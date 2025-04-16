@@ -278,11 +278,11 @@ def _optimize_file_mounts(yaml_path: str) -> None:
             # the dst.
             mkdir_parent = f'mkdir -p {dst}'
             src_basename = f'{src_basename}/*'
-        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+        mv = (f'cp -rf {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
               f'{dst_parent_dir}/{dst_basename}')
         fragment = f'({mkdir_parent} && {mv})'
         commands.append(fragment)
-    postprocess_runtime_files_command = ' && '.join(commands)
+    postprocess_runtime_files_command = '; '.join(commands)
 
     setup_commands = yaml_config.get('setup_commands', [])
     if setup_commands:
@@ -682,7 +682,7 @@ def write_cluster_config(
             ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
-    # User-supplied global instance tags from ~/.sky/skyconfig.yaml.
+    # User-supplied global instance tags from ~/.sky/config.yaml.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py

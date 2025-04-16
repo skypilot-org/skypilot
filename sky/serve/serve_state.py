@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import colorama
 
 from sky.serve import constants
-from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
@@ -335,11 +334,6 @@ def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
      _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
-    if load_balancing_policy is None:
-        # This entry in database was added in #4439, and it will always be set
-        # to a str value. If it is None, it means it is an legacy entry and is
-        # using the legacy default policy.
-        load_balancing_policy = lb_policies.LEGACY_DEFAULT_POLICY
     return {
         'name': name,
         'controller_job_id': controller_job_id,

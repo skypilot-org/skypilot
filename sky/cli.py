@@ -54,6 +54,7 @@ from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -276,6 +277,54 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     for (key, value) in env_list:
         env_dict[key] = value
     return list(env_dict.items())
+
+
+def config_option(expose_value: bool):
+    """A decorator for the --config option.
+
+    This decorator is used to parse the --config option.
+
+    Any overrides specified in the command line will be applied to the skypilot
+    config before the decorated function is called.
+
+    If expose_value is True, the decorated function will receive the parsed
+    config overrides as 'config_override' parameter.
+
+    Args:
+        expose_value: Whether to expose the value of the option to the decorated
+            function.
+    """
+
+    def preprocess_config_options(ctx, param, value):
+        del ctx  # Unused.
+        param.name = 'config_override'
+        try:
+            if len(value) == 0:
+                return None
+            elif len(value) > 1:
+                raise ValueError('argument specified multiple times. '
+                                 'To specify multiple configs, use '
+                                 '--config nested.key1=val1,another.key2=val2')
+            else:
+                # Apply the config overrides to the skypilot config.
+                return skypilot_config.apply_cli_config(value[0])
+        except ValueError as e:
+            raise click.BadParameter(f'{str(e)}') from e
+
+    def return_option_decorator(func):
+        return click.option(
+            '--config',
+            required=False,
+            type=str,
+            multiple=True,
+            expose_value=expose_value,
+            callback=preprocess_config_options,
+            help=('Path to a config file or a comma-separated '
+                  'list of key-value pairs '
+                  '(e.g. "nested.key1=val1,another.key2=val2").'),
+        )(func)
+
+    return return_option_decorator
 
 
 _COMMON_OPTIONS = [
@@ -630,7 +679,8 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None,
+        config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -691,6 +741,8 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if config_override:
+        override_params['_cluster_config_overrides'] = config_override
     return override_params
 
 
@@ -793,6 +845,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -826,7 +879,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
                                                   field_to_ignore)
@@ -1010,6 +1064,7 @@ def cli():
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=False,
                 type=str,
@@ -1139,7 +1194,8 @@ def launch(
         no_setup: bool,
         clone_disk_from: Optional[str],
         fast: bool,
-        async_call: bool):
+        async_call: bool,
+        config_override: Optional[Dict[str, Any]] = None):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1181,6 +1237,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        config_override=config_override,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1245,6 +1302,7 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('cluster',
                 required=False,
                 type=str,
@@ -1273,15 +1331,29 @@ def launch(
                     _COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(cluster: Optional[str], cluster_option: Optional[str],
-         entrypoint: Tuple[str, ...], detach_run: bool, name: Optional[str],
-         cloud: Optional[str], region: Optional[str], zone: Optional[str],
-         workdir: Optional[str], gpus: Optional[str], ports: Tuple[str],
-         instance_type: Optional[str], num_nodes: Optional[int],
-         use_spot: Optional[bool], image_id: Optional[str],
-         env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-         disk_tier: Optional[str], async_call: bool):
+def exec(cluster: Optional[str],
+         cluster_option: Optional[str],
+         entrypoint: Tuple[str, ...],
+         detach_run: bool,
+         name: Optional[str],
+         cloud: Optional[str],
+         region: Optional[str],
+         zone: Optional[str],
+         workdir: Optional[str],
+         gpus: Optional[str],
+         ports: Tuple[str],
+         instance_type: Optional[str],
+         num_nodes: Optional[int],
+         use_spot: Optional[bool],
+         image_id: Optional[str],
+         env_file: Optional[Dict[str, str]],
+         env: List[Tuple[str, str]],
+         cpus: Optional[str],
+         memory: Optional[str],
+         disk_size: Optional[int],
+         disk_tier: Optional[str],
+         async_call: bool,
+         config_override: Optional[Dict[str, Any]] = None):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1374,6 +1446,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
         disk_tier=disk_tier,
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
+        config_override=config_override,
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -1657,6 +1730,7 @@ def _show_endpoint(query_clusters: Optional[List[str]],
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -1949,6 +2023,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--all',
               '-a',
               default=False,
@@ -2019,6 +2094,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2080,6 +2156,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option(
     '--sync-down',
     '-s',
@@ -2217,6 +2294,7 @@ def logs(
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2320,6 +2398,7 @@ def cancel(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2387,6 +2466,7 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2499,6 +2579,7 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2744,6 +2825,7 @@ def start(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -3182,6 +3264,7 @@ def _down_or_stop_clusters(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
@@ -3222,6 +3305,7 @@ def check(clouds: Tuple[str], verbose: bool):
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
@@ -3693,6 +3777,7 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -3711,6 +3796,7 @@ def storage_ls(verbose: bool):
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('names',
                 required=False,
                 type=str,
@@ -3795,6 +3881,7 @@ def jobs():
 
 
 @jobs.command('launch', cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -3852,6 +3939,7 @@ def jobs_launch(
     detach_run: bool,
     yes: bool,
     async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3892,6 +3980,7 @@ def jobs_launch(
         disk_tier=disk_tier,
         ports=ports,
         job_recovery=job_recovery,
+        config_override=config_override,
     )
 
     if not isinstance(task_or_dag, sky.Dag):
@@ -3929,6 +4018,7 @@ def jobs_launch(
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -4045,6 +4135,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4119,6 +4210,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4183,6 +4275,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
@@ -4312,6 +4405,7 @@ def _generate_task_with_service(
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_yaml',
                 required=True,
                 type=str,
@@ -4423,6 +4517,7 @@ def serve_up(
 # TODO(MaoZiming): Expose mix replica traffic option to user.
 # Currently, we do not mix traffic from old and new replicas.
 @serve.command('update', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_name', required=True, type=str)
 @click.argument('service_yaml',
                 required=True,
@@ -4523,6 +4618,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -4648,6 +4744,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -4761,6 +4858,7 @@ def serve_down(
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -4874,6 +4972,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -4919,27 +5018,28 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_launch(
-        entrypoint: str,
-        benchmark: str,
-        name: Optional[str],
-        workdir: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        gpus: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        cpus: Optional[str],
-        memory: Optional[str],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        ports: Tuple[str],
-        idle_minutes_to_autostop: Optional[int],
-        yes: bool,
-        async_call: bool,  # pylint: disable=unused-argument
+    entrypoint: str,
+    benchmark: str,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    ports: Tuple[str],
+    idle_minutes_to_autostop: Optional[int],
+    yes: bool,
+    async_call: bool,  # pylint: disable=unused-argument
+    config_override: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Benchmark a task on different resources.
 
@@ -5048,7 +5148,8 @@ def benchmark_launch(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             config_override=config_override)
     _pop_and_ignore_fields_in_override_params(
         override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)
@@ -5113,6 +5214,7 @@ def benchmark_launch(
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def benchmark_ls() -> None:
     """List the benchmark history."""
@@ -5176,6 +5278,7 @@ def benchmark_ls() -> None:
 
 
 @bench.command('show', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmark', required=True, type=str)
 # TODO(woosuk): Add --all option to show all the collected information
 # (e.g., setup time, warmup steps, total steps, etc.).
@@ -5301,6 +5404,7 @@ def benchmark_show(benchmark: str) -> None:
 
 
 @bench.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmark', required=True, type=str)
 @click.option(
     '--exclude',
@@ -5343,6 +5447,7 @@ def benchmark_down(
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmarks', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5477,6 +5582,7 @@ def local():
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
@@ -5532,6 +5638,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(async_call: bool):
@@ -5547,6 +5654,7 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--deploy',
               type=bool,
               is_flag=True,
@@ -5579,6 +5687,7 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool):
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
@@ -5586,6 +5695,7 @@ def api_stop():
 
 
 @api.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_id', required=False, type=str)
 @click.option('--server-logs',
               is_flag=True,
@@ -5625,6 +5735,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5666,6 +5777,7 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 
 @api.command('status', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all-status',
               '-a',
@@ -5709,6 +5821,7 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
 
 
 @api.command('login', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--endpoint',
               '-e',
               required=False,
@@ -5720,6 +5833,7 @@ def api_login(endpoint: Optional[str]):
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_info():
     """Shows the SkyPilot API server URL."""

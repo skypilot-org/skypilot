@@ -369,7 +369,7 @@ Once the EBS CSI driver is installed, the default ``gp2`` storage class will be 
 Setting the SkyPilot config
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/skyconfig.yaml`` in the API server container.
+The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
 
 To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 
@@ -451,6 +451,10 @@ If you are upgrading from an early 0.8.0 nightly with a previously deployed Node
 
 Alternative: Deploy on cloud VMs
 --------------------------------
+
+.. note::
+
+    VM deployment does not offer failover and graceful upgrading supports. We recommend to use Helm deployment :ref:`sky-api-server-deploy` in production environments.
 
 You can also deploy the API server directly on cloud VMs using an existing SkyPilot installation.
 

@@ -1336,13 +1336,19 @@ def check_credentials(context: Optional[str],
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
+    # optional checks.
+    try:
+        _ = _get_kubeconfig_path()
+    except ValueError as e:
+        return False, f'{common_utils.format_exception(e, use_bracket=True)}'
+
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
     if not run_optional_checks:
         return True, None
 
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
-
     _, exec_msg = is_kubeconfig_exec_auth(context)
 
     # We now check if GPUs are available and labels are set correctly on the
@@ -1454,14 +1460,14 @@ def is_kubeconfig_exec_auth(
 
 
     Using exec-based authentication is problematic when used in conjunction
-    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/skyconfig.yaml.
+    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/config.yaml.
     This is because the exec-based authentication may not have the relevant
     dependencies installed on the remote cluster or may have hardcoded paths
     that are not available on the remote cluster.
 
     Returns:
         bool: True if exec-based authentication is used and LOCAL_CREDENTIAL
-            mode is used for remote_identity in ~/.sky/skyconfig.yaml.
+            mode is used for remote_identity in ~/.sky/config.yaml.
         str: Error message if exec-based authentication is used, None otherwise
     """
     k8s = kubernetes.kubernetes
@@ -1489,9 +1495,8 @@ def is_kubeconfig_exec_auth(
     # K8s api does not provide a mechanism to get the user details from the
     # context. We need to load the kubeconfig file and parse it to get the
     # user details.
-    kubeconfig_path = os.path.expanduser(
-        os.getenv('KUBECONFIG',
-                  k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+    kubeconfig_path = _get_kubeconfig_path()
+
     # Load the kubeconfig file as a dictionary
     with open(kubeconfig_path, 'r', encoding='utf-8') as f:
         kubeconfig = yaml.safe_load(f)
@@ -1514,7 +1519,7 @@ def is_kubeconfig_exec_auth(
                     'Managed Jobs or SkyServe controller on Kubernetes. '
                     'To fix, configure SkyPilot to create a service account '
                     'for running pods by setting the following in '
-                    '~/.sky/skyconfig.yaml:\n'
+                    '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
                     '    More: https://docs.skypilot.co/en/latest/'
@@ -2252,7 +2257,7 @@ def combine_pod_config_fields(
     cluster_config_overrides: Dict[str, Any],
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
-    ~/.sky/skyconfig.yaml's kubernetes.pod_spec dict.
+    ~/.sky/config.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
     SkyPilot yet, or require simple configuration (e.g., adding an
     imagePullSecrets field).
@@ -2312,7 +2317,7 @@ def combine_pod_config_fields(
 
 def combine_metadata_fields(cluster_yaml_path: str) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
-    fields from the ~/.sky/skyconfig.yaml's kubernetes.custom_metadata dict.
+    fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
@@ -3017,3 +3022,20 @@ def get_gpu_resource_key():
     # Else use default.
     # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
+
+
+def _get_kubeconfig_path() -> str:
+    """Get the path to the kubeconfig file.
+    Parses `KUBECONFIG` env var if present, else uses the default path.
+    Currently, specifying multiple KUBECONFIG paths in the envvar is not
+    allowed, hence will raise a ValueError.
+    """
+    kubeconfig_path = os.path.expanduser(
+        os.getenv(
+            'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
+            KUBE_CONFIG_DEFAULT_LOCATION))
+    if len(kubeconfig_path.split(os.pathsep)) > 1:
+        raise ValueError('SkyPilot currently only supports one '
+                         'config file path with $KUBECONFIG. Current '
+                         f'path(s) are {kubeconfig_path}.')
+    return kubeconfig_path

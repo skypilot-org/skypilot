@@ -117,7 +117,7 @@ RUNPOD_DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_RUNPOD_DOCKER_USERNAME'
 
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
-# `nvidia_gpus.disable_ecc: true` in ~/.sky/skyconfig.yaml.
+# `nvidia_gpus.disable_ecc: true` in ~/.sky/config.yaml.
 # Running this command will reboot the machine, introducing overhead for
 # provisioning the machine.
 # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
@@ -299,11 +299,6 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
-# The default idle timeout for SkyPilot controllers. This include jobs
-# controller and sky serve controller.
-# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each jobs/
 # serve controller process.
@@ -337,7 +332,7 @@ RCLONE_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
-# The keys that can be overridden in the `~/.sky/skyconfig.yaml` file. The
+# The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),

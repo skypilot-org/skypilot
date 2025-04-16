@@ -725,6 +725,29 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
+    autostop_schema = {
+        'anyOf': [
+            {
+                # Use boolean to disable autostop completely, e.g.
+                #   autostop: false
+                'type': 'boolean',
+            },
+            {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'idle_minutes': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
+                    'down': {
+                        'type': 'boolean',
+                    },
+                },
+            },
+        ],
+    }
     controller_resources_schema = {
         'type': 'object',
         'required': [],
@@ -736,6 +759,7 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'autostop': autostop_schema,
                 }
             },
             'bucket': {

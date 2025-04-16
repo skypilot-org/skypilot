@@ -720,7 +720,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        f'{common_utils.format_exception(e)}'
                        'Continuing without using nvidia RuntimeClass.\n'
                        'If you are on a K3s cluster, manually '
-                       'override runtimeClassName in ~/.sky/skyconfig.yaml. '
+                       'override runtimeClassName in ~/.sky/config.yaml. '
                        'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
     needs_gpus = False
@@ -879,8 +879,8 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _terminate_node(namespace: str, context: Optional[str],
-                    pod_name: str) -> None:
+def _terminate_node(namespace: str, context: Optional[str], pod_name: str,
+                    is_head: bool) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
@@ -918,16 +918,18 @@ def _terminate_node(namespace: str, context: Optional[str],
                 else:
                     raise
 
-    # Delete services for the pod
-    for service_name in [pod_name, f'{pod_name}-ssh']:
-        _delete_k8s_resource_with_retry(
-            delete_func=lambda name=service_name: kubernetes.core_api(
-                context).delete_namespaced_service(name=name,
-                                                   namespace=namespace,
-                                                   _request_timeout=config_lib.
-                                                   DELETION_TIMEOUT),
-            resource_type='service',
-            resource_name=service_name)
+    if is_head:
+        # Delete services for the head pod
+        # services are specified in sky/templates/kubernetes-ray.yml.j2
+        for service_name in [pod_name, f'{pod_name}-ssh']:
+            _delete_k8s_resource_with_retry(
+                delete_func=lambda name=service_name: kubernetes.core_api(
+                    context).delete_namespaced_service(
+                        name=name,
+                        namespace=namespace,
+                        _request_timeout=config_lib.DELETION_TIMEOUT),
+                resource_type='service',
+                resource_name=service_name)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
@@ -974,7 +976,7 @@ def terminate_instances(
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name)
+        _terminate_node(namespace, context, pod_name, _is_head(pod))
 
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),

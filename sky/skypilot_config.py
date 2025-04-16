@@ -1,7 +1,7 @@
 """Immutable user configurations (EXPERIMENTAL).
 
 On module import, we attempt to parse the config located at _USER_CONFIG_PATH
-(default: ~/.sky/skyconfig.yaml). Caller can then use
+(default: ~/.sky/config.yaml). Caller can then use
 
   >> skypilot_config.loaded()
 
@@ -35,14 +35,14 @@ Consider the following config contents:
 
 then:
 
-    # Assuming ~/.sky/skyconfig.yaml exists and can be loaded:
+    # Assuming ~/.sky/config.yaml exists and can be loaded:
     skypilot_config.loaded()  # ==> True
 
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> 1
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> {'nested': 1}
 
-    # If ~/.sky/skyconfig.yaml doesn't exist or failed to be loaded:
+    # If ~/.sky/config.yaml doesn't exist or failed to be loaded:
     skypilot_config.loaded()  # ==> False
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> None
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
@@ -53,7 +53,9 @@ import copy
 import os
 import pprint
 import typing
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+from omegaconf import OmegaConf
 
 from sky import exceptions
 from sky import sky_logging
@@ -100,9 +102,8 @@ ENV_VAR_USER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}USER_CONFIG'
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the local config files.
-_LEGACY_USER_CONFIG_PATH = '~/.sky/config.yaml'
-_USER_CONFIG_PATH = '~/.sky/skyconfig.yaml'
-_PROJECT_CONFIG_PATH = 'skyconfig.yaml'
+_USER_CONFIG_PATH = '~/.sky/config.yaml'
+_PROJECT_CONFIG_PATH = '.sky.yaml'
 
 # The loaded config.
 _dict = config_utils.Config()
@@ -110,20 +111,8 @@ _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
 
 
-# This function exists solely to maintain backward compatibility with the
-# legacy user config file located at ~/.sky/config.yaml.
 def get_user_config_path() -> str:
-    """Returns the path to the user config file.
-
-    If only the legacy user config file exists, return
-    the legacy user config path.
-    Otherwise, return the new user config path.
-    """
-    user_config_path = os.path.expanduser(_USER_CONFIG_PATH)
-    legacy_user_config_path = os.path.expanduser(_LEGACY_USER_CONFIG_PATH)
-    if (os.path.exists(legacy_user_config_path) and
-            not os.path.exists(user_config_path)):
-        return _LEGACY_USER_CONFIG_PATH
+    """Returns the path to the user config file."""
     return _USER_CONFIG_PATH
 
 
@@ -177,18 +166,18 @@ def _get_config_file_path(envvar: str) -> Optional[str]:
     return None
 
 
-def _validate_config(config: Dict[str, Any], config_path: str) -> None:
+def _validate_config(config: Dict[str, Any], config_source: str) -> None:
     """Validates the config."""
     common_utils.validate_schema(
         config,
         schemas.get_config_schema(),
-        f'Invalid config YAML ({config_path}). See: '
+        f'Invalid config YAML from ({config_source}). See: '
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
 
 
-def _overlay_skypilot_config(
+def overlay_skypilot_config(
         original_config: Optional[config_utils.Config],
         override_configs: Optional[config_utils.Config]) -> config_utils.Config:
     """Overlays the override configs on the original configs."""
@@ -309,7 +298,7 @@ def _reload_config_hierarchical() -> None:
     # layer the configs on top of each other based on priority
     overlaid_client_config: config_utils.Config = config_utils.Config()
     for override in overrides:
-        overlaid_client_config = _overlay_skypilot_config(
+        overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
     logger.debug(f'final config: {overlaid_client_config}')
     _dict = overlaid_client_config
@@ -374,3 +363,54 @@ def override_skypilot_config(
     finally:
         _dict = original_config
         _config_overridden = False
+
+
+def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+    """Composes the skypilot CLI config.
+    CLI config can either be:
+    - A path to a config file
+    - A comma-separated list of key-value pairs
+    """
+
+    if not cli_config:
+        return config_utils.Config()
+
+    config_source = 'CLI'
+    maybe_config_path = os.path.expanduser(cli_config)
+    try:
+        if os.path.isfile(maybe_config_path):
+            config_source = maybe_config_path
+            # cli_config is a path to a config file
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.load(maybe_config_path))
+        else:  # cli_config is a comma-separated list of key-value pairs
+            variables: List[str] = []
+            variables = cli_config.split(',')
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.from_dotlist(variables))
+        _validate_config(parsed_config, config_source)
+    except ValueError as e:
+        raise ValueError(f'Invalid config override: {cli_config}. '
+                         f'Check if config file exists or if the dotlist '
+                         f'is formatted as: key1=value1,key2=value2') from e
+    logger.debug('CLI overrides config syntax check passed.')
+
+    return parsed_config
+
+
+def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+    """Applies the CLI provided config.
+    SAFETY:
+    This function directly modifies the global _dict variable.
+    This is considered fine in CLI context because the program will exit after
+    a single CLI command is executed.
+    Args:
+        cli_config: A path to a config file or a comma-separated
+        list of key-value pairs.
+    """
+    global _dict
+    parsed_config = _compose_cli_config(cli_config)
+    logger.debug(f'applying following CLI overrides: {parsed_config}')
+    _dict = overlay_skypilot_config(original_config=_dict,
+                                    override_configs=parsed_config)
+    return parsed_config

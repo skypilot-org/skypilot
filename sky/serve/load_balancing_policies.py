@@ -15,10 +15,6 @@ logger = sky_logging.init_logger(__name__)
 # Define a registry for load balancing policies
 LB_POLICIES = {}
 DEFAULT_LB_POLICY = None
-# Prior to #4439, the default policy was round_robin. We store the legacy
-# default policy here to maintain backwards compatibility. Remove this after
-# 2 minor release, i.e., 0.9.0.
-LEGACY_DEFAULT_POLICY = 'round_robin'
 
 
 def _request_repr(request: 'fastapi.Request') -> str:
