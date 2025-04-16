@@ -1883,8 +1883,6 @@ def test_min_gpt_kubernetes():
     modified_content = content.replace('main.py',
                                        'main.py trainer_config.max_epochs=1')
 
-    # Replace any accelerator type with T4 using regex pattern
-    # This pattern will match any characters after "accelerators:" until the end of the line
     modified_content = re.sub(r'accelerators:\s*[^\n]+', 'accelerators: T4',
                               modified_content)
 
@@ -1896,7 +1894,6 @@ def test_min_gpt_kubernetes():
         test = smoke_tests_utils.Test(
             'min_gpt_kubernetes',
             [
-                # Use the temporary YAML file instead of the original
                 f'sky launch -y -c {name} --cloud kubernetes {f.name}',
                 f'sky logs {name} 1 --status',
             ],
