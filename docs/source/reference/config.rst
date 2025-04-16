@@ -36,7 +36,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         disk_size: 100
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
         idle_minutes: 10
-        down: false  # dangerous to enable!
+        down: false  # use with caution!
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
