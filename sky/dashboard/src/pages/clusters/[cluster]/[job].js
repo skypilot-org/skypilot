@@ -72,9 +72,17 @@ export function JobDetailPage() {
   const { clusterData, clusterJobData, loading, refreshData } =
     useClusterDetails({ cluster });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logs, setLogs] = useState([]);
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+
+  // Update isInitialLoad when data is first loaded
+  React.useEffect(() => {
+    if (!loading && isInitialLoad) {
+      setIsInitialLoad(false);
+    }
+  }, [loading]);
 
   const handleRefreshLogs = () => {
     setIsRefreshingLogs((prev) => !prev);
@@ -119,9 +127,6 @@ export function JobDetailPage() {
       if (refreshData) {
         await refreshData();
       }
-
-      // Wait a short time to show the refresh indicator
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -160,7 +165,7 @@ export function JobDetailPage() {
         isRefreshing={isRefreshing}
         loading={loading}
       />
-      {loading ? (
+      {loading && isInitialLoad ? (
         <div className="flex items-center justify-center h-64">
           <CircularProgress size={24} className="mr-2" />
           <span>Loading...</span>

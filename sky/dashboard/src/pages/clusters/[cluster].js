@@ -20,11 +20,19 @@ function ClusterDetails() {
   const { cluster } = router.query; // Access the dynamic part of the URL
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
 
   const { clusterData, clusterJobData, loading, refreshData } =
     useClusterDetails({ cluster });
+
+  // Update isInitialLoad when data is first loaded
+  React.useEffect(() => {
+    if (!loading && isInitialLoad) {
+      setIsInitialLoad(false);
+    }
+  }, [loading]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -97,7 +105,7 @@ function ClusterDetails() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && isInitialLoad ? (
         <div className="flex justify-center items-center py-12">
           <CircularProgress size={24} className="mr-2" />
           <span className="text-gray-500">Loading...</span>
@@ -106,7 +114,7 @@ function ClusterDetails() {
         <ActiveTab
           clusterData={clusterData}
           clusterJobData={clusterJobData}
-          loading={loading}
+          loading={loading || isRefreshing}
         />
       ) : null}
 

@@ -1179,19 +1179,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
+            { paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow

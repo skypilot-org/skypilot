@@ -27,6 +27,7 @@ function JobDetails() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { jobData, loading } = useManagedJobDetails(refreshTrigger);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
   const [scrollExecuted, setScrollExecuted] = useState(false);
@@ -34,6 +35,13 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [logsRefreshKey, setLogsRefreshKey] = useState(0);
   const [controllerLogsRefreshKey, setControllerLogsRefreshKey] = useState(0);
+
+  // Update isInitialLoad when data is first loaded
+  React.useEffect(() => {
+    if (!loading && isInitialLoad) {
+      setIsInitialLoad(false);
+    }
+  }, [loading]);
 
   // Function to scroll to a specific section
   const scrollToSection = (sectionId) => {
@@ -106,8 +114,10 @@ function JobDetails() {
     try {
       // Trigger job data refresh
       setRefreshTrigger((prev) => prev + 1);
-      // Wait a short time to show the refresh indicator
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Trigger logs refresh
+      setLogsRefreshKey((prev) => prev + 1);
+      // Trigger controller logs refresh
+      setControllerLogsRefreshKey((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -171,7 +181,7 @@ function JobDetails() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && isInitialLoad ? (
         <div className="flex items-center justify-center py-32">
           <CircularProgress size={20} className="mr-2" />
           <span>Loading...</span>
