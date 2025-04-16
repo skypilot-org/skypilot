@@ -71,7 +71,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm -n $NAMESPACE upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
               --set kubernetesCredentials.useApiServerCluster=true
@@ -116,7 +116,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
+            helm -n $NAMESPACE upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
 
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -136,7 +136,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm -n $NAMESPACE upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --set gcpCredentials.enabled=true \
               --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
