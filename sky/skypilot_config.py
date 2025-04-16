@@ -118,6 +118,64 @@ def get_user_config_path() -> str:
     return _USER_CONFIG_PATH
 
 
+def get_user_config() -> config_utils.Config:
+    """Returns the user config."""
+    # find the user config file
+    user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
+    if user_config_path:
+        logger.debug('using user config file specified by '
+                     f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
+        user_config_path = os.path.expanduser(user_config_path)
+        if not os.path.exists(user_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_USER_CONFIG} ({user_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_USER_CONFIG}')
+    else:
+        user_config_path = get_user_config_path()
+        logger.debug(f'using default user config file: {user_config_path}')
+        user_config_path = os.path.expanduser(user_config_path)
+
+    # load the user config file
+    if os.path.exists(user_config_path):
+        user_config = _parse_config_file(user_config_path)
+        _validate_config(user_config, user_config_path)
+    else:
+        user_config = config_utils.Config()
+    return user_config
+
+
+def _get_project_config() -> config_utils.Config:
+    # find the project config file
+    project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
+    if project_config_path:
+        logger.debug('using project config file specified by '
+                     f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
+        project_config_path = os.path.expanduser(project_config_path)
+        if not os.path.exists(project_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_PROJECT_CONFIG} ({project_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
+    else:
+        logger.debug(
+            f'using default project config file: {_PROJECT_CONFIG_PATH}')
+        project_config_path = _PROJECT_CONFIG_PATH
+        project_config_path = os.path.expanduser(project_config_path)
+
+    # load the project config file
+    if os.path.exists(project_config_path):
+        project_config = _parse_config_file(project_config_path)
+        _validate_config(project_config, project_config_path)
+    else:
+        project_config = config_utils.Config()
+    return project_config
+
+
 def get_nested(keys: Tuple[str, ...],
                default_value: Any,
                override_configs: Optional[Dict[str, Any]] = None) -> Any:
@@ -253,54 +311,12 @@ def _reload_config_hierarchical() -> None:
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
 
-    # find the user config file
-    user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
-    if user_config_path:
-        logger.debug('using user config file specified by '
-                     f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
-        user_config_path = os.path.expanduser(user_config_path)
-        if not os.path.exists(user_config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    'Config file specified by env var '
-                    f'{ENV_VAR_USER_CONFIG} ({user_config_path!r}) '
-                    'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_USER_CONFIG}')
-    else:
-        user_config_path = get_user_config_path()
-        logger.debug(f'using default user config file: {user_config_path}')
-        user_config_path = os.path.expanduser(user_config_path)
-
-    overrides = []
-
-    # find the project config file
-    project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
-    if project_config_path:
-        logger.debug('using project config file specified by '
-                     f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
-        project_config_path = os.path.expanduser(project_config_path)
-        if not os.path.exists(project_config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    'Config file specified by env var '
-                    f'{ENV_VAR_PROJECT_CONFIG} ({project_config_path!r}) '
-                    'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
-    else:
-        logger.debug(
-            f'using default project config file: {_PROJECT_CONFIG_PATH}')
-        project_config_path = _PROJECT_CONFIG_PATH
-        project_config_path = os.path.expanduser(project_config_path)
-
-    # load the user config file
-    if os.path.exists(user_config_path):
-        user_config = _parse_config_file(user_config_path)
-        _validate_config(user_config, user_config_path)
+    overrides: List[config_utils.Config] = []
+    user_config = get_user_config()
+    if user_config:
         overrides.append(user_config)
-
-    if os.path.exists(project_config_path):
-        project_config = _parse_config_file(project_config_path)
-        _validate_config(project_config, project_config_path)
+    project_config = _get_project_config()
+    if project_config:
         overrides.append(project_config)
 
     # layer the configs on top of each other based on priority
