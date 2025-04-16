@@ -1819,8 +1819,8 @@ def api_login(endpoint: Optional[str] = None) -> None:
             config_path.touch()
             config = {'api_server': {'endpoint': endpoint}}
         else:
-            config = skypilot_config.set_nested(('api_server', 'endpoint'),
-                                                endpoint)
+            config = skypilot_config.get_user_config()
+            config.set_nested(('api_server', 'endpoint'), endpoint)
         common_utils.dump_yaml(str(config_path), config)
         click.secho(f'Logged in to SkyPilot API server at {endpoint}',
                     fg='green')
