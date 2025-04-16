@@ -60,7 +60,7 @@ class _ThreadLocalLRUCache(threading.local):
 
     def __init__(self, maxsize=32):
         super().__init__()
-        self.cache = annotations.lru_cache(scope='global', maxsize=maxsize)
+        self.cache = annotations.lru_cache(scope='request', maxsize=maxsize)
 
 
 def _thread_local_lru_cache(maxsize=32):

@@ -35,7 +35,10 @@ logger = sky_logging.init_logger(__name__)
 # These non-skypilot environment variables will be updated from the local
 # environment on each request.
 external_env_vars = [
+    # Allow overriding the AWS authentication.
     'AWS_PROFILE',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
 ]
 
 
