@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
 import pathlib
+import re
 import tempfile
 import textwrap
 from typing import Dict
@@ -1872,11 +1873,6 @@ def test_long_setup_run_script(generic_cloud: str):
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy
 def test_min_gpt_kubernetes():
-    import os
-    import tempfile
-
-    import yaml
-
     name = smoke_tests_utils.get_cluster_name()
     original_yaml_path = 'examples/distributed-pytorch/train.yaml'
 
@@ -1886,6 +1882,10 @@ def test_min_gpt_kubernetes():
     # Let the train exit after 1 epoch
     modified_content = content.replace('main.py',
                                        'main.py trainer_config.max_epochs=1')
+
+    # Replace any accelerator type with T4 using regex pattern
+    modified_content = re.sub(r'accelerators:\s*\w+', 'accelerators: T4',
+                              modified_content)
 
     # Create a temporary YAML file with the modified content
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as tmp:
