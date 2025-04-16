@@ -293,7 +293,15 @@ def _start_api_server(deploy: bool = False,
                 time.sleep(0.5)
             else:
                 break
-        logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
+
+        dashboard_msg = (
+            f'{colorama.Style.DIM}Dashboard: {get_server_url(host)}/dashboard.'
+            ' Please run `npm run build` to generate the dashboard if you'
+            ' install SkyPilot from source.'
+            f'{colorama.Style.RESET_ALL}')
+        logger.info(
+            ux_utils.finishing_message(
+                f'SkyPilot API server started. {dashboard_msg}'))
 
 
 def check_server_healthy(endpoint: Optional[str] = None,) -> None:

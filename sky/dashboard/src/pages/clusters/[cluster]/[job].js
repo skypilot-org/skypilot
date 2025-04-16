@@ -193,7 +193,9 @@ export function JobDetailPage() {
                     <div className="text-base mt-1">{jobData.job}</div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">Status</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Status
+                    </div>
                     <div className="text-base mt-1">
                       <StatusBadge status={jobData.status} />
                     </div>

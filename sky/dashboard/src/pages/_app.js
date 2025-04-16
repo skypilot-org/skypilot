@@ -4,7 +4,6 @@ import '@/app/globals.css';
 import { useEffect } from 'react';
 import { BASE_PATH } from '@/data/connectors/constants';
 
-
 function MyApp({ Component, pageProps }) {
   useEffect(() => {
     const link = document.createElement('link');

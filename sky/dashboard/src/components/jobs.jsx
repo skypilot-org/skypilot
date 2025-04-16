@@ -323,7 +323,7 @@ export function ManagedJobsTable({
     if (selectedStatuses.length > 0) {
       return selectedStatuses.includes(status);
     }
-    
+
     // If no statuses are selected, highlight all statuses in the active tab
     return statusGroups[activeTab].includes(status);
   };
@@ -332,14 +332,16 @@ export function ManagedJobsTable({
   const filteredData = React.useMemo(() => {
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
-      return data.filter(item => selectedStatuses.includes(item.status));
+      return data.filter((item) => selectedStatuses.includes(item.status));
     }
-    
+
     // If no statuses are selected but we're in "show all" mode, show all jobs of the active tab
     if (showAllMode) {
-      return data.filter(item => statusGroups[activeTab].includes(item.status));
+      return data.filter((item) =>
+        statusGroups[activeTab].includes(item.status)
+      );
     }
-    
+
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
   }, [data, activeTab, selectedStatuses, showAllMode]);
@@ -349,8 +351,8 @@ export function ManagedJobsTable({
     // Toggle the clicked status without affecting others
     if (selectedStatuses.includes(status)) {
       // If the status is already selected, unselect it
-      const newSelectedStatuses = selectedStatuses.filter(s => s !== status);
-      
+      const newSelectedStatuses = selectedStatuses.filter((s) => s !== status);
+
       if (newSelectedStatuses.length === 0) {
         // When deselecting the last selected status, go back to "show all" mode
         // for the current active tab (active/finished)
@@ -415,7 +417,8 @@ export function ManagedJobsTable({
                 key={status}
                 onClick={() => handleStatusClick(status)}
                 className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                  isStatusHighlighted(status) || selectedStatuses.includes(status)
+                  isStatusHighlighted(status) ||
+                  selectedStatuses.includes(status)
                     ? getBadgeStyle(status)
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
@@ -541,7 +544,7 @@ export function ManagedJobsTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={12}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -597,10 +600,7 @@ export function ManagedJobsTable({
                         <Status2Actions
                           jobParent="/jobs"
                           jobId={item.id}
-                          jobName={item.name}
-                          status={item.status}
                           managed={true}
-                          cluster="job controller"
                         />
                       </TableCell>
                     </TableRow>
@@ -616,7 +616,7 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-6">
+                <TableCell colSpan={12} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
@@ -1179,7 +1179,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            { paginatedData.length > 0 ? (
+            {paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -1224,7 +1224,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      colSpan={7}
+                      colSpan={8}
                       innerRef={expandedRowRef}
                     />
                   )}
@@ -1233,7 +1233,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
                   No jobs found

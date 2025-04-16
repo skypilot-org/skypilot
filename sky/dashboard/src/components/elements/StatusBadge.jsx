@@ -24,7 +24,7 @@ export const getStatusStyle = (status) => {
       return 'bg-yellow-100 text-yellow-800';
     case 'TERMINATED':
       return 'bg-gray-100 text-gray-800';
-    
+
     // Job specific statuses
     case 'PENDING':
       return 'bg-yellow-50 text-yellow-700';
@@ -50,7 +50,7 @@ export const getStatusStyle = (status) => {
       return 'bg-red-50 text-red-700';
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
-      
+
     default:
       return 'bg-gray-100 text-gray-800';
   }
@@ -90,7 +90,7 @@ export const getStatusIcon = (status) => {
 export const status2Badge = (status) => {
   const statusStyle = getStatusStyle(status);
   const statusIcon = getStatusIcon(status);
-  
+
   return (
     <span className={`${badgeClasses} ${statusStyle}`}>
       {statusIcon}
@@ -108,4 +108,4 @@ export const StatusBadge = ({ status }) => {
   );
 };
 
-export default StatusBadge; 
+export default StatusBadge;

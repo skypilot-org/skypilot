@@ -1,7 +1,5 @@
 // Create a simple DOM-based toast function
 export function showToast(message, type = 'info', duration = 5000) {
-  console.log(`showToast: ${message}, type: ${type}`);
-
   // Create toast container if it doesn't exist
   let toastContainer = document.getElementById('toast-container');
   if (!toastContainer) {

@@ -14,12 +14,7 @@ import { getJobDetails } from '@/data/connectors/jobs';
 import { relativeTime } from '@/components/utils';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 function JobDetails() {
   const router = useRouter();
@@ -298,12 +293,10 @@ function JobDetailsContent({
   // Clear logs when activeTab changes or when jobData.id changes
   useEffect(() => {
     setLogs([]);
-    console.log('Logs cleared due to tab change or job ID change');
   }, [activeTab, jobData.id]);
 
   useEffect(() => {
     setControllerLogs([]);
-    console.log('Controller logs cleared due to tab change or job ID change');
   }, [activeTab, jobData.id]);
 
   // Define a function to handle both log types
@@ -312,7 +305,6 @@ function JobDetailsContent({
     const controller = new AbortController();
 
     if (activeTab === logType && jobId) {
-      console.log(`Starting to fetch ${logType} for managed job`, jobId);
       setIsLoading(true);
 
       streamManagedJobLogs({
@@ -328,7 +320,6 @@ function JobDetailsContent({
       })
         .then(() => {
           if (active) {
-            console.log(`Finished streaming ${logType}`);
             setIsLoading(false);
           }
         })

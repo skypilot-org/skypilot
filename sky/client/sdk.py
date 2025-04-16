@@ -1713,15 +1713,10 @@ def api_start(
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
-    logger.info(
-        f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-        f'{server_common.get_server_url(host)}\n'
-        f'{ux_utils.INDENT_SYMBOL}SkyPilot Dashboard: '
-        f'{server_common.get_server_url(host)}/dashboard\n'
-        f'{ux_utils.INDENT_SYMBOL}  Please run `npm run build`'
-        f' to generate the dashboard if you install skypilot from source\n'
-        f'{ux_utils.INDENT_LAST_SYMBOL}'
-        f'View API server logs at: {constants.API_SERVER_LOGS}')
+    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
+                f'{server_common.get_server_url(host)}\n'
+                f'{ux_utils.INDENT_LAST_SYMBOL}'
+                f'View API server logs at: {constants.API_SERVER_LOGS}')
 
 
 @usage_lib.entrypoint
@@ -1827,5 +1822,7 @@ def api_login(endpoint: Optional[str] = None) -> None:
             config = skypilot_config.get_user_config()
             config.set_nested(('api_server', 'endpoint'), endpoint)
         common_utils.dump_yaml(str(config_path), dict(config))
-        click.secho(f'Logged in to SkyPilot API server at {endpoint}',
-                    fg='green')
+        click.secho(
+            f'Logged in to SkyPilot API server at {endpoint}'
+            f' with dashboard {endpoint}/dashboard',
+            fg='green')

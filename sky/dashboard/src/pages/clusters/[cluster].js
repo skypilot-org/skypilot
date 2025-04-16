@@ -157,8 +157,12 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                 <div className="text-base mt-1">{clusterData.user}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Status</div>
-                <div className="text-base mt-1"><StatusBadge status={clusterData.status} /></div>
+                <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
+                <div className="text-base mt-1">
+                  <StatusBadge status={clusterData.status} />
+                </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">
