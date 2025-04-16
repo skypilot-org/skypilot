@@ -436,6 +436,9 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
+    # Reload the skypilot config to make sure the latest config is used.
+    skypilot_config.safe_reload_config()
+
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
