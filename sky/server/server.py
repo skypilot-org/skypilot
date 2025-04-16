@@ -51,6 +51,8 @@ from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 
+os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
