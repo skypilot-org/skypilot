@@ -15,13 +15,7 @@ import {
   ServiceBellIcon,
   ExternalLinkIcon,
   GitHubIcon,
-  StarIcon,
-  DocumentIcon,
-  RssIcon,
-  TwitterIcon,
   SlackIcon,
-  FeedbackIcon,
-  BookDocIcon,
   CommentFeedbackIcon,
 } from '@/components/elements/icons';
 import { BASE_PATH } from '@/data/connectors/constants';
