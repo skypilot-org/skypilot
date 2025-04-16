@@ -929,11 +929,14 @@ class SkyServeLoadBalancer:
                     for result in conf_results) + self_num_replicas
                 if total_num_replicas <= 0:
                     continue
-                fair_share = total_queue_size // total_num_replicas - sum(
+                self_replica_queue_size_total = sum(
                     (await self._replica_pool.active_requests()).values())
+                fair_share = (total_queue_size // total_num_replicas *
+                              self_num_replicas)
                 if fair_share <= 0:
                     continue
-                fair_share_remaining = fair_share * self_num_replicas
+                fair_share_remaining = (fair_share -
+                                        self_replica_queue_size_total)
                 for target, conf_result in zip(steal_targets, conf_results):
                     if fair_share_remaining <= 0:
                         break

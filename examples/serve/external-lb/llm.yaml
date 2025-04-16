@@ -15,7 +15,7 @@ service:
     #     - role: user
     #       content: Hello! What is your name?
     #   max_tokens: 1
-  replicas: 3
+  replicas: 4
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
@@ -39,9 +39,9 @@ service:
 resources:
   cloud: aws
   accelerators: L4:1
-  any_of:
-    - region: us-east-2
+  ordered:
     - region: ap-northeast-1
+    - region: us-east-2
     - region: eu-central-1
   ports: 8081
 
