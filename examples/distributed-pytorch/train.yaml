@@ -20,10 +20,16 @@ run: |
     MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
     echo "Starting distributed training, head node: $MASTER_ADDR"
 
+    # Explicit check for torchrun
+    if ! command -v torchrun >/dev/null 2>&1; then
+        echo "ERROR: torchrun command not found" >&2
+        exit 1
+    fi
+
     torchrun \
     --nnodes=$SKYPILOT_NUM_NODES \
     --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
     --master_addr=$MASTER_ADDR \
     --master_port=8008 \
     --node_rank=${SKYPILOT_NODE_RANK} \
-    main.py || exit 1
+    main.py
