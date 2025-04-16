@@ -52,6 +52,7 @@ import contextlib
 import copy
 import os
 import pprint
+import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -109,6 +110,7 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
+_reload_config_lock = threading.Lock()
 
 
 def get_user_config_path() -> str:
@@ -189,6 +191,12 @@ def overlay_skypilot_config(
                                         allowed_override_keys=None,
                                         disallowed_override_keys=None)
     return config
+
+
+def safe_reload_config() -> None:
+    """Reloads the config, safe to be called concurrently."""
+    with _reload_config_lock:
+        _reload_config()
 
 
 def _reload_config() -> None:
@@ -312,7 +320,7 @@ def loaded_config_path() -> Optional[str]:
     return _loaded_config_path
 
 
-# Load on import.
+# Load on import, synchronization is guaranteed by python interpreter.
 _reload_config()
 
 

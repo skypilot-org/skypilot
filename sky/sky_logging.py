@@ -97,8 +97,8 @@ def _setup_logger():
 def reload_logger():
     """Reload the logger.
 
-    This is useful when the logging configuration is changed.
-    e.g., the logging level is changed or stdout/stderr is reset.
+    This ensures that the logger takes the new environment variables,
+    such as SKYPILOT_DEBUG.
     """
     global _default_handler
     _root_logger.removeHandler(_default_handler)
