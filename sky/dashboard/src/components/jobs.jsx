@@ -6,15 +6,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import {
-  CircleIcon,
-  FilledCircleIcon,
-  SquareIcon,
-  TickIcon,
-} from '@/components/elements/icons';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
-
 import { Card } from '@/components/ui/card';
 import {
   Table,
@@ -24,13 +17,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/components/ui/select';
+import { formatDuration } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
@@ -45,36 +32,6 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
-
-// Format duration from seconds to a readable format
-export function formatDuration(durationInSeconds) {
-  if (!durationInSeconds && durationInSeconds !== 0) return '-';
-
-  // Convert to a whole number if it's a float
-  durationInSeconds = Math.floor(durationInSeconds);
-
-  const units = [
-    { value: 86400, label: 'd' }, // days
-    { value: 3600, label: 'h' }, // hours
-    { value: 60, label: 'm' }, // minutes
-    { value: 1, label: 's' }, // seconds
-  ];
-
-  let remaining = durationInSeconds;
-  let result = '';
-  let count = 0;
-
-  for (const unit of units) {
-    if (remaining >= unit.value && count < 2) {
-      const value = Math.floor(remaining / unit.value);
-      result += `${value}${unit.label} `;
-      remaining %= unit.value;
-      count++;
-    }
-  }
-
-  return result.trim() || '0s';
-}
 
 export function ManagedJobs() {
   const [loading, setLoading] = useState(false);
@@ -773,209 +730,6 @@ export function ManagedJobsTable({
 // Helper function to get status-specific styling
 function getBadgeStyle(status) {
   return getStatusStyle(status);
-}
-
-export function formatLogs(str) {
-  if (!str) return '';
-
-  // Filter out unwanted lines
-  const lines = str
-    .split('\n')
-    .filter(
-      (line) =>
-        !line.match(/<rich_.*?\[bold cyan\]/) &&
-        !line.match(/<rich_.*>.*<\/rich_.*>/) &&
-        !line.match(/├──/) &&
-        !line.match(/└──/)
-    );
-
-  // Remove ANSI escape codes
-  str = stripAnsiCodes(lines.join('\n'));
-
-  // Process each line
-  return str
-    .split('\n')
-    .map((line) => {
-      // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
-      const standardMatch = line.match(
-        /^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/
-      );
-
-      if (standardMatch) {
-        const [_, level, timestamp, location, message] = standardMatch;
-        const logLevel =
-          {
-            I: 'INFO',
-            W: 'WARNING',
-            E: 'ERROR',
-            D: 'DEBUG',
-          }[level] || '';
-
-        return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
-      }
-
-      // If it doesn't match the standard format, try to split on parentheses content
-      const parts = line.match(/^(\([^)]+\))(.*)$/);
-      if (parts) {
-        const [_, prefix, rest] = parts;
-        return `<span class="log-line"><span class="log-prefix">${prefix}</span><span class="log-rest">${rest}</span></span>`;
-      }
-
-      // If no patterns match, return the line as is
-      return `<span class="log-line"><span class="message">${line}</span></span>`;
-    })
-    .join('\n');
-}
-
-export const logStyles = `
-  .logs-container {
-    background-color: #f7f7f7;
-    padding: 16px;
-    max-height: calc(100vh - 300px);
-    overflow-y: auto;
-    overflow-x: hidden;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    line-height: 1.5;
-    border-radius: 6px;
-    min-height: fit-content;
-  }
-
-  .log-line {
-    display: block;
-    white-space: pre-wrap;
-    margin: 2px 0;
-  }
-
-  .log-line .level {
-    display: inline;
-    width: 1ch;
-    margin-right: 1ch;
-    font-weight: bold;
-  }
-
-  .log-line.INFO .level {
-    color: #2563eb;
-  }
-
-  .log-line.WARNING .level {
-    color: #d97706;
-  }
-
-  .log-line.ERROR .level {
-    color: #dc2626;
-  }
-
-  .log-line.DEBUG .level {
-    color: #6b7280;
-  }
-
-  .log-line .timestamp {
-    color: #059669;
-    margin-right: 1ch;
-    white-space: nowrap;
-  }
-
-  .log-line .location {
-    color: #6366f1;
-    margin-right: 1ch;
-    white-space: nowrap;
-  }
-
-  .log-line .message {
-    color: #111827;
-    word-break: break-word;
-    white-space: pre-wrap;
-  }
-
-  .log-line .log-prefix {
-    color: #6366f1;
-    font-weight: 500;
-  }
-
-  .log-line .log-rest {
-    color: #111827;
-    word-break: break-word;
-    white-space: pre-wrap;
-  }
-`;
-
-export function stripAnsiCodes(str) {
-  return str.replace(/\x1b\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGKH]/g, '');
-}
-
-function extractNodeTypes(logs) {
-  const nodePattern = /\((head|worker\d+),/g; // Matches 'head' or 'worker' followed by any number
-  const nodeTypes = new Set();
-
-  let match;
-  while ((match = nodePattern.exec(logs)) !== null) {
-    nodeTypes.add(match[1]); // Add the node type to the set
-  }
-
-  const sortedNodeTypes = Array.from(nodeTypes).sort((a, b) => {
-    if (a === 'head') return -1;
-    if (b === 'head') return 1;
-    return a.localeCompare(b, undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    });
-  });
-
-  return sortedNodeTypes; // Return sorted array
-}
-
-export function LogFilter({ logs, controller = false }) {
-  const [selectedNode, setSelectedNode] = useState('all');
-  const [filteredLogs, setFilteredLogs] = useState(logs);
-  const [nodeTypes, setNodeTypes] = useState([]);
-
-  useEffect(() => {
-    setNodeTypes(extractNodeTypes(logs));
-  }, [logs]);
-
-  useEffect(() => {
-    if (selectedNode === 'all') {
-      setFilteredLogs(logs);
-    } else {
-      const filtered = logs
-        .split('\n')
-        .filter((line) => line.includes(`(${selectedNode},`));
-      setFilteredLogs(filtered.join('\n'));
-    }
-  }, [selectedNode, logs]);
-
-  return (
-    <div>
-      <style>{logStyles}</style>
-      {!controller && (
-        <div style={{ marginBottom: '1rem' }}>
-          <Select
-            onValueChange={(value) => setSelectedNode(value)}
-            value={selectedNode}
-          >
-            <SelectTrigger
-              aria-label="Node"
-              className="focus:ring-0 focus:ring-offset-0"
-            >
-              <SelectValue placeholder="Select Node" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Nodes</SelectItem>
-              {nodeTypes.map((node) => (
-                <SelectItem key={node} value={node}>
-                  {node}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      <div
-        className="logs-container"
-        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
-      />
-    </div>
-  );
 }
 
 export function Status2Actions({

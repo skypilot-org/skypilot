@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
@@ -7,14 +7,9 @@ import { useManagedJobDetails } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import { RotateCwIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
-import { LogFilter, formatLogs } from '@/components/jobs';
+import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { getJobDetails } from '@/data/connectors/jobs';
-import { relativeTime } from '@/components/utils';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 function JobDetails() {
   const router = useRouter();

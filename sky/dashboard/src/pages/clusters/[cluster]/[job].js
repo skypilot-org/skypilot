@@ -3,14 +3,13 @@ import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { formatLogs } from '@/components/jobs';
 import { useClusterDetails } from '@/data/connectors/clusters';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { LogFilter } from '@/components/jobs';
+import { LogFilter, formatLogs } from '@/components/utils';
 
 // Custom header component with buttons inline
 function JobHeader({

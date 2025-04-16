@@ -8,11 +8,6 @@
 import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { CustomTooltip as Tooltip } from '@/components/utils';
-import {
-  FilledCircleIcon,
-  SquareIcon,
-  PauseIcon,
-} from '@/components/elements/icons';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
