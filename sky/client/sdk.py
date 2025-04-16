@@ -1694,6 +1694,8 @@ def api_start(
     Returns:
         None
     """
+    os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+    skypilot_config.safe_reload_config()
     if deploy:
         host = '0.0.0.0'
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
