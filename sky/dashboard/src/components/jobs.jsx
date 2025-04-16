@@ -797,12 +797,12 @@ export function formatLogs(str) {
     .split('\n')
     .map((line) => {
       // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
-      const match = line.match(
+      const standardMatch = line.match(
         /^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/
       );
 
-      if (match) {
-        const [_, level, timestamp, location, message] = match;
+      if (standardMatch) {
+        const [_, level, timestamp, location, message] = standardMatch;
         const logLevel =
           {
             I: 'INFO',
@@ -814,6 +814,14 @@ export function formatLogs(str) {
         return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
       }
 
+      // If it doesn't match the standard format, try to split on parentheses content
+      const parts = line.match(/^(\([^)]+\))(.*)$/);
+      if (parts) {
+        const [_, prefix, rest] = parts;
+        return `<span class="log-line"><span class="log-prefix">${prefix}</span><span class="log-rest">${rest}</span></span>`;
+      }
+
+      // If no patterns match, return the line as is
       return `<span class="log-line"><span class="message">${line}</span></span>`;
     })
     .join('\n');
@@ -874,6 +882,17 @@ export const logStyles = `
   }
 
   .log-line .message {
+    color: #111827;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .log-line .log-prefix {
+    color: #6366f1;
+    font-weight: 500;
+  }
+
+  .log-line .log-rest {
     color: #111827;
     word-break: break-word;
     white-space: pre-wrap;
