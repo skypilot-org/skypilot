@@ -99,6 +99,27 @@ def test_merge_k8s_configs_with_container_resources():
     assert container['resources']['requests'] == {'cpu': '0.5', 'memory': '1Gi'}
 
 
+def test_merge_k8s_configs_with_init_container_resources():
+    """Test merging Kubernetes configs with initContainer specifications."""
+    base_config = {
+        'initContainers': [{
+            'name': 'init-container',
+            'image': 'init-image:latest',
+        }]
+    }
+    override_config = {
+        'initContainers': [{
+            'name': 'init-container',
+            'image': 'override-image:latest',
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+    assert len(base_config['initContainers']) == 1
+    container = base_config['initContainers'][0]
+    assert container['image'] == 'override-image:latest'
+
+
 def test_merge_k8s_configs_with_deeper_override():
     base_config = {
         'containers': [{
