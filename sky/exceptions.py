@@ -553,7 +553,3 @@ class JobExitCode(enum.IntEnum):
         # Should not hit this case, but included to avoid errors
         return cls.FAILED
 
-
-class ApiEndpointNotFoundError(Exception):
-    """Raised when the API endpoint is not found."""
-    pass
