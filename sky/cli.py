@@ -3463,15 +3463,23 @@ def show_gpus(
             ])
         return realtime_gpu_table
 
-    # TODO(zhwu): this needs to run on remote server.
-    def _get_kubernetes_node_info_table(context: Optional[str]):
+    def _get_kubernetes_node_info(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
+        try:
+            nodes_info = sdk.stream_and_get(
+                sdk.kubernetes_node_info_v2(context=context))
+        except exceptions.ApiEndpointNotFoundError:
+            # Fallback to the old endpoint.
+            node_info_dict = sdk.stream_and_get(
+                sdk.kubernetes_node_info(context=context))
+            nodes_info = models.KubernetesNodesInfo(
+                node_info_dict=node_info_dict,
+                hint='',
+            )
         no_permissions_str = '<no permissions>'
-        node_info_dict = sdk.stream_and_get(
-            sdk.kubernetes_node_info(context=context))
-        for node_name, node_info in node_info_dict.items():
+        for node_name, node_info in nodes_info.node_info_dict.items():
             available = node_info.free[
                 'accelerators_available'] if node_info.free[
                     'accelerators_available'] != -1 else no_permissions_str
@@ -3479,7 +3487,14 @@ def show_gpus(
                 node_name, node_info.accelerator_type,
                 node_info.total['accelerator_count'], available
             ])
-        return node_table
+        k8s_per_node_acc_message = (
+            'Kubernetes per node accelerator availability ')
+        if nodes_info.hint:
+            k8s_per_node_acc_message += nodes_info.hint
+        return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                f'{k8s_per_node_acc_message}'
+                f'{colorama.Style.RESET_ALL}\n'
+                f'{node_table.get_string()}')
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3527,22 +3542,8 @@ def show_gpus(
                            f'Kubernetes GPUs {context_str}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
-                    k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
-                    # TODO(Doyoung): Update the message with the multi-host TPU
-                    # support.
-                    k8s_per_node_acc_message = (
-                        'Kubernetes per node accelerator availability ')
-                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
-                            context):
-                        k8s_per_node_acc_message += (
-                            '(Note: Multi-host TPUs are detected and excluded '
-                            'from the display as multi-host TPUs are not '
-                            'supported.)')
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'{k8s_per_node_acc_message}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_node_table.get_string()
+                    yield _get_kubernetes_node_info(context)
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)

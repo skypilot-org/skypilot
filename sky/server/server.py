@@ -205,6 +205,8 @@ async def realtime_kubernetes_gpu_availability(
     )
 
 
+# Deprecated, use kubernetes_node_info_v2 instead.
+# TODO(aylei): Remove this in v0.11.0
 @app.post('/kubernetes_node_info')
 async def kubernetes_node_info(
         request: fastapi.Request,
@@ -216,6 +218,21 @@ async def kubernetes_node_info(
         request_name='kubernetes_node_info',
         request_body=kubernetes_node_info_body,
         func=kubernetes_utils.get_kubernetes_node_info,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.post('/kubernetes_node_info_v2')
+async def kubernetes_node_info_v2(
+        request: fastapi.Request,
+        kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody
+) -> None:
+    """Gets Kubernetes nodes information and hints."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='kubernetes_node_info_v2',
+        request_body=kubernetes_node_info_body,
+        func=kubernetes_utils.get_kubernetes_node_info_v2,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
