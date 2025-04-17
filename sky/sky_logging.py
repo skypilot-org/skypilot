@@ -133,8 +133,8 @@ def set_logging_level(logger: str, level: int):
         logger.setLevel(original_level)
 
 
-def get_logging_level(logger: logging.Logger) -> int:
-    return logger.level
+def is_logging_enabled_for_level(logger: logging.Logger, level: int) -> bool:
+    return logger.level <= level
 
 
 @contextlib.contextmanager
