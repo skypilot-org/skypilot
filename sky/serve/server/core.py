@@ -935,21 +935,24 @@ def sync_down_logs(
             serve_utils.ServiceComponentTarget(
                 serve_utils.ServiceComponent.LOAD_BALANCER))
     if serve_utils.ServiceComponent.REPLICA in requested_components:
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Getting live replica infos...')):
+            replica_targets = _get_all_replica_targets(service_name, backend,
+                                                       handle)
         if not replica_ids:
             # Replica target requested but no specific IDs
             # -> Get all replica logs
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message('Getting live replicas...')):
-                replica_targets = _get_all_replica_targets(
-                    service_name, backend, handle)
             normalized_targets.update(replica_targets)
         else:
             # Replica target requested with specific IDs
-            normalized_targets.update({
-                serve_utils.ServiceComponentTarget(
-                    serve_utils.ServiceComponent.REPLICA, rid)
-                for rid in replica_ids
-            })
+            for rid in replica_ids:
+                if rid not in replica_targets:
+                    print(f'Replica ID {rid} not found for service '
+                          f'{service_name}. Skipping...')
+                else:
+                    normalized_targets.add(
+                        serve_utils.ServiceComponentTarget(
+                            serve_utils.ServiceComponent.REPLICA, rid))
 
     def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
         component = target.component
