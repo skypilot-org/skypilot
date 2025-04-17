@@ -4,6 +4,17 @@ import subprocess
 import sky
 
 
+class DoNothingPolicy(sky.AdminPolicy):
+    """Example policy: do nothing."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Returns the user request unchanged."""
+        return sky.MutatedUserRequest(user_request.task,
+                                      user_request.skypilot_config)
+
+
 class RejectAllPolicy(sky.AdminPolicy):
     """Example policy: rejects all user requests."""
 
@@ -72,7 +83,7 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         """Enforces autostop for all tasks.
-        
+
         Note that with this policy enforced, users can still change the autostop
         setting for an existing cluster by using `sky autostop`.
 
