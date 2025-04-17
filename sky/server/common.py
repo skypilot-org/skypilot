@@ -237,11 +237,12 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            start_new_session=True,
-            env={constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        server_env = os.environ.copy()
+        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        proc = subprocess.Popen(cmd,
+                                shell=True,
+                                start_new_session=True,
+                                env=server_env)
 
         start_time = time.time()
         while True:
