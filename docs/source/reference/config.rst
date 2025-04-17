@@ -37,7 +37,7 @@ Configuration sources
 
 .. note::
 
-  If the following fields are specified on the client side, they are ignored:
+  The following fields are ignored if specified on the client side:
 
   * :ref:`admin_policy <config-yaml-admin-policy>`
   * :ref:`allowed_clouds <config-yaml-allowed-clouds>`
