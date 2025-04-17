@@ -358,6 +358,9 @@ def _request_execution_wrapper(request_id: str,
         # captured in the log file.
         try:
             with override_request_env_and_config(request_body):
+                config = skypilot_config.to_dict()
+                logger.debug(f'request config: \n'
+                             f'{common_utils.dump_yaml_str(dict(config))}')
                 return_value = func(**request_body.to_kwargs())
                 f.flush()
         except KeyboardInterrupt:
