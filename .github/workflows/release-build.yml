@@ -23,6 +23,10 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v3
 
+      - name: Create pip cache directory
+        run: |
+          mkdir -p /home/runner/.cache/pip
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -59,6 +63,27 @@ jobs:
             echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
           fi
           echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Verify release version > latest PyPI version
+        id: verify_version
+        run: |
+          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          echo "Determined release version: ${RELEASE_VERSION}"
+
+          # Get the latest version from PyPI using JSON API
+          LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+          echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
+
+          # Compare versions using Bash sort -V
+          echo "Comparing determined version ${RELEASE_VERSION} with latest PyPI version ${LATEST_PYPI_VERSION}"
+          HIGHEST_VERSION=$(printf "%s\\n%s" "${RELEASE_VERSION}" "${LATEST_PYPI_VERSION}" | sort -V | tail -n1)
+
+          if [ "${RELEASE_VERSION}" = "${HIGHEST_VERSION}" ] && [ "${RELEASE_VERSION}" != "${LATEST_PYPI_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is greater than latest PyPI version ${LATEST_PYPI_VERSION}."
+          else
+            echo "Error: Determined release version ${RELEASE_VERSION} must be strictly greater than the latest PyPI version ${LATEST_PYPI_VERSION}."
+            exit 1
+          fi
 
       - name: Set release version and commit changes
         id: commit_changes
@@ -168,7 +193,7 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   create-pr:
-    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test]
+    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test, extract-smoke-tests, extract-quicktest]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
