@@ -3467,17 +3467,8 @@ def show_gpus(
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        try:
-            nodes_info = sdk.stream_and_get(
-                sdk.kubernetes_node_info_v2(context=context))
-        except exceptions.ApiEndpointNotFoundError:
-            # Fallback to the old endpoint.
-            node_info_dict = sdk.stream_and_get(
-                sdk.kubernetes_node_info(context=context))
-            nodes_info = models.KubernetesNodesInfo(
-                node_info_dict=node_info_dict,
-                hint='',
-            )
+        nodes_info = sdk.stream_and_get(
+            sdk.kubernetes_node_info(context=context))
         no_permissions_str = '<no permissions>'
         for node_name, node_info in nodes_info.node_info_dict.items():
             available = node_info.free[

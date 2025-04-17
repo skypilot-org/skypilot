@@ -1387,43 +1387,10 @@ def realtime_kubernetes_gpu_availability(
     return server_common.get_request_id(response)
 
 
-# TODO(aylei): Remove this in v0.11.0
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def kubernetes_node_info(
-        context: Optional[str] = None) -> server_common.RequestId:
-    """Gets the resource information for all the nodes in the cluster.
-
-    Currently only GPU resources are supported. The function returns the total
-    number of GPUs available on the node and the number of free GPUs on the
-    node.
-
-    If the user does not have sufficient permissions to list pods in all
-    namespaces, the function will return free GPUs as -1.
-
-    Args:
-        context: The Kubernetes context. If None, the default context is used.
-
-    Returns:
-        The request ID of the Kubernetes node info request.
-
-    Request Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
-    """
-    body = payloads.KubernetesNodeInfoRequestBody(context=context)
-    response = requests.post(
-        f'{server_common.get_server_url()}/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
-    return server_common.get_request_id(response)
-
-
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@annotations.client_api
-def kubernetes_node_info_v2(
         context: Optional[str] = None) -> server_common.RequestId:
     """Gets the resource information for all the nodes in the cluster.
 
@@ -1446,19 +1413,9 @@ def kubernetes_node_info_v2(
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.post(
-        f'{server_common.get_server_url()}/kubernetes_node_info_v2',
+        f'{server_common.get_server_url()}/kubernetes_node_info',
         json=json.loads(body.model_dump_json()),
         cookies=server_common.get_api_cookie_jar())
-    if response.status_code == 404:
-        # Do not fallback to the old endpoint because the old endpoint has
-        # different request return type. Compatibilities should be handled
-        # in upper layer.
-        # TODO(aylei): Update this after removing /kubernetes_node_info in
-        # v0.11.0.
-        raise exceptions.ApiEndpointNotFoundError(
-            'API endpoint /kubernetes_node_info_v2 not found. '
-            'Upgrade your SkyPilot API server or using '
-            'sdk.kubernetes_node_info instead.')
     return server_common.get_request_id(response)
 
 

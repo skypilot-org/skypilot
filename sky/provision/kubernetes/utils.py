@@ -2542,21 +2542,15 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     return unlabeled_nodes
 
 
-# TODO(aylei): For backward compatibility, remove this in v0.11.0
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
-    return get_kubernetes_node_info_v2(context=context).node_info_dict
-
-
-def get_kubernetes_node_info_v2(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
 
-    Compared to get_kubernetes_node_info, this function returns a model with
-    node info map as a nested field. This allows future extensions while
-    keeping the client-server compatibility, e.g. when adding a new field to
-    the model, the legacy clients will not be affected and new clients can
-    opt-in new behavior if the new field is presented.
+    This function returns a model with node info map as a nested field. This
+    allows future extensions while keeping the client-server compatibility,
+    e.g. when adding a new field to the model, the legacy clients will not be
+    affected and new clients can opt-in new behavior if the new field is
+    presented.
 
     Currently only GPU resources are supported. The function returns the total
     number of GPUs available on the node and the number of free GPUs on the
@@ -2633,8 +2627,8 @@ def get_kubernetes_node_info_v2(
             free={'accelerators_available': int(accelerators_available)})
     hint = ''
     if has_multi_host_tpu:
-        hint = ('Note: Multi-host TPUs are detected and excluded from the '
-                'display as multi-host TPUs are not supported.')
+        hint = ('(Note: Multi-host TPUs are detected and excluded from the '
+                'display as multi-host TPUs are not supported.)')
 
     return models.KubernetesNodesInfo(
         node_info_dict=node_info_dict,
