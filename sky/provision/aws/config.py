@@ -150,6 +150,66 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                     f'{role_name}{colorama.Style.RESET_ALL} from AWS.')
                 raise exc
 
+    def _create_instance_profile_if_not_exists(
+            instance_profile_name: str) -> None:
+        try:
+            iam.meta.client.create_instance_profile(
+                InstanceProfileName=instance_profile_name)
+        except aws.botocore_exceptions().ClientError as exc:
+            if exc.response.get('Error',
+                                {}).get('Code') == 'EntityAlreadyExists':
+                return
+            else:
+                utils.handle_boto_error(
+                    exc,
+                    f'Failed to create instance profile {colorama.Style.BRIGHT}'
+                    f'{instance_profile_name}{colorama.Style.RESET_ALL} in AWS.'
+                )
+                raise exc
+
+    def _create_role_if_not_exists(role_name: str,
+                                   policy_doc: Dict[str, Any]) -> None:
+        try:
+            iam.create_role(RoleName=role_name,
+                            AssumeRolePolicyDocument=json.dumps(policy_doc))
+        except aws.botocore_exceptions().ClientError as exc:
+            if exc.response.get('Error',
+                                {}).get('Code') == 'EntityAlreadyExists':
+                return
+            else:
+                utils.handle_boto_error(
+                    exc, f'Failed to create role {colorama.Style.BRIGHT}'
+                    f'{role_name}{colorama.Style.RESET_ALL} in AWS.')
+                raise exc
+
+    def _check_instance_profile_role(profile: Any, role_name: str) -> None:
+        if profile.roles and profile.roles[0].name != role_name:
+            logger.fatal(f'The instance profile {profile.name} already has '
+                         f'an associated role {profile.roles[0].name}, but the '
+                         f'role {role_name} is not the same as the expected '
+                         f'role. Please remove the existing role from the '
+                         f'instance profile and try again.')
+            raise SystemExit(1)
+
+    def _ensure_instance_profile_role(profile: Any, role: Any):
+        try:
+            profile.add_role(RoleName=role.name)
+        except aws.botocore_exceptions().ClientError as exc:
+            # AddRoleToInstanceProfile is not idempotent. Adding a role to an
+            # InstanceProfile that already has an associated role will cause
+            # LimitExceeded error, even if the two roles are identical.
+            # see also: https://docs.aws.amazon.com/IAM/latest/APIReference/API_AddRoleToInstanceProfile.html # pylint: disable=line-too-long
+            if exc.response.get('Error', {}).get('Code') == 'LimitExceeded':
+                _check_instance_profile_role(profile, role)
+                return
+            else:
+                utils.handle_boto_error(
+                    exc, f'Failed to add role {colorama.Style.BRIGHT}'
+                    f'{role.name}{colorama.Style.RESET_ALL} to instance '
+                    f'profile {colorama.Style.BRIGHT}{profile.name}'
+                    f'{colorama.Style.RESET_ALL} in AWS.')
+                raise exc
+
     instance_profile_name = DEFAULT_SKYPILOT_INSTANCE_PROFILE
     profile = _get_instance_profile(instance_profile_name)
 
@@ -158,14 +218,16 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             f'Creating new IAM instance profile {colorama.Style.BRIGHT}'
             f'{instance_profile_name}{colorama.Style.RESET_ALL} for use as the '
             'default.')
-        iam.meta.client.create_instance_profile(
-            InstanceProfileName=instance_profile_name)
+        _create_instance_profile_if_not_exists(instance_profile_name)
         profile = _get_instance_profile(instance_profile_name)
         time.sleep(15)  # wait for propagation
     assert profile is not None, 'Failed to create instance profile'
 
-    if not profile.roles:
-        role_name = DEFAULT_SKYPILOT_IAM_ROLE
+    role_name = DEFAULT_SKYPILOT_IAM_ROLE
+    if profile.roles:
+        _check_instance_profile_role(profile, role_name)
+    else:
+        # there is no role associated, ensure the role and associate
         role = _get_role(role_name)
         if role is None:
             logger.info(
@@ -186,8 +248,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                 'arn:aws:iam::aws:policy/AmazonS3FullAccess',
             ]
 
-            iam.create_role(RoleName=role_name,
-                            AssumeRolePolicyDocument=json.dumps(policy_doc))
+            # TODO(aylei): need to check and reconcile the role permission
+            # in case of external modification.
+            _create_role_if_not_exists(role_name, policy_doc)
             role = _get_role(role_name)
             assert role is not None, 'Failed to create role'
 
@@ -217,7 +280,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             role.Policy('SkyPilotPassRolePolicy').put(
                 PolicyDocument=json.dumps(skypilot_pass_role_policy_doc))
 
-        profile.add_role(RoleName=role.name)
+        _ensure_instance_profile_role(profile, role)
         time.sleep(15)  # wait for propagation
     return {'Arn': profile.arn}
 
