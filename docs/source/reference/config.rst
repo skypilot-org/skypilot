@@ -35,12 +35,19 @@ Configuration sources
 #. User configuration
 #. Server configuration
 
+.. note::
+
+  If the following fields are specified on the client side, they are ignored:
+
+  * :ref:`admin_policy <config-yaml-admin-policy>`
+  * :ref:`allowed_clouds <config-yaml-allowed-clouds>`
+
 .. _config-server-config:
 
 Server configuration
 ~~~~~~~~~~~~~~~~~~~~
 
-| SkyPilot server looks for ``~/.sky/config.yaml`` in the API server instance/container to find the server configuration.
+| If you are using a shared :ref:`SkyPilot API server <sky-api-server>`, it looks for ``~/.sky/config.yaml`` in the API server instance/container to find the server configuration.
 | To specify a different file, set ``SKYPILOT_SERVER_CONFIG`` environment variable to the desired path.
 
 .. _config-client-user-config:
@@ -65,7 +72,7 @@ Job / task YAML
 ~~~~~~~~~~~~~~~
 
 | You can specify inline configuration options in task or job YAML files.
-| Following fields are supported in task or job YAML inline configuration:
+| The following fields are supported in task or job YAML inline configuration:
 
 * :ref:`docker.run_options <config-yaml-docker-run-options>`
 * :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
@@ -95,7 +102,7 @@ CLI flag
 ~~~~~~~~
 
 | You can pass configuration arguments to the CLI using the ``--config`` flag.
-| ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
+| The ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
 
 Example:
 
@@ -114,7 +121,7 @@ Example:
 Configuration overrides
 -----------------------
 
-If the same configuration field is specified in multiple configuration sources, configuration is combined based :ref:`priority<config-priority>`.
+If the same configuration field is specified in multiple configuration sources, configuration is combined based on :ref:`priority<config-priority>`.
 
 Example:
 
@@ -130,7 +137,7 @@ If the following is configured in the :ref:`user config file<config-client-user-
       map-migrated: my-value
       Owner: user-unique-name
 
-And the following :ref:`project config file<config-client-project-config>`:
+And the following in the :ref:`project config file<config-client-project-config>`:
 
 .. code-block:: yaml
 
