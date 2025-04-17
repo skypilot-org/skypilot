@@ -52,7 +52,6 @@ import contextlib
 import copy
 import os
 import pprint
-import re
 import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -454,20 +453,6 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     - A comma-separated list of key-value pairs
     """
 
-    def split_by_comma_outside_brackets(text: str) -> List[str]:
-        """Split a string by commas, but not inside
-        square or curly brackets.
-        This is needed to handle cases such as:
-        --config 'kubernetes.allowed_contexts=[context1,context2],kubernetes.provision_timeout=600'
-
-        Args:
-            text: The string to split.
-
-        Returns:
-            A list of strings, split by the specified commas.
-        """  # pylint: disable=line-too-long
-        return re.split(r',(?!(?:[^\[\{\]\}]*[\]\}]))', text)
-
     if not cli_config:
         return config_utils.Config()
 
@@ -481,7 +466,7 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
                 OmegaConf.load(maybe_config_path))
         else:  # cli_config is a comma-separated list of key-value pairs
             variables: List[str] = []
-            variables = split_by_comma_outside_brackets(cli_config)
+            variables = cli_config.split(',')
             parsed_config = OmegaConf.to_object(
                 OmegaConf.from_dotlist(variables))
         _validate_config(parsed_config, config_source)
