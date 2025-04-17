@@ -6,12 +6,15 @@ from pathlib import Path
 import time
 from unittest import mock
 
+import click
 import pytest
 import requests
 
+from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
+from sky.utils import common as common_utils
 
 
 @pytest.fixture
@@ -122,3 +125,36 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
                               requests.cookies.RequestsCookieJar)
             assert mock_get.call_args[1]["cookies"].get(
                 "user_name", domain="api.skypilot.co") == "sky-user"
+
+
+def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    # Create a temporary config file
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+
+    test_endpoint = "http://test.skypilot.co"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_endpoint)
+
+        # Verify the endpoint is written to config file
+        assert config_path.exists()
+        config = skypilot_config.get_user_config()
+        assert config["api_server"]["endpoint"] == test_endpoint
+        mock_check.assert_called_once_with(test_endpoint)
+
+    # Test with existing config
+    test_endpoint_2 = "http://test2.skypilot.co"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_endpoint_2)
+
+        # Verify the endpoint is updated in config file
+        config = skypilot_config.get_user_config()
+        assert config["api_server"]["endpoint"] == test_endpoint_2
+        mock_check.assert_called_once_with(test_endpoint_2)
+
+    # Test with invalid endpoint
+    with pytest.raises(click.BadParameter):
+        client_sdk.api_login("invalid_endpoint")
