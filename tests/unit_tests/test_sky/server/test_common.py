@@ -130,8 +130,8 @@ def test_get_version_info_hint():
     with mock.patch('sky.__version__', '1.0.0-dev0'), \
          mock.patch('sky.__commit__', 'def456'):
         hint = common._get_version_info_hint(server_info)
-        assert 'client version: v1.0.0-dev0 (commit: def456)' in hint
-        assert 'server version: v1.0.0-dev0 (commit: abc123)' in hint
+        assert 'client version: v1.0.0-dev0 with commit def456' in hint
+        assert 'server version: v1.0.0-dev0 with commit abc123' in hint
 
     # Test stable version
     server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
