@@ -10,32 +10,31 @@ Any new configuration provided does not affect existing clusters.
 Configuration sources
 ---------------------
 
-Client-side configuration sources
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sources are listed in increasing precedence - the lowest precedence source is listed first.
 
-.. note::
+.. _config-server-config:
 
-  ``allowed_clouds`` and ``admin_policy`` are ignored if specified in client configuration sources.
+**Server Configuration**
 
-.. _config-client-cli-flag:
+SkyPilot server looks for ``~/.sky/config.yaml`` to find the server configuration.
 
-**CLI flag**
+To specify a different file, set ``SKYPILOT_SERVER_CONFIG`` environment variable to the desired path.
 
-You can pass configuration arguments to the CLI using the ``--config`` flag.
+.. _config-client-user-config:
 
-``--config`` flag can either be a path to a YAML file meeting configuration, or a dotlist of key-value pairs.
+**User Configuration**
 
-Example:
+SkyPilot client looks for ``~/.sky/config.yaml`` to find the user configuration.
 
-.. code-block:: bash
+To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
 
-  # pass a config file
-  sky launch --config my_config.yaml ...
-  # pass individual config options
-  sky launch --config 'kubernetes.autoscaler=gke,api_server.endpoint=http://1.2.3.4:8000' ...
-  # list and dictionary syntax are supported
-  sky launch --config 'kubernetes.allowed_contexts=[context1,context2]' ...
-  sky launch --config 'aws.labels={"map-migrated": "my-value", "Owner": "user-unique-name"}' ...
+.. _config-client-project-config:
+
+**Project Configuration**
+
+SkyPilot client looks for ``$pwd/.sky.yaml`` to find the project configuration.
+
+To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
 
 .. _config-client-job-task-yaml:
 
@@ -67,40 +66,25 @@ Example:
     nvidia_gpus:
       disable_ecc: ...
 
-.. _config-client-project-config:
+.. _config-client-cli-flag:
 
-**Project Configuration**
+**CLI flag**
 
-SkyPilot looks for ``$pwd/.sky.yaml`` to find project configuration.
+You can pass configuration arguments to the CLI using the ``--config`` flag.
 
-To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
+``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
 
-.. _config-client-user-config:
+Example:
 
-**User Configuration**
+.. code-block:: bash
 
-SkyPilot looks for ``~/.sky/config.yaml`` to find user configuration.
-
-To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
-
-Server-side configuration sources
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. _config-server-project-config:
-
-**Project Configuration**
-
-SkyPilot looks for ``$pwd/.sky.yaml`` to find project configuration.
-
-To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
-
-.. _config-server-user-config:
-
-**User Configuration**
-
-SkyPilot looks for ``~/.sky/config.yaml`` to find user configuration.
-
-To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
+  # pass a config file
+  sky launch --config my_config.yaml ...
+  # pass individual config options
+  sky launch --config 'kubernetes.autoscaler=gke,api_server.endpoint=http://1.2.3.4:8000' ...
+  # list and dictionary syntax are supported
+  sky launch --config 'kubernetes.allowed_contexts=[context1,context2]' ...
+  sky launch --config 'aws.labels={"map-migrated": "my-value", "Owner": "user-unique-name"}' ...
 
 
 Configuration overrides

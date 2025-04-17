@@ -156,12 +156,11 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 
 .. code-block:: yaml
 
-    experimental:
-      config_overrides:
-        gcp:
-          managed_instance_group:
-            run_duration: 3600
-            provision_timeout: 900
+    config:
+      gcp:
+        managed_instance_group:
+          run_duration: 3600
+          provision_timeout: 900
 
     resources:
       cloud: gcp
@@ -180,14 +179,13 @@ To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS con
 
 .. code-block:: yaml
 
-    experimental:
-      config_overrides:
-        kubernetes:
-          pod_config:
-            metadata:
-              annotations:
-                provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
-          provision_timeout: 900
+    config:
+      kubernetes:
+        pod_config:
+          metadata:
+            annotations:
+              provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
+        provision_timeout: 900
 
     resources:
       cloud: kubernetes
