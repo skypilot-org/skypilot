@@ -1408,8 +1408,8 @@ def kubernetes_node_info(
         The request ID of the Kubernetes node info request.
 
     Request Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.post(

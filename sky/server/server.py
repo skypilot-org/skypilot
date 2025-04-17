@@ -210,7 +210,7 @@ async def kubernetes_node_info(
         request: fastapi.Request,
         kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody
 ) -> None:
-    """Gets Kubernetes node information."""
+    """Gets Kubernetes nodes information and hints."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='kubernetes_node_info',
