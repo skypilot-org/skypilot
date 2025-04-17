@@ -12,7 +12,7 @@ Summary
 -------
 
 | You can specify advanced configuration at ``~/.sky/config.yaml`` following the :ref:`configuration syntax<config-yaml-syntax>`.
-| You can override configuration for a command using the ``--config`` flag in the :ref:`CLI<config-client-cli-flag>`.
+| You can override configuration for a command using ``--config`` flag in the :ref:`CLI<config-client-cli-flag>`.
 | You can layer configurations by leveraging multiple :ref:`configuration sources<config-sources>`.
 
 .. _config-sources:
@@ -23,10 +23,21 @@ Configuration sources
 .. image:: ../images/config-sources.svg
     :width: 90%
     :align: center
+    :alt: Configuration Sources
 
-.. _config-precedence:
+.. _config-priority:
 
-| Sources are listed in increasing precedence - the lowest precedence source is listed first.
+| When multiple configuration sources are specified, SkyPilot combines them based on the following priority:
+
+  highest priority
+
+  #. CLI flag
+  #. Task YAML
+  #. Project configuration
+  #. User configuration
+  #. Server configuration
+
+  lowest priority
 
 .. _config-server-config:
 
@@ -100,7 +111,7 @@ Example:
 Configuration overrides
 -----------------------
 
-If the same configuration field is specified in multiple configuration sources, configuration is combined according to :ref:`precedence<config-precedence>`.
+If the same configuration field is specified in multiple configuration sources, configuration is combined based :ref:`priority<config-priority>`.
 
 Example:
 
@@ -120,7 +131,7 @@ And the following :ref:`project config file<config-client-project-config>`:
 
 .. code-block:: yaml
 
-  # project config has precedence over user config
+  # project config overrides user config
   kubernetes:
     allowed_contexts: [context3, context4]
     provision_timeout: 300
@@ -133,12 +144,12 @@ The combined configuration is:
 .. code-block:: yaml
 
   kubernetes:
-    # lists are overridden by config sources with higher precedence
+    # lists are overridden by config sources with higher priority
     allowed_contexts: [context3, context4]
     provision_timeout: 300
     aws:
       # dicts are merged, with individual keys overridden by
-      # config sources with higher precedence
+      # config sources with higher priority
       labels:
         map-migrated: my-value
         Owner: project-unique-name
