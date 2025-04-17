@@ -3463,7 +3463,7 @@ def show_gpus(
             ])
         return realtime_gpu_table
 
-    def _get_kubernetes_node_info(context: Optional[str]):
+    def _format_kubernetes_node_info(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
@@ -3534,7 +3534,7 @@ def show_gpus(
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                     yield '\n\n'
-                    yield _get_kubernetes_node_info(context)
+                    yield _format_kubernetes_node_info(context)
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)

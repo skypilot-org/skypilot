@@ -552,4 +552,3 @@ class JobExitCode(enum.IntEnum):
 
         # Should not hit this case, but included to avoid errors
         return cls.FAILED
-
