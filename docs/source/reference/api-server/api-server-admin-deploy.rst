@@ -63,7 +63,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             NAMESPACE=skypilot
             kubectl create secret generic kube-credentials \
-              -n $NAMESPACE \
+              --namespace $NAMESPACE \
               --from-file=config=~/.kube/config
 
 
@@ -71,7 +71,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
               --set kubernetesCredentials.useApiServerCluster=true
@@ -106,7 +107,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             NAMESPACE=skypilot
             kubectl create secret generic aws-credentials \
-              -n $NAMESPACE \
+              --namespace $NAMESPACE \
               --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
               --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
 
@@ -116,7 +117,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
+            helm --namespace $NAMESPACE upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
 
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -129,7 +130,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             NAMESPACE=skypilot
             kubectl create secret generic gcp-credentials \
-              -n $NAMESPACE \
+              --namespace $NAMESPACE \
               --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
 
         When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` to your project ID:
@@ -137,6 +138,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE
               --set gcpCredentials.enabled=true \
               --set gcpCredentials.projectId=YOUR_PROJECT_ID
 

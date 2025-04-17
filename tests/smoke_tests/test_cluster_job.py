@@ -769,7 +769,7 @@ def test_task_labels_aws():
             'task_labels_aws',
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-                f'sky launch -y -c {name} {file_path}',
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
                 # Verify with aws cli that the tags are set.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'aws ec2 describe-instances '
@@ -801,7 +801,7 @@ def test_task_labels_gcp():
             'task_labels_gcp',
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-                f'sky launch -y -c {name} {file_path}',
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
                 # Verify with gcloud cli that the tags are set
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -833,7 +833,7 @@ def test_task_labels_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {file_path}',
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
                 # Verify with kubectl that the labels are set.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'kubectl get pods '
