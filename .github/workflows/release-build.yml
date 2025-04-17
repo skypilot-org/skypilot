@@ -70,14 +70,23 @@ jobs:
           LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
           echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
 
-          # Compare versions using Bash sort -V
-          echo "Comparing determined version ${RELEASE_VERSION} with latest PyPI version ${LATEST_PYPI_VERSION}"
-          HIGHEST_VERSION=$(printf "%s\\n%s" "${RELEASE_VERSION}" "${LATEST_PYPI_VERSION}" | sort -V | tail -n1)
+          # Parse latest PyPI version
+          PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
+          PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+          PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
 
-          if [ "${RELEASE_VERSION}" = "${HIGHEST_VERSION}" ] && [ "${RELEASE_VERSION}" != "${LATEST_PYPI_VERSION}" ]; then
-            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is greater than latest PyPI version ${LATEST_PYPI_VERSION}."
+          # Calculate expected next versions
+          NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
+          NEXT_MINOR_VERSION="${PYPI_MAJOR}.$((PYPI_MINOR + 1)).0"
+
+          echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
+          echo "Expected next minor version: ${NEXT_MINOR_VERSION}"
+
+          # Check if the determined release version is one of the expected next versions
+          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ] || [ "${RELEASE_VERSION}" = "${NEXT_MINOR_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is a valid next version."
           else
-            echo "Error: Determined release version ${RELEASE_VERSION} must be strictly greater than the latest PyPI version ${LATEST_PYPI_VERSION}."
+            echo "Error: Determined release version ${RELEASE_VERSION} must be either the next patch version (${NEXT_PATCH_VERSION}) or the next minor version (${NEXT_MINOR_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
             exit 1
           fi
 
