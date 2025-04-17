@@ -691,7 +691,7 @@ def get_response_from_request_id(request_id: str) -> Any:
     """
     response = requests.get(
         f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
-        timeout=5)
+        timeout=15)
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
