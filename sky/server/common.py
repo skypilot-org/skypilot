@@ -227,6 +227,7 @@ def _start_api_server(deploy: bool = False,
 
         if foreground:
             # Replaces the current process with the API server
+            os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
@@ -237,7 +238,12 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
+        server_env = os.environ.copy()
+        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        proc = subprocess.Popen(cmd,
+                                shell=True,
+                                start_new_session=True,
+                                env=server_env)
 
         start_time = time.time()
         while True:
@@ -436,6 +442,12 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
+    # This should be called first to make sure the logger is up-to-date.
+    sky_logging.reload_logger()
+
+    # Reload the skypilot config to make sure the latest config is used.
+    skypilot_config.safe_reload_config()
+
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
@@ -451,11 +463,6 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-
-    # Make sure the logger takes the new environment variables. This is
-    # necessary because the logger is initialized before the environment
-    # variables are set, such as SKYPILOT_DEBUG.
-    sky_logging.reload_logger()
 
 
 def clear_local_api_server_database() -> None:

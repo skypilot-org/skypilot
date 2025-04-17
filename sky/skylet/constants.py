@@ -362,3 +362,6 @@ LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
 # Path to the generated cluster config yamls and ssh configs.
 SKY_USER_FILE_PATH = '~/.sky/generated'
+
+# Environment variable that is set to 'true' if this is a skypilot server.
+ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
