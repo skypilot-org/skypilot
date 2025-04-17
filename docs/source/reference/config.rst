@@ -20,9 +20,7 @@ Summary
 Configuration sources
 ---------------------
 
-**TODO change this to an actual diagram about config precedence**
-
-.. image:: ../images/skypilot-abstractions-long-2.png
+.. image:: ../images/config-sources.svg
     :width: 90%
     :align: center
 
