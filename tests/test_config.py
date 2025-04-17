@@ -518,7 +518,9 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
             [('aws', 'security_group')])
 @mock.patch('sky.skypilot_config.loaded_config_path',
             return_value='/path/to/config.yaml')
-def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
+@mock.patch('sky.sky_logging.get_logging_level', return_value=10)  # DEBUG
+def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
+                                                  mock_get_logging_level):
     with mock.patch('sky.server.requests.payloads.logger') as mock_logger:
         # Call the function
         result = payloads.get_override_skypilot_config_from_client()
