@@ -359,7 +359,7 @@ def _reload_config_as_server() -> None:
     for override in overrides:
         overlaid_server_config = overlay_skypilot_config(
             original_config=overlaid_server_config, override_configs=override)
-    logger.debug(f'final config: {overlaid_server_config}')
+    logger.debug(f'final server config: {overlaid_server_config}')
     _dict = overlaid_server_config
 
 
@@ -381,7 +381,7 @@ def _reload_config_as_client() -> None:
     for override in overrides:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    logger.debug(f'final config: {overlaid_client_config}')
+    logger.debug(f'final client config: {overlaid_client_config}')
     _dict = overlaid_client_config
 
 
