@@ -3762,6 +3762,14 @@ def show_gpus(
         click.echo()
 
 
+@cli.command()
+@config_option(expose_value=False)
+def show_config():
+    """Show the currently applied SkyPilot configuration."""
+    applied_config = skypilot_config.to_dict()
+    click.echo(common_utils.dump_yaml_str(dict(applied_config)))
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
     """SkyPilot Storage CLI."""
