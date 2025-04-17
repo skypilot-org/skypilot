@@ -79,6 +79,10 @@ Below is the configuration syntax and some example values.  See details under ea
     python train.py
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
 
+  :ref:`config <yaml-spec-config>`:
+    kubernetes:
+      provision_timeout: 600
+
 Fields
 ----------
 
@@ -862,7 +866,7 @@ OR
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
-.. _task-spec-config:
+.. _yaml-spec-config:
 .. _task-yaml-experimental:
 
 ``config``

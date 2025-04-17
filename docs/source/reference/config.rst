@@ -29,40 +29,40 @@ Configuration sources
 
 | When multiple configuration sources are specified, SkyPilot combines them based on the following priority:
 
-  highest priority
-
-  #. CLI flag
-  #. Task YAML
-  #. Project configuration
-  #. User configuration
-  #. Server configuration
-
-  lowest priority
+#. CLI flag
+#. Task YAML
+#. Project configuration
+#. User configuration
+#. Server configuration
 
 .. _config-server-config:
 
-**Server Configuration**
+Server configuration
+~~~~~~~~~~~~~~~~~~~~
 
-| SkyPilot server looks for ``~/.sky/config.yaml`` to find the server configuration.
+| SkyPilot server looks for ``~/.sky/config.yaml`` in the API server instance/container to find the server configuration.
 | To specify a different file, set ``SKYPILOT_SERVER_CONFIG`` environment variable to the desired path.
 
 .. _config-client-user-config:
 
-**User Configuration**
+User configuration
+~~~~~~~~~~~~~~~~~~
 
 | SkyPilot client looks for ``~/.sky/config.yaml`` to find the user configuration.
 | To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
 
 .. _config-client-project-config:
 
-**Project Configuration**
+Project configuration
+~~~~~~~~~~~~~~~~~~~~~
 
-| SkyPilot client looks for ``$pwd/.sky.yaml`` to find the project configuration.
+| SkyPilot client looks for ``$pwd/.sky.yaml`` to find the current project configuration.
 | To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
 
 .. _config-client-job-task-yaml:
 
-**Job / Task YAML**
+Job / task YAML
+~~~~~~~~~~~~~~~
 
 | You can specify inline configuration options in task or job YAML files.
 | Following fields are supported in task or job YAML inline configuration:
@@ -91,7 +91,8 @@ Example:
 
 .. _config-client-cli-flag:
 
-**CLI flag**
+CLI flag
+~~~~~~~~
 
 | You can pass configuration arguments to the CLI using the ``--config`` flag.
 | ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
@@ -117,7 +118,7 @@ If the same configuration field is specified in multiple configuration sources, 
 
 Example:
 
-If a SkyPilot server is configured with the following :ref:`user config file<config-client-user-config>`:
+If the following is configured in the :ref:`user config file<config-client-user-config>`:
 
 .. code-block:: yaml
 

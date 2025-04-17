@@ -454,8 +454,9 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     - A comma-separated list of key-value pairs
     """
 
-    def split_by_comma_outside_brackets(text):
-        """Split a string by commas, but not inside square brackets.
+    def split_by_comma_outside_brackets(text: str) -> List[str]:
+        """Split a string by commas, but not inside
+        square or curly brackets.
         This is needed to handle cases such as:
         --config 'kubernetes.allowed_contexts=[context1,context2],kubernetes.provision_timeout=600'
 
