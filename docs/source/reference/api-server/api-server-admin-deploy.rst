@@ -460,7 +460,7 @@ In helm deployment, a set of default permissions are granted to the API server t
         helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
           --set rbac.manageSystemComponents=false
 
-If you want to use an existing service account and permissions instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
+If you want to use an existing service account and permissions that meet the :ref:`minimum permissions required for SkyPilot<k8s-permissions>` instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
 
 .. code-block:: bash
 
