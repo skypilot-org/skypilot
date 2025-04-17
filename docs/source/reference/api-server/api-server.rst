@@ -117,23 +117,8 @@ To verify that the API server is working, run ``sky api info``:
 
 By default, each user connected to the API server will only see their own resources.
 
-.. code-block:: console
 
-    $ sky status
-    Clusters
-    NAME          LAUNCHED      RESOURCES              STATUS   AUTOSTOP  COMMAND
-    my-cluster-2  2 hrs ago     1x GCP(n2-standard-8)  STOPPED  -         sky launch task-2.yaml
-    my-cluster-1  2 months ago  1x AWS(m6i.4xlarge)    STOPPED  -         sky launch task-1.yaml
-
-    $ sky jobs queue
-    Fetching managed job statuses...
-    Managed jobs
-    ID  TASK  NAME     RESOURCES  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-    3   -     job-2    1x[CPU:2]  2 days ago  2m 10s         1m 14s        0            CANCELLED
-    1   -     job-1    1x[CPU:2]  5 days ago  1m 7s          3s            0            SUCCEEDED
-
-
-To see controllers and other users' clusters, use the ``-u`` flag.
+To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
 
 .. code-block:: console
     :emphasize-lines: 5,7,14
