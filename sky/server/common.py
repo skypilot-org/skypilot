@@ -295,10 +295,12 @@ def _start_api_server(deploy: bool = False,
                 break
 
         dashboard_msg = (
-            f'{colorama.Style.DIM}Dashboard: {get_server_url(host)}/dashboard.'
-            ' Please run `npm run build` to generate the dashboard if you'
-            ' install SkyPilot from source.'
-            f'{colorama.Style.RESET_ALL}')
+            f'{colorama.Style.DIM}Dashboard: {get_server_url(host)}/dashboard.')
+        if not os.path.isdir(server_constants.DASHBOARD_DIR):
+            dashboard_msg += (
+                ' Please run `npm run build` to generate the dashboard if you'
+                ' install SkyPilot from source.')
+        dashboard_msg += f'{colorama.Style.RESET_ALL}'
         logger.info(
             ux_utils.finishing_message(
                 f'SkyPilot API server started. {dashboard_msg}'))

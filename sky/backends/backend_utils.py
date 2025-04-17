@@ -2583,8 +2583,7 @@ def get_clusters(
         records = new_records
 
     def _update_record_with_resources(record: Optional[Dict[str, Any]]) -> None:
-        """Add the resources to the record.
-        """
+        """Add the resources to the record."""
         if record is None:
             return
         handle = record['handle']

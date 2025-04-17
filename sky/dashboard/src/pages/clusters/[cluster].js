@@ -32,7 +32,7 @@ function ClusterDetails() {
     if (!loading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading]);
+  }, [loading, isInitialLoad]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
@@ -31,7 +31,7 @@ function JobDetails() {
     if (!loading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading]);
+  }, [loading, isInitialLoad]);
 
   // Function to scroll to a specific section
   const scrollToSection = (sectionId) => {
@@ -295,60 +295,63 @@ function JobDetailsContent({
   }, [activeTab, jobData.id]);
 
   // Define a function to handle both log types
-  const fetchLogs = (logType, jobId, setLogs, setIsLoading) => {
-    let active = true;
-    const controller = new AbortController();
+  const fetchLogs = useCallback(
+    (logType, jobId, setLogs, setIsLoading) => {
+      let active = true;
+      const controller = new AbortController();
 
-    if (activeTab === logType && jobId) {
-      setIsLoading(true);
+      if (activeTab === logType && jobId) {
+        setIsLoading(true);
 
-      streamManagedJobLogs({
-        jobId: jobId,
-        controller: logType === 'controllerlogs',
-        signal: controller.signal,
-        onNewLog: (log) => {
-          if (active) {
-            const strippedLog = formatLogs(log);
-            setLogs((prevLogs) => [...prevLogs, strippedLog]);
-          }
-        },
-      })
-        .then(() => {
-          if (active) {
-            setIsLoading(false);
-          }
-        })
-        .catch((error) => {
-          if (active) {
-            // Only log and handle non-abort errors
-            if (error.name !== 'AbortError') {
-              console.error(`Error streaming ${logType}:`, error);
-              if (error.message) {
-                setLogs((prevLogs) => [
-                  ...prevLogs,
-                  `Error fetching logs: ${error.message}`,
-                ]);
-              }
+        streamManagedJobLogs({
+          jobId: jobId,
+          controller: logType === 'controllerlogs',
+          signal: controller.signal,
+          onNewLog: (log) => {
+            if (active) {
+              const strippedLog = formatLogs(log);
+              setLogs((prevLogs) => [...prevLogs, strippedLog]);
             }
-            setIsLoading(false);
-          }
-        });
+          },
+        })
+          .then(() => {
+            if (active) {
+              setIsLoading(false);
+            }
+          })
+          .catch((error) => {
+            if (active) {
+              // Only log and handle non-abort errors
+              if (error.name !== 'AbortError') {
+                console.error(`Error streaming ${logType}:`, error);
+                if (error.message) {
+                  setLogs((prevLogs) => [
+                    ...prevLogs,
+                    `Error fetching logs: ${error.message}`,
+                  ]);
+                }
+              }
+              setIsLoading(false);
+            }
+          });
 
-      // Return cleanup function
+        // Return cleanup function
+        return () => {
+          active = false;
+        };
+      }
       return () => {
         active = false;
       };
-    }
-    return () => {
-      active = false;
-    };
-  };
+    },
+    [activeTab]
+  );
 
   // Only fetch logs when actually viewing the logs tab
   useEffect(() => {
     const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
     return cleanup;
-  }, [activeTab, jobData.id]);
+  }, [activeTab, jobData.id, fetchLogs, setIsLoadingLogs]);
 
   // Only fetch controller logs when actually viewing the controller logs tab
   useEffect(() => {
@@ -359,7 +362,7 @@ function JobDetailsContent({
       setIsLoadingControllerLogs
     );
     return cleanup;
-  }, [activeTab, jobData.id]);
+  }, [activeTab, jobData.id, fetchLogs, setIsLoadingControllerLogs]);
 
   if (activeTab === 'logs') {
     return (

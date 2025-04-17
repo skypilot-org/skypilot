@@ -9,6 +9,7 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "stop": "pkill next && kill $(lsof -t -i :3000) || true",
     "test": "jest",
     "test:watch": "jest --watch"

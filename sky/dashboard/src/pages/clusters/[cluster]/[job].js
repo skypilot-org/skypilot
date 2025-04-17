@@ -81,7 +81,7 @@ export function JobDetailPage() {
     if (!loading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading]);
+  }, [loading, isInitialLoad]);
 
   const handleRefreshLogs = () => {
     setIsRefreshingLogs((prev) => !prev);
@@ -103,7 +103,9 @@ export function JobDetailPage() {
         },
       })
         .then(() => {
-          if (active) setIsLoadingLogs(false);
+          if (active) {
+            setIsLoadingLogs(false);
+          }
         })
         .catch((error) => {
           if (active) {
@@ -115,7 +117,7 @@ export function JobDetailPage() {
     return () => {
       active = false;
     };
-  }, [cluster, job, isRefreshingLogs]);
+  }, [cluster, job, isRefreshingLogs, isLoadingLogs]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {

@@ -170,9 +170,6 @@ setuptools.setup(
     entry_points={
         'console_scripts': ['sky = sky.cli:cli'],
     },
-    package_data={
-        'dashboard': ["sky/dashboard/out/**/*",],
-    },
     include_package_data=True,
     classifiers=[
         'Programming Language :: Python :: 3.7',

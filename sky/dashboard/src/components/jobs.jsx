@@ -243,25 +243,28 @@ export function ManagedJobsTable({
   };
 
   // Define status groups
-  const statusGroups = {
-    active: [
-      'PENDING',
-      'RUNNING',
-      'RECOVERING',
-      'SUBMITTED',
-      'STARTING',
-      'CANCELLING',
-    ],
-    finished: [
-      'SUCCEEDED',
-      'FAILED',
-      'CANCELLED',
-      'FAILED_SETUP',
-      'FAILED_PRECHECKS',
-      'FAILED_NO_RESOURCE',
-      'FAILED_CONTROLLER',
-    ],
-  };
+  const statusGroups = React.useMemo(
+    () => ({
+      active: [
+        'PENDING',
+        'RUNNING',
+        'RECOVERING',
+        'SUBMITTED',
+        'STARTING',
+        'CANCELLING',
+      ],
+      finished: [
+        'SUCCEEDED',
+        'FAILED',
+        'CANCELLED',
+        'FAILED_SETUP',
+        'FAILED_PRECHECKS',
+        'FAILED_NO_RESOURCE',
+        'FAILED_CONTROLLER',
+      ],
+    }),
+    []
+  );
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
@@ -272,7 +275,7 @@ export function ManagedJobsTable({
       statusGroups.finished.includes(item.status)
     ).length;
     return { active, finished };
-  }, [data]);
+  }, [data, statusGroups]);
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -301,7 +304,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, activeTab, selectedStatuses, showAllMode]);
+  }, [data, activeTab, selectedStatuses, showAllMode, statusGroups]);
 
   // Handle status selection
   const handleStatusClick = (status) => {

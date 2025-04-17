@@ -2,7 +2,29 @@ This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next
 
 ## Getting Started
 
-Install nextjs:
+### Access the dashboard
+
+If you install SkyPilot from the official package, after starting the API server, the dashboard can be accessed at `${API_Server_Endpoint}/dashboard`, for example, it's `http://127.0.0.1:46580/dashboard` for the local API server by default.
+
+If you install SkyPilot from source, before starting the API server, run the following commands to generate the dashboard production build:
+
+```bash
+# You may need to clear your cache if you have permission issues
+# npm cache clean --force
+
+# Install all dependencies in the current directory
+npm install
+# Build
+npm run build
+```
+
+Then you can start your API server and access the dashboard at `${API_Server_Endpoint}/dashboard`.
+
+### Run dashboard development server
+
+If you want to update the dashboard files or debug the dashboard, you can run the development server following the instructions.
+
+Install dependencies:
 
 ```bash
 # You may need to clear your cache if you have permission issues
@@ -22,27 +44,10 @@ Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard) with your browser to see the result.
 
 You can start editing the page by modifying the files. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
-
 Execute `npm run lint` for static code analysis and `npm run format` to format the code with `prettier`.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
