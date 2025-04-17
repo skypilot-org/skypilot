@@ -947,8 +947,8 @@ def sync_down_logs(
             # Replica target requested with specific IDs
             for rid in replica_ids:
                 if rid not in replica_targets:
-                    print(f'Replica ID {rid} not found for service '
-                          f'{service_name}. Skipping...')
+                    logger.warning(f'Replica ID {rid} not found for service '
+                                   f'{service_name}. Skipping...')
                 else:
                     normalized_targets.add(
                         serve_utils.ServiceComponentTarget(
