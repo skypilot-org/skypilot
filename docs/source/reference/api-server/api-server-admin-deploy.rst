@@ -52,12 +52,16 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: Kubernetes
         :sync: kubernetes-creds-tab
 
-        By default, SkyPilot will automatically use the same Kubernetes cluster as the API server:
+        By default, SkyPilot API server is granted permissions to use its hosting Kubernetes cluster:
 
         * To disable this behavior, set ``kubernetesCredentials.useApiServerCluster=false`` in the Helm chart values.
         * When running in the same cluster, tasks are launched in the same namespace as the API server. To use a different namespace for tasks, set ``kubernetesCredentials.inclusterNamespace=<namespace>`` when deploying the API server.
 
-        To use a kubeconfig file to authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file:
+        .. tip::
+
+            The default permissions granted to the API server works out of box. For further hardening, you can refer to :ref:`Setting minimum permissions in helm deployment <minimum-permissions-in-helm>` to understand the permissions and how to customize them.
+
+        To use a kubeconfig file to authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file with :ref:`necessary permissions <cloud-permissions-kubernetes>`:
 
         .. code-block:: bash
 
@@ -74,10 +78,8 @@ Following tabs describe how to configure credentials for different clouds on the
             helm --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --set kubernetesCredentials.useKubeconfig=true \
-              --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
-              --set kubernetesCredentials.useApiServerCluster=true
-
-
+              --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
+        
         .. tip::
 
             If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
@@ -93,8 +95,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             To use multiple Kubernetes clusters from the config file, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config file. See :ref:`sky-api-server-config` on how to set the config file.
 
-            You can also set both ``useKubeconfig`` and ``useApiServerCluster`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
-
+            You can also set both ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.useApiServerCluster=true`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
 
     .. tab-item:: AWS
         :sync: aws-creds-tab
@@ -425,6 +426,49 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 .. code-block:: bash
 
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+
+.. _minimum-permissions-in-helm:
+
+Setting minimum permissions in helm deployment
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In helm deployment, a set of default permissions are granted to the API server to access the hosting Kubernetes cluster. You can customize the permissions in the following conditions:
+
+* Reduce the RBAC permissions by using ``kubernetes.remote_identity``: by default, the API server creates a service account and RBAC roles to grant permissions to SkyPilot task Pods. This in turn requires the API server to have permissions to manipulate RBAC roles and service accounts. You can disable this by the following steps:
+
+    1. Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` to set ``kubernetes.remote_identity`` to the service account of API server, which already has the necessary permissions:
+
+    .. code-block:: yaml
+
+        # TODO: replace ${RELEASE_NAME} with the actual release name in deployment step
+        kubernetes:
+          remote_identity: ${RELEASE_NAME}-api-sa
+    
+    .. note::
+
+        If you also grant external Kubernetes cluster permissions to the API server via ``kubernetesCredentials.useKubeconfig``, the same service account with enough permissions must be prepared in these Kubernetes clusters manually.
+
+    2. Set ``rbac.manageRbacPolicies=false`` in helm valuesto disable the RBAC policies:
+
+    .. code-block:: bash
+
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+          --set rbac.manageRbacPolicies=false
+
+* If your use case does not require object storage mounting, you can disable the permissions to manage SkyPilot system components by setting ``rbac.manageSystemComponents=false``:
+
+    .. code-block:: bash
+
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+          --set rbac.manageSystemComponents=false
+
+If you want to use an existing service account and permissions that meet the :ref:`minimum permissions required for SkyPilot<k8s-permissions>` instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
+
+.. code-block:: bash
+
+    helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+      --set rbac.create=false \
+      --set rbac.serviceAccountName=my-existing-service-account
 
 .. _sky-migrate-legacy-service:
 
