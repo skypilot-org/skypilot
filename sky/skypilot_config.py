@@ -51,7 +51,6 @@ then:
 import contextlib
 import copy
 import os
-import pprint
 import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -314,8 +313,8 @@ def _parse_config_file(config_path: str) -> config_utils.Config:
     try:
         config_dict = common_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
-        logger.debug(
-            f'Config loaded from {config_path}:\n{pprint.pformat(config)}')
+        logger.debug(f'Config loaded from {config_path}:\n'
+                     f'{common_utils.dump_yaml_str(dict(config))}')
     except yaml.YAMLError as e:
         logger.error(f'Error in loading config file ({config_path}):', e)
     if config:
@@ -359,7 +358,8 @@ def _reload_config_as_server() -> None:
     for override in overrides:
         overlaid_server_config = overlay_skypilot_config(
             original_config=overlaid_server_config, override_configs=override)
-    logger.debug(f'final server config: {overlaid_server_config}')
+    logger.debug(f'server config: \n'
+                 f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
     _dict = overlaid_server_config
 
 
@@ -381,7 +381,8 @@ def _reload_config_as_client() -> None:
     for override in overrides:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    logger.debug(f'final client config: {overlaid_client_config}')
+    logger.debug(f'client config (before task and CLI overrides): \n'
+                 f'{common_utils.dump_yaml_str(dict(overlaid_client_config))}')
     _dict = overlaid_client_config
 
 
@@ -491,7 +492,8 @@ def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
     """
     global _dict
     parsed_config = _compose_cli_config(cli_config)
-    logger.debug(f'applying following CLI overrides: {parsed_config}')
+    logger.debug(f'applying following CLI overrides: \n'
+                 f'{common_utils.dump_yaml_str(dict(parsed_config))}')
     _dict = overlay_skypilot_config(original_config=_dict,
                                     override_configs=parsed_config)
     return parsed_config
