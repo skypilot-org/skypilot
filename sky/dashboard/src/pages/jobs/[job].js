@@ -201,7 +201,13 @@ function JobDetails() {
           <div id="logs-section" className="mt-6">
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
-                <h3 className="text-lg font-semibold">Logs</h3>
+                <div className="flex items-center">
+                  <h3 className="text-lg font-semibold">Logs</h3>
+                  <span className="ml-2 text-xs text-gray-500">
+                    (Logs are not streaming; click refresh to fetch the latest
+                    logs.)
+                  </span>
+                </div>
                 <Tooltip
                   content="Refresh logs"
                   className="text-muted-foreground"
@@ -235,7 +241,13 @@ function JobDetails() {
           <div id="controller-logs-section" className="mt-6">
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
-                <h3 className="text-lg font-semibold">Controller Logs</h3>
+                <div className="flex items-center">
+                  <h3 className="text-lg font-semibold">Controller Logs</h3>
+                  <span className="ml-2 text-xs text-gray-500">
+                    (Logs are not streaming; click refresh to fetch the latest
+                    logs.)
+                  </span>
+                </div>
                 <Tooltip
                   content="Refresh controller logs"
                   className="text-muted-foreground"
