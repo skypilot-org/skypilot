@@ -5,161 +5,12 @@ Advanced Configuration
 
 You can pass **optional configuration** to SkyPilot.
 
-Any new configuration provided does not affect existing clusters.
+This configuration is set globally in ``~/.sky/config.yaml`` following the :ref:`configuration syntax<config-yaml-syntax>`.
 
+You can override the global configuration in your project directory, task YAML, or from the command line. Refer to :ref:`configuration sources<config-sources>` for more details.
 
-Summary
--------
+Any new configuration changes do not affect existing clusters.
 
-| You can specify advanced configuration at ``~/.sky/config.yaml`` following the :ref:`configuration syntax<config-yaml-syntax>`.
-| You can override configuration for a command using ``--config`` flag in the :ref:`CLI<config-client-cli-flag>`.
-| You can layer configurations by leveraging multiple :ref:`configuration sources<config-sources>`.
-
-.. _config-sources:
-
-Configuration sources
----------------------
-
-.. image:: ../images/config-sources.svg
-    :width: 90%
-    :align: center
-    :alt: Configuration Sources
-
-.. _config-priority:
-
-| When multiple configuration sources are specified, SkyPilot combines them based on the following priority:
-
-#. CLI flag
-#. Task YAML
-#. Project configuration
-#. User configuration
-#. Server configuration
-
-.. note::
-
-  The following fields are ignored if specified on the client side:
-
-  * :ref:`admin_policy <config-yaml-admin-policy>`
-  * :ref:`allowed_clouds <config-yaml-allowed-clouds>`
-
-.. _config-server-config:
-
-Server configuration
-~~~~~~~~~~~~~~~~~~~~
-
-| If you are using a shared :ref:`SkyPilot API server <sky-api-server>`, it looks for ``~/.sky/config.yaml`` in the API server instance/container to find the server configuration.
-| To specify a different file, set ``SKYPILOT_SERVER_CONFIG`` environment variable to the desired path.
-
-.. _config-client-user-config:
-
-User configuration
-~~~~~~~~~~~~~~~~~~
-
-| SkyPilot client looks for ``~/.sky/config.yaml`` to find the user configuration.
-| To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
-
-.. _config-client-project-config:
-
-Project configuration
-~~~~~~~~~~~~~~~~~~~~~
-
-| SkyPilot client looks for ``$pwd/.sky.yaml`` to find the current project configuration.
-| To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
-
-.. _config-client-job-task-yaml:
-
-Job / task YAML
-~~~~~~~~~~~~~~~
-
-| You can specify inline configuration options in task or job YAML files.
-| The following fields are supported in task or job YAML inline configuration:
-
-* :ref:`docker.run_options <config-yaml-docker-run-options>`
-* :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
-* :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`
-* :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
-* :ref:`gcp.managed_instance_group <config-yaml-gcp-managed-instance-group>`
-
-Example:
-
-.. code-block:: yaml
-
-  # job or task yaml
-  config:
-    docker:
-      run_options: ...
-    kubernetes:
-      pod_config: ...
-      provision_timeout: ...
-    gcp:
-      managed_instance_group: ...
-    nvidia_gpus:
-      disable_ecc: ...
-
-.. _config-client-cli-flag:
-
-CLI flag
-~~~~~~~~
-
-| You can pass configuration arguments to the CLI using the ``--config`` flag.
-| The ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
-
-Example:
-
-.. code-block:: bash
-
-  # pass a config file
-  sky launch --config my_config.yaml ...
-  # pass individual config options
-  sky launch --config 'kubernetes.provision_timeout=600,kubernetes.pod_config.spec.priorityClassName=high-priority' ...
-  # this command is equivalent to the command above
-  sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1,kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
-
-Configuration overrides
------------------------
-
-If the same configuration field is specified in multiple configuration sources, configuration is combined based on :ref:`priority<config-priority>`.
-
-Example:
-
-If the following is configured in the :ref:`user config file<config-client-user-config>`:
-
-.. code-block:: yaml
-
-  kubernetes:
-    allowed_contexts: [context1, context2]
-    provision_timeout: 600
-  aws:
-    labels:
-      map-migrated: my-value
-      Owner: user-unique-name
-
-And the following in the :ref:`project config file<config-client-project-config>`:
-
-.. code-block:: yaml
-
-  # project config overrides user config
-  kubernetes:
-    allowed_contexts: [context3, context4]
-    provision_timeout: 300
-  aws:
-    labels:
-      Owner: project-unique-name
-
-The combined configuration is:
-
-.. code-block:: yaml
-
-  kubernetes:
-    # lists are overridden by config sources with higher priority
-    allowed_contexts: [context3, context4]
-    provision_timeout: 300
-    aws:
-      # dicts are merged, with individual keys overridden by
-      # config sources with higher priority
-      labels:
-        map-migrated: my-value
-        Owner: project-unique-name
 
 .. _config-yaml-syntax:
 
@@ -1192,3 +1043,9 @@ Example:
         us-ashburn-1:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+
+.. toctree::
+   :hidden:
+
+   Configuration Overrides <config-override>
