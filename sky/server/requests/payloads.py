@@ -63,8 +63,8 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
         value = config.pop_nested(nested_key, default_value=None)
         if value is not None:
             ignored_key_values['.'.join(nested_key)] = value
-    if (ignored_key_values and sky_logging.is_logging_enabled_for_level(
-            logger, sky_logging.DEBUG)):
+    if (ignored_key_values and
+            sky_logging.logging_enabled(logger, sky_logging.DEBUG)):
         logger.debug(f'The following keys ({json.dumps(ignored_key_values)}) '
                      'are specified in the client SkyPilot config at '
                      f'{skypilot_config.loaded_config_path()!r}. '

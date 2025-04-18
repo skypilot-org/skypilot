@@ -133,7 +133,7 @@ def set_logging_level(logger: str, level: int):
         logger.setLevel(original_level)
 
 
-def is_logging_enabled_for_level(logger: logging.Logger, level: int) -> bool:
+def logging_enabled(logger: logging.Logger, level: int) -> bool:
     return logger.level <= level
 
 
