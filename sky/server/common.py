@@ -298,9 +298,18 @@ def _start_api_server(deploy: bool = False,
             f'{colorama.Style.DIM}Dashboard: {get_server_url(host)}/dashboard')
         api_server_info = get_api_server_status(get_server_url(host))
         if api_server_info.version == _DEV_VERSION:
-            dashboard_msg += (
-                '\n  Please run `npm run build` to generate the dashboard'
-                ' if you install SkyPilot from source.')
+            if not os.path.isdir(server_constants.DASHBOARD_DIR):
+                dashboard_msg += (
+                    f'\n{colorama.Style.RESET_ALL}{ux_utils.INDENT_SYMBOL}'
+                    f'{colorama.Fore.YELLOW}'
+                    'Dashboard is not built, '
+                    'to build: npm --prefix sky/dashboard run build')
+            else:
+                dashboard_msg += (
+                    f'\n{colorama.Style.RESET_ALL}{ux_utils.INDENT_SYMBOL}'
+                    f'{colorama.Fore.YELLOW}'
+                    'Dashboard may be stale when installed from source, '
+                    'to rebuild: npm --prefix sky/dashboard run build')
         dashboard_msg += f'{colorama.Style.RESET_ALL}'
         logger.info(
             ux_utils.finishing_message(
