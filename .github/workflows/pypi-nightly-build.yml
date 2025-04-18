@@ -27,8 +27,6 @@ jobs:
     outputs:
       buildkite_json: ${{ steps.trigger_buildkite.outputs.json }}
     steps:
-      - name: Intentionally fail for testing
-        run: exit 1
       - name: Clone repository
         uses: actions/checkout@v3
       - name: Set up Python 3.10
