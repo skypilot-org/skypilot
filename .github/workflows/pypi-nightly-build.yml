@@ -124,7 +124,7 @@ jobs:
         run: |
           TITLE_TEXT="Workflow ${{ github.workflow }} failed."
           if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step.\\nBuildkite Log: https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}"
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step. Buildkite Log: https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}"
             echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
             echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
           else
@@ -139,10 +139,16 @@ jobs:
           method: chat.postMessage
           token: ${{ secrets.SLACK_BOT_TOKEN }}
           payload: |
-            channel: ${{ secrets.SLACK_CHANNEL_ID }}
-            text: ${{ steps.message_content.outputs.message_text }}
-            blocks:
-              - type: "section"
-                text:
-                  type: "mrkdwn"
-                  text: ${{ steps.message_content.outputs.message_block }}
+            {
+              "channel": "${{ secrets.SLACK_CHANNEL_ID }}",
+              "text": "${{ steps.message_content.outputs.message_text }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.message_content.outputs.message_block }}"
+                  }
+                }
+              ]
+            }
