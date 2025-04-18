@@ -117,7 +117,7 @@ export function JobDetailPage() {
     return () => {
       active = false;
     };
-  }, [cluster, job, isRefreshingLogs, isLoadingLogs]);
+  }, [cluster, job, isRefreshingLogs]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {

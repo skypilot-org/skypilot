@@ -150,6 +150,7 @@ else
     npm --prefix sky/dashboard install
     npm --prefix sky/dashboard run lint
     npm --prefix sky/dashboard run format
+    echo "SkyPilot Dashboard linting and formatting: Done"
     echo
 fi
 

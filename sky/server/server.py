@@ -20,7 +20,6 @@ import aiofiles
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
-from starlette.middleware.base import BaseHTTPMiddleware
 
 import sky
 from sky import check as sky_check
@@ -152,7 +151,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
 
 
 # Add a new middleware class to handle /internal/dashboard prefix
-class InternalDashboardPrefixMiddleware(BaseHTTPMiddleware):
+class InternalDashboardPrefixMiddleware(
+        starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle /internal/dashboard prefix in requests."""
 
     async def dispatch(self, request: fastapi.Request, call_next):

@@ -1822,7 +1822,9 @@ def api_login(endpoint: Optional[str] = None) -> None:
             config = skypilot_config.get_user_config()
             config.set_nested(('api_server', 'endpoint'), endpoint)
         common_utils.dump_yaml(str(config_path), dict(config))
+        dashboard_msg = (f'{colorama.Style.DIM}Dashboard: {endpoint}/dashboard'
+                         f'{colorama.Style.RESET_ALL}')
         click.secho(
-            f'Logged in to SkyPilot API server at {endpoint}'
-            f' with dashboard {endpoint}/dashboard',
+            f'Logged in to SkyPilot API server at {endpoint}.'
+            f' {dashboard_msg}',
             fg='green')
