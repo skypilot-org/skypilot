@@ -10,7 +10,7 @@ Configuration sources and overrides
 
 SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
-For example, you can have a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, a :ref:`user configuration<config-client-user-config>` to apply globally to all projects and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
+For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
 
 Refer to :ref:`config-sources-and-overrides` for more details.
 
