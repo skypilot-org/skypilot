@@ -1048,4 +1048,4 @@ Example:
 .. toctree::
    :hidden:
 
-   Configuration Overrides <config-override>
+   Configuration Sources <config-sources>
