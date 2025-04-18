@@ -3481,6 +3481,7 @@ class R2Store(AbstractStore):
                 f'--endpoint {endpoint_url} '
                 # R2 does not support CRC64-NVME
                 # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
                 f'--checksum-algorithm CRC32 '
                 f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
@@ -3504,6 +3505,7 @@ class R2Store(AbstractStore):
                 f'--endpoint {endpoint_url} '
                 # R2 does not support CRC64-NVME
                 # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
                 f'--checksum-algorithm CRC32 '
                 f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
