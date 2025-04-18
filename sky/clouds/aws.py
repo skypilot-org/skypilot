@@ -571,7 +571,7 @@ class AWS(clouds.Cloud):
         return cls._check_credentials()
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to AWS."""
@@ -710,7 +710,7 @@ class AWS(clouds.Cloud):
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='global', maxsize=1)
+    @annotations.lru_cache(scope='request', maxsize=1)
     def _aws_configure_list(cls) -> Optional[bytes]:
         proc = subprocess.run('aws configure list',
                               shell=True,
@@ -722,7 +722,7 @@ class AWS(clouds.Cloud):
         return proc.stdout
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
@@ -804,7 +804,7 @@ class AWS(clouds.Cloud):
         return [user_ids]
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
@@ -909,7 +909,7 @@ class AWS(clouds.Cloud):
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
-    @annotations.lru_cache(scope='global', maxsize=1)
+    @annotations.lru_cache(scope='request', maxsize=1)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
         return (identity_type is not None and
