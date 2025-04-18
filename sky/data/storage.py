@@ -3472,13 +3472,18 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.R2_CREDENTIALS_PATH} '
-                            'aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {base_dir_path} '
-                            f's3://{self.name}{sub_path} '
-                            f'--endpoint {endpoint_url} '
-                            f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                'aws s3 sync --no-follow-symlinks --exclude="*" '
+                f'{includes} {base_dir_path} '
+                f's3://{self.name}{sub_path} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -3491,13 +3496,18 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.R2_CREDENTIALS_PATH} '
-                            f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
-                            f's3://{self.name}{sub_path}/{dest_dir_name} '
-                            f'--endpoint {endpoint_url} '
-                            f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                f'aws s3 sync --no-follow-symlinks {excludes} '
+                f'{src_dir_path} '
+                f's3://{self.name}{sub_path}/{dest_dir_name} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
