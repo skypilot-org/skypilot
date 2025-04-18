@@ -11,7 +11,7 @@ import requests
 
 from sky.utils import annotations
 
-ENDPOINT = 'https://api.simplepod.ai/'
+ENDPOINT = 'https://apidev.simplepod.ai/'
 SIMPLEPOD_API_KEY_PATH = '~/.simplepod/simplepod_keys'
 
 class SimplePodError(Exception):
@@ -122,7 +122,7 @@ class SimplePodClient:
         """Launch a new instance.
 
         Args:
-            instance_type: Format like "gpu_1x_rtx a2000" or "A100:1"
+            instance_type: Format like "gpu_1x_rtx a2000", "A100:1", or "gpu_1x_p104-100"
             name: Instance name
             ssh_key: SSH key for access
             template_id: Optional template ID to use
@@ -136,13 +136,18 @@ class SimplePodClient:
         """
         # Handle instance type formats:
         # 1. gpu_1x_rtx a2000
-        # 2. A100:1
-        # 3. A100 1
+        # 2. gpu_1x_p104-100
+        # 3. A100:1
+        # 4. A100 1
         parts = instance_type.split()
 
         if len(parts) == 2 and parts[0].startswith('gpu_'):
-            # Format: gpu_1x_rtx a2000
+            # Format: gpu_1x_rtx a2000 or gpu_1x_p104-100
             gpu_type = parts[0].replace('gpu_1x_', '') + ' ' + parts[1]
+            gpu_count = 1
+        elif len(parts) == 1 and parts[0].startswith('gpu_1x_'):
+            # Format: gpu_1x_p104-100 (single part)
+            gpu_type = parts[0].replace('gpu_1x_', '')
             gpu_count = 1
         else:
             # Format: A100:1 or A100 1
@@ -166,22 +171,25 @@ class SimplePodClient:
 
         # Use first matching instance
         market_instance = matching[0]
-        print(f'Found available instance: {market_instance}')
         payload = {
             'gpuCount': gpu_count,
             'instanceMarket': f"/instances/market/{market_instance['id']}",
-            'name': 'testHead',
         }
 
         if template_id:
             payload['instanceTemplate'] = f'/instances/templates/{template_id}'
         else:
-            payload['instanceTemplate'] = f'/instances/templates/29'
+            payload['instanceTemplate'] = f'/instances/templates/2131'
 
         if env_variables:
             payload['envVariables'] = env_variables
 
+        print(f'Creating instance.... {name} with {gpu_count} GPUs of type {gpu_type}')
         response = self._make_request('POST', 'instances', json=payload)
+        instance_id = response.json()['id']
+        print(f'Instance created with ID: {instance_id}')
+        name = name.replace('-', '_')
+        self.update_instance(instance_id, name=name)
         return str(response.json()['id'])
 
     @annotations.lru_cache(scope='global')
@@ -236,11 +244,11 @@ class SimplePodClient:
         """Update instance settings."""
         payload = {}
         if auto_renew is not None:
-            payload['isAutoRenewOn'] = auto_renew
+            payload['isAutoRenewOn'] = "true"
         if auto_renew_max_price is not None:
             payload['priceAutoRenewMax'] = auto_renew_max_price
         if name is not None:
-            payload['name'] = 'test-Head'
+            payload['name'] = name
         if notes is not None:
             payload['notes'] = notes
         if template_id is not None:

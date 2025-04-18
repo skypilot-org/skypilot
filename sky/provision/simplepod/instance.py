@@ -1,10 +1,12 @@
 """SimplePod instance provisioning implementation."""
 
+import os
 import time
 from typing import Any, Dict, List, Optional
 from venv import logger
 
 from sky import exceptions, sky_logging
+from sky.authentication import _SSH_KEY_PATH_PREFIX
 from sky.provision import common
 from sky.provision.simplepod import utils
 from sky.utils import common_utils
@@ -16,25 +18,6 @@ _TIMEOUT_SECONDS = 600
 
 
 client = utils.SimplePodClient()
-
-
-def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]],
-                      head_only: bool = False) -> Dict[str, Any]:
-    instances = client.list_instances()
-    instances: Dict[str, List[common.InstanceInfo]] = {}
-    possible_names = [f'{cluster_name_on_cloud}-head']
-    if not head_only:
-        possible_names.append(f'{cluster_name_on_cloud}-worker')
-
-    filtered_instances = {}
-    for instance_id, instance in instances.items():
-        if (status_filters is not None and
-                instance['status'] not in status_filters):
-            continue
-        if instance['name'] in possible_names:
-            filtered_instances[instance_id] = instance
-    return filtered_instances
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
@@ -50,11 +33,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     running_instances = {
         instance['id']: instance
         for instance in client.list_instances()
-        if instance['name'].startswith(f'{cluster_name_on_cloud}-') and instance['status'] in ['running', 'active']
+        if instance['name'].startswith(f'{cluster_name_on_cloud}_') and instance['status'] in ['running']
     }
 
     head_instance_id = next(
-        (inst_id for inst_id, inst in running_instances.items() if inst['name'].endswith('-head')),
+        (inst_id for inst_id, inst in running_instances.items() if inst['name'].endswith('_head')),
         None
     )
 
@@ -224,24 +207,77 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    cluster_name_on_cloud = cluster_name_on_cloud.replace('-', '_')
+    running_instances = _filter_instances(cluster_name_on_cloud, ['running'])
+    print(f"[DEBUG] Running instances: {running_instances.items()}")
+    head_instance_id = None
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['internal_ip'],
-                ssh_port=instance_info['ssh_port'],
-                tags={},
+                internal_ip=instance_info['rig']['ip'],
+                external_ip=instance_info['rig']['ip'],
+                ssh_port=instance_info['ports']['direct'][0]['destPort'][1],
+                tags={}
             )
         ]
-        if instance_info['name'].endswith('-head'):
+        if instance_info['name'].endswith('_head'):
             head_instance_id = instance_id
-
+            print('[DEBUG]HEAD instannce is!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!:', head_instance_id)
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
         provider_name='simplepod',
         provider_config=provider_config,
     )
+
+def _filter_instances(cluster_name_on_cloud: str,
+                      status_filters: Optional[List[str]],
+                      head_only: bool = True) -> Dict[str, Any]:
+    instances = client.list_instances()
+    print(f"[DEBUG] Wszystkie instancje: {instances}")
+
+    filtered_instances = {}
+    for instance in instances:
+        name = instance['name']
+        status = instance['status']
+
+        print(f"[DEBUG] Sprawdzam instancję: {name}, status: {status}")
+
+        if status_filters is not None and status not in [s.lower() for s in status_filters]:
+            print(f"[DEBUG] Pomijam ze względu na status: {status}")
+            continue
+
+        if not name.startswith(cluster_name_on_cloud):
+            print(f"[DEBUG] Pomijam ze względu na nazwę (nie zaczyna się od {cluster_name_on_cloud})")
+            continue
+
+        if head_only and 'head' not in name:
+            print(f"[DEBUG] Pomijam, bo nie head: {name}")
+            continue
+
+        filtered_instances[instance['id']] = instance
+
+    print(f"[DEBUG] Zwracam przefiltrowane instancje: {filtered_instances}")
+    return filtered_instances
+
+def save_instance_ssh_key(instance_info: Dict[str, Any], user_hash: str) -> str:
+
+    # Check if the instance_info has the expected structure
+    ssh_key = instance_info.get('hashId')
+    if not ssh_key:
+        raise ValueError("Brak klucza 'hashId' w danych instancji.")
+
+    # Check if the user_hash is valid
+    ssh_key_dir = os.path.expanduser(_SSH_KEY_PATH_PREFIX.format(user_hash=user_hash))
+    os.makedirs(ssh_key_dir, exist_ok=True, mode=0o700)
+    ssh_key_path = os.path.join(ssh_key_dir, 'sky-key')
+
+    # Save the SSH key to the specified path
+    with open(ssh_key_path, 'w', encoding='utf-8') as key_file:
+        key_file.write(ssh_key)
+        os.chmod(ssh_key_path, 0o600)  # Set permissions to read/write for the user only
+
+    return ssh_key_path

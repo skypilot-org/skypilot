@@ -15,7 +15,7 @@ from typing import Optional
 
 import requests
 
-ENDPOINT = 'https://api.simplemining.net/instances/market/list?rentalStatus=active&itemsPerPage=5'
+ENDPOINT = 'https://apidev.simplemining.net/instances/market/list?rentalStatus=active&itemsPerPage=5'
 DEFAULT_SIMPLEPOD_KEYS_PATH = os.path.expanduser('~/.simplepod/simplepod_keys')
 
 def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
