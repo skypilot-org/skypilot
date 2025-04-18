@@ -27,6 +27,8 @@ jobs:
     outputs:
       buildkite_json: ${{ steps.trigger_buildkite.outputs.json }}
     steps:
+      - name: Intentionally fail for testing
+        run: exit 1
       - name: Clone repository
         uses: actions/checkout@v3
       - name: Set up Python 3.10
@@ -137,9 +139,9 @@ jobs:
         uses: slackapi/slack-github-action@v2.0.0
         with:
           method: chat.postMessage
-          token: ${{ secrets.SLACK_BOT_TOKEN }} # Needs repo secret
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
           payload: |
-            channel: ${{ secrets.SLACK_CHANNEL_ID }} # Needs repo secret
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
             text: ${{ steps.message_content.outputs.message_text }}
             blocks:
               - type: "section"
