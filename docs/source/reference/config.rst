@@ -5,7 +5,7 @@ Advanced Configuration
 
 You can pass **optional configuration** to SkyPilot.
 
-This configuration is set globally in ``~/.sky/config.yaml`` following the :ref:`configuration syntax<config-yaml-syntax>`.
+This configuration is set globally for all SkyPilot invocations in ``~/.sky/config.yaml``.
 
 You can override the global configuration in your project directory, task YAML, or from the command line. Refer to :ref:`configuration sources<config-sources>` for more details.
 

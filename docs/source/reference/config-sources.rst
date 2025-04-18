@@ -1,7 +1,11 @@
 .. _config-override:
 
-Configuration Overrides
-======================
+Configuration Sources and Overrides
+===================================
+
+SkyPilot allows you to configure settings across multiple sources, providing flexibility in how you manage your configurations. 
+
+It also implements a :ref:`priority<config-priority>` mechanism to combine configurations from different sources.
 
 .. image:: ../images/config-sources.svg
     :width: 90%
@@ -13,36 +17,32 @@ Configuration Overrides
 Configuration sources
 ---------------------
 
-SkyPilot allows you to configure settings across multiple sources, providing flexibility in how you manage your configurations.
-
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
-| **Configuration Type**                   | **Configuration Location**           | **Description**                                      |
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
-| **Server configuration**    | ``~/.sky/config.yaml`` on API server | Applies to all requests made to the SkyPilot API server.  |
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
-| **User configuration**                 | ``~/.sky/config.yaml``               | Applies to all SkyPilot invocations. |
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
-| **Project configuration**                | ``$pwd/.sky.yaml``                   | Applies to all SkyPilot invocations in the current   |
-|                                          |                                      | directory.                                           |
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
-| **SkyPilot YAML**                        | ``config`` field in the SkyPilot YAML    | Applies to a specific SkyPilot task.                 |
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
-| **CLI flags**                            | Using ``--config`` CLI flag          | Override configuration for a specific command.       |
-+------------------------------------------+--------------------------------------+------------------------------------------------------+
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
+| **Configuration Type**                   | **Configuration Location**           | **Description**                                          |
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
+| **Server configuration**                 | ``~/.sky/config.yaml`` on API server | Applies to all requests made to the SkyPilot API server. |
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
+| **User configuration**                   | ``~/.sky/config.yaml``               | Applies to all SkyPilot invocations.                     |
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
+| **Project configuration**                | ``$pwd/.sky.yaml``                   | Applies to all SkyPilot invocations in the current       |
+|                                          |                                      | directory.                                               |
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
+| **SkyPilot YAML**                        | ``config`` field in the SkyPilot YAML| Applies to a specific SkyPilot task.                     |
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
+| **CLI flags**                            | Using ``--config`` CLI flag          | Override configuration for a specific command.           |
++------------------------------------------+--------------------------------------+----------------------------------------------------------+
 
 All configurations use the :ref:`configuration syntax<config-yaml-syntax>`.
 
-You can layer configurations by leveraging multiple :ref:`configuration sources<config-sources>`.
-
 .. _config-priority:
 
-When multiple configuration sources are specified, SkyPilot combines them based on the following priority:
+You can layer configurations by using multiple configuration sources. When multiple configuration sources are specified, SkyPilot merges them. If fields conflict, they are :ref:`overridden<config-override>` in the following priority order:
 
-#. CLI flag
+#. CLI flag (highest priority)
 #. SkyPilot YAML
 #. Project configuration
 #. User configuration
-#. Server configuration (only used by remote API server)
+#. Server configuration (lowest priority)
 
 .. note::
 
