@@ -4772,11 +4772,6 @@ def serve_down(
               default=False,
               help='Sync down logs to the local machine. Can be combined with '
               '--controller, --load-balancer, or a replica ID to narrow scope.')
-@click.option('--refresh',
-              '-r',
-              is_flag=True,
-              default=False,
-              help='Refresh the logs from the controller.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
@@ -4789,7 +4784,6 @@ def serve_logs(
     load_balancer: bool,
     replica_ids: Tuple[int, ...],
     sync_down: bool,
-    refresh: bool,
 ):
     """Tail or sync down logs of a service.
 
@@ -4847,8 +4841,7 @@ def serve_logs(
             serve_lib.sync_down_logs(service_name,
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
-                                     replica_ids=list(replica_ids),
-                                     refresh=refresh)
+                                     replica_ids=list(replica_ids))
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Service {service_name} logs: '

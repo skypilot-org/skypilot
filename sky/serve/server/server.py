@@ -135,7 +135,6 @@ async def download_logs(
         request_name='serve.sync_down_logs',
         request_body=download_logs_body,
         func=core.sync_down_logs,
-        schedule_type=api_requests.ScheduleType.LONG
-        if download_logs_body.refresh else api_requests.ScheduleType.SHORT,
+        schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )

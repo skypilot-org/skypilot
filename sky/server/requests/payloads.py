@@ -425,7 +425,6 @@ class ServeDownloadLogsBody(RequestBody):
     targets: Optional[Union[str, serve.ServiceComponent,
                             List[Union[str, serve.ServiceComponent]]]]
     replica_ids: Optional[List[int]] = None
-    refresh: bool = False
 
 
 class ServeStatusBody(RequestBody):

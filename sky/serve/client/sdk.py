@@ -379,8 +379,7 @@ def sync_down_logs(service_name: str,
                        str, 'serve_utils.ServiceComponent',
                        List[Union[str,
                                   'serve_utils.ServiceComponent']]]] = None,
-                   replica_ids: Optional[List[int]] = None,
-                   refresh: bool = False) -> None:
+                   replica_ids: Optional[List[int]] = None) -> None:
     """Sync down logs from the service components to a local directory.
 
     This function syncs logs from the specified service components (controller,
@@ -419,7 +418,6 @@ def sync_down_logs(service_name: str,
         local_dir=local_dir,
         targets=targets,
         replica_ids=replica_ids,
-        refresh=refresh,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/serve/sync-down-logs',

@@ -105,18 +105,18 @@ def _get_all_replica_targets(
 
 
 def _maybe_restart_controller(
-        refresh: bool, stopped_message: str, spinner_message: str
+        stopped_message: str, spinner_message: str
 ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
-    """Restart controller if refresh is True and it is stopped."""
+    """Restart controller if it is stopped.
+
+    The logs of SkyServe controller don't have staleness, and all
+    service logs are removed after the service is terminated.
+    So there is no `refresh` parameter than jobs controller."""
     controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-    if refresh:
-        stopped_message = ''
     try:
         handle = backend_utils.is_controller_accessible(
             controller=controller_type, stopped_message=stopped_message)
     except exceptions.ClusterNotUpError as e:
-        if not refresh:
-            raise
         handle = None
         controller_status = e.cluster_status
 
@@ -134,7 +134,7 @@ def _maybe_restart_controller(
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
 
-    assert handle is not None, (controller_status, refresh)
+    assert handle is not None, controller_status
     return handle
 
 
@@ -860,7 +860,6 @@ def sync_down_logs(
     targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
                    None] = None,
     replica_ids: Optional[List[int]] = None,
-    refresh: bool = False,
 ) -> str:
     """Sync down logs from the controller for the given service.
 
@@ -897,7 +896,6 @@ def sync_down_logs(
     # Step 0) get the controller handle
     controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = _maybe_restart_controller(
-        refresh=refresh,
         stopped_message=(
             f'{controller_type.value.name.capitalize()} is stopped. To '
             f'get the logs, run: {colorama.Style.BRIGHT}sky serve logs '
