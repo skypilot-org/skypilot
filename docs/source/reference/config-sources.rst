@@ -3,48 +3,62 @@
 Configuration Sources and Overrides
 ===================================
 
-SkyPilot allows you to configure settings across multiple sources, providing flexibility in how you manage your configurations. 
+SkyPilot allows you to set :ref:`configuration<config-yaml>` across multiple sources, providing flexibility in how you manage your configurations. 
 
-It also implements a :ref:`priority<config-priority>` mechanism to combine configurations from different sources.
+It also implements a :ref:`override priority<config-overrides>` mechanism to merge configurations from different sources when layering configurations. 
 
-.. image:: ../images/config-sources.svg
-    :width: 90%
-    :align: center
-    :alt: Configuration Sources
+For example, you can have a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, a :ref:`user configuration<config-client-user-config>` to apply globally to all projects and :ref:`Task YAML<config-client-cli-flag>` overrides for specific jobs.
+
+
+..
+   Source: https://docs.google.com/presentation/d/1dMfsIjtwKphbXzOdoBz4Ezg0R_5LGKvblfAJnVxZEGk/edit?usp=sharing
+
+.. figure:: ../images/config-cheatsheet-light.svg
+   :width: 90%
+   :align: center
+   :alt: Configuration Sources
+   :class: no-scaled-link, only-light
+
+.. figure:: ../images/config-cheatsheet-dark.svg
+   :width: 90%
+   :align: center
+   :alt: Configuration Sources
+   :class: no-scaled-link, only-dark
+
+
+
 
 .. _config-sources:
 
 Configuration sources
 ---------------------
 
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
-| **Configuration Type**                   | **Configuration Location**           | **Description**                                          |
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
-| :ref:`Server configuration<config-server-config>`                 | ``~/.sky/config.yaml`` on API server | Applies to all requests made to the SkyPilot API server. |
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
-| :ref:`User configuration<config-client-user-config>`                   | ``~/.sky/config.yaml``               | Applies to all SkyPilot invocations.                     |
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
-| :ref:`Project configuration<config-client-project-config>`                | ``$pwd/.sky.yaml``                   | Applies to all SkyPilot invocations in the current       |
-|                                          |                                      | directory.                                               |
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
-| :ref:`SkyPilot YAML<config-client-job-task-yaml>`                        | ``config`` field in the SkyPilot YAML| Applies to a specific SkyPilot task.                     |
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
-| :ref:`CLI flags<config-client-cli-flag>`                            | Using ``--config`` CLI flag          | Override configuration for a specific command.           |
-+------------------------------------------+--------------------------------------+----------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
 
-All configurations use the :ref:`configuration syntax<config-yaml-syntax>`.
+   * - Configuration Type
+     - Configuration Location
+     - Description
+   * - :ref:`Server configuration <config-server-config>`
+     - ``~/.sky/config.yaml`` on API server
+     - Applies to all requests made to the SkyPilot API server.
+   * - :ref:`User configuration <config-client-user-config>`
+     - ``~/.sky/config.yaml``
+     - Applies to all SkyPilot invocations.
+   * - :ref:`Project configuration <config-client-project-config>`
+     - ``$pwd/.sky.yaml``
+     - Applies to all SkyPilot invocations in the current directory.
+   * - :ref:`SkyPilot YAML <config-client-job-task-yaml>`
+     - ``config`` field in the SkyPilot YAML
+     - Applies to a specific SkyPilot task.
+   * - :ref:`CLI flags <config-client-cli-flag>`
+     - Using ``--config`` CLI flag
+     - Override configuration for a specific command.
 
-.. _config-priority:
+All configurations use the :ref:`configuration syntax<config-yaml-syntax>`. Any new configuration changes do not affect existing clusters.
 
-You can layer configurations by using multiple configuration sources. When multiple configuration sources are specified, SkyPilot merges them. 
-
-If fields conflict, they are :ref:`overridden<config-override>` in the following priority order:
-
-#. CLI flag (highest priority)
-#. SkyPilot YAML
-#. Project configuration
-#. User configuration
-#. Server configuration (lowest priority)
+You can layer configurations from multiple sources. When multiple sources are specified, SkyPilot :ref:`merges them<config-overrides>`. 
 
 .. note::
 
@@ -137,10 +151,19 @@ Example:
   # this command is equivalent to the command above
   sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1,kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
 
+
+.. _config-overrides:
+
 Configuration overrides
 -----------------------
 
-If the same configuration field is specified in multiple configuration sources, configuration is combined based on :ref:`priority<config-priority>`.
+If the same configuration field is specified in multiple configuration sources, configuration is overridden based on the following priority order:
+
+#. CLI flag (highest priority)
+#. SkyPilot YAML
+#. Project configuration
+#. User configuration
+#. Server configuration (lowest priority)
 
 Merging rules:
 
@@ -150,7 +173,7 @@ Merging rules:
 
 * Dictionaries are merged, with individual keys overridden by config sources with higher priority.
 
-Override Example
+Override example
 ~~~~~~~~~~~~~~~~
 
 If the following is configured in the :ref:`user config file<config-client-user-config>`:
