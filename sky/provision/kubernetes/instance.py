@@ -1055,8 +1055,10 @@ def _delete_services(name_prefix: str, namespace: str,
                                         resource_name=service_name)
 
 
-def _terminate_node(namespace: str, context: Optional[str],
-                    pod_name: str, is_head: bool = False) -> None:
+def _terminate_node(namespace: str,
+                    context: Optional[str],
+                    pod_name: str,
+                    is_head: bool = False) -> None:
     """Terminate a pod and its associated services."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
