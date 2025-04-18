@@ -3,9 +3,9 @@
 Configuration Sources and Overrides
 ===================================
 
-SkyPilot allows you to set :ref:`configuration<config-yaml>` across multiple sources, providing flexibility in how you manage your configurations. 
+SkyPilot allows you to set :ref:`configuration<config-yaml>` across multiple sources, providing flexibility in how you manage your configurations.
 
-It also implements a :ref:`override priority<config-overrides>` mechanism to merge configurations from different sources when layering configurations. 
+It also implements a :ref:`override priority<config-overrides>` mechanism to merge configurations from different sources when layering configurations.
 
 For example, you can have a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, a :ref:`user configuration<config-client-user-config>` to apply globally to all projects and :ref:`Task YAML<config-client-cli-flag>` overrides for specific jobs.
 
@@ -58,7 +58,7 @@ Configuration sources
 
 All configurations use the :ref:`configuration syntax<config-yaml-syntax>`. Any new configuration changes do not affect existing clusters.
 
-You can layer configurations from multiple sources. When multiple sources are specified, SkyPilot :ref:`merges them<config-overrides>`. 
+You can layer configurations from multiple sources. When multiple sources are specified, SkyPilot :ref:`merges them<config-overrides>`.
 
 .. note::
 
@@ -148,7 +148,6 @@ Example:
   sky launch --config my_config.yaml ...
   # pass individual config options
   sky launch --config 'kubernetes.provision_timeout=600,kubernetes.pod_config.spec.priorityClassName=high-priority' ...
-  # this command is equivalent to the command above
   sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1,kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
 
 

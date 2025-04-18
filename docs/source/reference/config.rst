@@ -5,7 +5,7 @@ Advanced Configuration
 
 You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
-Configuration Sources and Overrides
+Configuration sources and overrides
 -----------------------------------
 
 SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
