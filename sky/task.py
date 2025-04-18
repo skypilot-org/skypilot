@@ -323,7 +323,20 @@ class Task:
         if not workdir_only:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
-            r.validate()
+            try:
+                r.validate()
+            except ValueError as e:
+                if self.managed_job_dag is not None:
+                    # this task is a jobs controller
+                    logger.warning(f'{colorama.Fore.YELLOW}Failed to validate '
+                                   f'jobs controller resource {r}. If '
+                                   'the cluster exists, please check if '
+                                   'SkyPilot can connect. If this was a '
+                                   'previously launched cluster that was '
+                                   'taken down, consider removing it with '
+                                   '`sky down --purge`.'
+                                   f'{colorama.Style.RESET_ALL}')
+                raise e
 
     def validate_name(self):
         """Validates if the task name is valid."""
