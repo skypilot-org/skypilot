@@ -1,5 +1,5 @@
 """Constants used for Managed Jobs."""
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 from sky.skylet import constants as skylet_constants
 
@@ -21,6 +21,13 @@ CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
     'cpus': '4+',
     'memory': '8x',
     'disk_size': 50
+}
+
+# Autostop config for the jobs controller. These are the default values for
+# jobs.controller.autostop in ~/.sky/config.yaml.
+CONTROLLER_AUTOSTOP: Dict[str, Any] = {
+    'idle_minutes': 10,
+    'down': False,
 }
 
 # TODO(zhwu): This is no longer accurate, after #4592, which increases the

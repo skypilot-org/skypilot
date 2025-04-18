@@ -23,6 +23,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -31,10 +32,10 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.clouds import Lambda
 from sky.skylet import constants
 from sky.skylet import events
-import sky.skypilot_config
 from sky.utils import common_utils
 
 
@@ -129,7 +130,6 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
-@pytest.mark.no_nebius
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -168,7 +168,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.aws
 def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
     name = smoke_tests_utils.get_cluster_name()
-    tmp_config_path = tmp_path / 'config.yaml'
+    tmp_config_path = tmp_path / 'sky.yaml'
     test = smoke_tests_utils.Test(
         'test_launch_fast_with_cluster_changes',
         [
@@ -186,11 +186,11 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
-            f'cp ${{SKYPILOT_CONFIG:-~/.sky/config.yaml}} {tmp_config_path} && '
+            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
             # Set config override. This should change the cluster yaml, forcing reprovision/setup
             f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
             # Launch and do full output validation. Setup/provisioning should be run.
-            f's=$(SKYPILOT_DEBUG=0 SKYPILOT_CONFIG={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 3 --status',
             f'sky status -r {name} | grep UP',
         ],
@@ -397,6 +397,17 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
         dummy_task = sky.Task()
         job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
         assert job_id_dummy is None
+        # Check the cluster status from the dashboard
+        cluster_exist = False
+        status_request_id = (
+            smoke_tests_utils.get_dashboard_cluster_status_request_id())
+        status_response = (
+            smoke_tests_utils.get_response_from_request_id(status_request_id))
+        for cluster in status_response:
+            if cluster['name'] == name:
+                cluster_exist = True
+                break
+        assert cluster_exist
     finally:
         sky.get(sky.down(name))
 
@@ -404,7 +415,6 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
-@pytest.mark.no_nebius  # Nebius Autodown and Autostop not supported.
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
@@ -431,7 +441,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 def test_jobs_launch_and_logs(generic_cloud: str):
     # Use the context manager
-    with sky.skypilot_config.override_skypilot_config(
+    with skypilot_config.override_skypilot_config(
             smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
         name = smoke_tests_utils.get_cluster_name()
         task = sky.Task(run="echo start job; sleep 30; echo end job")
@@ -440,6 +450,17 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
         job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
         assert handle is not None
+        # Check the job status from the dashboard
+        queue_request_id = (
+            smoke_tests_utils.get_dashboard_jobs_queue_request_id())
+        queue_response = (
+            smoke_tests_utils.get_response_from_request_id(queue_request_id))
+        job_exist = False
+        for job in queue_response:
+            if job['job_id'] == job_id:
+                job_exist = True
+                break
+        assert job_exist
         try:
             with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
                 sky.jobs.tail_logs(job_id=job_id, output_stream=f)
@@ -755,7 +776,7 @@ def test_kubernetes_context_failover(unreachable_context):
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
-                'SKYPILOT_CONFIG': f.name,
+                skypilot_config.ENV_VAR_SKYPILOT_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
                     sky.server.common.get_server_url()
             },

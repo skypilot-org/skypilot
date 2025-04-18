@@ -53,6 +53,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
+    'omegaconf>=2.4.0dev3,<2.5',
 ]
 
 local_ray = [
@@ -131,7 +132,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0'],
+    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1

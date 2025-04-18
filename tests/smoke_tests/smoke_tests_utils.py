@@ -1,24 +1,30 @@
 import contextlib
 import enum
 import inspect
+import json
 import os
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 import uuid
 
 import colorama
 import pytest
+import requests
 from smoke_tests.docker import docker_utils
 import yaml
 
 import sky
 from sky import serve
+from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
+from sky.server import common as server_common
+from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -50,7 +56,7 @@ LOW_RESOURCE_PARAM = {
     'memory': '4+',
 }
 LOW_CONTROLLER_RESOURCE_ENV = {
-    'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
+    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
@@ -367,9 +373,10 @@ def run_one_test(test: Test) -> None:
         temp_config = tempfile.NamedTemporaryFile(mode='w',
                                                   suffix='.yaml',
                                                   delete=False)
-        if 'SKYPILOT_CONFIG' in env_dict:
+        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
             # Read the original config
-            with open(env_dict['SKYPILOT_CONFIG'], 'r') as f:
+            with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG],
+                      'r') as f:
                 config = yaml.safe_load(f)
         else:
             config = {}
@@ -382,7 +389,7 @@ def run_one_test(test: Test) -> None:
         yaml.dump(config, temp_config)
         temp_config.close()
         # Update the environment variable to use the temporary file
-        env_dict['SKYPILOT_CONFIG'] = temp_config.name
+        env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
 
     for command in test.commands:
         write(f'+ {command}\n')
@@ -640,3 +647,55 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
     finally:
         for file in files:
             os.unlink(file)
+
+
+def get_api_server_url() -> str:
+    """Get the API server URL in the test environment."""
+    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+        return docker_utils.get_api_server_endpoint_inside_docker()
+    return server_common.get_server_url()
+
+
+def get_dashboard_cluster_status_request_id() -> str:
+    """Get the status of the cluster from the dashboard."""
+    body = payloads.StatusBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_dashboard_jobs_queue_request_id() -> str:
+    """Get the jobs queue from the dashboard."""
+    body = payloads.JobsQueueBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_response_from_request_id(request_id: str) -> Any:
+    """Waits for and gets the result of a request.
+
+    Args:
+        request_id: The request ID of the request to get.
+
+    Returns:
+        The ``Request Returns`` of the specified request. See the documentation
+        of the specific requests above for more details.
+
+    Raises:
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
+    """
+    response = requests.get(
+        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+        timeout=15)
+    request_task = None
+    if response.status_code == 200:
+        request_task = requests_lib.Request.decode(
+            requests_lib.RequestPayload(**response.json()))
+        return request_task.get_return_value()
+    raise RuntimeError(f'Failed to get request {request_id}: '
+                       f'{response.status_code} {response.text}')

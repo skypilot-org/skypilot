@@ -265,7 +265,7 @@ class CommandError(SkyPilotExcludeArgsBaseException):
                 # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
-                       f'{returncode}.\n{error_msg}')
+                       f'{returncode}.\n{error_msg}\n{detailed_reason}')
         super().__init__(message)
 
 
@@ -475,6 +475,11 @@ class ApiServerConnectionError(RuntimeError):
             f'Could not connect to SkyPilot API server at {server_url}. '
             f'Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')
+
+
+class APIVersionMismatchError(RuntimeError):
+    """Raised when the API version mismatch."""
+    pass
 
 
 class JobExitCode(enum.IntEnum):

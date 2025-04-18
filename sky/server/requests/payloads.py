@@ -47,6 +47,8 @@ def request_body_env_vars() -> dict:
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_USER_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     return env_vars
 
 
@@ -61,7 +63,8 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
         value = config.pop_nested(nested_key, default_value=None)
         if value is not None:
             ignored_key_values['.'.join(nested_key)] = value
-    if ignored_key_values:
+    if (ignored_key_values and
+            sky_logging.logging_enabled(logger, sky_logging.DEBUG)):
         logger.debug(f'The following keys ({json.dumps(ignored_key_values)}) '
                      'are specified in the client SkyPilot config at '
                      f'{skypilot_config.loaded_config_path()!r}. '

@@ -60,3 +60,17 @@ It is recommended to run benchmark using `--api` args if you want the benchmark 
 ```bash
 python tests/load_tests/test_load_on_server.py -n 100 --api status
 ```
+
+### Use distributed clients to benchmark
+
+When benchmarking with the high concurrency, the client can become a bottleneck.
+To address this, we can distribute the load to multiple clients to focus the benchmark on the API server.
+
+```bash
+# -t: number of client instances
+# --cpus: number of CPU cores to use for each client
+# --memory: GB of memory to use for each client
+# --url: URL of the API server to benchmark, it is recommended to launch the clients on a different API server to avoid interference
+# <ARGS_FOR_TEST_LOAD_ON_SERVER>: args for test_load_on_server.py, refer to the previous sections for more details
+python tests/load_tests/test_distribute_load_on_server.py -t 10 --cpus 2+ --memory 8+ --url <API_SERVER_URL> <ARGS_FOR_TEST_LOAD_ON_SERVER>
+```

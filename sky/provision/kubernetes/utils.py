@@ -1336,13 +1336,19 @@ def check_credentials(context: Optional[str],
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
+    # optional checks.
+    try:
+        _ = _get_kubeconfig_path()
+    except ValueError as e:
+        return False, f'{common_utils.format_exception(e, use_bracket=True)}'
+
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
     if not run_optional_checks:
         return True, None
 
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
-
     _, exec_msg = is_kubeconfig_exec_auth(context)
 
     # We now check if GPUs are available and labels are set correctly on the
@@ -1489,9 +1495,8 @@ def is_kubeconfig_exec_auth(
     # K8s api does not provide a mechanism to get the user details from the
     # context. We need to load the kubeconfig file and parse it to get the
     # user details.
-    kubeconfig_path = os.path.expanduser(
-        os.getenv('KUBECONFIG',
-                  k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+    kubeconfig_path = _get_kubeconfig_path()
+
     # Load the kubeconfig file as a dictionary
     with open(kubeconfig_path, 'r', encoding='utf-8') as f:
         kubeconfig = yaml.safe_load(f)
@@ -2148,32 +2153,35 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     return content
 
 
-def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'nc' are installed"""
+def check_port_forward_mode_dependencies(
+        raise_error: bool = True) -> Optional[List[str]]:
+    """Checks if 'socat' and 'nc' are installed
 
-    # Construct runtime errors
-    socat_default_error = RuntimeError(
-        f'`socat` is required to setup Kubernetes cloud with '
+    Args:
+        raise_error: set to true when the dependencies need to be present.
+            set to false for `sky check`, where reason strings are compiled
+            at the end.
+
+    Returns: the reasons list if there are missing dependencies.
+    """
+
+    # errors
+    socat_message = (
+        '`socat` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install socat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install socat')
-    netcat_default_error = RuntimeError(
-        f'`nc` is required to setup Kubernetes cloud with '
+        'default networking mode and it is not installed. ')
+    netcat_default_message = (
+        '`nc` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install netcat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
-    mac_installed_error = RuntimeError(
-        f'The default MacOS `nc` is installed. However, for '
+        'default networking mode and it is not installed. ')
+    netcat_macos_message = (
+        'The default MacOS `nc` is installed. However, for '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode, GNU netcat is required. '
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
+        'default networking mode, GNU netcat is required. ')
+
+    # save
+    reasons = []
+    required_binaries = []
 
     # Ensure socat is installed
     try:
@@ -2182,8 +2190,8 @@ def check_port_forward_mode_dependencies() -> None:
                        stderr=subprocess.DEVNULL,
                        check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
-        with ux_utils.print_exception_no_traceback():
-            raise socat_default_error from None
+        required_binaries.append('socat')
+        reasons.append(socat_message)
 
     # Ensure netcat is installed
     #
@@ -2198,15 +2206,28 @@ def check_port_forward_mode_dependencies() -> None:
             netcat_output.stderr)
 
         if nc_mac_installed:
-            with ux_utils.print_exception_no_traceback():
-                raise mac_installed_error from None
+            required_binaries.append('netcat')
+            reasons.append(netcat_macos_message)
         elif netcat_output.returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise netcat_default_error from None
+            required_binaries.append('netcat')
+            reasons.append(netcat_default_message)
 
     except FileNotFoundError:
-        with ux_utils.print_exception_no_traceback():
-            raise netcat_default_error from None
+        required_binaries.append('netcat')
+        reasons.append(netcat_default_message)
+
+    if required_binaries:
+        reasons.extend([
+            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+            f'  $ sudo apt install {" ".join(required_binaries)}',
+            'On MacOS, install with: ',
+            f'  $ brew install {" ".join(required_binaries)}',
+        ])
+        if raise_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('\n'.join(reasons))
+        return reasons
+    return None
 
 
 def get_endpoint_debug_message() -> str:
@@ -2522,8 +2543,14 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
 
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
+        context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
+
+    This function returns a model with node info map as a nested field. This
+    allows future extensions while keeping the client-server compatibility,
+    e.g. when adding a new field to the model, the legacy clients will not be
+    affected and new clients can opt-in new behavior if the new field is
+    presented.
 
     Currently only GPU resources are supported. The function returns the total
     number of GPUs available on the node and the number of free GPUs on the
@@ -2533,8 +2560,8 @@ def get_kubernetes_node_info(
     namespaces, the function will return free GPUs as -1.
 
     Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     nodes = get_kubernetes_nodes(context=context)
     # Get the pods to get the real-time resource usage
@@ -2553,6 +2580,7 @@ def get_kubernetes_node_info(
         label_keys = lf.get_label_keys()
 
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
+    has_multi_host_tpu = False
 
     for node in nodes:
         accelerator_name = None
@@ -2589,6 +2617,7 @@ def get_kubernetes_node_info(
         # TODO(Doyoung): Remove the logic when adding support for
         # multi-host TPUs.
         if is_multi_host_tpu(node.metadata.labels):
+            has_multi_host_tpu = True
             continue
 
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
@@ -2596,8 +2625,15 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)})
+    hint = ''
+    if has_multi_host_tpu:
+        hint = ('(Note: Multi-host TPUs are detected and excluded from the '
+                'display as multi-host TPUs are not supported.)')
 
-    return node_info_dict
+    return models.KubernetesNodesInfo(
+        node_info_dict=node_info_dict,
+        hint=hint,
+    )
 
 
 def to_label_selector(tags):
@@ -2844,15 +2880,6 @@ def is_multi_host_tpu(node_metadata_labels: dict) -> bool:
     return False
 
 
-def multi_host_tpu_exists_in_cluster(context: Optional[str] = None) -> bool:
-    """Checks if there exists a multi-host TPU within the cluster."""
-    nodes = get_kubernetes_nodes(context=context)
-    for node in nodes:
-        if is_multi_host_tpu(node.metadata.labels):
-            return True
-    return False
-
-
 @dataclasses.dataclass
 class KubernetesSkyPilotClusterInfo:
     cluster_name_on_cloud: str
@@ -3001,3 +3028,20 @@ def get_gpu_resource_key():
     # Else use default.
     # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
+
+
+def _get_kubeconfig_path() -> str:
+    """Get the path to the kubeconfig file.
+    Parses `KUBECONFIG` env var if present, else uses the default path.
+    Currently, specifying multiple KUBECONFIG paths in the envvar is not
+    allowed, hence will raise a ValueError.
+    """
+    kubeconfig_path = os.path.expanduser(
+        os.getenv(
+            'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
+            KUBE_CONFIG_DEFAULT_LOCATION))
+    if len(kubeconfig_path.split(os.pathsep)) > 1:
+        raise ValueError('SkyPilot currently only supports one '
+                         'config file path with $KUBECONFIG. Current '
+                         f'path(s) are {kubeconfig_path}.')
+    return kubeconfig_path

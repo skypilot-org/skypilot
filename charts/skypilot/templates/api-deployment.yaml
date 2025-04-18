@@ -15,9 +15,11 @@ spec:
     metadata:
       labels:
         app: {{ .Release.Name }}-api
+        # This label indicates that the API server is ready to serve requests.
+        skypilot.co/ready: "true"
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
-      serviceAccountName: {{ .Release.Name }}-api-sa
+      serviceAccountName: {{ include "skypilot.serviceAccountName" . }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}

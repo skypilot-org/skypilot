@@ -20,6 +20,11 @@ on:
         type: number
         default: 120
         description: "Timeout in minutes (default: 2 hours)"
+      fail_on_buildkite_failure:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to fail the job if the Buildkite build fails (default: true)"
     secrets:
       BUILDKITE_TOKEN:
         required: true
@@ -39,6 +44,7 @@ jobs:
         id: wait_buildkite
         env:
           BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+          FAIL_ON_BUILDKITE_FAILURE: ${{ inputs.fail_on_buildkite_failure }}
         run: |
           organization="${{ inputs.organization }}"
           pipeline="${{ inputs.pipeline }}"
@@ -69,7 +75,12 @@ jobs:
               "failed"|"canceled"|"blocked")
                 echo "Buildkite build failed with status: $status"
                 echo "build_status=failure" >> $GITHUB_OUTPUT
-                exit 1
+                if [ "$FAIL_ON_BUILDKITE_FAILURE" = "true" ]; then
+                  exit 1
+                else
+                  echo "Not failing workflow despite Buildkite failure: $status"
+                  exit 0
+                fi
                 ;;
               *)
                 echo "Buildkite build status: $status - waiting..."
@@ -81,4 +92,9 @@ jobs:
 
           echo "Timeout waiting for Buildkite build to complete (${{ inputs.timeout_minutes }} minute limit reached)"
           echo "build_status=timeout" >> $GITHUB_OUTPUT
-          exit 1
+          if [ "$FAIL_ON_BUILDKITE_FAILURE" = "true" ]; then
+            exit 1
+          else
+            echo "Not failing workflow despite Buildkite timeout"
+            exit 0
+          fi
