@@ -204,7 +204,7 @@ function JobDetails() {
                 <div className="flex items-center">
                   <h3 className="text-lg font-semibold">Logs</h3>
                   <span className="ml-2 text-xs text-gray-500">
-                    (Logs are not streaming, click on refresh to fetch the latest logs)
+                    (Logs are not streaming; click refresh to fetch the latest logs.)
                   </span>
                 </div>
                 <Tooltip
@@ -243,7 +243,7 @@ function JobDetails() {
                 <div className="flex items-center">
                   <h3 className="text-lg font-semibold">Controller Logs</h3>
                   <span className="ml-2 text-xs text-gray-500">
-                    (Logs are not streaming, click on refresh to fetch the latest logs)
+                    (Logs are not streaming; click refresh to fetch the latest logs.)
                   </span>
                 </div>
                 <Tooltip
