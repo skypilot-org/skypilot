@@ -1,6 +1,6 @@
 import pathlib
 import subprocess
-from typing import Sequence
+from typing import Optional, Sequence
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -109,8 +109,11 @@ class TestBackwardCompatibility:
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
 
-    def run_compatibility_test(self, test_name: str, commands: list,
-                               teardown: str):
+    def run_compatibility_test(self,
+                               test_name: str,
+                               commands: list,
+                               teardown: str,
+                               skip_if: Optional[str] = None):
         """Helper method to create and run tests with proper cleanup"""
         test = smoke_tests_utils.Test(
             test_name,
@@ -118,6 +121,7 @@ class TestBackwardCompatibility:
             teardown=teardown,
             timeout=self.TEST_TIMEOUT,
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            skip_if=skip_if,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -333,13 +337,14 @@ class TestBackwardCompatibility:
         """Test client server compatibility across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
-        commands = [
-            # Check API version compatibility
+        # If API version is bumped, the in-compatibility is expected
+        # and we just skip the test.
+        skip_if = (
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'{self.ACTIVATE_CURRENT} && result="$(sky status 2>&1)" || true; '
-            'if echo "$result" | grep -q -e "version mismatch" -e "too old"; then '
-            '  echo "$result" && echo "API version bumped, skip compatibility test" && exit 0; '
-            'fi',
+            'echo "$result" | grep -q -e "version mismatch" -e "too old" && '
+            'echo "API version bumped, skip compatibility test"')
+        commands = [
             # managed job test
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
@@ -373,4 +378,7 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
-        self.run_compatibility_test(cluster_name, commands, teardown)
+        self.run_compatibility_test(cluster_name,
+                                    commands,
+                                    teardown,
+                                    skip_if=skip_if)

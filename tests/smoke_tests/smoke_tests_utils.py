@@ -279,6 +279,8 @@ DEFAULT_CMD_TIMEOUT = 15 * 60
 
 class Test(NamedTuple):
     name: str
+    # Skip this test if the command returns 0.
+    skip_if: Optional[str] = None
     # Each command is executed serially.  If any failed, the remaining commands
     # are not run and the test is treated as failed.
     commands: List[str]
@@ -386,7 +388,7 @@ def run_one_test(test: Test) -> None:
         # Update the environment variable to use the temporary file
         env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
 
-    for command in test.commands:
+    def run_one_command(command: str, raise_on_timeout: bool = False):
         write(f'+ {command}\n')
         flush()
         proc = subprocess.Popen(
@@ -407,17 +409,29 @@ def run_one_test(test: Test) -> None:
             flush()
             # Kill the current process.
             proc.terminate()
+            if raise_on_timeout:
+                raise e
             proc.returncode = 1  # None if we don't set it.
-            break
+        return proc.returncode
 
-        if proc.returncode:
+    if test.skip_if is not None:
+        write('Checking the precondition of this test...\n')
+        flush()
+        if run_one_command(test.skip_if, raise_on_timeout=True) == 0:
+            test.echo('Skipping this test...')
+            return
+
+    returncode = 0
+    for command in test.commands:
+        returncode = run_one_command(command)
+        if returncode:
             break
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command}' if proc.returncode else ''
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
+               if returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+    reason = f'\nReason: {command}' if returncode else ''
     msg = (f'{outcome}.'
            f'{reason}')
     if log_to_stdout:
@@ -427,7 +441,7 @@ def run_one_test(test: Test) -> None:
         test.echo(msg)
         write(msg)
 
-    if (proc.returncode == 0 or
+    if (returncode == 0 or
             pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
@@ -438,7 +452,7 @@ def run_one_test(test: Test) -> None:
             env=env_dict,
         )
 
-    if proc.returncode:
+    if returncode:
         if log_to_stdout:
             raise Exception(f'test failed')
         else:
