@@ -124,7 +124,7 @@ jobs:
         run: |
           TITLE_TEXT="Workflow ${{ github.workflow }} failed."
           if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step. Buildkite Log: https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}"
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step. <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}|Buildkite Log>"
             echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
             echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
           else
