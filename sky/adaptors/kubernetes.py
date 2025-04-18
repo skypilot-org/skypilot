@@ -3,6 +3,8 @@ import logging
 import os
 from typing import Any, Callable, Optional, Set
 
+import colorama
+
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
 from sky.utils import annotations
@@ -85,11 +87,11 @@ def _load_config(context: Optional[str] = None):
                     'Please check if your kubeconfig file exists at '
                     f'{kubeconfig_path} and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
-            if context is None: # kubernetes defaults to current-context.
+            if context is None:  # kubernetes defaults to current-context.
                 err_str += (
-                    '\nHint: Kubernetes attempted to query the '
-                    'current-context set in kubeconfig. Check if '
-                    'the current-context is valid.')
+                    f'\n{colorama.Fore.YELLOW}Hint: Kubernetes attempted '
+                    'to query the current-context set in kubeconfig. Check if '
+                    f'the current-context is valid.{colorama.Style.RESET_ALL}')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
 
