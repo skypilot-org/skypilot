@@ -85,6 +85,11 @@ def _load_config(context: Optional[str] = None):
                     'Please check if your kubeconfig file exists at '
                     f'{kubeconfig_path} and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
+            if context is None: # kubernetes defaults to current-context.
+                err_str += (
+                    '\nHint: Kubernetes attempted to query the '
+                    'current-context set in kubeconfig. Check if '
+                    'the current-context is valid.')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
 
