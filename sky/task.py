@@ -329,8 +329,8 @@ class Task:
             except ValueError as e:
                 if self.managed_job_dag is not None:
                     # this task is a jobs controller
-                    cluster_name = controller_utils.Controllers.\
-                        JOBS_CONTROLLER.value.cluster_name
+                    cluster_name = (controller_utils.Controllers.
+                                    JOBS_CONTROLLER.value.cluster_name)
                     logger.warning(
                         f'{colorama.Fore.YELLOW}Failed to validate jobs '
                         f'controller resource {r.repr_with_region_zone}.'
