@@ -5,11 +5,16 @@ Advanced Configuration
 
 You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
-This configuration applies to all new clusters and does not affect existing clusters.
+Configuration sources and overrides
+-----------------------------------
 
-.. tip::
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
-  Some config fields can be overridden on a per-task basis through the ``experimental.config_overrides`` field. See :ref:`here <task-yaml-experimental>` for more details.
+For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
+
+Refer to :ref:`config-sources-and-overrides` for more details.
+
+.. _config-yaml-syntax:
 
 Syntax
 ------
@@ -1040,3 +1045,9 @@ Example:
         us-ashburn-1:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+
+.. toctree::
+   :hidden:
+
+   Configuration Sources <config-sources>
