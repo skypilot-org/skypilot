@@ -1370,7 +1370,8 @@ class Resources:
         return features
 
     @staticmethod
-    def apply_resource_config_aliases(config: Optional[Dict[str, Any]]) -> None:
+    def _apply_resource_config_aliases(
+            config: Optional[Dict[str, Any]]) -> None:
         """Mutatively applies overriding aliases to the passed in config.
 
         Note: Nested aliases are not supported.
@@ -1399,7 +1400,11 @@ class Resources:
         if config is None:
             return {Resources()}
 
-        Resources.apply_resource_config_aliases(config)
+        Resources._apply_resource_config_aliases(config)
+        anyof = config.get('any_of')
+        if anyof is not None:
+            for anyof_config in anyof:
+                Resources._apply_resource_config_aliases(anyof_config)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
