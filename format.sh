@@ -140,6 +140,20 @@ else
     fi
 fi
 
+# Lint and format the dashboard
+echo "SkyPilot Dashboard linting and formatting:"
+if ! npm -v || ! node -v; then
+    echo "npm or node is not installed, please install them first"
+    # Don't fail the script if npm or node is not installed
+    # because it's not required for all users
+else
+    npm --prefix sky/dashboard install
+    npm --prefix sky/dashboard run lint
+    npm --prefix sky/dashboard run format
+    echo "SkyPilot Dashboard linting and formatting: Done"
+    echo
+fi
+
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'
     echo 'Changes not staged for commit:'

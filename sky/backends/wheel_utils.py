@@ -85,6 +85,15 @@ def _build_sky_wheel() -> pathlib.Path:
         for f in setup_files_dir.iterdir():
             if f.is_file() and f.name != 'setup.py':
                 shutil.copy(str(f), str(tmp_dir))
+                if f.name == 'MANIFEST.in':
+                    # Remove the line `sky/dashboard/out`, so we do not
+                    # include the dashboard files in the internal wheel
+                    import fileinput  # pylint: disable=import-outside-toplevel
+                    with fileinput.input(tmp_dir / f.name,
+                                         inplace=True) as file:
+                        for line in file:
+                            if 'sky/dashboard/out' not in line:
+                                print(line, end='')
 
         init_file_path = SKY_PACKAGE_PATH / '__init__.py'
         init_file_content = init_file_path.read_text()

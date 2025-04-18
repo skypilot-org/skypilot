@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
 import pathlib
+import re
 import tempfile
 import textwrap
 from typing import Dict
@@ -1864,5 +1865,39 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky logs {name} --status 3',
             ],
             f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test min-gpt on Kubernetes ----------
+@pytest.mark.kubernetes
+@pytest.mark.resource_heavy
+def test_min_gpt_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    original_yaml_path = 'examples/distributed-pytorch/train.yaml'
+
+    with open(original_yaml_path, 'r') as f:
+        content = f.read()
+
+    # Let the train exit after 1 epoch
+    modified_content = content.replace('main.py',
+                                       'main.py trainer_config.max_epochs=1')
+
+    modified_content = re.sub(r'accelerators:\s*[^\n]+', 'accelerators: T4',
+                              modified_content)
+
+    # Create a temporary YAML file with the modified content
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(modified_content)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'min_gpt_kubernetes',
+            [
+                f'sky launch -y -c {name} --cloud kubernetes {f.name}',
+                f'sky logs {name} 1 --status',
+            ],
+            f'sky down -y {name}',
+            timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
