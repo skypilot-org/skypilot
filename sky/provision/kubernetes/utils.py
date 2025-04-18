@@ -2543,8 +2543,14 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
 
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
+        context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
+
+    This function returns a model with node info map as a nested field. This
+    allows future extensions while keeping the client-server compatibility,
+    e.g. when adding a new field to the model, the legacy clients will not be
+    affected and new clients can opt-in new behavior if the new field is
+    presented.
 
     Currently only GPU resources are supported. The function returns the total
     number of GPUs available on the node and the number of free GPUs on the
@@ -2554,8 +2560,8 @@ def get_kubernetes_node_info(
     namespaces, the function will return free GPUs as -1.
 
     Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     nodes = get_kubernetes_nodes(context=context)
     # Get the pods to get the real-time resource usage
@@ -2574,6 +2580,7 @@ def get_kubernetes_node_info(
         label_keys = lf.get_label_keys()
 
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
+    has_multi_host_tpu = False
 
     for node in nodes:
         accelerator_name = None
@@ -2610,6 +2617,7 @@ def get_kubernetes_node_info(
         # TODO(Doyoung): Remove the logic when adding support for
         # multi-host TPUs.
         if is_multi_host_tpu(node.metadata.labels):
+            has_multi_host_tpu = True
             continue
 
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
@@ -2617,8 +2625,15 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)})
+    hint = ''
+    if has_multi_host_tpu:
+        hint = ('(Note: Multi-host TPUs are detected and excluded from the '
+                'display as multi-host TPUs are not supported.)')
 
-    return node_info_dict
+    return models.KubernetesNodesInfo(
+        node_info_dict=node_info_dict,
+        hint=hint,
+    )
 
 
 def to_label_selector(tags):
@@ -2861,15 +2876,6 @@ def is_multi_host_tpu(node_metadata_labels: dict) -> bool:
         # reflects the total across all hosts, while
         # node_tpu_chip_count reflects only the chips in a single node.
         if node_tpu_chip_count != topology_chip_count:
-            return True
-    return False
-
-
-def multi_host_tpu_exists_in_cluster(context: Optional[str] = None) -> bool:
-    """Checks if there exists a multi-host TPU within the cluster."""
-    nodes = get_kubernetes_nodes(context=context)
-    for node in nodes:
-        if is_multi_host_tpu(node.metadata.labels):
             return True
     return False
 

@@ -18,6 +18,12 @@ _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
+DEBUG = logging.DEBUG
+INFO = logging.INFO
+WARNING = logging.WARNING
+ERROR = logging.ERROR
+CRITICAL = logging.CRITICAL
+
 
 def _show_logging_prefix():
     return env_options.Options.SHOW_DEBUG_INFO.get(
@@ -125,6 +131,10 @@ def set_logging_level(logger: str, level: int):
         yield
     finally:
         logger.setLevel(original_level)
+
+
+def logging_enabled(logger: logging.Logger, level: int) -> bool:
+    return logger.level <= level
 
 
 @contextlib.contextmanager

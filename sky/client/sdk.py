@@ -1408,8 +1408,8 @@ def kubernetes_node_info(
         The request ID of the Kubernetes node info request.
 
     Request Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.post(
@@ -1821,6 +1821,6 @@ def api_login(endpoint: Optional[str] = None) -> None:
         else:
             config = skypilot_config.get_user_config()
             config.set_nested(('api_server', 'endpoint'), endpoint)
-        common_utils.dump_yaml(str(config_path), config)
+        common_utils.dump_yaml(str(config_path), dict(config))
         click.secho(f'Logged in to SkyPilot API server at {endpoint}',
                     fg='green')

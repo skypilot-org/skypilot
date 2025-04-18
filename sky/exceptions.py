@@ -477,6 +477,11 @@ class ApiServerConnectionError(RuntimeError):
             f'Try: curl {server_url}/api/health')
 
 
+class APIVersionMismatchError(RuntimeError):
+    """Raised when the API version mismatch."""
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 
