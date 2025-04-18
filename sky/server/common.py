@@ -293,7 +293,25 @@ def _start_api_server(deploy: bool = False,
                 time.sleep(0.5)
             else:
                 break
-        logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
+
+        dashboard_msg = (f'Dashboard: {get_server_url(host)}/dashboard')
+        api_server_info = get_api_server_status(get_server_url(host))
+        if api_server_info.version == _DEV_VERSION:
+            dashboard_msg += (
+                f'\n{colorama.Style.RESET_ALL}{ux_utils.INDENT_SYMBOL}'
+                f'{colorama.Fore.YELLOW}')
+            if not os.path.isdir(server_constants.DASHBOARD_DIR):
+                dashboard_msg += (
+                    'Dashboard is not built, '
+                    'to build: npm --prefix sky/dashboard run build')
+            else:
+                dashboard_msg += (
+                    'Dashboard may be stale when installed from source, '
+                    'to rebuild: npm --prefix sky/dashboard run build')
+            dashboard_msg += f'{colorama.Style.RESET_ALL}'
+        logger.info(
+            ux_utils.finishing_message(
+                f'SkyPilot API server started. {dashboard_msg}'))
 
 
 def check_server_healthy(endpoint: Optional[str] = None,) -> None:
