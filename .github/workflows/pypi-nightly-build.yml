@@ -126,11 +126,11 @@ jobs:
         run: |
           TITLE_TEXT="Workflow ${{ github.workflow }} failed."
           if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
-            MARKDOWN_TEXT="🚨 Workflow *${{ github.workflow }}* failed at Buildkite step.\nBuildkite Log: https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step.\\nBuildkite Log: https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}"
             echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
             echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
           else
-            MARKDOWN_TEXT="🚨 Workflow *${{ github.workflow }}* failed.\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed."
             echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
             echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
           fi
