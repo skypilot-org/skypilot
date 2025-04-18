@@ -241,7 +241,12 @@ export function JobDetailPage() {
           <div id="logs" className="mt-6">
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
-                <h2 className="text-lg font-semibold">Logs</h2>
+                <div className="flex items-center">
+                  <h2 className="text-lg font-semibold">Logs</h2>
+                  <span className="ml-2 text-xs text-gray-500">
+                    (Logs are not streaming, click on refresh to fetch the latest logs)
+                  </span>
+                </div>
                 <Tooltip
                   content="Refresh logs"
                   className="text-muted-foreground"
