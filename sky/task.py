@@ -22,6 +22,7 @@ from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -328,14 +329,17 @@ class Task:
             except ValueError as e:
                 if self.managed_job_dag is not None:
                     # this task is a jobs controller
-                    logger.warning(f'{colorama.Fore.YELLOW}Failed to validate '
-                                   f'jobs controller resource {r}. If '
-                                   'the cluster exists, please check if '
-                                   'SkyPilot can connect. If this was a '
-                                   'previously launched cluster that was '
-                                   'taken down, consider removing it with '
-                                   '`sky down --purge`.'
-                                   f'{colorama.Style.RESET_ALL}')
+                    cluster_name = controller_utils.Controllers.\
+                        JOBS_CONTROLLER.value.cluster_name
+                    logger.warning(
+                        f'{colorama.Fore.YELLOW}Failed to validate jobs '
+                        f'controller resource {r.repr_with_region_zone}.'
+                        '\nIf the cluster exists, please check and allow '
+                        'SkyPilot to connect. If this was a '
+                        'previously launched cluster that was '
+                        'taken down or removed, consider removing the '
+                        'cluster from SkyPilot with:\n\n`sky down '
+                        f'{cluster_name} --purge`{colorama.Style.RESET_ALL}')
                 raise e
 
     def validate_name(self):
