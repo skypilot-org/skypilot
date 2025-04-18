@@ -1402,9 +1402,13 @@ class Resources:
 
         Resources._apply_resource_config_aliases(config)
         anyof = config.get('any_of')
-        if anyof is not None:
+        if anyof is not None and isinstance(anyof, list):
             for anyof_config in anyof:
                 Resources._apply_resource_config_aliases(anyof_config)
+        ordered = config.get('ordered')
+        if ordered is not None and isinstance(ordered, list):
+            for ordered_config in ordered:
+                Resources._apply_resource_config_aliases(ordered_config)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
