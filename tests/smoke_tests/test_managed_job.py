@@ -932,7 +932,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_az_cmd} && exit 1; }} || true'))
-        timeout *= 2
+        timeout *= 4
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)

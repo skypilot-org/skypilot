@@ -52,8 +52,11 @@ import contextlib
 import copy
 import os
 import pprint
+import threading
 import typing
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+from omegaconf import OmegaConf
 
 from sky import exceptions
 from sky import sky_logging
@@ -99,19 +102,113 @@ ENV_VAR_SKYPILOT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}CONFIG'
 ENV_VAR_USER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}USER_CONFIG'
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
-# Path to the local config files.
+# (Used by server) Environment variable for setting the server config file.
+ENV_VAR_SERVER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}SERVER_CONFIG'
+
+# Path to the client config files.
 _USER_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
+
+# Path to the server config file.
+_SERVER_CONFIG_PATH = _USER_CONFIG_PATH
 
 # The loaded config.
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
+_reload_config_lock = threading.Lock()
 
 
 def get_user_config_path() -> str:
     """Returns the path to the user config file."""
     return _USER_CONFIG_PATH
+
+
+def get_user_config() -> config_utils.Config:
+    """Returns the user config."""
+    # find the user config file
+    user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
+    if user_config_path:
+        logger.debug('using user config file specified by '
+                     f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
+        user_config_path = os.path.expanduser(user_config_path)
+        if not os.path.exists(user_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_USER_CONFIG} ({user_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_USER_CONFIG}')
+    else:
+        user_config_path = get_user_config_path()
+        logger.debug(f'using default user config file: {user_config_path}')
+        user_config_path = os.path.expanduser(user_config_path)
+
+    # load the user config file
+    if os.path.exists(user_config_path):
+        user_config = _parse_config_file(user_config_path)
+        _validate_config(user_config, user_config_path)
+    else:
+        user_config = config_utils.Config()
+    return user_config
+
+
+def _get_project_config() -> config_utils.Config:
+    # find the project config file
+    project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
+    if project_config_path:
+        logger.debug('using project config file specified by '
+                     f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
+        project_config_path = os.path.expanduser(project_config_path)
+        if not os.path.exists(project_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_PROJECT_CONFIG} ({project_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
+    else:
+        logger.debug(
+            f'using default project config file: {_PROJECT_CONFIG_PATH}')
+        project_config_path = _PROJECT_CONFIG_PATH
+        project_config_path = os.path.expanduser(project_config_path)
+
+    # load the project config file
+    if os.path.exists(project_config_path):
+        project_config = _parse_config_file(project_config_path)
+        _validate_config(project_config, project_config_path)
+    else:
+        project_config = config_utils.Config()
+    return project_config
+
+
+def get_server_config() -> config_utils.Config:
+    """Returns the server config."""
+    # find the server config file
+    server_config_path = _get_config_file_path(ENV_VAR_SERVER_CONFIG)
+    if server_config_path:
+        logger.debug('using server config file specified by '
+                     f'{ENV_VAR_SERVER_CONFIG}: {server_config_path}')
+        server_config_path = os.path.expanduser(server_config_path)
+        if not os.path.exists(server_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_SERVER_CONFIG} ({server_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_SERVER_CONFIG}')
+    else:
+        server_config_path = _SERVER_CONFIG_PATH
+        logger.debug(f'using default server config file: {server_config_path}')
+        server_config_path = os.path.expanduser(server_config_path)
+
+    # load the server config file
+    if os.path.exists(server_config_path):
+        server_config = _parse_config_file(server_config_path)
+        _validate_config(server_config, server_config_path)
+    else:
+        server_config = config_utils.Config()
+    return server_config
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -164,18 +261,18 @@ def _get_config_file_path(envvar: str) -> Optional[str]:
     return None
 
 
-def _validate_config(config: Dict[str, Any], config_path: str) -> None:
+def _validate_config(config: Dict[str, Any], config_source: str) -> None:
     """Validates the config."""
     common_utils.validate_schema(
         config,
         schemas.get_config_schema(),
-        f'Invalid config YAML ({config_path}). See: '
+        f'Invalid config YAML from ({config_source}). See: '
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
 
 
-def _overlay_skypilot_config(
+def overlay_skypilot_config(
         original_config: Optional[config_utils.Config],
         override_configs: Optional[config_utils.Config]) -> config_utils.Config:
     """Overlays the override configs on the original configs."""
@@ -189,6 +286,12 @@ def _overlay_skypilot_config(
     return config
 
 
+def safe_reload_config() -> None:
+    """Reloads the config, safe to be called concurrently."""
+    with _reload_config_lock:
+        _reload_config()
+
+
 def _reload_config() -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
@@ -200,7 +303,10 @@ def _reload_config() -> None:
         _reload_config_from_internal_file(internal_config_path)
         return
 
-    _reload_config_hierarchical()
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        _reload_config_as_server()
+    else:
+        _reload_config_as_client()
 
 
 def _parse_config_file(config_path: str) -> config_utils.Config:
@@ -238,67 +344,44 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     _loaded_config_path = config_path
 
 
-def _reload_config_hierarchical() -> None:
+def _reload_config_as_server() -> None:
     global _dict
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
 
-    # find the user config file
-    user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
-    if user_config_path:
-        logger.debug('using user config file specified by '
-                     f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
-        user_config_path = os.path.expanduser(user_config_path)
-        if not os.path.exists(user_config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    'Config file specified by env var '
-                    f'{ENV_VAR_USER_CONFIG} ({user_config_path!r}) '
-                    'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_USER_CONFIG}')
-    else:
-        user_config_path = get_user_config_path()
-        logger.debug(f'using default user config file: {user_config_path}')
-        user_config_path = os.path.expanduser(user_config_path)
+    overrides: List[config_utils.Config] = []
+    server_config = get_server_config()
+    if server_config:
+        overrides.append(server_config)
 
-    overrides = []
+    # layer the configs on top of each other based on priority
+    overlaid_server_config: config_utils.Config = config_utils.Config()
+    for override in overrides:
+        overlaid_server_config = overlay_skypilot_config(
+            original_config=overlaid_server_config, override_configs=override)
+    logger.debug(f'final server config: {overlaid_server_config}')
+    _dict = overlaid_server_config
 
-    # find the project config file
-    project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
-    if project_config_path:
-        logger.debug('using project config file specified by '
-                     f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
-        project_config_path = os.path.expanduser(project_config_path)
-        if not os.path.exists(project_config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    'Config file specified by env var '
-                    f'{ENV_VAR_PROJECT_CONFIG} ({project_config_path!r}) '
-                    'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
-    else:
-        logger.debug(
-            f'using default project config file: {_PROJECT_CONFIG_PATH}')
-        project_config_path = _PROJECT_CONFIG_PATH
-        project_config_path = os.path.expanduser(project_config_path)
 
-    # load the user config file
-    if os.path.exists(user_config_path):
-        user_config = _parse_config_file(user_config_path)
-        _validate_config(user_config, user_config_path)
+def _reload_config_as_client() -> None:
+    global _dict
+    # Reset the global variables, to avoid using stale values.
+    _dict = config_utils.Config()
+
+    overrides: List[config_utils.Config] = []
+    user_config = get_user_config()
+    if user_config:
         overrides.append(user_config)
-
-    if os.path.exists(project_config_path):
-        project_config = _parse_config_file(project_config_path)
-        _validate_config(project_config, project_config_path)
+    project_config = _get_project_config()
+    if project_config:
         overrides.append(project_config)
 
     # layer the configs on top of each other based on priority
     overlaid_client_config: config_utils.Config = config_utils.Config()
     for override in overrides:
-        overlaid_client_config = _overlay_skypilot_config(
+        overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    logger.debug(f'final config: {overlaid_client_config}')
+    logger.debug(f'final client config: {overlaid_client_config}')
     _dict = overlaid_client_config
 
 
@@ -310,7 +393,7 @@ def loaded_config_path() -> Optional[str]:
     return _loaded_config_path
 
 
-# Load on import.
+# Load on import, synchronization is guaranteed by python interpreter.
 _reload_config()
 
 
@@ -361,3 +444,54 @@ def override_skypilot_config(
     finally:
         _dict = original_config
         _config_overridden = False
+
+
+def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+    """Composes the skypilot CLI config.
+    CLI config can either be:
+    - A path to a config file
+    - A comma-separated list of key-value pairs
+    """
+
+    if not cli_config:
+        return config_utils.Config()
+
+    config_source = 'CLI'
+    maybe_config_path = os.path.expanduser(cli_config)
+    try:
+        if os.path.isfile(maybe_config_path):
+            config_source = maybe_config_path
+            # cli_config is a path to a config file
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.load(maybe_config_path))
+        else:  # cli_config is a comma-separated list of key-value pairs
+            variables: List[str] = []
+            variables = cli_config.split(',')
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.from_dotlist(variables))
+        _validate_config(parsed_config, config_source)
+    except ValueError as e:
+        raise ValueError(f'Invalid config override: {cli_config}. '
+                         f'Check if config file exists or if the dotlist '
+                         f'is formatted as: key1=value1,key2=value2') from e
+    logger.debug('CLI overrides config syntax check passed.')
+
+    return parsed_config
+
+
+def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+    """Applies the CLI provided config.
+    SAFETY:
+    This function directly modifies the global _dict variable.
+    This is considered fine in CLI context because the program will exit after
+    a single CLI command is executed.
+    Args:
+        cli_config: A path to a config file or a comma-separated
+        list of key-value pairs.
+    """
+    global _dict
+    parsed_config = _compose_cli_config(cli_config)
+    logger.debug(f'applying following CLI overrides: {parsed_config}')
+    _dict = overlay_skypilot_config(original_config=_dict,
+                                    override_configs=parsed_config)
+    return parsed_config

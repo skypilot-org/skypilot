@@ -289,8 +289,9 @@ def _get_cloud_dependencies_installation_commands(
                 '  ARCH="amd64"; '
                 'fi && '
                 '(command -v kubectl &>/dev/null || '
-                '("https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" '
-                '&& sudo install -o root -g root -m 0755 '
+                '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
+                '/bin/linux/$ARCH/kubectl" && '
+                'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))

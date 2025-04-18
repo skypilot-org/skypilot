@@ -17,6 +17,7 @@ import uuid
 import colorama
 import filelock
 
+import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -57,12 +58,36 @@ RETRY_COUNT_ON_TIMEOUT = 3
 # (e.g. in high contention env) and we will exit eagerly if server exit.
 WAIT_APISERVER_START_TIMEOUT_SEC = 60
 
-SKY_API_VERSION_WARNING = (
-    f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
-    f'v{{server_version}} (client version is v{{client_version}}). '
-    'Please restart the SkyPilot API server with: '
+_VERSION_INFO = (
+    f'{colorama.Style.RESET_ALL}'
+    f'{colorama.Style.DIM}'
+    'client version: v{client_version} (API version: v{client_api_version})\n'
+    'server version: v{server_version} (API version: v{server_api_version})'
+    f'{colorama.Style.RESET_ALL}')
+_LOCAL_SERVER_VERSION_MISMATCH_WARNING = (
+    f'{colorama.Fore.YELLOW}Client and local API server version mismatch:\n'
+    '{version_info}\n'
+    f'{colorama.Fore.YELLOW}Please restart the SkyPilot API server with:\n'
     'sky api stop; sky api start'
     f'{colorama.Style.RESET_ALL}')
+_CLIENT_TOO_OLD_WARNING = (
+    f'{colorama.Fore.YELLOW}Your SkyPilot client is too old:\n'
+    '{version_info}\n'
+    f'{colorama.Fore.YELLOW}Upgrade your client with:\n'
+    '{command}'
+    f'{colorama.Style.RESET_ALL}')
+_REMOTE_SERVER_TOO_OLD_WARNING = (
+    f'{colorama.Fore.YELLOW}SkyPilot API server is too old:\n'
+    '{version_info}\n'
+    f'{colorama.Fore.YELLOW}Contact your administrator to upgrade the '
+    'remote API server or downgrade your local client with:\n'
+    '{command}\n'
+    f'{colorama.Style.RESET_ALL}')
+# Parse local API version eargly to catch version format errors.
+_LOCAL_API_VERSION: int = int(server_constants.API_VERSION)
+# SkyPilot dev version.
+_DEV_VERSION = '1.0.0-dev0'
+
 RequestId = str
 ApiVersion = Optional[str]
 
@@ -78,7 +103,9 @@ class ApiServerStatus(enum.Enum):
 @dataclasses.dataclass
 class ApiServerInfo:
     status: ApiServerStatus
-    api_version: ApiVersion
+    api_version: ApiVersion = None
+    version: Optional[str] = None
+    commit: Optional[str] = None
 
 
 def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
@@ -137,37 +164,35 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                 try:
                     result = response.json()
                     api_version = result.get('api_version')
-                    if api_version is None:
+                    version = result.get('version')
+                    commit = result.get('commit')
+                    server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
+                                                api_version=api_version,
+                                                version=version,
+                                                commit=commit)
+                    if api_version is None or version is None or commit is None:
                         logger.warning(f'API server response missing '
                                        f'version info. {server_url} may '
                                        f'not be running SkyPilot API server.')
-                        return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
-                                             api_version=None)
-                    if api_version == server_constants.API_VERSION:
-                        return ApiServerInfo(status=ApiServerStatus.HEALTHY,
-                                             api_version=api_version)
-                    return ApiServerInfo(
-                        status=ApiServerStatus.VERSION_MISMATCH,
-                        api_version=api_version)
+                        server_info.status = ApiServerStatus.UNHEALTHY
+                    elif api_version != server_constants.API_VERSION:
+                        server_info.status = ApiServerStatus.VERSION_MISMATCH
+                    return server_info
                 except (json.JSONDecodeError, AttributeError) as e:
                     logger.warning('Failed to parse API server response: '
                                    f'{str(e)}')
-                    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
-                                         api_version=None)
+                    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
             else:
-                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
-                                     api_version=None)
+                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
-                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
-                                     api_version=None)
+                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
             time_out_try_count += 1
             continue
         except requests.exceptions.ConnectionError:
-            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
-                                 api_version=None)
+            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
-    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
+    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
 
 def handle_request_error(response: 'requests.Response') -> None:
@@ -227,6 +252,7 @@ def _start_api_server(deploy: bool = False,
 
         if foreground:
             # Replaces the current process with the API server
+            os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
@@ -237,7 +263,12 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
+        server_env = os.environ.copy()
+        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        proc = subprocess.Popen(cmd,
+                                shell=True,
+                                start_new_session=True,
+                                env=server_env)
 
         start_time = time.time()
         while True:
@@ -247,20 +278,21 @@ def _start_api_server(deploy: bool = False,
                     raise RuntimeError(
                         'SkyPilot API server process exited unexpectedly.\n'
                         f'View logs at: {constants.API_SERVER_LOGS}')
-            api_server_info = get_api_server_status()
-            assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
-                f'API server version mismatch when starting the server. '
-                f'Server version: {api_server_info.api_version} '
-                f'Client version: {server_constants.API_VERSION}')
-            if api_server_info.status == ApiServerStatus.HEALTHY:
+            try:
+                check_server_healthy()
+            except exceptions.APIVersionMismatchError:
+                raise
+            except Exception as e:  # pylint: disable=broad-except
+                if time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'Failed to start SkyPilot API server at '
+                            f'{get_server_url(host)}'
+                            '\nView logs at: '
+                            f'{constants.API_SERVER_LOGS}') from e
+                time.sleep(0.5)
+            else:
                 break
-            elif time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'Failed to start SkyPilot API server at '
-                        f'{get_server_url(host)}'
-                        f'\nView logs at: {constants.API_SERVER_LOGS}')
-            time.sleep(0.5)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
@@ -279,14 +311,68 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
     api_server_info = get_api_server_status(endpoint)
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
+        sv = api_server_info.api_version
+        assert sv is not None, 'Server API version is None'
+        try:
+            server_is_older = int(sv) < _LOCAL_API_VERSION
+        except ValueError:
+            # Raised when the server version using an unknown scheme.
+            # Version compatibility checking is expected to handle all legacy
+            # cases so we safely assume the server is newer when the version
+            # scheme is unknown.
+            logger.debug('API server version using unknown scheme: %s', sv)
+            server_is_older = False
+        version_info = _get_version_info_hint(api_server_info)
+        if is_api_server_local():
+            # For local server, just hint user to restart the server to get
+            # a consistent version.
+            msg = _LOCAL_SERVER_VERSION_MISMATCH_WARNING.format(
+                version_info=version_info)
+        else:
+            assert api_server_info.version is not None, 'Server version is None'
+            if server_is_older:
+                msg = _REMOTE_SERVER_TOO_OLD_WARNING.format(
+                    version_info=version_info,
+                    command=_install_server_version_command(api_server_info))
+            else:
+                msg = _CLIENT_TOO_OLD_WARNING.format(
+                    version_info=version_info,
+                    command=_install_server_version_command(api_server_info))
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                SKY_API_VERSION_WARNING.format(
-                    server_version=api_server_info.api_version,
-                    client_version=server_constants.API_VERSION))
+            raise exceptions.APIVersionMismatchError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ApiServerConnectionError(endpoint)
+
+
+def _get_version_info_hint(server_info: ApiServerInfo) -> str:
+    assert server_info.version is not None, 'Server version is None'
+    assert server_info.commit is not None, 'Server commit is None'
+    sv = server_info.version
+    cv = sky.__version__
+    if server_info.version == _DEV_VERSION:
+        sv = f'{sv} with commit {server_info.commit}'
+    if cv == _DEV_VERSION:
+        cv = f'{cv} with commit {sky.__commit__}'
+    return _VERSION_INFO.format(client_version=cv,
+                                server_version=sv,
+                                client_api_version=server_constants.API_VERSION,
+                                server_api_version=server_info.api_version)
+
+
+def _install_server_version_command(server_info: ApiServerInfo) -> str:
+    assert server_info.version is not None, 'Server version is None'
+    assert server_info.commit is not None, 'Server commit is None'
+    if server_info.version == _DEV_VERSION:
+        # Dev build without valid version.
+        return ('pip install git+https://github.com/skypilot-org/skypilot@'
+                f'{server_info.commit}')
+    elif 'dev' in server_info.version:
+        # Nightly version.
+        return f'pip install -U "skypilot-nightly=={server_info.version}"'
+    else:
+        # Stable version.
+        return f'pip install -U "skypilot=={server_info.version}"'
 
 
 def check_server_healthy_or_start_fn(deploy: bool = False,
@@ -436,6 +522,12 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
+    # This should be called first to make sure the logger is up-to-date.
+    sky_logging.reload_logger()
+
+    # Reload the skypilot config to make sure the latest config is used.
+    skypilot_config.safe_reload_config()
+
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
@@ -451,11 +543,6 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-
-    # Make sure the logger takes the new environment variables. This is
-    # necessary because the logger is initialized before the environment
-    # variables are set, such as SKYPILOT_DEBUG.
-    sky_logging.reload_logger()
 
 
 def clear_local_api_server_database() -> None:

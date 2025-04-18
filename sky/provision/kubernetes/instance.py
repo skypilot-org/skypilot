@@ -1056,11 +1056,14 @@ def _delete_services(name_prefix: str, namespace: str,
 
 
 def _terminate_node(namespace: str, context: Optional[str],
-                    pod_name: str) -> None:
+                    pod_name: str, is_head: bool = False) -> None:
     """Terminate a pod and its associated services."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
-    _delete_services(pod_name, namespace, context)
+    if is_head:
+        # Delete services for the head pod
+        # services are specified in sky/templates/kubernetes-ray.yml.j2
+        _delete_services(pod_name, namespace, context)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
@@ -1138,7 +1141,7 @@ def terminate_instances(
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name)
+        _terminate_node(namespace, context, pod_name, _is_head(pod))
 
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
