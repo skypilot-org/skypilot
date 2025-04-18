@@ -63,38 +63,32 @@ It is recommended to tune the resources allocated to the API server based on the
 The following table shows the maximum concurrency for different resource configurations:
 
 .. list-table::
-   :widths: 1 1 2 2 1
+   :widths: 1 1 3 2
    :header-rows: 1
 
    * - CPU
      - Memory
-     - Long requests
-     - Short requests
+     - Max concurrency
      - Suggested team size
    * - 4
      - 8Gi
-     - 8 Max concurrency
-     - 11 Max concurrency
+     - 8 Long requests, 11 Short requests
      - 1~5 users
    * - 16
      - 32Gi
-     - 32 Max concurrency
-     - 60 Max concurrency
+     - 32 Long requests, 60 Short requests
      - 1~15 users
    * - 32
      - 64Gi
-     - 64 Max concurrency
-     - 145 Max concurrency
+     - 64 Long requests, 145 Short requests
      - 1~30 users
    * - 64
      - 128Gi
-     - 128 Max concurrency
-     - 299 Max concurrency
+     - 128 Long requests, 299 Short requests
      - 10~50 users
    * - 128
      - 256Gi
-     - 256 Max concurrency
-     - 589 Max concurrency
+     - 256 Long requests, 589 Short requests
      - 10~100 users
 
 Queuing requests and polling status asynchronously
