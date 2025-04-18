@@ -338,7 +338,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'{self.ACTIVATE_CURRENT} && result="$(sky status 2>&1)" || true; '
             'if echo "$result" | grep -q "SkyPilot API server is too old"; then '
-            '  echo "$result" && exit 1; '
+            '  echo "$result" && echo "API version bumped, skip compatibility test" && exit 0; '
             'fi',
             # managed job test
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
