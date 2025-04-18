@@ -306,6 +306,27 @@ export function ManagedJobsTable({
     return [];
   }, [data, activeTab, selectedStatuses, showAllMode, statusGroups]);
 
+  // Sort the filtered data
+  const sortedData = React.useMemo(() => {
+    if (!sortConfig.key) return filteredData;
+
+    return [...filteredData].sort((a, b) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [filteredData, sortConfig]);
+
+  // Calculate pagination based on sorted data
+  const totalPages = Math.ceil(sortedData.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedData = sortedData.slice(startIndex, endIndex);
+
   // Handle status selection
   const handleStatusClick = (status) => {
     // Toggle the clicked status without affecting others
@@ -340,11 +361,6 @@ export function ManagedJobsTable({
     setStatusCounts(counts);
   }, [data]);
 
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredData.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-
   // Page navigation handlers
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -359,8 +375,6 @@ export function ManagedJobsTable({
     setPageSize(newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
-
-  const paginatedData = filteredData.slice(startIndex, endIndex);
 
   return (
     <div className="relative">
@@ -629,7 +643,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls */}
-      {filteredData.length > 0 && (
+      {sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -664,8 +678,8 @@ export function ManagedJobsTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, filteredData.length)} of{' '}
-              {filteredData.length}
+              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
             </div>
             <div className="flex items-center space-x-2">
               <Button
