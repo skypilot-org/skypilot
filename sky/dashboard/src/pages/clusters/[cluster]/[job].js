@@ -244,7 +244,8 @@ export function JobDetailPage() {
                 <div className="flex items-center">
                   <h2 className="text-lg font-semibold">Logs</h2>
                   <span className="ml-2 text-xs text-gray-500">
-                    (Logs are not streaming; click refresh to fetch the latest logs.)
+                    (Logs are not streaming; click refresh to fetch the latest
+                    logs.)
                   </span>
                 </div>
                 <Tooltip
