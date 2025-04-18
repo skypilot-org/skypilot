@@ -1132,8 +1132,8 @@ async def serve_static_or_dashboard(full_path: str):
         return fastapi.responses.FileResponse(file_path)
 
     # If file not found, serve the index.html for client-side routing.
-    # For example, the non-matched arbitrary route from client will be
-    # redirected to the index.html.
+    # For example, the non-matched arbitrary route (/ or /test) from
+    # client will be redirected to the index.html.
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:

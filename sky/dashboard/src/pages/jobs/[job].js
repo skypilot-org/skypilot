@@ -285,6 +285,12 @@ function JobDetailsContent({
   const [logs, setLogs] = useState([]);
   const [controllerLogs, setControllerLogs] = useState([]);
 
+  const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
+  const PRE_START_STATUSES = ['PENDING', 'SUBMITTED'];
+
+  const isPending = PENDING_STATUSES.includes(jobData.status);
+  const isPreStart = PRE_START_STATUSES.includes(jobData.status);
+
   // Clear logs when activeTab changes or when jobData.id changes
   useEffect(() => {
     setLogs([]);
@@ -299,6 +305,18 @@ function JobDetailsContent({
     (logType, jobId, setLogs, setIsLoading) => {
       let active = true;
       const controller = new AbortController();
+
+      // Don't fetch logs if job is in pending state
+      if (logType === 'logs' && isPending) {
+        setIsLoading(false);
+        return () => {};
+      }
+
+      // Don't fetch controller logs if job is in pre-start state
+      if (logType === 'controllerlogs' && isPreStart) {
+        setIsLoading(false);
+        return () => {};
+      }
 
       if (activeTab === logType && jobId) {
         setIsLoading(true);
@@ -344,7 +362,7 @@ function JobDetailsContent({
         active = false;
       };
     },
-    [activeTab]
+    [activeTab, isPending, isPreStart]
   );
 
   // Only fetch logs when actually viewing the logs tab
@@ -367,7 +385,13 @@ function JobDetailsContent({
   if (activeTab === 'logs') {
     return (
       <div className="max-h-96 overflow-y-auto">
-        {isLoadingLogs ? (
+        {isPending ? (
+          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+            <span>
+              Waiting for the job to start, please refresh after a while
+            </span>
+          </div>
+        ) : isLoadingLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
             <span>Loading...</span>
@@ -382,7 +406,14 @@ function JobDetailsContent({
   if (activeTab === 'controllerlogs') {
     return (
       <div className="max-h-96 overflow-y-auto">
-        {isLoadingControllerLogs ? (
+        {isPreStart ? (
+          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+            <span>
+              Waiting for the job controller process to start, please refresh
+              after a while
+            </span>
+          </div>
+        ) : isLoadingControllerLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
             <span>Loading...</span>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
@@ -76,6 +76,14 @@ export function JobDetailPage() {
   const [logs, setLogs] = useState([]);
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
 
+  const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
+
+  const isPending = useMemo(() => {
+    if (!clusterJobData || !job) return true;
+    const jobData = clusterJobData.find((j) => j.id == job);
+    return jobData && PENDING_STATUSES.includes(jobData.status);
+  }, [clusterJobData, job, PENDING_STATUSES]);
+
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
     if (!loading && isInitialLoad) {
@@ -90,34 +98,42 @@ export function JobDetailPage() {
 
   useEffect(() => {
     let active = true;
-    if (cluster && job && !isLoadingLogs) {
-      setIsLoadingLogs(true);
-      streamClusterJobLogs({
-        clusterName: cluster,
-        jobId: job,
-        onNewLog: (log) => {
-          if (active) {
-            const strippedLog = formatLogs(log);
-            setLogs((prevLogs) => [...prevLogs, strippedLog]);
-          }
-        },
-      })
-        .then(() => {
-          if (active) {
-            setIsLoadingLogs(false);
-          }
-        })
-        .catch((error) => {
-          if (active) {
-            console.error('Error streaming logs:', error);
-            setIsLoadingLogs(false);
-          }
-        });
+
+    if (!cluster || !job || isPending) {
+      setIsLoadingLogs(false);
+      return () => {
+        active = false;
+      };
     }
+
+    setIsLoadingLogs(true);
+
+    streamClusterJobLogs({
+      clusterName: cluster,
+      jobId: job,
+      onNewLog: (log) => {
+        if (active) {
+          const strippedLog = formatLogs(log);
+          setLogs((prevLogs) => [...prevLogs, strippedLog]);
+        }
+      },
+    })
+      .then(() => {
+        if (active) {
+          setIsLoadingLogs(false);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          console.error('Error streaming logs:', error);
+          setIsLoadingLogs(false);
+        }
+      });
+
     return () => {
       active = false;
     };
-  }, [cluster, job, isRefreshingLogs]);
+  }, [cluster, job, isRefreshingLogs, isPending]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
@@ -258,7 +274,13 @@ export function JobDetailPage() {
                 </Tooltip>
               </div>
               <div className="p-4">
-                {isLoadingLogs ? (
+                {isPending ? (
+                  <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+                    <span>
+                      Waiting for the job to start, please refresh after a while
+                    </span>
+                  </div>
+                ) : isLoadingLogs ? (
                   <div className="flex items-center justify-center py-4">
                     <CircularProgress size={20} className="mr-2" />
                     <span>Loading...</span>
