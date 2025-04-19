@@ -393,7 +393,6 @@ def download_and_stream_latest_job_log(
             f'Failed to stream the logs for the user program at '
             f'{log_file}: {common_utils.format_exception(e)}',
             exc_info=True)
-        # Return the log_file anyway.
 
     return log_file
 
