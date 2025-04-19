@@ -262,6 +262,12 @@ def up(
                         if task.service.tls_credential is None else 'https')
             endpoint = f'{protocol}://{socket_endpoint}'
 
+            # cache endpoint
+            serve_state.set_endpoint_cache(service_name=service_name,
+                                           endpoint=endpoint)
+            logger.debug(f'Cached service endpoint {endpoint} '
+                         f'for service {service_name}')
+
         logger.info(
             f'{fore.CYAN}Service name: '
             f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
@@ -497,6 +503,10 @@ def down(
         raise ValueError('Can only specify one of service_names or all. '
                          f'Provided {argument_str!r}.')
 
+    # Clear cache if we have a valid set of inputs. We can always recache
+    # incase of termination failure and the service is still up.
+    serve_state.delete_endpoint_cache(None if all else service_names)
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     service_names = None if all else service_names
@@ -570,10 +580,34 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     sky_logging.print(stdout)
 
 
+def _make_dummy(cached_record: Dict[str, str]) -> Dict[str, Any]:
+    """Dummy data for service status.
+
+    sky serve status --endpoint deadlocks if we do not return
+    the complete schema.
+    """
+    service_name = cached_record['name']
+    endpoint = cached_record['endpoint']
+    return {
+        'name': service_name,
+        'active_versions': [],
+        'controller_job_id': -1,
+        'uptime': -1,
+        'status': serve_state.ServiceStatus.READY,
+        'controller_port': None,
+        'load_balancer_port': None,
+        'endpoint': endpoint,
+        'policy': None,
+        'requested_resources_str': '',
+        'load_balancing_policy': '',
+        'tls_encrypted': False,
+        'replica_info': []
+    }
+
+
 @usage_lib.entrypoint
-def status(
-    service_names: Optional[Union[str,
-                                  List[str]]] = None) -> List[Dict[str, Any]]:
+def status(service_names: Optional[Union[str, List[str]]] = None,
+           use_endpoint_cache: bool = False) -> List[Dict[str, Any]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -620,10 +654,14 @@ def status(
     Args:
         service_names: a single or a list of service names to query. If None,
             query all services.
+        use_endpoint_cache: whether endpoint caching is used (for --endpoint).
 
     Returns:
         A list of dicts, with each dict containing the information of a service.
         If a service is not found, it will be omitted from the returned list.
+        When use_endpoint_cache is True, the endpoint for the service will be
+        retrieved from the cache (if exists). Returned dictionary will leave
+        some fields blank (ie: uptime, active_versions, etc).
 
     Raises:
         RuntimeError: if failed to get the service status.
@@ -632,6 +670,20 @@ def status(
     if service_names is not None:
         if isinstance(service_names, str):
             service_names = [service_names]
+
+    if use_endpoint_cache:
+        cached_records = serve_state.get_endpoint_cache(service_names)
+        logger.info(f'Cached Records: {cached_records}')
+        if (service_names is None or
+                len(service_names) == 0) and not cached_records:
+            logger.debug('Unspecified status check returned 0 cached '
+                         'entries. Querying controller.')
+        elif service_names is not None and len(service_names) > 0 and len(
+                service_names) != len(cached_records):
+            logger.debug('Number of services queried did not match number of '
+                         'cached records. Querying controller.')
+        else:
+            return [_make_dummy(c) for c in cached_records]
 
     try:
         backend_utils.check_network_connection()
@@ -665,6 +717,11 @@ def status(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
+    # now that we've got some data back, we are going to clear cache for
+    # the services we queried. We do this because external causes might
+    # bring serve down (ie: user just terminates everything on AWS console)
+    serve_state.delete_endpoint_cache(service_names)
+
     service_records = serve_utils.load_service_status(serve_status_payload)
     # Get the endpoint for each service
     for service_record in service_records:
@@ -681,6 +738,18 @@ def status(
                 protocol = ('https'
                             if service_record['tls_encrypted'] else 'http')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
+                # we only cache is service is Ready. This is mostly to prevent
+                # status calls called after "down" to cache terminating
+                # endpoints.
+                if service_record['status'] == serve_state.ServiceStatus.READY:
+                    name = service_record['name']
+                    endpoint = service_record['endpoint']
+                    assert isinstance(name, str)
+                    assert isinstance(endpoint, str)
+                    serve_state.set_endpoint_cache(service_name=name,
+                                                   endpoint=endpoint)
+                    logger.debug(
+                        f'Cached endpoint {endpoint} for service {name}.')
 
     return service_records
 

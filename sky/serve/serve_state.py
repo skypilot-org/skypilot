@@ -6,7 +6,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -58,6 +58,10 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS endpoint_cache (
+        service_name TEXT PRIMARY KEY,
+        endpoint TEXT)""")
     conn.commit()
 
     # Backward compatibility.
@@ -549,3 +553,56 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+
+# == Endpoint Cache functions ==
+def get_endpoint_cache(
+    service_names: Optional[Union[str,
+                                  List[str]]] = None) -> List[Dict[str, str]]:
+    """Gets endpoint cache values for services."""
+    if service_names is None:
+        service_names = []
+    elif isinstance(service_names, str):
+        service_names = [service_names]
+
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = None
+        if not service_names:
+            rows = cursor.execute("""SELECT * FROM endpoint_cache""").fetchall()
+        else:
+            placeholder = ', '.join(['?'] * len(service_names))
+            rows = cursor.execute(
+                f"""\
+                SELECT * FROM endpoint_cache
+                WHERE service_name IN ({placeholder})""",
+                tuple(service_names)).fetchall()
+    return [{'name': row[0], 'endpoint': row[1]} for row in rows]
+
+
+def set_endpoint_cache(service_name: str, endpoint: str) -> None:
+    """Sets endpoint cache value for a specific service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT or REPLACE INTO endpoint_cache
+            (service_name, endpoint)
+            VALUES (?, ?)""", (service_name, endpoint))
+
+
+def delete_endpoint_cache(
+        service_names: Optional[Union[str, List[str]]] = None) -> None:
+    """Removes endpoint cache."""
+    if service_names is None:
+        service_names = []
+    elif isinstance(service_names, str):
+        service_names = [service_names]
+
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        if not service_names:
+            cursor.execute("""DELETE FROM endpoint_cache""")
+        else:
+            placeholder = ', '.join(['?'] * len(service_names))
+            cursor.execute(
+                f"""\
+                DELETE FROM endpoint_cache
+                WHERE service_name IN ({placeholder})""", tuple(service_names))
