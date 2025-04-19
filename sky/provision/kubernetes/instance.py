@@ -1304,7 +1304,7 @@ def get_command_runners(
 
         # Try to get deployment name from label first
         head_instance_info = instances[pod_name][0]
-        deployment: str | None = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
+        deployment = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
