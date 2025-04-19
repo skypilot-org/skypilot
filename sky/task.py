@@ -22,7 +22,6 @@ from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -324,23 +323,7 @@ class Task:
         if not workdir_only:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
-            try:
-                r.validate()
-            except ValueError as e:
-                if self.managed_job_dag is not None:
-                    # this task is a jobs controller
-                    cluster_name = (controller_utils.Controllers.
-                                    JOBS_CONTROLLER.value.cluster_name)
-                    logger.warning(
-                        f'{colorama.Fore.YELLOW}Failed to validate jobs '
-                        f'controller resource {r.repr_with_region_zone}.'
-                        '\nIf the cluster exists, please check and allow '
-                        'SkyPilot to connect. If this was a '
-                        'previously launched cluster that was '
-                        'taken down or removed, consider removing the '
-                        'cluster from SkyPilot with:\n\n`sky down '
-                        f'{cluster_name} --purge`{colorama.Style.RESET_ALL}')
-                raise e
+            r.validate()
 
     def validate_name(self):
         """Validates if the task name is valid."""
