@@ -1301,11 +1301,10 @@ def get_command_runners(
     runners: List[command_runner.CommandRunner] = []
     if cluster_info.head_instance_id is not None:
         pod_name = cluster_info.head_instance_id
-        deployment = None
-        if is_high_availability_controller_by_name(pod_name):
-            # Try to get deployment name from label first
-            head_instance_info = instances[pod_name][0]
-            deployment = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
+
+        # Try to get deployment name from label first
+        head_instance_info = instances[pod_name][0]
+        deployment: str | None = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
