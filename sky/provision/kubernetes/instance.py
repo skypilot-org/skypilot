@@ -709,16 +709,25 @@ def _wait_for_deployment_pod(context, namespace, deployment, timeout=60):
     target_replicas = deployment.spec.replicas
     start_time = time.time()
     while time.time() - start_time < timeout:
-        pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace, label_selector=label_selector).items
-        # TODO(andyl): not sure if this necessary
-        if len(pods) == target_replicas:
+        # Refresh the deployment status
+        deployment = kubernetes.apps_api(
+            context).read_namespaced_deployment_status(deployment.metadata.name,
+                                                       namespace)
+        if (deployment.status and
+                deployment.status.ready_replicas is not None and
+                deployment.status.ready_replicas >= target_replicas):
+            pods = kubernetes.core_api(context).list_namespaced_pod(
+                namespace, label_selector=label_selector).items
             return pods
+        logger.debug(
+            f'Waiting for deployment {deployment.metadata.name!r} to be ready. '
+            f'Ready replicas: {deployment.status.ready_replicas}/'
+            f'{target_replicas}')
         time.sleep(2)
 
     raise TimeoutError(
-        f'Timeout: Not all Pods for Deployment {deployment.metadata.name!r}'
-        ' are created.')
+        f'Timeout: Deployment {deployment.metadata.name!r} did not become '
+        'ready.')
 
 
 @timeline.event
