@@ -945,14 +945,17 @@ def sync_down_logs(
             normalized_targets.update(replica_targets)
         else:
             # Replica target requested with specific IDs
-            for rid in replica_ids:
-                if rid not in replica_targets:
-                    logger.warning(f'Replica ID {rid} not found for service '
-                                   f'{service_name}. Skipping...')
+            requested_replica_targets = [
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.REPLICA, rid)
+                for rid in replica_ids
+            ]
+            for target in requested_replica_targets:
+                if target not in replica_targets:
+                    logger.warning(f'Replica ID {target.replica_id} not found '
+                                   f'for {service_name}. Skipping...')
                 else:
-                    normalized_targets.add(
-                        serve_utils.ServiceComponentTarget(
-                            serve_utils.ServiceComponent.REPLICA, rid))
+                    normalized_targets.add(target)
 
     def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
         component = target.component
