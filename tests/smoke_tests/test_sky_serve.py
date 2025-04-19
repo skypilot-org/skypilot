@@ -67,8 +67,8 @@ _SERVE_WAIT_UNTIL_READY = (
     ' done; }}; echo "Got service status $s";'
     f'sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
-_AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
-_SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
+_AWK_ALL_LINES_BELOW_REPLICAS = '/Replicas/{flag=1; next} flag'
+_SERVICE_LAUNCHING_STATUS_REGEX = r'PROVISIONING\|STARTING'
 
 _SHOW_SERVE_STATUS = (
     'echo "+ sky serve status {name}"; '
@@ -88,7 +88,7 @@ _TEARDOWN_SERVICE = _SHOW_SERVE_STATUS + (
     '     s=$(sky serve down -y {name});'
     '     echo "Trying to terminate {name}";'
     '     echo "$s";'
-    '     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
+    r'     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
     '     sleep 10;'
     '     [ $i -eq 20 ] && echo "Failed to terminate service {name}";'
     'done)')
@@ -216,7 +216,7 @@ def _check_replica_in_status(name: str,
                          ] and not status.startswith('FAILED'):
             spot_str = ''
             if is_spot:
-                spot_str = '\[Spot\]'
+                spot_str = r'\[Spot\]'
             resource_str = f'({spot_str}vCPU=2)'
         check_conditions.append(
             f'echo "$s" | grep "{resource_str}" | grep "{status}" | wc -l | '
@@ -268,7 +268,7 @@ def _check_service_version(service_name: str, version: str) -> str:
     # Grep the lines before 'Service Replicas' and check if the service version
     # is correct.
     return (f'echo "$s" | grep -B1000 "Service Replicas" | '
-            f'grep -E "{service_name}\s+{version}" || exit 1; ')
+            rf'grep -E "{service_name}\s+{version}" || exit 1; ')
 
 
 @pytest.mark.gcp
@@ -340,7 +340,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
         prompt2output = json.load(f)
 
     test = smoke_tests_utils.Test(
-        f'test-skyserve-llm',
+        'test-skyserve-llm',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} --gpus {accelerator} -y tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -363,7 +363,7 @@ def test_skyserve_spot_recovery():
     zone = 'us-central1-a'
 
     test = smoke_tests_utils.Test(
-        f'test-skyserve-spot-recovery-gcp',
+        'test-skyserve-spot-recovery-gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky serve up -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/recovery.yaml',
@@ -393,7 +393,7 @@ def test_skyserve_spot_recovery():
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-base-ondemand-fallback',
+        'test-skyserve-base-ondemand-fallback',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -414,7 +414,7 @@ def test_skyserve_dynamic_ondemand_fallback():
     zone = 'us-central1-a'
 
     test = smoke_tests_utils.Test(
-        f'test-skyserve-dynamic-ondemand-fallback',
+        'test-skyserve-dynamic-ondemand-fallback',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky serve up -n {name} --cloud gcp {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
@@ -423,7 +423,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
-            f'sleep 40',
+            'sleep 40',
             _check_replica_in_status(name, [
                 (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
                 (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
@@ -472,7 +472,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
             generic_cloud) as increase_initial_delay_seconds:
         test = smoke_tests_utils.Test(
-            f'test-skyserve-user-bug-restart',
+            'test-skyserve-user-bug-restart',
             [
                 increase_initial_delay_seconds(
                     f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/restart/user_bug.yaml'
@@ -511,7 +511,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-load-balancer',
+        'test-skyserve-load-balancer',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/load_balancer/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
@@ -537,7 +537,7 @@ def test_skyserve_auto_restart():
     name = _get_service_name()
     zone = 'us-central1-a'
     test = smoke_tests_utils.Test(
-        f'test-skyserve-auto-restart',
+        'test-skyserve-auto-restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             # TODO(tian): we can dynamically generate YAML from template to
@@ -548,7 +548,7 @@ def test_skyserve_auto_restart():
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
-            f'sleep 20',
+            'sleep 20',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=smoke_tests_utils.terminate_gcp_replica(name, zone, 1)),
@@ -585,7 +585,7 @@ def test_skyserve_cancel(generic_cloud: str):
     name = _get_service_name()
 
     test = smoke_tests_utils.Test(
-        f'test-skyserve-cancel',
+        'test-skyserve-cancel',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/cancel/cancel.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -614,7 +614,7 @@ def test_skyserve_streaming(generic_cloud: str):
         generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-streaming',
+        'test-skyserve-streaming',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/streaming/streaming.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -635,7 +635,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-readiness-timeout-fail',
+        'test-skyserve-readiness-timeout-fail',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/readiness_timeout/task.yaml',
             # None of the readiness probe will pass, so the service will be
@@ -661,7 +661,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-large-readiness-timeout',
+        'test-skyserve-large-readiness-timeout',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/readiness_timeout/task_large_timeout.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -687,7 +687,7 @@ def test_skyserve_update(generic_cloud: str):
         generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-update',
+        'test-skyserve-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -783,7 +783,7 @@ def test_skyserve_fast_update(generic_cloud: str):
     name = _get_service_name()
 
     test = smoke_tests_utils.Test(
-        f'test-skyserve-fast-update',
+        'test-skyserve-fast-update',
         [
             f'sky serve up -n {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -916,7 +916,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 90',
+            'sleep 90',
             wait_until_no_pending,
             _check_replica_in_status(
                 name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
@@ -1010,7 +1010,7 @@ def test_skyserve_https(generic_cloud: str):
             f'-subj "/" -keyout {keyfile} -out {certfile}')
 
         test = smoke_tests_utils.Test(
-            f'test-skyserve-https',
+            'test-skyserve-https',
             [
                 f'sky serve up -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} -y tests/skyserve/https/service.yaml '
                 f'--env TLS_KEYFILE_ENV_VAR={keyfile} --env TLS_CERTFILE_ENV_VAR={certfile}',
@@ -1041,7 +1041,7 @@ def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""
     name = _get_service_name()
     test = smoke_tests_utils.Test(
-        f'test-skyserve-multi-ports',
+        'test-skyserve-multi-ports',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/multi_ports.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -1087,3 +1087,165 @@ def test_user_dependencies(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_after_ready():
+    """Test HA recovery when killing controller after replicas are READY."""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-after-ready',
+        [
+            # Launch service and wait for ready
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            # Verify service is accessible
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Kill controller and verify recovery
+            _kill_and_wait_controller(),
+            # Verify service remains accessible after controller recovery
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_provision():
+    """Test HA recovery when killing controller during PROVISIONING."""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-provision',
+        [
+            # Launch service and wait for provisioning
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            # Wait for service to enter PROVISIONING state
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'until echo "$s" | grep "PROVISIONING"; do '
+            '  echo "Waiting for PROVISIONING state..."; '
+            '  sleep 5; '
+            f'  s=$(sky serve status {name}); '
+            'done; echo "$s"',
+            # Kill controller during provisioning
+            _kill_and_wait_controller(),
+            # Verify service eventually becomes ready
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Check there is only one cluster
+            f'instance_names=$(gcloud compute instances list --filter="name~{name}" --format="value(name)"); '
+            'echo "Initial instances: $instance_names"; '
+            'num_instances=$(echo "$instance_names" | wc -l); '
+            '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_pending():
+    """Test HA recovery when killing controller during PENDING."""
+    name = _get_service_name()
+    replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
+        name, 1)
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-pending',
+        [
+            # Launch service and wait for pending
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
+            _check_replica_in_status(name, [(1, False, 'PENDING')]),
+            # Kill controller during pending
+            _kill_and_wait_controller(),
+            # Verify service eventually becomes ready and accessible
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Check there are one cluster
+            f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)"); '
+            'echo "Initial instances: $instance_names"; '
+            'num_instances=$(echo "$instance_names" | wc -l); '
+            '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_shutdown():
+    """Test HA recovery when killing controller during replica shutdown."""
+    name = _get_service_name()
+    replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
+        name, 1)
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-shutdown',
+        [
+            # Launch service and wait for ready
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Record instance names and initiate shutdown of the replica
+            f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)"); '
+            'echo "Initial instances: $instance_names"; '
+            'num_instances=$(echo "$instance_names" | wc -l); '
+            '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
+            # Shutdown the replica
+            f'sky serve down -y {name} 1',
+            # Verify the replica is in SHUTTING_DOWN state
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN" > /dev/null; do '
+            '  echo "Waiting for replica to be SHUTTING_DOWN..."; sleep 5; '
+            f'  s=$(sky serve status {name}); '
+            'done; echo "$s"',
+            # Kill controller during shutdown
+            _kill_and_wait_controller(),
+            # Even after the pod ready, `serve status` may return `Failed to connect to serve controller, please try again later.`
+            # So we need to wait for a while before checking the status again.
+            'sleep 10',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN" > /dev/null',
+            # Verify GCP instances are eventually terminated
+            # First check this command run well
+            f'until gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)" 2>/dev/null | wc -l | grep -q "^0$"; do '
+            '  echo "Waiting for instances to terminate..."; sleep 5; '
+            'done',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+def _kill_and_wait_controller() -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    return (
+        'initial_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}"); '
+        'echo "Killing controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        'until new_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}") && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && kubectl get pod $new_controller_pod | grep "1/1"; do '
+        '  echo "Waiting for new controller pod..."; sleep 5; '
+        'done; '
+        'echo "New controller pod ready: $new_controller_pod"')

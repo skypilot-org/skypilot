@@ -1583,6 +1583,10 @@ class RetryingVmProvisioner(object):
                 except provision_common.StopFailoverError:
                     with ux_utils.print_exception_no_traceback():
                         raise
+                except exceptions.InconsistentHighAvailabilityError:
+                    # No teardown happens for this error.
+                    with ux_utils.print_exception_no_traceback():
+                        raise
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
@@ -2032,6 +2036,7 @@ class RetryingVmProvisioner(object):
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
                 common_utils.check_cluster_name_is_valid(cluster_name)
+
                 if dryrun:
                     cloud_user = None
                 else:
@@ -2459,6 +2464,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
+
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
@@ -2689,6 +2695,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or common.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
+        self._dump_final_script = kwargs.pop('dump_final_script', False)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -3272,18 +3279,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
 
-            def _dump_setup_script(setup_script: str) -> None:
+            def _dump_final_script(
+                    setup_script: str,
+                    target_dir: str = remote_setup_file_name) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
                     setup_sh_path = f.name
                     runner.rsync(source=setup_sh_path,
-                                 target=remote_setup_file_name,
+                                 target=target_dir,
                                  up=True,
                                  stream_logs=False)
 
+            # Always dump the full setup script to the persistent path first
+            # In high availability mode, we need to dump the full setup script
+            # to a persistent path BEFORE any other operations. This ensures
+            # that if the pod restarts, it can find and execute the complete
+            # setup script, rather than a reference to a temporary file that
+            # would no longer exist after restart.
+            if self._dump_final_script:
+                _dump_final_script(setup_script,
+                                   constants.PERSISTENT_SETUP_SCRIPT_PATH)
+
             if detach_setup or _is_command_length_over_limit(encoded_script):
-                _dump_setup_script(setup_script)
+                _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
@@ -3335,7 +3354,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to run setup command inline due to '
                         'command length limit. Dumping setup script to '
                         'file and running it with SSH.')
-                    _dump_setup_script(setup_script)
+                    _dump_final_script(setup_script)
                     returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
@@ -3426,14 +3445,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        def _dump_code_to_file(codegen: str) -> None:
+        def _dump_code_to_file(codegen: str,
+                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(SKY_REMOTE_APP_DIR,
-                                           f'sky_job_{job_id}')
+                script_path = os.path.join(target_dir, f'sky_job_{job_id}')
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
                 # execute the script. Happens for AWS.
@@ -3441,6 +3460,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+
+        # Should also be ealier than _is_command_length_over_limit
+        # Same reason as in _setup
+        if self._dump_final_script:
+            _dump_code_to_file(job_submit_cmd,
+                               constants.PERSISTENT_RUN_SCRIPT_DIR)
 
         if _is_command_length_over_limit(job_submit_cmd):
             _dump_code_to_file(codegen)
@@ -3457,7 +3482,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot set the managed job to PENDING state in the job template
             # (jobs-controller.yaml.j2), as it may need to wait for the run
             # commands to be scheduled on the job controller in high-load cases.
-            job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
+            job_submit_cmd += ' && ' + managed_job_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,

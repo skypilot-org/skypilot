@@ -479,6 +479,14 @@ def total_number_provisioning_replicas() -> int:
     return provisioning_count
 
 
+def get_replicas_at_status(
+    service_name: str,
+    status: ReplicaStatus,
+) -> List['replica_managers.ReplicaInfo']:
+    replicas = get_replica_infos(service_name)
+    return [replica for replica in replicas if replica.status == status]
+
+
 # === Version functions ===
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""
@@ -549,3 +557,36 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+
+def get_latest_version(service_name: str) -> Optional[int]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT MAX(version) FROM version_specs
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+    if not rows or rows[0][0] is None:
+        return None
+    return rows[0][0]
+
+
+def get_service_controller_port(service_name: str) -> int:
+    """Gets the controller port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT controller_port FROM services WHERE name = ?',
+                       (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f'Service {service_name} does not exist.')
+        return row[0]
+
+
+def get_service_load_balancer_port(service_name: str) -> int:
+    """Gets the load balancer port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT load_balancer_port FROM services WHERE name = ?',
+                       (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f'Service {service_name} does not exist.')
+        return row[0]

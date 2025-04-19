@@ -185,6 +185,12 @@ class InvalidCloudCredentials(Exception):
     pass
 
 
+class InconsistentHighAvailabilityError(Exception):
+    """Raised when the high availability property in the user config
+    is inconsistent with the actual cluster."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 

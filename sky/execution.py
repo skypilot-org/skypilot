@@ -208,9 +208,19 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
+    is_controller_high_availability_supported = False
+
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+        if controller_utils.high_availability_specified(cluster_name,
+                                                        skip_warning=False):
+            requested_features.add(clouds.CloudImplementationFeatures.
+                                   HIGH_AVAILABILITY_CONTROLLERS)
+            # If we provision a cluster that supports high availability
+            # controllers, we can use the high availability controller.
+            is_controller_high_availability_supported = True
 
     # Add requested features from the task
     requested_features |= task.get_required_cloud_features()
@@ -295,9 +305,14 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    backend.register_info(dag=dag,
-                          optimize_target=optimize_target,
-                          requested_features=requested_features)
+    backend.register_info(
+        dag=dag,
+        optimize_target=optimize_target,
+        requested_features=requested_features,
+        # That's because we want to do commands in task.setup and task.run again
+        # after K8S pod recovers from a crash.
+        # See `kubernetes-ray.yml.j2` for more details.
+        dump_final_script=is_controller_high_availability_supported)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
