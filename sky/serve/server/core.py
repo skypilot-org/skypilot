@@ -4,7 +4,8 @@ import re
 import signal
 import tempfile
 import threading
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+import typing
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -32,7 +33,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky.backends import cloud_vm_ray_backend
 
 logger = sky_logging.init_logger(__name__)
@@ -95,6 +96,7 @@ def _get_all_replica_targets(
     service_records = serve_utils.load_service_status(serve_status_payload)
     if not service_records:
         raise ValueError(f'Service {service_name!r} not found.')
+    assert len(service_records) == 1
     service_record = service_records[0]
 
     return {

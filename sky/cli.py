@@ -4822,6 +4822,8 @@ def serve_logs(
     if sync_down:
         # For sync-down, multiple targets are allowed.
         # If no specific components/replicas are mentioned, sync all.
+        # Note: Multiple replicas or targets can only be specified when
+        # using --sync-down.
         targets_to_sync = list(chosen_components)
         if not targets_to_sync and not replica_ids:
             # Default to all components if nothing specific is requested
