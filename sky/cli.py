@@ -4837,7 +4837,7 @@ def serve_logs(
         log_dir.mkdir(parents=True, exist_ok=True)
 
         with rich_utils.client_status(
-                ux_utils.spinner_message('Downloading service logs')):
+                ux_utils.spinner_message('Downloading service logs...')):
             serve_lib.sync_down_logs(service_name,
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
