@@ -1,6 +1,6 @@
 """Immutable user configurations (EXPERIMENTAL).
 
-On module import, we attempt to parse the config located at _USER_CONFIG_PATH
+On module import, we attempt to parse the config located at _GLOBAL_CONFIG_PATH
 (default: ~/.sky/config.yaml). Caller can then use
 
   >> skypilot_config.loaded()
@@ -80,7 +80,7 @@ logger = sky_logging.init_logger(__name__)
 #     This behavior is subject to change and should not be relied on by users.
 # Else,
 # (1) If env var {ENV_VAR_GLOBAL_CONFIG} exists, use its path as the user
-#     config file. Else, use the default path {_USER_CONFIG_PATH}.
+#     config file. Else, use the default path {_GLOBAL_CONFIG_PATH}.
 # (2) If env var {ENV_VAR_PROJECT_CONFIG} exists, use its path as the project
 #     config file. Else, use the default path {_PROJECT_CONFIG_PATH}.
 # (3) Override any config keys in (1) with the ones in (2).
@@ -103,11 +103,8 @@ ENV_VAR_GLOBAL_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}GLOBAL_CONFIG'
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the client config files.
-_USER_CONFIG_PATH = '~/.sky/config.yaml'
+_GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
-
-# Path to the server config file.
-_SERVER_CONFIG_PATH = _USER_CONFIG_PATH
 
 # The loaded config.
 _dict = config_utils.Config()
@@ -118,7 +115,7 @@ _reload_config_lock = threading.Lock()
 
 def get_user_config_path() -> str:
     """Returns the path to the user config file."""
-    return _USER_CONFIG_PATH
+    return _GLOBAL_CONFIG_PATH
 
 
 def get_user_config() -> config_utils.Config:
@@ -195,7 +192,7 @@ def get_server_config() -> config_utils.Config:
                     'does not exist. Please double check the path or unset the '
                     f'env var: unset {ENV_VAR_GLOBAL_CONFIG}')
     else:
-        server_config_path = _SERVER_CONFIG_PATH
+        server_config_path = _GLOBAL_CONFIG_PATH
         logger.debug(f'using default server config file: {server_config_path}')
         server_config_path = os.path.expanduser(server_config_path)
 
