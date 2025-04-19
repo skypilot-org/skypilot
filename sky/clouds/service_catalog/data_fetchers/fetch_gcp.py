@@ -60,8 +60,9 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
 
-# TPU V6e price for the following regions is missing in the SKUs.
-TPU_V6E_MISSING_REGIONS = ['us-central2', 'southamerica-west1']
+# Maximum price for TPU V6e is $691.2/hour. Here we set a higher price
+# so the failover will go to the region with precise pricing info first.
+TPU_V6E_MAX_PRICE = 700
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
@@ -699,13 +700,12 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        if (tpu_name.startswith('tpu-v6e') and
-                tpu_region in TPU_V6E_MISSING_REGIONS):
-            if not spot:
-                tpu_price = 0.0
-        else:
-            assert spot or tpu_price is not None, (row, hidden_tpu,
-                                                   HIDDEN_TPU_DF)
+            # GCP's TPU V6e pricing info is not stable and there are some
+            # regions that are missing the pricing info. We set the price to
+            # the maximum price so the failover will go to the region with
+            # precise pricing info first.
+            if tpu_name.startswith('tpu-v6e'):
+                tpu_price = TPU_V6E_MAX_PRICE
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)
