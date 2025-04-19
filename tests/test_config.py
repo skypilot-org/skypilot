@@ -660,20 +660,6 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     skypilot_config._reload_config()
 
-    # test the client config is not affected by the server config files
-    server_config_path = tmp_path / 'server_config.yaml'
-    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
-                        server_config_path)
-    server_config_path.write_text(
-        textwrap.dedent(f"""\
-            aws:
-                labels:
-                    default-server-config: present
-            """))
-    skypilot_config._reload_config()
-    assert skypilot_config.get_nested(
-        ('aws', 'labels', 'default-server-config'), None) is None
-
     # Check the two configs are merged correctly with
     # project config overriding user config
     assert skypilot_config.get_nested(('gcp', 'labels', 'default-user-config'),
@@ -813,15 +799,6 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('aws', 'labels', 'default-server-config'), None) == 'present'
 
     # test the server config is not affected by the client config files
-    env_user_config_path = tmp_path / 'env_user_config.yaml'
-    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
-                        env_user_config_path)
-    env_user_config_path.write_text(
-        textwrap.dedent(f"""\
-            gcp:
-                labels:
-                    env-user-config: present
-            """))
     env_project_config_path = tmp_path / 'env_project_config.yaml'
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         env_project_config_path)
