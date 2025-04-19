@@ -697,7 +697,9 @@ def _create_persistent_volume_claim(namespace: str, context: Optional[str],
 
 
 @timeline.event
-def _wait_for_deployment_pod(context, namespace, deployment,
+def _wait_for_deployment_pod(context,
+                             namespace,
+                             deployment,
                              timeout=60) -> List:
     label_selector = ','.join([
         f'{key}={value}'
@@ -894,7 +896,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             template_pod_spec = deployment_spec['spec']['template']
             # Add the deployment name as a label to the pod spec
             deployment_name = deployment_spec['metadata']['name']
-            pod_spec_copy['metadata']['labels'][TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
+            pod_spec_copy['metadata']['labels'][
+                TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
             try:
@@ -924,9 +927,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             raise exceptions.InconsistentHighAvailabilityError(message)
 
     # Create pods in parallel
-    created_resources = subprocess_utils.run_in_parallel(_create_resource_thread,
-                                                          list(range(to_start_count)),
-                                                          _NUM_THREADS)
+    created_resources = subprocess_utils.run_in_parallel(
+        _create_resource_thread, list(range(to_start_count)), _NUM_THREADS)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
