@@ -32,6 +32,7 @@ logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
+TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 
 
 def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
@@ -57,11 +58,6 @@ def _get_deployment_name(cluster_name: str) -> str:
 
 def _head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
-
-
-def infer_deployment_name_from_pods(pod_name: str) -> str:
-    """Kubernetes pod adds random suffix to the deployment name."""
-    return pod_name[:pod_name.rfind('-')]
 
 
 def is_high_availability_controller_by_name(cluster_name: str) -> bool:
@@ -894,8 +890,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             _create_persistent_volume_claim(namespace, context, pvc_spec)
 
             # It's safe to directly modify the template spec in the deployment spec
-            # because controller pod is singleton, i.e. i in [0].
+            # because controller pod is singleton, i in [0].
             template_pod_spec = deployment_spec['spec']['template']
+            # Add the deployment name as a label to the pod spec
+            deployment_name = deployment_spec['metadata']['name']
+            pod_spec_copy['metadata']['labels'][TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
             try:
@@ -1302,9 +1301,12 @@ def get_command_runners(
     runners: List[command_runner.CommandRunner] = []
     if cluster_info.head_instance_id is not None:
         pod_name = cluster_info.head_instance_id
-        deployment = (infer_deployment_name_from_pods(pod_name)
-                      if is_high_availability_controller_by_name(pod_name) else
-                      None)
+        deployment = None
+        if is_high_availability_controller_by_name(pod_name):
+            # Try to get deployment name from label first
+            head_instance_info = instances[pod_name][0]
+            deployment = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
+
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0], deployment=deployment, **credentials)
