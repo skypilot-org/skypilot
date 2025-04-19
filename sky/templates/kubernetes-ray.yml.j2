@@ -585,7 +585,7 @@ available_node_types:
 
               {% if high_availability %}
               mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
-              if [ -f ~/.sky/k8s_container_ready ]; then
+              if [ -f {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready ]; then
                 # ! Keep this aligned with `CloudVmRayBackend._setup()`
                 # Suppose all `task.setup` are the same for skyserve controller task.
                 # So be careful for compatibility issue once you change it.
@@ -601,7 +601,7 @@ available_node_types:
                 done
               fi
 
-              touch ~/.sky/k8s_container_ready
+              touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
               {% endif %}
 
               trap : TERM INT; log_tail || sleep infinity & wait
