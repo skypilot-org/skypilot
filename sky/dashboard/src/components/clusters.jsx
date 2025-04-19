@@ -47,7 +47,10 @@ export function Clusters() {
     <Layout highlighted="clusters">
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
-          <Link href="/clusters" className="text-sky-blue leading-none">
+          <Link
+            href="/clusters"
+            className="text-sky-blue hover:underline leading-none"
+          >
             Sky Clusters
           </Link>
         </div>
