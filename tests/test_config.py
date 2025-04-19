@@ -634,9 +634,8 @@ def test_override_skypilot_config_without_original_config(
 def test_hierarchical_client_config(monkeypatch, tmp_path):
     """Test that hierarchical client config is loaded correctly."""
     # prepare a clean test environment
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SERVER_CONFIG, raising=False)
     # test with default config files
     default_user_config_path = tmp_path / 'user_config.yaml'
     monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
@@ -686,7 +685,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     # Test with env vars
     env_user_config_path = tmp_path / 'env_user_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(env_user_config_path))
     env_user_config_path.write_text(
         textwrap.dedent(f"""\
@@ -712,7 +711,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
                                       None) == 'present'
     assert skypilot_config.get_nested(('gcp', 'labels', 'source'),
                                       None) == 'env-project-config'
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
 
     skypilot_config._reload_config()
@@ -730,11 +729,11 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     # if config files specified by env vars are missing,
     # error out
-    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(non_existent_config_path))
     with pytest.raises(FileNotFoundError):
         skypilot_config._reload_config()
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
     skypilot_config._reload_config()
 
     monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
@@ -748,7 +747,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
     # this test is to document the existing behavior, not
     # necessarily to enforce the desired behavior.
     env_user_config_path = tmp_path / 'env_user_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(env_user_config_path))
     env_user_config_path.write_text(
         textwrap.dedent(f"""\
@@ -774,9 +773,8 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 def test_hierarchical_server_config(monkeypatch, tmp_path):
     """Test that hierarchical server config is loaded correctly."""
     # prepare a clean test environment
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SERVER_CONFIG, raising=False)
     # set the environment variable to indicate that the current process is
     # running as a server.
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
@@ -797,7 +795,7 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
 
     # test with env vars
     env_server_config_path = tmp_path / 'env_server_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_SERVER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(env_server_config_path))
     env_server_config_path.write_text(
         textwrap.dedent(f"""\
@@ -808,7 +806,7 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
     skypilot_config._reload_config()
     assert skypilot_config.get_nested(('aws', 'labels', 'env-server-config'),
                                       None) == 'present'
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SERVER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
 
     skypilot_config._reload_config()
     assert skypilot_config.get_nested(
