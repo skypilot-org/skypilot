@@ -375,6 +375,17 @@ Fluidstack
   echo "your_api_key_here" > ~/.fluidstack/api_key
 
 
+Hyperstack
+~~~~~~~~~~~~~~~~~~
+
+`Hyperstack <https://infrahub-doc.nexgencloud.com/>`__ is a cloud provider offering low-cost GPUs. To configure Hyperstack access, go to the `API Keys <https://console.hyperstack.cloud/api-keys>`__ page on your Hyperstack console to generate an API key and then add the :code:`API key` to :code:`~/.hyperstack/api_key` :
+
+.. code-block:: shell
+
+  mkdir -p ~/.hyperstack
+  echo "your_api_key_here" > ~/.hyperstack/api_key
+
+
 
 Cudo Compute
 ~~~~~~~~~~~~~~~~~~
