@@ -19,5 +19,6 @@ Table of contents
 
     aws
     gcp
+    nebius
     vsphere
     kubernetes
