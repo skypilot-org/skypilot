@@ -132,6 +132,23 @@ This may show multiple clusters, if you have created several:
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
+Access the dashboard
+====================
+
+If you install SkyPilot from the official package, after starting the API server (when running locally, the first CLI or SDK call will automatically start a SkyPilot API server locally), the dashboard can be accessed at `${API_Server_Endpoint}/dashboard`, for example, it's `http://127.0.0.1:46580/dashboard` for the local API server by default.
+
+If you install SkyPilot from source, before starting the API server, run the following commands to generate the dashboard production build:
+
+.. code-block:: bash
+
+  cd sky/dashboard
+  # Install all dependencies in the current directory
+  npm install
+  # Build
+  npm run build
+
+Then you can start your API server and access the dashboard at `${API_Server_Endpoint}/dashboard`.
+
 .. _ssh:
 
 SSH into clusters
