@@ -78,7 +78,7 @@ Server configuration
 
 If you are using a remote :ref:`SkyPilot API server <sky-api-server>`, it looks for ``~/.sky/config.yaml`` in the API server instance/container to find the server configuration.
 
-To specify a different file, set ``SKYPILOT_SERVER_CONFIG`` environment variable to the desired path.
+To specify a different file, set ``SKYPILOT_GLOBAL_CONFIG`` environment variable to the desired path.
 
 If you are using a local API server, you can use :ref:`User configuration<config-client-user-config>` to set global configuration.
 
@@ -89,7 +89,7 @@ User configuration
 
 SkyPilot client looks for ``~/.sky/config.yaml`` to find the user configuration.
 
-To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
+To specify a different file, set ``SKYPILOT_GLOBAL_CONFIG`` environment variable to the desired path.
 
 .. _config-client-project-config:
 
