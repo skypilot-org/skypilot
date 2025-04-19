@@ -701,7 +701,8 @@ def _create_persistent_volume_claim(namespace: str, context: Optional[str],
 
 
 @timeline.event
-def _wait_for_deployment_pod(context, namespace, deployment, timeout=60):
+def _wait_for_deployment_pod(context, namespace, deployment,
+                             timeout=60) -> List:
     label_selector = ','.join([
         f'{key}={value}'
         for key, value in deployment.spec.selector.match_labels.items()
@@ -824,11 +825,10 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
-    created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
-    def _create_pod_thread(i: int):
+    def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         if head_pod_name is None and i == 0:
             # First pod should be head if no head exists
@@ -925,18 +925,21 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             raise exceptions.InconsistentHighAvailabilityError(message)
 
     # Create pods in parallel
-    pods = subprocess_utils.run_in_parallel(_create_pod_thread,
-                                            list(range(to_start_count)),
-                                            _NUM_THREADS)
+    created_resources = subprocess_utils.run_in_parallel(_create_resource_thread,
+                                                          list(range(to_start_count)),
+                                                          _NUM_THREADS)
 
     if to_create_deployment:
-        deployments = copy.deepcopy(pods)
-        pods.clear()  # Since it's not pods. What created here are true pods.
-        for deployment in deployments:
-            pods.extend(_wait_for_deployment_pod(context, namespace,
-                                                 deployment))
+        deployments = copy.deepcopy(created_resources)
+        pods = [
+            pod for deployment in deployments
+            for pod in _wait_for_deployment_pod(context, namespace, deployment)
+        ]
+    else:
+        # If not creating deployments, 'created_resources' already holds Pod objects
+        pods = created_resources
 
-    # Process created pods
+    created_pods = {}
     for pod in pods:
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None and _is_head(pod):
