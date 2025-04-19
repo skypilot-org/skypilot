@@ -1051,8 +1051,8 @@ def _delete_services(name_prefix: str, namespace: str,
         namespace: Kubernetes namespace
         context: Kubernetes context
     """
-    for service_suffix in ['', '-ssh']:
-        service_name = f'{name_prefix}{service_suffix}'
+    # TODO(andy): We should use tag for the service filter.
+    for service_name in [name_prefix, f'{name_prefix}-ssh']:
         # Since we are not saving this lambda, it's a false positive.
         # TODO(andyl): Wait for
         # https://github.com/pylint-dev/pylint/issues/5263.
