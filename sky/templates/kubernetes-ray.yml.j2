@@ -688,10 +688,47 @@ available_node_types:
                 - name: init-copy-home
                   image: {{image_id}}
                   command: ["/bin/sh", "-c"]
-                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a {{k8s_high_availability_deployment_volume_mount_path}}/ /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
+                  args:
+                    - |
+                      # Define path for the marker file created by the main container upon successful startup.
+                      # This file persists in the PVC across Pod restarts.
+                      MARKER_FILE="/mnt/home/k8s_container_ready"
+                      SOURCE_PATH="{{k8s_high_availability_deployment_volume_mount_path}}"
+                      DEST_PATH="/mnt/home"
+
+                      # We only need to copy the initial home directory contents from the image
+                      # the *first* time a Pod uses a *new* PVC.
+                      # On subsequent Pod starts (e.g., after a crash or update), the PVC
+                      # already contains the necessary data (and potentially user modifications).
+                      # The presence of MARKER_FILE (created by the main container in a previous
+                      # successful run) indicates the PVC is already initialized. Checking for
+                      # it prevents unnecessary and time-consuming rsync operations on every restart.
+                      if [ ! -f "$MARKER_FILE" ]; then
+                        echo "Marker '$MARKER_FILE' not found. PVC likely needs initialization."
+                        echo "Copying initial home directory from image ($SOURCE_PATH/) to PVC ($DEST_PATH)..."
+
+                        # The -a flag includes preserving owner/group, which can cause permission
+                        # issues in PVCs if the image UID/GID differs from the container's runtime UID/GID.
+                        # --no-owner --no-group prevents this by using the initContainer's runtime user/group
+                        # for the copied files in the PVC, ensuring better compatibility.
+                        rsync -a --no-owner --no-group "$SOURCE_PATH/" "$DEST_PATH"
+
+                        # Check if rsync failed
+                        if [ $? -ne 0 ]; then
+                           echo "ERROR: rsync failed during home directory initialization." >&2
+                           exit 1 # Exit initContainer with error if copy fails
+                        fi
+                        echo "Home directory initialization copy complete."
+                      else
+                        # If marker exists, skip the copy
+                        echo "Marker '$MARKER_FILE' found. Skipping initial home directory copy."
+                      fi
+                      echo "Current contents of $DEST_PATH:"
+                      ls -la "$DEST_PATH"
                   volumeMounts:
+                    # Mount the persistent volume claim into the initContainer
                     - name: {{k8s_high_availability_deployment_volume_mount_name}}
-                      mountPath: /mnt/home
+                      mountPath: /mnt/home # Temporary mount point for initialization
               # should be replaced by pod spec
       {% endif %}
 setup_commands:
