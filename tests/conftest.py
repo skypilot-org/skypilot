@@ -421,14 +421,14 @@ def setup_docker_container(request):
 
         if worker_count == 0:
             logger.info('Last worker finished, cleaning up container...')
-            subprocess.run([
-                'docker', 'stop', '-t', '600',
-                docker_utils.get_container_name()
-            ],
-                           check=False)
-            subprocess.run(['docker', 'rm',
-                            docker_utils.get_container_name()],
-                           check=False)
+            # subprocess.run([
+            #     'docker', 'stop', '-t', '600',
+            #     docker_utils.get_container_name()
+            # ],
+            #                check=False)
+            # subprocess.run(['docker', 'rm',
+            #                 docker_utils.get_container_name()],
+            #                check=False)
             try:
                 os.remove(counter_file)
             except OSError:

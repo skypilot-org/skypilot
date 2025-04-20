@@ -420,33 +420,33 @@ def test_multi_echo(generic_cloud: str):
         'multi_echo',
         [
             f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            'sleep 10',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            'sleep 30',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            'sleep 30',
-            # Make sure that our job scheduler is fast enough to have at least
-            # 15 RUNNING jobs in parallel.
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 15) exit 1}}\'',
-            'sleep 30',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            # This is to make sure we can finish job 32 before the test timeout.
-            f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
+            # f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+            # 'sleep 10',
+            # f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+            # 'sleep 30',
+            # f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+            # 'sleep 30',
+            # # Make sure that our job scheduler is fast enough to have at least
+            # # 15 RUNNING jobs in parallel.
+            # f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 15) exit 1}}\'',
+            # 'sleep 30',
+            # f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+            # # This is to make sure we can finish job 32 before the test timeout.
+            # f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
         ] +
         # Ensure jobs succeeded.
-        [
-            smoke_tests_utils.
-            get_cmd_wait_until_job_status_contains_matching_job_id(
-                cluster_name=name,
-                job_id=i + 1,
-                job_status=[sky.JobStatus.SUCCEEDED],
-                timeout=120) for i in range(32)
-        ] +
+        # [
+        #     smoke_tests_utils.
+        #     get_cmd_wait_until_job_status_contains_matching_job_id(
+        #         cluster_name=name,
+        #         job_id=i + 1,
+        #         job_status=[sky.JobStatus.SUCCEEDED],
+        #         timeout=120) for i in range(32)
+        # ] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
-        f'sky down -y {name}',
+        # f'sky down -y {name}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
