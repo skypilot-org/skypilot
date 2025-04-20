@@ -11,7 +11,6 @@ import colorama
 
 import sky
 from sky import backends
-from sky import core
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
@@ -30,7 +29,6 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
