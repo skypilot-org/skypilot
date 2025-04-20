@@ -646,31 +646,6 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     sky_logging.print(stdout)
 
 
-def _make_dummy(cached_record: Dict[str, str]) -> Dict[str, Any]:
-    """Dummy data for service status.
-
-    sky serve status --endpoint deadlocks if we do not return
-    the complete schema.
-    """
-    service_name = cached_record['name']
-    endpoint = cached_record['endpoint']
-    return {
-        'name': service_name,
-        'active_versions': [],
-        'controller_job_id': -1,
-        'uptime': -1,
-        'status': serve_state.ServiceStatus.READY,
-        'controller_port': None,
-        'load_balancer_port': None,
-        'endpoint': endpoint,
-        'policy': None,
-        'requested_resources_str': '',
-        'load_balancing_policy': '',
-        'tls_encrypted': False,
-        'replica_info': []
-    }
-
-
 @usage_lib.entrypoint
 def status(service_names: Optional[Union[str, List[str]]] = None,
            use_endpoint_cache: bool = False) -> List[Dict[str, Any]]:
@@ -739,7 +714,7 @@ def status(service_names: Optional[Union[str, List[str]]] = None,
 
     if use_endpoint_cache:
         cached_records = serve_state.get_endpoint_cache(service_names)
-        logger.info(f'Cached Records: {cached_records}')
+        logger.info(f'Cached serve endpoint records: {cached_records}')
         if (service_names is None or
                 len(service_names) == 0) and not cached_records:
             logger.debug('Unspecified status check returned 0 cached '
@@ -749,7 +724,7 @@ def status(service_names: Optional[Union[str, List[str]]] = None,
             logger.debug('Number of services queried did not match number of '
                          'cached records. Querying controller.')
         else:
-            return [_make_dummy(c) for c in cached_records]
+            return cached_records
 
     try:
         backend_utils.check_network_connection()

@@ -564,7 +564,7 @@ def delete_all_versions(service_name: str) -> None:
 # == Endpoint Cache functions ==
 def get_endpoint_cache(
     service_names: Optional[Union[str,
-                                  List[str]]] = None) -> List[Dict[str, str]]:
+                                  List[str]]] = None) -> List[Dict[str, Any]]:
     """Gets endpoint cache values for services."""
     if service_names is None:
         service_names = []
@@ -582,7 +582,11 @@ def get_endpoint_cache(
                 SELECT * FROM endpoint_cache
                 WHERE service_name IN ({placeholder})""",
                 tuple(service_names)).fetchall()
-    return [{'name': row[0], 'endpoint': row[1]} for row in rows]
+    return [{
+        'name': row[0],
+        'endpoint': row[1],
+        'status': ServiceStatus.READY
+    } for row in rows]
 
 
 def set_endpoint_cache(service_name: str, endpoint: str) -> None:
