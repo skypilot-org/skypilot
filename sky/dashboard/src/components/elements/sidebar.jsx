@@ -149,46 +149,53 @@ export function TopBar() {
     return router.pathname.startsWith(path);
   };
 
-  // Get link classes based on active state
+  // Modify the getLinkClasses function to handle mobile styles
   const getLinkClasses = (path) => {
     const isActive = isActivePath(path);
-    return `inline-flex items-center space-x-2 px-1 pt-1 border-b-2 ${
-      isActive
-        ? 'border-transparent text-blue-600'
-        : 'border-transparent hover:text-blue-600 hover:border-blue-600'
+    const baseClasses = isActive
+      ? 'border-transparent text-blue-600'
+      : 'border-transparent hover:text-blue-600 hover:border-blue-600';
+
+    return `inline-flex items-center border-b-2 ${baseClasses} ${
+      isMobile ? 'px-2 py-1' : 'px-1 pt-1 space-x-2'
     }`;
   };
 
   return (
     <div className="fixed top-0 left-0 right-0 bg-white z-30 h-14 px-4 border-b border-gray-200 shadow-sm">
       <div className="flex items-center h-full">
-        <div className="flex items-center space-x-4 mr-6">
+        <div
+          className={`flex items-center ${isMobile ? 'space-x-2 mr-2' : 'space-x-4 mr-6'}`}
+        >
           <Link
             href="/"
             className="flex items-center px-1 pt-1 h-full"
             prefetch={false}
           >
-            <Image
-              src={`${BASE_PATH}/skypilot.svg`}
-              alt="SkyPilot Logo"
-              width={80}
-              height={80}
-              priority
-              style={{ width: '80px', height: '80px' }}
-              className="h-12 w-12"
-            />
+            <div
+              className={`${isMobile ? 'h-16 w-16' : 'h-20 w-20'} flex items-center justify-center`}
+            >
+              <Image
+                src={`${BASE_PATH}/skypilot.svg`}
+                alt="SkyPilot Logo"
+                width={80}
+                height={80}
+                priority
+                className="w-full h-full object-contain"
+              />
+            </div>
           </Link>
         </div>
 
-        {/* Navigation links - now aligned to the left */}
-        <div className="hidden md:flex items-center space-x-6 mr-6">
+        {/* Navigation links - now visible on mobile with icons only */}
+        <div className="flex items-center space-x-2 md:space-x-6 mr-6">
           <Link
             href="/clusters"
             className={getLinkClasses('/clusters')}
             prefetch={false}
           >
             <ServerIcon className="w-4 h-4" />
-            <span>Clusters</span>
+            {!isMobile && <span>Clusters</span>}
           </Link>
 
           <Link
@@ -197,90 +204,95 @@ export function TopBar() {
             prefetch={false}
           >
             <BriefcaseIcon className="w-4 h-4" />
-            <span>Jobs</span>
+            {!isMobile && <span>Jobs</span>}
           </Link>
 
-          <div className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400">
+          <div
+            className={`inline-flex items-center ${isMobile ? 'px-2 py-1' : 'px-1 pt-1'} text-gray-400`}
+          >
             <ServiceBellIcon className="w-4 h-4" />
-            <span>Services</span>
-            <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-              Soon
-            </span>
+            {!isMobile && (
+              <>
+                <span className="ml-2">Services</span>
+                <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
+                  Soon
+                </span>
+              </>
+            )}
           </div>
         </div>
 
-        {/* External links - pushed to the right with ml-auto */}
-        <div className="hidden md:flex items-center space-x-2 ml-auto">
-          <div className="flex items-center space-x-1">
-            <CustomTooltip
-              content="Documentation"
-              className="text-sm text-muted-foreground"
+        {/* External links - now shows only icons on mobile */}
+        <div
+          className={`flex items-center space-x-1 ${isMobile ? 'ml-0' : 'ml-auto'}`}
+        >
+          <CustomTooltip
+            content="Documentation"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://skypilot.readthedocs.io/en/latest/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+              title="Docs"
             >
-              <a
-                href="https://skypilot.readthedocs.io/en/latest/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center px-3 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
-                title="Docs"
-              >
-                <span className="mr-1">Docs</span>
-                <ExternalLinkIcon className="w-3.5 h-3.5" />
-              </a>
-            </CustomTooltip>
+              {!isMobile && <span className="mr-1">Docs</span>}
+              <ExternalLinkIcon
+                className={`${isMobile ? 'w-4 h-4' : 'w-3.5 h-3.5'}`}
+              />
+            </a>
+          </CustomTooltip>
 
-            <div className="border-l border-gray-200 h-6 mx-1"></div>
+          <div className="border-l border-gray-200 h-6 mx-1"></div>
 
-            <CustomTooltip
-              content="GitHub Repository"
-              className="text-sm text-muted-foreground"
+          {/* Keep the rest of the external links as icons only */}
+          <CustomTooltip
+            content="GitHub Repository"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://github.com/skypilot-org/skypilot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="GitHub"
             >
-              <a
-                href="https://github.com/skypilot-org/skypilot"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                title="GitHub"
-              >
-                <span className="flex items-center justify-center">
-                  <GitHubIcon className="w-5 h-5" />
-                </span>
-              </a>
-            </CustomTooltip>
+              <GitHubIcon className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+            </a>
+          </CustomTooltip>
 
-            <CustomTooltip
-              content="Join Slack"
-              className="text-sm text-muted-foreground"
+          <CustomTooltip
+            content="Join Slack"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://slack.skypilot.co/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="Slack"
             >
-              <a
-                href="https://slack.skypilot.co/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                title="Slack"
-              >
-                <span className="flex items-center justify-center">
-                  <SlackIcon className="w-5 h-5" />
-                </span>
-              </a>
-            </CustomTooltip>
+              <SlackIcon className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+            </a>
+          </CustomTooltip>
 
-            <CustomTooltip
-              content="Leave Feedback"
-              className="text-sm text-muted-foreground"
+          <CustomTooltip
+            content="Leave Feedback"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://github.com/skypilot-org/skypilot/issues/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="Leave Feedback"
             >
-              <a
-                href="https://github.com/skypilot-org/skypilot/issues/new?assignees=&labels=type%3A+enhancement&title="
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                title="Leave Feedback"
-              >
-                <span className="flex items-center justify-center">
-                  <CommentFeedbackIcon className="w-5 h-5" />
-                </span>
-              </a>
-            </CustomTooltip>
-          </div>
+              <CommentFeedbackIcon
+                className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`}
+              />
+            </a>
+          </CustomTooltip>
         </div>
       </div>
     </div>
