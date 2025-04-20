@@ -106,40 +106,6 @@ def _get_all_replica_targets(
     }
 
 
-def _maybe_restart_controller(
-        stopped_message: str, spinner_message: str
-) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
-    """Restart controller if it is stopped.
-
-    The logs of SkyServe controller don't have staleness, and all
-    service logs are removed after the service is terminated.
-    So there is no `refresh` parameter than jobs controller."""
-    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-    try:
-        handle = backend_utils.is_controller_accessible(
-            controller=controller_type, stopped_message=stopped_message)
-    except exceptions.ClusterNotUpError as e:
-        handle = None
-        controller_status = e.cluster_status
-
-    if handle is not None:
-        return handle
-
-    sky_logging.print(f'{colorama.Fore.YELLOW}'
-                      f'Restarting {controller_type.value.name}...'
-                      f'{colorama.Style.RESET_ALL}')
-
-    rich_utils.force_update_status(
-        ux_utils.spinner_message(f'{spinner_message} - restarting '
-                                 'controller'))
-    handle = core.start(cluster_name=controller_type.value.cluster_name)
-    controller_status = status_lib.ClusterStatus.UP
-    rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
-
-    assert handle is not None, controller_status
-    return handle
-
-
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -896,17 +862,14 @@ def sync_down_logs(
         ValueError: Arguments not valid.
     """
     # Step 0) get the controller handle
-    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-    handle = _maybe_restart_controller(
-        stopped_message=(
-            f'{controller_type.value.name.capitalize()} is stopped. To '
-            f'get the logs, run: {colorama.Style.BRIGHT}sky serve logs '
-            f'-r --sync-down {service_name}{colorama.Style.RESET_ALL}'),
-        spinner_message='Retrieving service logs',
-    )
-
-    backend: backends.CloudVmRayBackend = (
-        backend_utils.get_backend_from_handle(handle))
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking service status...')):
+        controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=controller_type.value.default_hint_if_non_existent)
+        backend: backends.CloudVmRayBackend = (
+            backend_utils.get_backend_from_handle(handle))
 
     requested_components: Set[serve_utils.ServiceComponent] = set()
     if not targets:
