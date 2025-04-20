@@ -207,6 +207,7 @@ gcpCredentials:
   enabled: false
   # TODO(romilb): This can be made optional by using the project in the key json by default.
   projectId: null
+  # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
 
 # Set securityContext for the api pod
