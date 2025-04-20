@@ -141,13 +141,25 @@ If you install SkyPilot from source, before starting the API server, run the fol
 
 .. code-block:: bash
 
-  cd sky/dashboard
+  $ cd sky/dashboard
   # Install all dependencies in the current directory
-  npm install
+  $ npm install
   # Build
-  npm run build
+  $ npm run build
 
 Then you can start your API server and access the dashboard at `${API_Server_Endpoint}/dashboard`.
+
+The clusters page:
+
+.. image:: ../images/dashboard-clusters.png
+  :width: 800
+  :alt: Clusters dashboard
+
+The managed jobs page:
+
+.. image:: ../images/dashboard-managed-jobs.png
+  :width: 800
+  :alt: Managed jobs dashboard
 
 .. _ssh:
 
