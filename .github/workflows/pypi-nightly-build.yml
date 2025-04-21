@@ -25,10 +25,24 @@ jobs:
     needs: check-date
     if: ${{ needs.check-date.outputs.should_run != 'false' }}
     outputs:
-      build_number: ${{ steps.extract_build_number.outputs.build_number }}
+      buildkite_json: ${{ steps.trigger_buildkite.outputs.json }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+          cache-dependency-path: 'sky/dashboard/package-lock.json'
+      - name: Install dashboard dependencies
+        run: |
+          cd sky/dashboard
+          npm ci
+      - name: Build dashboard
+        run: |
+          cd sky/dashboard
+          npm run build
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -73,20 +87,19 @@ jobs:
           ignore_pipeline_branch_filter: true
           build_env_vars: '{"ARGS": "--aws"}'
 
-      # Extract build number from response JSON
-      - name: Extract build number
-        id: extract_build_number
-        run: |
-          build_number=$(echo '${{ steps.trigger_buildkite.outputs.json }}' | jq -r '.number')
-          echo "build_number=$build_number" >> $GITHUB_OUTPUT
+  extract-build-number:
+    needs: nightly-build-pypi
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.nightly-build-pypi.outputs.buildkite_json }}
 
   wait-for-buildkite:
-    needs: nightly-build-pypi
+    needs: extract-build-number
     uses: ./.github/workflows/wait-for-buildkite.yml
     with:
       organization: "skypilot-1"
       pipeline: "smoke-tests"
-      build_number: ${{ needs.nightly-build-pypi.outputs.build_number }}
+      build_number: ${{ needs.extract-build-number.outputs.build_number }}
       timeout_minutes: 120
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
@@ -114,4 +127,3 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
-

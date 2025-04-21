@@ -1408,8 +1408,8 @@ def kubernetes_node_info(
         The request ID of the Kubernetes node info request.
 
     Request Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.post(
@@ -1812,14 +1812,18 @@ def api_login(endpoint: Optional[str] = None) -> None:
     server_common.check_server_healthy(endpoint)
 
     # Set the endpoint in the config file
-    config_path = pathlib.Path(skypilot_config.CONFIG_PATH).expanduser()
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
     with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not skypilot_config.loaded():
+        if not config_path.exists():
             config_path.touch()
             config = {'api_server': {'endpoint': endpoint}}
         else:
-            config = skypilot_config.set_nested(('api_server', 'endpoint'),
-                                                endpoint)
-        common_utils.dump_yaml(str(config_path), config)
-        click.secho(f'Logged in to SkyPilot API server at {endpoint}',
-                    fg='green')
+            config = skypilot_config.get_user_config()
+            config.set_nested(('api_server', 'endpoint'), endpoint)
+        common_utils.dump_yaml(str(config_path), dict(config))
+        dashboard_msg = f'Dashboard: {endpoint}/dashboard'
+        click.secho(
+            f'Logged in to SkyPilot API server at {endpoint}.'
+            f' {dashboard_msg}',
+            fg='green')

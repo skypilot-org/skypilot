@@ -148,4 +148,3 @@ Dynamically updating clusters to use
 ----------------------------------------------
 
 You can configure SkyPilot to dynamically fetch Kubernetes cluster configs and enforce restrictions on which clusters are used. Refer to :ref:`dynamic-kubernetes-contexts-update-policy` for more.
-

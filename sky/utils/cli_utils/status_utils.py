@@ -6,8 +6,8 @@ import click
 import colorama
 
 from sky import backends
-from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -198,12 +198,19 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 
     if cluster_records:
         if controller_name is not None:
-            autostop_minutes = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            controller = controller_utils.Controllers.from_name(controller_name)
+            if controller is None:
+                raise ValueError(f'Controller {controller_name} not found.')
+            autostop_minutes, _ = (
+                controller_utils.get_controller_autostop_config(
+                    controller=controller))
+            if autostop_minutes is not None:
+                autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
+                                f'idle for {autostop_minutes}min)'
+                                f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
-                       f'{colorama.Style.DIM} (will be autostopped if idle for '
-                       f'{autostop_minutes}min)'
-                       f'{colorama.Style.RESET_ALL}')
+                       f'{autostop_str}')
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')

@@ -45,7 +45,6 @@ from sky.utils import controller_utils
 # when the controller being on Azure, which takes a long time for launching
 # step.
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
@@ -68,7 +67,7 @@ def test_managed_jobs_basic(generic_cloud: str):
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=360
-                if generic_cloud in ['azure', 'kubernetes'] else 120),
+                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -91,7 +90,6 @@ def test_managed_jobs_basic(generic_cloud: str):
 
 
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_cli_exit_codes(generic_cloud: str):
     """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
     name = smoke_tests_utils.get_cluster_name()
@@ -762,7 +760,6 @@ def test_managed_jobs_cancellation_gcp():
 
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
     timeout = 7 * 60  # 7 mins
@@ -935,7 +932,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_az_cmd} && exit 1; }} || true'))
-        timeout *= 2
+        timeout *= 4
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
@@ -1087,7 +1084,6 @@ def test_managed_jobs_tpu():
 # ---------- Testing env for managed jobs ----------
 @pytest.mark.no_vast  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
     name = smoke_tests_utils.get_cluster_name()
@@ -1119,7 +1115,6 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

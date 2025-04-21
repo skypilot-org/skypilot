@@ -353,19 +353,25 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
-        if down:
-            raise ValueError('Using autodown (rather than autostop) is not '
-                             'supported for SkyPilot controllers. Pass '
-                             '`down=False` or omit it instead.')
-        if idle_minutes_to_autostop is not None:
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
+        if down or idle_minutes_to_autostop:
+            arguments = []
+            if down:
+                arguments.append('`down`')
+            if idle_minutes_to_autostop is not None:
+                arguments.append('`idle_minutes_to_autostop`')
+            arguments_str = ' and '.join(arguments) + ' argument'
+            if len(arguments) > 1:
+                arguments_str += 's'
             raise ValueError(
-                'Passing a custom autostop setting is currently not '
+                'Passing per-request autostop/down settings is currently not '
                 'supported when starting SkyPilot controllers. To '
-                'fix: omit the `idle_minutes_to_autostop` argument to use the '
-                f'default autostop settings (got: {idle_minutes_to_autostop}).')
-        idle_minutes_to_autostop = (
-            constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+                f'fix: omit the {arguments_str} to use the '
+                f'default autostop settings from config.')
+        idle_minutes_to_autostop, down = (
+            controller_utils.get_controller_autostop_config(
+                controller=controller))
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
@@ -629,26 +635,21 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
-    # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
-    if not down and not is_cancel:
-        try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.STOP})
-        except exceptions.NotSupportedError as e:
-            raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
-                f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  {_stop_not_supported_message(handle.launched_resources)}.'
-            ) from e
-
-    # Check if autodown is required and supported
+    # Check if autostop/autodown is required and supported
     if not is_cancel:
         try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.AUTO_TERMINATE})
+            if down:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.AUTODOWN})
+            else:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.STOP})
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.AUTOSTOP})
         except exceptions.NotSupportedError as e:
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
