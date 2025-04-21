@@ -292,6 +292,8 @@ class Test(NamedTuple):
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
     env: Optional[Dict[str, str]] = None
+    # Skip this test if the command condition met (returns 0).
+    skip_if_command_met: Optional[str] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -391,7 +393,7 @@ def run_one_test(test: Test) -> None:
         # Update the environment variable to use the temporary file
         env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
 
-    for command in test.commands:
+    def run_one_command(command: str, raise_on_timeout: bool = False):
         write(f'+ {command}\n')
         flush()
         proc = subprocess.Popen(
@@ -412,17 +414,30 @@ def run_one_test(test: Test) -> None:
             flush()
             # Kill the current process.
             proc.terminate()
+            if raise_on_timeout:
+                raise e
             proc.returncode = 1  # None if we don't set it.
-            break
+        return proc.returncode
 
-        if proc.returncode:
+    if test.skip_if_command_met is not None:
+        write('Checking the precondition of this test...\n')
+        flush()
+        if run_one_command(test.skip_if_command_met,
+                           raise_on_timeout=True) == 0:
+            test.echo('Skipping this test...')
+            return
+
+    returncode = 0
+    for command in test.commands:
+        returncode = run_one_command(command)
+        if returncode:
             break
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command}' if proc.returncode else ''
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
+               if returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+    reason = f'\nReason: {command}' if returncode else ''
     msg = (f'{outcome}.'
            f'{reason}')
     if log_to_stdout:
@@ -432,7 +447,7 @@ def run_one_test(test: Test) -> None:
         test.echo(msg)
         write(msg)
 
-    if (proc.returncode == 0 or
+    if (returncode == 0 or
             pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
@@ -443,11 +458,60 @@ def run_one_test(test: Test) -> None:
             env=env_dict,
         )
 
-    if proc.returncode:
+    if returncode:
         if log_to_stdout:
             raise Exception(f'test failed')
         else:
             raise Exception(f'test failed: less -r {log_file.name}')
+
+
+def get_api_server_url() -> str:
+    """Get the API server URL in the test environment."""
+    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+        return docker_utils.get_api_server_endpoint_inside_docker()
+    return server_common.get_server_url()
+
+
+def get_dashboard_cluster_status_request_id() -> str:
+    """Get the status of the cluster from the dashboard."""
+    body = payloads.StatusBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_dashboard_jobs_queue_request_id() -> str:
+    """Get the jobs queue from the dashboard."""
+    body = payloads.JobsQueueBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_response_from_request_id(request_id: str) -> Any:
+    """Waits for and gets the result of a request.
+    Args:
+        request_id: The request ID of the request to get.
+    Returns:
+        The ``Request Returns`` of the specified request. See the documentation
+        of the specific requests above for more details.
+    Raises:
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
+    """
+    response = requests.get(
+        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+        timeout=15)
+    request_task = None
+    if response.status_code == 200:
+        request_task = requests_lib.Request.decode(
+            requests_lib.RequestPayload(**response.json()))
+        return request_task.get_return_value()
+    raise RuntimeError(f'Failed to get request {request_id}: '
+                       f'{response.status_code} {response.text}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
@@ -647,55 +711,3 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
     finally:
         for file in files:
             os.unlink(file)
-
-
-def get_api_server_url() -> str:
-    """Get the API server URL in the test environment."""
-    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
-        return docker_utils.get_api_server_endpoint_inside_docker()
-    return server_common.get_server_url()
-
-
-def get_dashboard_cluster_status_request_id() -> str:
-    """Get the status of the cluster from the dashboard."""
-    body = payloads.StatusBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/status',
-        json=json.loads(body.model_dump_json()))
-    return server_common.get_request_id(response)
-
-
-def get_dashboard_jobs_queue_request_id() -> str:
-    """Get the jobs queue from the dashboard."""
-    body = payloads.JobsQueueBody(all_users=True,)
-    response = requests.post(
-        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
-        json=json.loads(body.model_dump_json()))
-    return server_common.get_request_id(response)
-
-
-def get_response_from_request_id(request_id: str) -> Any:
-    """Waits for and gets the result of a request.
-
-    Args:
-        request_id: The request ID of the request to get.
-
-    Returns:
-        The ``Request Returns`` of the specified request. See the documentation
-        of the specific requests above for more details.
-
-    Raises:
-        Exception: It raises the same exceptions as the specific requests,
-            see ``Request Raises`` in the documentation of the specific requests
-            above.
-    """
-    response = requests.get(
-        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
-        timeout=15)
-    request_task = None
-    if response.status_code == 200:
-        request_task = requests_lib.Request.decode(
-            requests_lib.RequestPayload(**response.json()))
-        return request_task.get_return_value()
-    raise RuntimeError(f'Failed to get request {request_id}: '
-                       f'{response.status_code} {response.text}')
