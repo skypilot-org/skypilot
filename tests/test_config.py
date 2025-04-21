@@ -785,7 +785,7 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
             # Warning should be logged when the override config
             # is different from the original config
             mock_logger.warning.assert_called_once_with(
-                'The following keys ([["aws", "vpc_name"]]) have different '
+                'The following keys (["aws.vpc_name"]) have different '
                 'values in the client SkyPilot config with the server and will '
                 'be ignored. Remove these keys to disable this warning. If you '
                 'want to specify it, please modify it on server side or contact '

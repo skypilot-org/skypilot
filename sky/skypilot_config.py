@@ -421,7 +421,7 @@ def override_skypilot_config(
         value = override_configs.pop_nested(key, default_value=None)
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
-            disallowed_diff_keys.append(key)
+            disallowed_diff_keys.append('.'.join(key))
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:
