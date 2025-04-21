@@ -24,13 +24,13 @@ Using AWS SSO
      * - *Supported features:*
        - SSO credentials
        - Static credentials
-     * - Launch AWS instances with S3 buckets
+     * - Use S3 buckets on an AWS cluster
        - |:white_check_mark:|
        - |:white_check_mark:|
-     * - Use S3 buckets from other clouds
+     * - Use S3 buckets on a cluster from other clouds
        - |:x:|
        - |:white_check_mark:|
-     * - Use managed jobs across multiple clouds
+     * - Run managed jobs across multiple clouds
        - |:yellow_circle:| [1]_
        - |:white_check_mark:|
 
