@@ -369,7 +369,7 @@ def run_one_test(test: Test) -> None:
         env_dict.update(test.env)
 
     # Create a temporary config file with API server config only if running with remote server
-    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+    if is_remote_server_test():
         temp_config = tempfile.NamedTemporaryFile(mode='w',
                                                   suffix='.yaml',
                                                   delete=False)
@@ -649,9 +649,13 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
             os.unlink(file)
 
 
+def is_remote_server_test() -> bool:
+    return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+
+
 def get_api_server_url() -> str:
     """Get the API server URL in the test environment."""
-    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+    if is_remote_server_test():
         return docker_utils.get_api_server_endpoint_inside_docker()
     return server_common.get_server_url()
 
