@@ -11,6 +11,7 @@ import sky
 from sky import skypilot_config
 import sky.exceptions
 from sky.server.requests import payloads
+from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -521,7 +522,8 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
 @mock.patch('sky.sky_logging.logging_enabled', return_value=True)
 def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
                                                   mock_logging_enabled):
-    with mock.patch('sky.server.requests.payloads.logger') as mock_logger:
+    with mock.patch('sky.skypilot_config.logger') as mock_logger:
+        mock_logger.level = INFO
         # Call the function
         result = payloads.get_override_skypilot_config_from_client()
 
@@ -754,11 +756,12 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
     """Test override_skypilot_config with disallowed keys."""
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
+        mock_logger.level = INFO
         os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
         # Create original config file
         config_path = tmp_path / 'config.yaml'
         _create_config_file(config_path)
-        monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+        monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         skypilot_config.safe_reload_config()
 
         same_configs = {'aws': {'vpc_name': f'{VPC_NAME}',}}
