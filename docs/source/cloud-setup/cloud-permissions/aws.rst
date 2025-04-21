@@ -37,7 +37,7 @@ Using AWS SSO
   .. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
 
 
-To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. If you install v2, you may need to ``deactivate`` (for venv) or ``conda deactivate`` to avoid the v1 CLI taking precedence.
+To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the aboslute path to the CLI (by default, `/usr/local/aws-cli/aws`) or create an alias `alias awsv2=/usr/local/aws-cli/aws`.
 
 You can use the following to check version:
 
