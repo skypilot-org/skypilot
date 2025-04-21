@@ -20,6 +20,7 @@ import {
 } from '@/components/elements/icons';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
+import { useMobile } from '@/hooks/useMobile';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -49,23 +50,8 @@ export function useSidebar() {
 
 export function SideBar({ highlighted = 'clusters' }) {
   const { isSidebarOpen, toggleSidebar } = useSidebar();
-  const [isMobile, setIsMobile] = useState(false);
+  const isMobile = useMobile();
   const sidebarRef = useRef(null);
-
-  // Listen to window resize to detect mobile devices
-  useEffect(() => {
-    function handleResize() {
-      setIsMobile(window.innerWidth < 768);
-    }
-
-    // Check on initial load
-    handleResize();
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
 
   // Common link style
   const linkStyle = (isHighlighted) => `
@@ -122,27 +108,7 @@ export function SideBar({ highlighted = 'clusters' }) {
 
 export function TopBar() {
   const router = useRouter();
-
-  // State to track if the viewport is mobile
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Effect to handle resize and determine if mobile
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    // Set on mount
-    handleResize();
-
-    // Add event listener
-    window.addEventListener('resize', handleResize);
-
-    // Cleanup
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
+  const isMobile = useMobile();
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
@@ -187,8 +153,10 @@ export function TopBar() {
           </Link>
         </div>
 
-        {/* Navigation links - now visible on mobile with icons only */}
-        <div className="flex items-center space-x-2 md:space-x-6 mr-6">
+        {/* Navigation links - reduce spacing on mobile */}
+        <div
+          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-6'} ${isMobile ? 'mr-2' : 'mr-6'}`}
+        >
           <Link
             href="/clusters"
             className={getLinkClasses('/clusters')}

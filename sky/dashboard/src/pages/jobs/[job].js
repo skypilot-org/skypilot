@@ -10,6 +10,7 @@ import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { useMobile } from '@/hooks/useMobile';
 
 function JobDetails() {
   const router = useRouter();
@@ -25,7 +26,7 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [logsRefreshKey, setLogsRefreshKey] = useState(0);
   const [controllerLogsRefreshKey, setControllerLogsRefreshKey] = useState(0);
-
+  const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
     if (!loading && isInitialLoad) {
@@ -165,7 +166,7 @@ function JobDetails() {
               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
             >
               <RotateCwIcon className="w-4 h-4 mr-1.5" />
-              <span>Refresh</span>
+              {!isMobile && <span>Refresh</span>}
             </button>
           </Tooltip>
         </div>
