@@ -14,37 +14,61 @@ from sky.utils import common_utils
 logger = sky_logging.init_logger(__name__)
 
 GPU_NAME_MAP = {
-    'A100-80GB': 'NVIDIA A100 80GB PCIe',
-    'A100-40GB': 'NVIDIA A100-PCIE-40GB',
+    # AMD
+    'MI300X':        'AMD Instinct MI300X OAM',
+
+    # NVIDIA A-series
+    'A100-80GB':     'NVIDIA A100 80GB PCIe',
     'A100-80GB-SXM': 'NVIDIA A100-SXM4-80GB',
-    'A30': 'NVIDIA A30',
-    'A40': 'NVIDIA A40',
-    'RTX3070': 'NVIDIA GeForce RTX 3070',
-    'RTX3080': 'NVIDIA GeForce RTX 3080',
-    'RTX3080Ti': 'NVIDIA GeForce RTX 3080 Ti',
-    'RTX3090': 'NVIDIA GeForce RTX 3090',
-    'RTX3090Ti': 'NVIDIA GeForce RTX 3090 Ti',
-    'RTX4070Ti': 'NVIDIA GeForce RTX 4070 Ti',
-    'RTX4080': 'NVIDIA GeForce RTX 4080',
-    'RTX4090': 'NVIDIA GeForce RTX 4090',
-    # Following instance is displayed as SXM at the console
-    # but the ID from the API appears as HBM
-    'H100-SXM': 'NVIDIA H100 80GB HBM3',
-    'H100': 'NVIDIA H100 PCIe',
-    'L4': 'NVIDIA L4',
-    'L40': 'NVIDIA L40',
-    'RTX4000-Ada-SFF': 'NVIDIA RTX 4000 SFF Ada Generation',
-    'RTX4000-Ada': 'NVIDIA RTX 4000 Ada Generation',
-    'RTX6000-Ada': 'NVIDIA RTX 6000 Ada Generation',
-    'RTXA4000': 'NVIDIA RTX A4000',
-    'RTXA4500': 'NVIDIA RTX A4500',
-    'RTXA5000': 'NVIDIA RTX A5000',
-    'RTXA6000': 'NVIDIA RTX A6000',
-    'RTX5000': 'Quadro RTX 5000',
-    'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
-    'V100-16GB-SXM2': 'V100-SXM2-16GB',
-    'RTXA2000': 'NVIDIA RTX A2000',
-    'V100-16GB-PCIe': 'Tesla V100-PCIE-16GB'
+    'A30':           'NVIDIA A30',
+    'A40':           'NVIDIA A40',
+
+    # NVIDIA B-series
+    'B200':          'NVIDIA B200',
+
+    # GeForce
+    'RTX3070':       'NVIDIA GeForce RTX 3070',
+    'RTX3080':       'NVIDIA GeForce RTX 3080',
+    'RTX3080Ti':     'NVIDIA GeForce RTX 3080 Ti',
+    'RTX3090':       'NVIDIA GeForce RTX 3090',
+    'RTX3090Ti':     'NVIDIA GeForce RTX 3090 Ti',
+    'RTX4070Ti':     'NVIDIA GeForce RTX 4070 Ti',
+    'RTX4080':       'NVIDIA GeForce RTX 4080',
+    'RTX4080SUPER':  'NVIDIA GeForce RTX 4080 SUPER',
+    'RTX4090':       'NVIDIA GeForce RTX 4090',
+    'RTX5080':       'NVIDIA GeForce RTX 5080',
+    'RTX5090':       'NVIDIA GeForce RTX 5090',
+
+    # NVIDIA H100/H200
+    'H100-SXM':      'NVIDIA H100 80GB HBM3', # displayed as SXM at the console but the ID from the API appears as HBM
+    'H100-NVL':      'NVIDIA H100 NVL',
+    'H100':          'NVIDIA H100 PCIe',
+    'H200-SXM':      'NVIDIA H200',
+
+    # NVIDIA L-series
+    'L4':            'NVIDIA L4',
+    'L40':           'NVIDIA L40',
+    'L40S':          'NVIDIA L40S',
+
+    # Ada generation (GeForce & RTX A)
+    'RTX2000-Ada':   'NVIDIA RTX 2000 Ada Generation',
+    'RTX4000-Ada':   'NVIDIA RTX 4000 Ada Generation',
+    'RTX4000-Ada-SFF':'NVIDIA RTX 4000 SFF Ada Generation',
+    'RTX5000-Ada':   'NVIDIA RTX 5000 Ada Generation',
+    'RTX6000-Ada':   'NVIDIA RTX 6000 Ada Generation',
+
+    # NVIDIA RTX A-series
+    'RTXA2000':      'NVIDIA RTX A2000',
+    'RTXA4000':      'NVIDIA RTX A4000',
+    'RTXA4500':      'NVIDIA RTX A4500',
+    'RTXA5000':      'NVIDIA RTX A5000',
+    'RTXA6000':      'NVIDIA RTX A6000',
+
+    # Tesla V100 variants
+    'V100-16GB-FHHL':'Tesla V100-FHHL-16GB',
+    'V100-16GB-SXM2':'Tesla V100-SXM2-16GB',
+    'V100-32GB-SXM2':'Tesla V100-SXM2-32GB',
+    'V100-16GB-PCIe':'Tesla V100-PCIE-16GB',
 }
 
 
