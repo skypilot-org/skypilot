@@ -29,7 +29,7 @@ SSO login has limited functionality *across multiple clouds*. If you use multipl
    * - Use S3 buckets on a cluster in another cloud
      - |:x:|
      - |:white_check_mark:|
-   * - Run managed jobs across multiple clouds
+   * - Run :ref:`managed jobs <managed-jobs>` across multiple clouds
      - |:yellow_circle:| [1]_
      - |:white_check_mark:|
 
