@@ -479,7 +479,8 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
         maybe_config_path = os.path.expanduser(cli_config[0])
         if os.path.isfile(maybe_config_path):
             if len(cli_config) != 1:
-                raise ValueError('Cannot use multiple --config flags with a config file.')
+                raise ValueError(
+                    'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
             parsed_config = OmegaConf.to_object(
