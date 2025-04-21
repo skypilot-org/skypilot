@@ -31,12 +31,27 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# These non-skypilot environment variables will be updated from the local
+# environment on each request when running a local API server.
+# We should avoid adding variables here, but we should include credential-
+# related variables.
+EXTERNAL_LOCAL_ENV_VARS = [
+    # Allow overriding the AWS authentication.
+    'AWS_PROFILE',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    # Allow overriding the GCP authentication.
+    'GOOGLE_APPLICATION_CREDENTIALS',
+]
+
 
 @annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
         if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+            env_vars[env_var] = os.environ[env_var]
+        if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
