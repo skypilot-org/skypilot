@@ -184,7 +184,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
 .. note::
 
-    You can either configure credentials before or after the first deployment in :ref:`Step 2 <sky-api-server-helm-deploy-command>`. If you configure credentials after the first deployment, an API server restart will be automatically triggered to apply the new credentials. Refer to :ref:`sky-api-server-upgrade` for more details about the potential downtime and mitigation.
+    When you configure credentials after the API server is deployed, an API server restart will be automatically triggered to apply the new credentials. Refer to :ref:`sky-api-server-upgrade` for more details about the potential downtime and mitigation.
 
 .. tab-set::
 
@@ -200,7 +200,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             The default permissions granted to the API server works out of box. For further hardening, you can refer to :ref:`Setting minimum permissions in helm deployment <minimum-permissions-in-helm>` to understand the permissions and how to customize them.
 
-       To authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file with :ref:`necessary permissions <cloud-permissions-kubernetes>`:
+        To authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file with :ref:`necessary permissions <cloud-permissions-kubernetes>`:
 
         .. code-block:: bash
 
