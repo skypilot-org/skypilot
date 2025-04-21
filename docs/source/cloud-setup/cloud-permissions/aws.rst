@@ -14,27 +14,26 @@ Using AWS SSO
 `AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (Successor to AWS Single Sign-On, or SSO) is supported.
 
 .. _sso-feature-compat:
-.. note::
-  SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
-  .. list-table::
-     :header-rows: 1
-     :stub-columns: 1
+SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
-     * - *Supported features:*
-       - SSO credentials
-       - Static credentials
-     * - Use S3 buckets on an AWS cluster
-       - |:white_check_mark:|
-       - |:white_check_mark:|
-     * - Use S3 buckets on a cluster from other clouds
-       - |:x:|
-       - |:white_check_mark:|
-     * - Run managed jobs across multiple clouds
-       - |:yellow_circle:| [1]_
-       - |:white_check_mark:|
+.. list-table::
+   :header-rows: 1
 
-  .. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
+   * - *Supported features:*
+     - SSO credentials
+     - Static credentials
+   * - Use S3 buckets on an AWS cluster
+     - |:white_check_mark:|
+     - |:white_check_mark:|
+   * - Use S3 buckets on a cluster in another cloud
+     - |:x:|
+     - |:white_check_mark:|
+   * - Run managed jobs across multiple clouds
+     - |:yellow_circle:| [1]_
+     - |:white_check_mark:|
+
+.. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
 
 
 To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the aboslute path to the CLI (by default, `/usr/local/aws-cli/aws`) or create an alias `alias awsv2=/usr/local/aws-cli/aws`.
@@ -136,7 +135,7 @@ Follow these steps to create a new AWS user:
 6. Use the newly created access key to configure your credentials with the AWS CLI:
 
    .. code-block:: console
-     :emphasize-lines: 9-10
+     :emphasize-lines: 13-14
 
      $ # Configure your AWS credentials
      $ aws configure
@@ -174,6 +173,8 @@ Example of mixing the default profile and another profile:
 
     $ # A cluster launched under a different profile.
     $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
+
+If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` won't work.
 
 
 .. _aws-troubleshooting:
