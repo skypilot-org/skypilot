@@ -1,9 +1,24 @@
 """Common utilities for the load balancer benchmark."""
 
 import dataclasses
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+import sky
 
 OAIChatHistory = List[Dict[str, str]]
+
+sky_sgl_enhanced_cluster = 'sky-global'
+sgl_cluster = 'router'
+
+
+def sky_serve_status() -> List[Dict[str, Any]]:
+    req = sky.serve.status(None)
+    return sky.client.sdk.get(req)
+
+
+def sky_status() -> List[Dict[str, Any]]:
+    req = sky.status()
+    return sky.client.sdk.get(req)
 
 
 @dataclasses.dataclass
