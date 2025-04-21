@@ -3,7 +3,7 @@ Nebius
 
 .. _nebius-service-account:
 
-Service Account
+Service account
 ----------------
 
 To use *Service Account* authentication, follow these steps:
