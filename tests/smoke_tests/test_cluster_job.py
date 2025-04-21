@@ -445,7 +445,10 @@ def test_multi_echo(generic_cloud: str):
         # ] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
-        [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
+        [
+            f'cat ~/.sky/generated/ssh/{name}',
+            f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
+        ],
         # f'sky down -y {name}',
         timeout=20 * 60,
     )
