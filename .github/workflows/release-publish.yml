@@ -136,12 +136,3 @@ jobs:
           else
             echo "Test branch ${TEST_BRANCH} does not exist, skipping"
           fi
-
-          # Check if release branch exists and delete it
-          RELEASE_BRANCH="releases/${VERSION}"
-          if git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
-            echo "Deleting release branch: ${RELEASE_BRANCH}"
-            git push origin --delete ${RELEASE_BRANCH}
-          else
-            echo "Release branch ${RELEASE_BRANCH} does not exist, skipping"
-          fi
