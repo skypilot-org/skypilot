@@ -22,7 +22,7 @@ Prerequisites
 
     You can also deploy the API server on cloud VMs using an existing SkyPilot installation. See :ref:`sky-api-server-cloud-deploy`.
 
-Step 1: Prepare the environment
+Step 1: Create a namespace and add Helm repository
 --------------------------------------------------
 
 The API server will be deployed in a namespace of your choice. You can either create the namespace manually:
