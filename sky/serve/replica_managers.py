@@ -257,14 +257,6 @@ class ReplicaStatusProperty:
     # is set to True and it can fail immediately due to spot availability.
     failed_spot_availability: bool = False
 
-    def remove_terminated_replica(self) -> bool:
-        """Whether to remove the replica record from the replica table.
-
-        If not, the replica will stay in the replica table permanently to
-        notify the user that something is wrong with the user code / setup.
-        """
-        return self.is_scale_down
-
     def unrecoverable_failure(self) -> bool:
         """Whether the replica fails and cannot be recovered.
 
@@ -730,6 +722,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                            replica_drain_delay_seconds: int,
                            is_scale_down: bool = False,
                            purge: bool = False) -> None:
+        left_in_record = not (is_scale_down or purge)
+        if left_in_record:
+            assert sync_down_logs, (
+                'For the replica left in the record, '
+                'the logs should always be synced down. '
+                'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_process_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,

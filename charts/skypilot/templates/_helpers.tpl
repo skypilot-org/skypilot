@@ -43,3 +43,18 @@ Create the name of the service account to use
 {{ .Release.Name }}-api-sa
 {{- end -}}
 {{- end -}} 
+
+{{/*
+Create the namespace if not exist
+*/}}
+{{- define "skypilot.ensureNamespace" -}}
+{{ if not (lookup "v1" "Namespace" "" .) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ . }}
+  annotations:
+    {{/* Keep the namespace when uninstalling the chart, so that the deployed sky resources (if any) can still work even if the API server get uninstalled */ -}}
+    helm.sh/resource-policy: keep
+{{ end -}}
+{{- end -}}

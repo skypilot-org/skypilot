@@ -145,7 +145,7 @@ def test_nested_config(monkeypatch) -> None:
 
 def test_no_config(monkeypatch) -> None:
     """Test that the config is not loaded if the config file does not exist."""
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         '/tmp/does_not_exist')
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         '/tmp/does_not_exist')
@@ -157,7 +157,7 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
         f.write('')
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'empty.yaml')
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         tmp_path / 'empty.yaml')
@@ -183,7 +183,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
                 resources:
                     disk_size: 256
         """)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'valid.yaml')
     skypilot_config._reload_config()
     proxy_config = skypilot_config.get_nested(
@@ -200,7 +200,7 @@ def test_invalid_field_config(monkeypatch, tmp_path) -> None:
             vpc_name: {VPC_NAME}
             not_a_field: 123
         """))
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
         skypilot_config._reload_config()
@@ -220,7 +220,7 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
                 cpus: 4
                 disk_size: 50
         """))
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
         skypilot_config._reload_config()
@@ -237,7 +237,7 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
                 resources:
                     cloud: notacloud
         """))
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
         skypilot_config._reload_config()
@@ -258,7 +258,7 @@ def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
             gcp:
                 vpc_name: {valid_vpc}
             """))
-        monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+        monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         # Should not raise an exception
         skypilot_config._reload_config()
         assert skypilot_config.get_nested(('gcp', 'vpc_name'),
@@ -275,7 +275,7 @@ def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
             gcp:
                 vpc_name: {invalid_vpc}
             """))
-        monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+        monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         with pytest.raises(ValueError) as e:
             skypilot_config._reload_config()
         assert 'Invalid config YAML' in e.value.args[0]
@@ -291,7 +291,7 @@ def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
                 - projects/my-project/reservations/my-reservation
                 - projects/my-project/reservations/my-reservation2
         """))
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'valid.yaml')
     skypilot_config._reload_config()
 
@@ -302,7 +302,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     # Load from a config file
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     skypilot_config._reload_config()
     # Check that the config is loaded with the expected values
     assert skypilot_config.loaded()
@@ -328,7 +328,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     new_config2 = skypilot_config.set_nested(('aws', 'ssh_proxy_command'), None)
     new_config_path = tmp_path / 'new_config.yaml'
     common_utils.dump_yaml(new_config_path, new_config2)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', new_config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config._reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
@@ -343,7 +343,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     del new_config3['aws']['use_internal_ips']
     new_config_path = tmp_path / 'new_config3.yaml'
     common_utils.dump_yaml(new_config_path, new_config3)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', new_config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config._reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None) is None
@@ -362,7 +362,7 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'does_not_exist')
     skypilot_config._reload_config()
     assert skypilot_config.loaded()
@@ -387,7 +387,7 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
                                   enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
     skypilot_config._reload_config()
     task_path = tmp_path / 'task.yaml'
@@ -422,7 +422,7 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
                                         enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
     _reload_config()
     task_path = tmp_path / 'task.yaml'
@@ -445,7 +445,7 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
                                   enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
     skypilot_config._reload_config()
     task_path = tmp_path / 'task.yaml'
@@ -481,7 +481,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
                                       enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
     skypilot_config._reload_config()
 
@@ -518,7 +518,9 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
             [('aws', 'security_group')])
 @mock.patch('sky.skypilot_config.loaded_config_path',
             return_value='/path/to/config.yaml')
-def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
+@mock.patch('sky.sky_logging.logging_enabled', return_value=True)
+def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
+                                                  mock_logging_enabled):
     with mock.patch('sky.server.requests.payloads.logger') as mock_logger:
         # Call the function
         result = payloads.get_override_skypilot_config_from_client()
@@ -540,7 +542,7 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
     # Create original config file
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     skypilot_config._reload_config()
 
     # Store original values
@@ -583,7 +585,7 @@ def test_override_skypilot_config_without_original_config(
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     # Create original config file
     config_path = tmp_path / 'non_existent.yaml'
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH', config_path)
     skypilot_config._reload_config()
     assert not skypilot_config._dict
@@ -625,12 +627,11 @@ def test_override_skypilot_config_without_original_config(
 def test_hierarchical_client_config(monkeypatch, tmp_path):
     """Test that hierarchical client config is loaded correctly."""
     # prepare a clean test environment
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SERVER_CONFIG, raising=False)
     # test with default config files
     default_user_config_path = tmp_path / 'user_config.yaml'
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         default_user_config_path)
     default_user_config_path.write_text(
         textwrap.dedent(f"""\
@@ -652,20 +653,6 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     skypilot_config._reload_config()
 
-    # test the client config is not affected by the server config files
-    server_config_path = tmp_path / 'server_config.yaml'
-    monkeypatch.setattr(skypilot_config, '_SERVER_CONFIG_PATH',
-                        server_config_path)
-    server_config_path.write_text(
-        textwrap.dedent(f"""\
-            aws:
-                labels:
-                    default-server-config: present
-            """))
-    skypilot_config._reload_config()
-    assert skypilot_config.get_nested(
-        ('aws', 'labels', 'default-server-config'), None) is None
-
     # Check the two configs are merged correctly with
     # project config overriding user config
     assert skypilot_config.get_nested(('gcp', 'labels', 'default-user-config'),
@@ -677,7 +664,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     # Test with env vars
     env_user_config_path = tmp_path / 'env_user_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(env_user_config_path))
     env_user_config_path.write_text(
         textwrap.dedent(f"""\
@@ -703,7 +690,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
                                       None) == 'present'
     assert skypilot_config.get_nested(('gcp', 'labels', 'source'),
                                       None) == 'env-project-config'
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
 
     skypilot_config._reload_config()
@@ -712,7 +699,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     # test with missing default config files
     non_existent_config_path = tmp_path / 'non_existent.yaml'
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         non_existent_config_path)
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         non_existent_config_path)
@@ -721,11 +708,11 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
 
     # if config files specified by env vars are missing,
     # error out
-    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(non_existent_config_path))
     with pytest.raises(FileNotFoundError):
         skypilot_config._reload_config()
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
     skypilot_config._reload_config()
 
     monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
@@ -739,7 +726,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
     # this test is to document the existing behavior, not
     # necessarily to enforce the desired behavior.
     env_user_config_path = tmp_path / 'env_user_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(env_user_config_path))
     env_user_config_path.write_text(
         textwrap.dedent(f"""\
@@ -795,16 +782,15 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
 def test_hierarchical_server_config(monkeypatch, tmp_path):
     """Test that hierarchical server config is loaded correctly."""
     # prepare a clean test environment
-    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SERVER_CONFIG, raising=False)
     # set the environment variable to indicate that the current process is
     # running as a server.
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
 
     # test with default config files
     default_server_config_path = tmp_path / 'server_config.yaml'
-    monkeypatch.setattr(skypilot_config, '_SERVER_CONFIG_PATH',
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         default_server_config_path)
     default_server_config_path.write_text(
         textwrap.dedent(f"""\
@@ -818,7 +804,7 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
 
     # test with env vars
     env_server_config_path = tmp_path / 'env_server_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_SERVER_CONFIG,
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(env_server_config_path))
     env_server_config_path.write_text(
         textwrap.dedent(f"""\
@@ -829,22 +815,13 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
     skypilot_config._reload_config()
     assert skypilot_config.get_nested(('aws', 'labels', 'env-server-config'),
                                       None) == 'present'
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SERVER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
 
     skypilot_config._reload_config()
     assert skypilot_config.get_nested(
         ('aws', 'labels', 'default-server-config'), None) == 'present'
 
     # test the server config is not affected by the client config files
-    env_user_config_path = tmp_path / 'env_user_config.yaml'
-    monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH',
-                        env_user_config_path)
-    env_user_config_path.write_text(
-        textwrap.dedent(f"""\
-            gcp:
-                labels:
-                    env-user-config: present
-            """))
     env_project_config_path = tmp_path / 'env_project_config.yaml'
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         env_project_config_path)

@@ -46,7 +46,7 @@ def request_body_env_vars() -> dict:
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
-    env_vars.pop(skypilot_config.ENV_VAR_USER_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     return env_vars
 
@@ -406,6 +406,15 @@ class ServeLogsBody(RequestBody):
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
+
+
+class ServeDownloadLogsBody(RequestBody):
+    """The request body for the serve download logs endpoint."""
+    service_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    replica_ids: Optional[List[int]] = None
 
 
 class ServeStatusBody(RequestBody):

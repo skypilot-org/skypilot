@@ -22,7 +22,11 @@ def mock_server_api_version(monkeypatch, version):
         if '/api/health' in url:
             mock_response = mock.MagicMock()
             mock_response.status_code = 200
-            mock_response.json.return_value = {'api_version': version}
+            mock_response.json.return_value = {
+                'api_version': version,
+                'version': '1.0.0',
+                'commit': '1234567890'
+            }
             return mock_response
         return original_get(url, *args, **kwargs)
 
@@ -174,7 +178,7 @@ class TestServerVersion:
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(cli.status, [])
-        assert "SkyPilot API server is too old: v2 (client version is v3)." in str(
+        assert "Client and local API server version mismatch" in str(
             result.exception)
         assert result.exit_code == 1
 
@@ -187,7 +191,7 @@ class TestServerVersion:
         result = cli_runner.invoke(cli.status, [])
 
         # Verify the error message contains correct versions
-        assert "SkyPilot API server is too old: v3 (client version is v2)." in str(
+        assert "Client and local API server version mismatch" in str(
             result.exception)
         assert result.exit_code == 1
 

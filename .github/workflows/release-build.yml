@@ -27,7 +27,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip'
 
       # Find the latest release branch to use as base branch for tests
       - name: Find latest release branch
@@ -59,6 +58,36 @@ jobs:
             echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
           fi
           echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Verify release version > latest PyPI version
+        id: verify_version
+        run: |
+          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          echo "Determined release version: ${RELEASE_VERSION}"
+
+          # Get the latest version from PyPI using JSON API
+          LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+          echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
+
+          # Parse latest PyPI version
+          PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
+          PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+          PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
+
+          # Calculate expected next versions
+          NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
+          NEXT_MINOR_VERSION="${PYPI_MAJOR}.$((PYPI_MINOR + 1)).0"
+
+          echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
+          echo "Expected next minor version: ${NEXT_MINOR_VERSION}"
+
+          # Check if the determined release version is one of the expected next versions
+          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ] || [ "${RELEASE_VERSION}" = "${NEXT_MINOR_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is a valid next version."
+          else
+            echo "Error: Determined release version ${RELEASE_VERSION} must be either the next patch version (${NEXT_PATCH_VERSION}) or the next minor version (${NEXT_MINOR_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
+            exit 1
+          fi
 
       - name: Set release version and commit changes
         id: commit_changes
@@ -168,7 +197,7 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   create-pr:
-    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test]
+    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test, extract-smoke-tests, extract-quicktest]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

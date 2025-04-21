@@ -96,7 +96,7 @@ provider:
             name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
-    # Role for the skypilot-system namespace to create FUSE device manager and
+    # Role for the skypilot-system namespace to create fusermount-server and
     # any other system components.
     autoscaler_skypilot_system_role:
         kind: Role
@@ -384,8 +384,12 @@ available_node_types:
                 set +e
                 
                 if [ ! -z "$MISSING_PACKAGES" ]; then
-                  echo "Installing missing packages: $MISSING_PACKAGES";
-                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $MISSING_PACKAGES;
+                  # Install missing packages individually to avoid failure installation breaks the whole install process,
+                  # e.g. fuse3 is not available on some distributions.
+                  echo "Installing missing packages individually: $MISSING_PACKAGES";
+                  for pkg in $MISSING_PACKAGES; do
+                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $pkg || echo "Optional package $pkg installation failed, skip.";
+                  done
                 fi;
 
                 {% if k8s_fuse_device_required %}

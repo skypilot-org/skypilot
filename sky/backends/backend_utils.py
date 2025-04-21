@@ -2582,11 +2582,36 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
+    def _update_record_with_resources(record: Optional[Dict[str, Any]]) -> None:
+        """Add the resources to the record."""
+        if record is None:
+            return
+        handle = record['handle']
+        if handle is None:
+            return
+        record['nodes'] = handle.launched_nodes
+        if handle.launched_resources is None:
+            return
+        record['cloud'] = (f'{handle.launched_resources.cloud}'
+                           if handle.launched_resources.cloud else None)
+        record['region'] = (f'{handle.launched_resources.region}'
+                            if handle.launched_resources.region else None)
+        record['cpus'] = (f'{handle.launched_resources.cpus}'
+                          if handle.launched_resources.cpus else None)
+        record['memory'] = (f'{handle.launched_resources.memory}'
+                            if handle.launched_resources.memory else None)
+        record['accelerators'] = (f'{handle.launched_resources.accelerators}'
+                                  if handle.launched_resources.accelerators else
+                                  None)
+
     # Add auth_config to the records
     for record in records:
         _update_record_with_credentials_and_resources_str(record)
 
     if refresh == common.StatusRefreshMode.NONE:
+        # Add resources to the records
+        for record in records:
+            _update_record_with_resources(record)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -2662,6 +2687,9 @@ def get_clusters(
         for cluster_name, e in failed_clusters:
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
 
+    # Add resources to the records
+    for record in kept_records:
+        _update_record_with_resources(record)
     return kept_records
 
 

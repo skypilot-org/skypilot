@@ -188,8 +188,5 @@ def decode_job_status(
 
 @register_decoders('kubernetes_node_info')
 def decode_kubernetes_node_info(
-        return_value: Dict[str, Any]) -> Dict[str, models.KubernetesNodeInfo]:
-    return {
-        node_name: models.KubernetesNodeInfo(**node_info)
-        for node_name, node_info in return_value.items()
-    }
+        return_value: Dict[str, Any]) -> models.KubernetesNodesInfo:
+    return models.KubernetesNodesInfo.from_dict(return_value)

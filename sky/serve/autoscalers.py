@@ -676,8 +676,12 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             # because the provisioning spot can fail to UP due to the capacity
             # issue, and on-demand should fill the gap between the required
             # number of spot and ready spot.
-            num_ondemand_to_provision += (num_spot_to_provision -
-                                          num_ready_spot)
+            # When scaling down spot instances, it is possible that the number
+            # of ready spot is more than the number of spot to provision, thus
+            # generate a negative number. In this case, we don't need to
+            # provision on-demand instances.
+            num_ondemand_to_provision += max(
+                0, num_spot_to_provision - num_ready_spot)
 
         # Make sure we don't launch on-demand fallback for
         # overprovisioned replicas.

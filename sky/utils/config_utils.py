@@ -171,7 +171,6 @@ def _get_nested(configs: Optional[Dict[str, Any]],
             curr = value
         else:
             return default_value
-    logger.debug(f'Config: {".".join(keys)} -> {curr}')
     return curr
 
 

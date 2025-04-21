@@ -29,6 +29,20 @@ jobs:
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+          cache-dependency-path: 'sky/dashboard/package-lock.json'
+      - name: Install dashboard dependencies
+        run: |
+          cd sky/dashboard
+          npm ci
+      - name: Build dashboard
+        run: |
+          cd sky/dashboard
+          npm run build
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
