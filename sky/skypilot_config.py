@@ -464,7 +464,7 @@ def override_skypilot_config(
         _config_overridden = False
 
 
-def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     """Composes the skypilot CLI config.
     CLI config can either be:
     - A path to a config file
@@ -475,18 +475,16 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
         return config_utils.Config()
 
     config_source = 'CLI'
-    maybe_config_path = os.path.expanduser(cli_config)
     try:
-        if os.path.isfile(maybe_config_path):
+        maybe_config_path = os.path.expanduser(cli_config[0])
+        if len(cli_config) == 1 and os.path.isfile(maybe_config_path):
             config_source = maybe_config_path
             # cli_config is a path to a config file
             parsed_config = OmegaConf.to_object(
                 OmegaConf.load(maybe_config_path))
         else:  # cli_config is a comma-separated list of key-value pairs
-            variables: List[str] = []
-            variables = cli_config.split(',')
             parsed_config = OmegaConf.to_object(
-                OmegaConf.from_dotlist(variables))
+                OmegaConf.from_dotlist(cli_config))
         _validate_config(parsed_config, config_source)
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
@@ -497,7 +495,7 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     return parsed_config
 
 
-def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     """Applies the CLI provided config.
     SAFETY:
     This function directly modifies the global _dict variable.

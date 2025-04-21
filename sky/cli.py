@@ -302,13 +302,9 @@ def config_option(expose_value: bool):
         try:
             if len(value) == 0:
                 return None
-            elif len(value) > 1:
-                raise ValueError('argument specified multiple times. '
-                                 'To specify multiple configs, use '
-                                 '--config nested.key1=val1,another.key2=val2')
             else:
                 # Apply the config overrides to the skypilot config.
-                return skypilot_config.apply_cli_config(value[0])
+                return skypilot_config.apply_cli_config(value)
         except ValueError as e:
             raise click.BadParameter(f'{str(e)}') from e
 
