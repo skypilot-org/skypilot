@@ -100,8 +100,9 @@ jobs:
           git checkout ${MANUAL_CREATED_RELEASE_BRANCH}
 
           # Make version changes
-          echo "Updating __version__ in sky/__init__.py to ${RELEASE_VERSION}..."
+          echo "Updating __version__ in sky/__init__.py and Dockerfile to ${RELEASE_VERSION}..."
           sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/skypilot-nightly\[all\]/skypilot[all]==${RELEASE_VERSION}/g" Dockerfile
 
           # Create the test branch from the *current* state (base branch with version bump)
           TEST_BRANCH="test_releases/${RELEASE_VERSION}"
@@ -110,6 +111,7 @@ jobs:
 
           # Commit the version change on the new test branch
           git add sky/__init__.py
+          git add Dockerfile
           git commit -m "Release ${RELEASE_VERSION}"
 
           # Get the new commit SHA from the test branch
