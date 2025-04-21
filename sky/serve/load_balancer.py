@@ -924,9 +924,11 @@ class SkyServeLoadBalancer:
                     self._req_check_conf(target) for target in steal_targets
                 ]
                 conf_results = await asyncio.gather(*conf_tasks)
-                total_queue_size = sum(result.queue_size +
-                                       result.replica_queue_size_total
-                                       for result in conf_results)
+                self_replica_queue_size_total = sum(
+                    (await self._replica_pool.active_requests()).values())
+                total_queue_size = sum(
+                    result.queue_size + result.replica_queue_size_total
+                    for result in conf_results) + self_replica_queue_size_total
                 if total_queue_size <= 0:
                     continue
                 self_num_replicas = len(self._replica_pool.ready_replicas())
@@ -935,14 +937,19 @@ class SkyServeLoadBalancer:
                     for result in conf_results) + self_num_replicas
                 if total_num_replicas <= 0:
                     continue
-                self_replica_queue_size_total = sum(
-                    (await self._replica_pool.active_requests()).values())
-                fair_share = (total_queue_size // total_num_replicas *
-                              self_num_replicas)
+                unit_fair_share = total_queue_size // total_num_replicas
+                fair_share = unit_fair_share * self_num_replicas
                 if fair_share <= 0:
                     continue
                 fair_share_remaining = (fair_share -
                                         self_replica_queue_size_total)
+                logger.info(f'total_queue_size: {total_queue_size}, '
+                            'self_replica_queue_size_total: '
+                            f'{self_replica_queue_size_total}, '
+                            f'total_num_replicas: {total_num_replicas}, '
+                            f'self_num_replicas: {self_num_replicas}, '
+                            f'fair_share: {fair_share}, '
+                            f'fair_share_remaining: {fair_share_remaining}')
                 for target, conf_result in zip(steal_targets, conf_results):
                     if fair_share_remaining <= 0:
                         break
@@ -951,20 +958,20 @@ class SkyServeLoadBalancer:
                         continue
                     # Steal until the target reaches the fair share.
                     # Dont steal more than the actual queue size.
-                    target_should_remain = (
-                        conf_result.queue_size +
-                        conf_result.replica_queue_size_total -
-                        fair_share * conf_result.num_replicas)
-                    num_steal = min(fair_share_remaining, target_should_remain,
+                    should_steal = (conf_result.queue_size +
+                                    conf_result.replica_queue_size_total -
+                                    unit_fair_share * conf_result.num_replicas)
+                    num_steal = min(fair_share_remaining, should_steal,
                                     conf_result.queue_size_actual)
                     if num_steal <= 0:
                         continue
                     fair_share_remaining -= num_steal
-                    logger.info(f'Steal from {target} with '
-                                f'{num_steal} requests; '
-                                f'queue_size: {conf_result.queue_size}, '
-                                'queue_size_actual: '
-                                f'{conf_result.queue_size_actual}.')
+                    logger.info(
+                        f'Steal from {target} with {num_steal} requests; '
+                        f'queue_size: {conf_result.queue_size}, '
+                        f'queue_size_actual: {conf_result.queue_size_actual}, '
+                        f'should_steal: {should_steal}, '
+                        f'fair_share_remaining: {fair_share_remaining}.')
                     await self._req_steal_request(target, num_steal)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in request stealing loop: '
@@ -1076,6 +1083,7 @@ class SkyServeLoadBalancer:
                 steal_entries.append(steal_entry)
 
             logger.info(
+                f'[time={time.time():.4f}] '
                 f'num steal entries: {len(steal_entries)}, '
                 f'num_steal: {num_steal}, '
                 f'actual_size: {await self._request_queue.actual_size()}')
@@ -1105,9 +1113,8 @@ class SkyServeLoadBalancer:
 
             end_time = time.perf_counter()
             if remaining_to_steal > 0:
-                logger.info(
-                    f'{remaining_to_steal} requests was NOT stolen and remained '
-                    f'from {source_lb_url}.')
+                logger.info(f'{remaining_to_steal} requests was NOT '
+                            f'stolen and remained from {source_lb_url}.')
             t_select_lb = select_lb_end_time - select_lb_start_time
             t_sort = sort_end_time - sort_start_time
             logger.info(f'Time to select LB: {t_select_lb:.4f}s, '
