@@ -237,7 +237,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             kubernetes:
               allowed_contexts:
-              # The hosting Kubernetes cluster, you cannot set if the hosting is disabled by kubernetesCredentials.useApiServerCluster=false
+              # The hosting Kubernetes cluster, you cannot set this if the hosting cluster is disabled by kubernetesCredentials.useApiServerCluster=false
               - in-cluster
               # The additional Kubernetes context names in the kubeconfig you configured
               - context1
