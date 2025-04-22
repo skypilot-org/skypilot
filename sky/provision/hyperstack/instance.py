@@ -36,6 +36,7 @@ class HyperstackStatus(enum.Enum):
     STOPPING = ('STOPPING', HyperstackStatusGroup.PENDING)
     SHUTOFF = ('SHUTOFF', HyperstackStatusGroup.STOPPED)
     DELETING = ('DELETING', HyperstackStatusGroup.PENDING)
+    ERROR = ('ERROR', HyperstackStatusGroup.PENDING)
     ACTIVE = ('ACTIVE', HyperstackStatusGroup.ACTIVE)
 
     @staticmethod
@@ -61,6 +62,7 @@ class HyperstackStatus(enum.Enum):
             HyperstackStatus.STOPPING: ClusterStatus.STOPPED,
             HyperstackStatus.SHUTOFF: ClusterStatus.STOPPED,
             HyperstackStatus.DELETING: None,
+            HyperstackStatus.ERROR: None,
             HyperstackStatus.ACTIVE: ClusterStatus.UP,
         }
         return statuses[hs]
