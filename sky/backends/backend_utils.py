@@ -702,8 +702,8 @@ def write_cluster_config(
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
-    is_docker = ('true' if to_provision.extract_docker_image() is not None else
-                 'false')
+    is_custom_docker = ('true' if to_provision.extract_docker_image()
+                        is not None else 'false')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -744,7 +744,8 @@ def write_cluster_config(
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS.replace(
                         '{conda_auto_activate}',
-                        conda_auto_activate).replace('{is_docker}', is_docker),
+                        conda_auto_activate).replace('{is_custom_docker}',
+                                                     is_custom_docker),
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',
