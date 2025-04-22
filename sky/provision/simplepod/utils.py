@@ -179,15 +179,13 @@ class SimplePodClient:
         if template_id:
             payload['instanceTemplate'] = f'/instances/templates/{template_id}'
         else:
-            payload['instanceTemplate'] = f'/instances/templates/2131'
+            payload['instanceTemplate'] = f'/instances/templates/2164'
 
         if env_variables:
             payload['envVariables'] = env_variables
 
-        print(f'Creating instance.... {name} with {gpu_count} GPUs of type {gpu_type}')
         response = self._make_request('POST', 'instances', json=payload)
         instance_id = response.json()['id']
-        print(f'Instance created with ID: {instance_id}')
         name = name.replace('-', '_')
         self.update_instance(instance_id, name=name)
         return str(response.json()['id'])
