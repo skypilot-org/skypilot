@@ -6,6 +6,8 @@ import dataclasses
 import importlib
 import json
 import os
+from pathlib import Path
+import tempfile
 import time
 from typing import List
 
@@ -74,9 +76,12 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
     rp(f'{"KV Cache Hit Rate":=^50}')
     rp(f'Mean: {total_cached_tokens / total_input_tokens:.3f}')
 
-    input('Press Enter to save results...')
+    if not args.yes:
+        input('Press Enter to save results...')
 
-    result_file = f'@temp/result/metric/{args.exp_name}.json'
+    result_file = (Path(args.output_dir).expanduser() / 'result' / 'metric' /
+                   f'{args.exp_name}.json')
+    result_file.parent.mkdir(parents=True, exist_ok=True)
 
     with open(result_file, 'w', encoding='utf-8') as fout:
         value = {
@@ -89,7 +94,7 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
         fout.write(json.dumps(value) + '\n')
 
 
-def prepare_lb_endpoints_and_confirm(backend_url: str) -> List[str]:
+def prepare_lb_endpoints_and_confirm(backend_url: str, yes: bool) -> List[str]:
     with rich_utils.client_status(
             ux_utils.spinner_message(
                 '[bold cyan]Checking External LB Endpoints[/]')) as spinner:
@@ -115,15 +120,20 @@ def prepare_lb_endpoints_and_confirm(backend_url: str) -> List[str]:
             # raise ValueError(f'Unknown backend URL: {backend_url}')
         print(f'External Load Balancer Endpoints: {colorama.Fore.GREEN}'
               f'{endpoints}{colorama.Style.RESET_ALL}')
-        spinner.update('Press Enter to confirm the endpoints are correct...')
-        input()
+        if not yes:
+            spinner.update(
+                'Press Enter to confirm the endpoints are correct...')
+            input()
         return endpoints
 
 
 async def pull_queue_status(exp_name: str, endpoints: List[str],
-                            event: asyncio.Event) -> None:
-    tmp_name = f'@temp/trash/result_queue_size_{exp_name}.txt'
-    dest_name = f'@temp/result/queue_size/{exp_name}.txt'
+                            event: asyncio.Event, output_dir: str) -> None:
+    tmp_name = os.path.join(tempfile.gettempdir(),
+                            f'result_queue_size_{exp_name}.txt')
+    dest_name = (Path(output_dir).expanduser() / 'result' / 'queue_size' /
+                 f'{exp_name}.txt')
+    dest_name.parent.mkdir(parents=True, exist_ok=True)
     print(f'Pulling queue status:      tail -f {tmp_name} | jq')
     if SGL_ROUTER_IDENTIFIER in endpoints:
         while not event.is_set():
@@ -148,7 +158,7 @@ async def pull_queue_status(exp_name: str, endpoints: List[str],
 
 
 def main():
-    # py examples/serve/external-lb/bench.py --data-path @temp/test.jsonl
+    # py examples/serve/external-lb/bench.py
     # --exp-name sky-exp --num-branches 2 --num-users 5 --num-questions 1
     # --backend-url vllmtest.aws.cblmemo.net:8000
     all_workloads_file = os.listdir(
@@ -158,6 +168,10 @@ def main():
     parser.add_argument('--exp-name', type=str, default='sky-exp')
     parser.add_argument('--num-users', type=int, default=1)
     parser.add_argument('--backend-url', type=str, default=None)
+    parser.add_argument('-y', '--yes', action='store_true')
+    parser.add_argument('--output-dir', type=str, default='@temp')
+    parser.add_argument('--skip-queue-status', action='store_true')
+    parser.add_argument('--skip-tasks', action='store_true')
     parser.add_argument('--workload',
                         type=str,
                         required=True,
@@ -174,15 +188,25 @@ def main():
     # Parse all arguments after adding workload-specific ones
     args = parser.parse_args()
 
-    endpoints = prepare_lb_endpoints_and_confirm(args.backend_url)
+    if args.skip_queue_status:
+        endpoints = []
+    else:
+        endpoints = prepare_lb_endpoints_and_confirm(args.backend_url, args.yes)
 
     async def run_all():
         event = asyncio.Event()
-        queue_status_task = asyncio.create_task(
-            pull_queue_status(args.exp_name, endpoints, event))
-        await launch_task(args, workload_module)
+        if not args.skip_queue_status:
+            queue_status_task = asyncio.create_task(
+                pull_queue_status(args.exp_name, endpoints, event,
+                                  args.output_dir))
+        if not args.skip_tasks:
+            await launch_task(args, workload_module)
+        else:
+            await asyncio.to_thread(
+                input, 'Skipping tasks. Press Enter to continue...')
         event.set()
-        await queue_status_task
+        if not args.skip_queue_status:
+            await queue_status_task
 
     asyncio.run(run_all())
 

@@ -1,0 +1,15 @@
+envs:
+  HF_TOKEN:
+  CMD:
+
+resources:
+  cloud: aws
+  cpus: 8+
+
+setup: |
+  source ~/skypilot-runtime/bin/activate
+  pip install datasets==3.0.1 openai==1.68.0
+
+run: |
+  source ~/skypilot-runtime/bin/activate
+  $CMD

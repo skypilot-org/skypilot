@@ -5,6 +5,8 @@ import asyncio
 import collections
 import copy
 import json
+import os
+import subprocess
 import time
 import traceback
 from typing import Any, Awaitable, Dict, List, Union
@@ -14,9 +16,10 @@ from rich import print as rp
 from sky.lbbench import oai
 from sky.lbbench import utils
 
+dataset_link = 'https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl'  # pylint: disable=line-too-long
+
 
 def add_args(parser: argparse.ArgumentParser) -> None:
-    # wget https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl  # pylint: disable=line-too-long
     parser.add_argument('--data-path', type=str, default='@temp/test.jsonl')
     parser.add_argument('--num-questions', type=int, default=200)
     parser.add_argument('--num-branches', type=int, default=2)
@@ -111,7 +114,11 @@ def launch_user_tasks(
         num_users: int) -> List[Awaitable[List[utils.OAIChatHistory]]]:
     uid2questions = collections.defaultdict(list)
     idx = 0
-    with open(args.data_path, encoding='utf-8') as fin:
+    dp = args.data_path
+    if not os.path.exists(dp):
+        rp(f'Data path {dp} does not exist. Downloading...')
+        subprocess.run(['wget', f'wget {dataset_link}', '-O', dp], check=True)
+    with open(dp, encoding='utf-8') as fin:
         for line in fin:
             if line.startswith('#'):
                 continue
