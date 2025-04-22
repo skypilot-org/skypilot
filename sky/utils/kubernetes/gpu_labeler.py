@@ -56,7 +56,8 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
         print(reason)
         return
 
-    unlabeled_gpu_nodes = kubernetes_utils.get_unlabeled_accelerator_nodes()
+    unlabeled_gpu_nodes = kubernetes_utils.get_unlabeled_accelerator_nodes(
+        context=context)
 
     if not unlabeled_gpu_nodes:
         print('No unlabeled GPU nodes found in the cluster. If you have '
