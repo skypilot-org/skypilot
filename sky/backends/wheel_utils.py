@@ -67,21 +67,22 @@ def _build_sky_wheel() -> pathlib.Path:
     # See https://github.com/skypilot-org/skypilot/issues/5311.
     version_on_disk = common.get_skypilot_version_on_disk()
     if version_on_disk != sky.__version__:
-        logger.warning('Wheel build: The installed SkyPilot version is '
-                       'different from the running code.\n'
-                       f'{colorama.Style.DIM}'
-                       f'running version: {sky.__version__}\n'
-                       f'installed version: {version_on_disk}\n'
-                       f'{colorama.Style.RESET_ALL}'
-                       # The following message only applies to local API server.
-                       # We have no way to tell from here if this is a remote or
-                       # local API server. But we expect this to happen much
-                       # more commonly to a local API server, so just print
-                       # the hint regardless.
-                       f'{colorama.Fore.YELLOW}Please restart the local API '
-                       'server by running:\n'
-                       f'{colorama.Style.BRIGHT}sky api stop; sky api start'
-                       f'{colorama.Style.RESET_ALL}')
+        logger.warning(
+            'Wheel build: The installed SkyPilot version is different from the '
+            'running code.\n'
+            f'{colorama.Style.DIM}'
+            f'running version: {sky.__version__}\n'
+            f'installed version: {version_on_disk}\n'
+            f'{colorama.Style.RESET_ALL}'
+            # The following message only applies to local API server.
+            # We have no way to tell from here if this is a remote or
+            # local API server. But we expect this to happen much
+            # more commonly to a local API server, so just print
+            # the hint regardless.
+            f'{colorama.Fore.YELLOW}'
+            'Please restart the local API server by running:\n'
+            f'{colorama.Style.BRIGHT}sky api stop; sky api start'
+            f'{colorama.Style.RESET_ALL}')
         raise RuntimeError('The installed SkyPilot version is different from '
                            'the running code. Please restart the SkyPilot API '
                            'server with: sky api stop; sky api start')
