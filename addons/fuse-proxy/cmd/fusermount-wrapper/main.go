@@ -32,6 +32,9 @@ const (
 	placeholderDescription = "the placeholder to replace the mount point in fuse implementation command"
 	optionsDescription     = "mount options"
 	daemonizeDescription   = "daemonize the fuser adapter process"
+
+	// The timeout to wait for the fuse adapter to be ready, same as the mount timeout of azure blobfuse2.
+	waitMountTimeout = 5 * time.Second
 )
 
 var (
@@ -131,14 +134,19 @@ func main() {
 		}
 		if child != nil {
 			// Only runs in parent process: fusermount-wrapper monitors the fuse adapter
-			readyiness := time.After(5 * time.Second)
+			readyiness := time.After(waitMountTimeout)
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
 
 			log.Infof("Waiting for fuse adapter running")
 			select {
 			case <-sigChild:
-				log.Warningf("Fuse adapter process exited, check log %s for more details", fname)
+				buff, err := os.ReadFile(dmnCtx.LogFileName)
+				if err != nil {
+					log.Errorf("Fuse adapter process exited: failed to read child [%v] failure logs [%s]", child.Pid, err.Error())
+				} else {
+					log.Errorf("Fuse adapter process exited: failure logs: %s", string(buff))
+				}
 				os.Exit(1)
 			case <-readyiness:
 				// TODO(aylei): we assume the fuse is ready if the fuse adapter process does not exit for 5 seconds
