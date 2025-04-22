@@ -278,6 +278,7 @@ Following tabs describe how to configure credentials for different clouds on the
             You can also set the following values to use a secret that already contains your AWS credentials:
 
             .. code-block::bash
+
                 # TODO: replace with your secret name and keys in the secret
                 helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
@@ -316,6 +317,7 @@ Following tabs describe how to configure credentials for different clouds on the
             You can also set the following values to use a secret that already contains your GCP credentials:
 
             .. code-block::bash
+
                 # TODO: replace with your secret name
                 helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
@@ -446,6 +448,8 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
 
     # Install the API server with the config file
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+      # Reuse the values set in the previous steps, if any
+      --reuse-values \
       --set-file apiService.config=config.yaml
 
 You can also directly set config values in the ``values.yaml`` file.
