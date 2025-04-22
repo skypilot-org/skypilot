@@ -52,7 +52,6 @@ Options:
 }
 
 func mount() {
-	log.Infof("Mount point: %s, placeholder: %s, mount options: %s, daemonize: %t", *mountPoint, *placeholder, *mountOptions, *daemonize)
 	socketPath := common.MustGetServerSocketPath()
 	// Forward the fusermount request to the server and receive the mounted fd
 	c, err := client.NewClient(socketPath)
@@ -64,7 +63,6 @@ func mount() {
 	if *mountOptions != "" {
 		fusermountArgs = append(fusermountArgs, "-o", *mountOptions)
 	}
-	log.Infof("Fusermount command: %v", fusermountArgs)
 	fd, err := c.Fusermount(fusermountArgs)
 	if err != nil {
 		log.Fatalf("An error occurred when calling fusermount server: %v", err)
