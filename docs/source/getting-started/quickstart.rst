@@ -137,25 +137,15 @@ Access the dashboard
 
 If you install SkyPilot from the official package, after starting the API server (when running locally, the first CLI or SDK call will automatically start a SkyPilot API server locally), the dashboard can be accessed at `${API_Server_Endpoint}/dashboard`, for example, it's `http://127.0.0.1:46580/dashboard` for the local API server by default.
 
-If you install SkyPilot from source, before starting the API server, run the following commands to generate the dashboard production build:
+If you install SkyPilot from source, before starting the API server, refer to the `Dashboard README <https://github.com/skypilot-org/skypilot/blob/master/sky/dashboard/README.md#access-the-dashboard>`_ to build the dashboard. Then you can start your API server and access the dashboard at `${API_Server_Endpoint}/dashboard`.
 
-.. code-block:: bash
-
-  $ cd sky/dashboard
-  # Install all dependencies in the current directory
-  $ npm install
-  # Build
-  $ npm run build
-
-Then you can start your API server and access the dashboard at `${API_Server_Endpoint}/dashboard`.
-
-The clusters page:
+The clusters page example:
 
 .. image:: ../images/dashboard-clusters.png
   :width: 800
   :alt: Clusters dashboard
 
-The managed jobs page:
+The managed jobs page example:
 
 .. image:: ../images/dashboard-managed-jobs.png
   :width: 800
