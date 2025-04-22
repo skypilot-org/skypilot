@@ -16,17 +16,27 @@ POLL_INTERVAL = 5
 logger = sky_logging.init_logger(__name__)
 
 
+class HyperstackStatusGroup(enum.Enum):
+    """Status groups enum for Hyperstack instances.
+    Logically grouping statuses to make code that uses them
+    more readable.
+    """
+    ACTIVE = 'ACTIVE'
+    PENDING = 'PENDING'
+    STOPPED = 'STOPPED'
+
+
 class HyperstackStatus(enum.Enum):
     """Statuses enum for Hyperstack instances."""
-    BUILD = 'BUILD'
-    CREATING = 'CREATING'
-    STARTING = 'STARTING'
-    REBOOTING = 'REBOOTING'
-    HARD_REBOOT = 'HARD_REBOOT'
-    STOPPING = 'STOPPING'
-    SHUTOFF = 'SHUTOFF'
-    DELETING = 'DELETING'
-    ACTIVE = 'ACTIVE'
+    BUILD = ('BUILD', HyperstackStatusGroup.PENDING)
+    CREATING = ('CREATING', HyperstackStatusGroup.PENDING)
+    STARTING = ('STARTING', HyperstackStatusGroup.PENDING)
+    REBOOTING = ('REBOOTING', HyperstackStatusGroup.PENDING)
+    HARD_REBOOT = ('HARD_REBOOT', HyperstackStatusGroup.PENDING)
+    STOPPING = ('STOPPING', HyperstackStatusGroup.PENDING)
+    SHUTOFF = ('SHUTOFF', HyperstackStatusGroup.STOPPED)
+    DELETING = ('DELETING', HyperstackStatusGroup.PENDING)
+    ACTIVE = ('ACTIVE', HyperstackStatusGroup.ACTIVE)
 
     @staticmethod
     def get_status(instance_status: str) -> 'HyperstackStatus':
@@ -55,22 +65,16 @@ class HyperstackStatus(enum.Enum):
         }
         return statuses[hs]
 
-    def is_pending(self) -> bool:
-        return (self != HyperstackStatus.ACTIVE and
-                self != HyperstackStatus.SHUTOFF)
+    def get_group(self) -> HyperstackStatusGroup:
+        return self.value[1]
 
     def is_active(self) -> bool:
         return self == HyperstackStatus.ACTIVE
 
-    def is_stopped(self) -> bool:
-        return self == HyperstackStatus.SHUTOFF
-
 
 def _filter_instances(
         cluster_name_on_cloud: str,
-        add_active: bool = True,
-        add_pending: bool = True,
-        add_stopped: bool = True,
+        status_group_filter: Optional[List[HyperstackStatusGroup]] = None,
         include_instances: Optional[List[str]] = None) -> Dict[str, Any]:
 
     instances = utils.HyperstackClient().list_instances()
@@ -82,9 +86,8 @@ def _filter_instances(
     for instance in instances:
         instance_status = instance['status']
         status = HyperstackStatus.get_status(instance_status)
-        if not ((add_active and status.is_active()) or
-                (add_pending and status.is_pending()) or
-                (add_stopped and status.is_stopped())):
+        if ((status_group_filter is not None) and
+                status.get_group() not in status_group_filter):
             continue
         if (include_instances is not None and
                 instance['id'] not in include_instances):
@@ -107,7 +110,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, False, True, False)
+        instances = _filter_instances(cluster_name_on_cloud,
+                                      [HyperstackStatusGroup.PENDING])
         if len(instances) > config.count:
             raise RuntimeError(
                 f'Cluster {cluster_name_on_cloud} already has '
@@ -121,10 +125,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         logger.info(f'Waiting for {len(instances)} instances to be ready: '
                     f'{instance_statuses}')
         time.sleep(POLL_INTERVAL)
-    stopped_instances = _filter_instances(cluster_name_on_cloud, False, False,
-                                          True)
-    active_instances = _filter_instances(cluster_name_on_cloud, True, False,
-                                         False)
+    stopped_instances = _filter_instances(cluster_name_on_cloud,
+                                          [HyperstackStatusGroup.STOPPED])
+    active_instances = _filter_instances(cluster_name_on_cloud,
+                                         [HyperstackStatusGroup.ACTIVE])
     exist_instances = {**stopped_instances, **active_instances}
     head_instance_id = _get_head_instance_id(exist_instances)
 
@@ -180,7 +184,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready.
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, True, True, True)
+        instances = _filter_instances(cluster_name_on_cloud)
         if len(instances) < config.count:
             all_instances = _filter_instances(
                 cluster_name_on_cloud, include_instances=created_instance_ids)
@@ -271,8 +275,8 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, True, False,
-                                          False)
+    running_instances = _filter_instances(cluster_name_on_cloud,
+                                          [HyperstackStatusGroup.ACTIVE])
     instances: Dict[str, List[common.InstanceInfo]] = {}
 
     head_instance_id = None
