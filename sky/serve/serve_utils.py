@@ -17,8 +17,10 @@ import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
                     Optional, TextIO, Type, TypeVar, Union)
+from urllib import parse
 import uuid
 
+import aiohttp
 import colorama
 import filelock
 import psutil
@@ -991,6 +993,24 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         ):
             print(line, end='', flush=True)
     return ''
+
+
+async def check_lb_latency(url: str) -> Optional[float]:
+    # TODO(tian): This only works for meta policy that applies to LB.
+    # Not works for replica LB policy.
+    path = constants.LB_HEALTH_ENDPOINT
+    url = parse.urljoin(url, path)
+    # TODO(tian): Hack. Dont use infinite loop.
+    while True:
+        start_time = time.perf_counter()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    await response.text()
+            return time.perf_counter() - start_time
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Error checking LB latency: {e}')
+            return None
 
 
 # ================== Table Formatter for `sky serve status` ==================

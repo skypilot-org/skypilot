@@ -360,8 +360,10 @@ class SkyServeLoadBalancer:
         self._lb_to_last_steal_time: Dict[str, float] = collections.defaultdict(
             float)
         self._steal_requests_lock: asyncio.Lock = asyncio.Lock()
-        self._latest_req_id = 0
-        self._use_ie_queue_indicator = use_ie_queue_indicator
+        self._latest_req_id: int = 0
+        self._use_ie_queue_indicator: bool = use_ie_queue_indicator
+        self._steal_targets_cache: Optional[List[str]] = None
+        self._self_url_cache: Optional[str] = None
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
@@ -558,8 +560,13 @@ class SkyServeLoadBalancer:
                          f'{common_utils.format_exception(e)}')
             return e
 
-    def _steal_targets(self) -> Tuple[List[str], Optional[str]]:
+    async def _steal_targets(self) -> Tuple[List[str], Optional[str]]:
         """Return the target LBs to steal from."""
+        if (self._steal_targets_cache is not None and
+                self._self_url_cache is not None):
+            # TODO(tian): This currently does not support update.
+            # Reset the cache to None if the LB is updated.
+            return self._steal_targets_cache, self._self_url_cache
         steal_targets = []
         self_url = None
         all_lb_urls = self._lb_pool.ready_replicas()
@@ -576,6 +583,25 @@ class SkyServeLoadBalancer:
             else:
                 assert self_url is None, (self_url, lb, all_lb_urls)
                 self_url = lb
+        if not steal_targets:
+            return steal_targets, self_url
+        latencies_tasks = [
+            serve_utils.check_lb_latency(lb) for lb in steal_targets
+        ]
+        latencies = await asyncio.gather(*latencies_tasks)
+        if any(lat is None for lat in latencies):
+            return steal_targets, self_url
+        # Sort steal_targets based on latencies
+        steal_targets_with_latencies = [
+            (target, lat) for target, lat in zip(steal_targets, latencies)
+        ]
+        steal_targets_with_latencies.sort(key=lambda x: x[1])
+        steal_targets = [target for target, _ in steal_targets_with_latencies]
+        logger.info('Steal targets with latencies: '
+                    f'{steal_targets_with_latencies}, '
+                    f'Steal targets: {steal_targets}')
+        self._steal_targets_cache = steal_targets
+        self._self_url_cache = self_url
         return steal_targets, self_url
 
     async def _queue_processor(self) -> None:
@@ -602,30 +628,30 @@ class SkyServeLoadBalancer:
                     entry: RequestQueueEntry = await self._request_queue.peek()
 
                     # Barrier Entry
-                    if isinstance(entry, StealBarrierEntry):
-                        await self._request_queue.get_and_remove()
-                        lb_url = entry
-                        logger.info(
-                            f'Processing barrier for lb {lb_url}. '
-                            f'Current steal requests: '
-                            f'{self._lb_to_steal_requests} (to be popped).')
-                        async with self._steal_requests_lock:
-                            if lb_url in self._lb_to_steal_requests:
-                                if self._lb_to_steal_requests[lb_url]:
-                                    self._lb_to_steal_requests[lb_url].pop(0)
-                                if not self._lb_to_steal_requests[lb_url]:
-                                    await self._lb_pool.set_replica_unavailable(
-                                        lb_url)
-                                    logger.info(
-                                        f'{lb_url} has no steal '
-                                        'requests. Set it to unavailable.')
-                                # elif self._lb_to_steal_requests[lb_url][0] > 0:
-                                else:
-                                    await self._lb_pool.set_replica_available(
-                                        lb_url)
-                                    logger.info(f'{lb_url} has steal requests. '
-                                                'Set it to available.')
-                        continue
+                    # if isinstance(entry, StealBarrierEntry):
+                    #     await self._request_queue.get_and_remove()
+                    #     lb_url = entry
+                    #     logger.info(
+                    #         f'Processing barrier for lb {lb_url}. '
+                    #         f'Current steal requests: '
+                    #         f'{self._lb_to_steal_requests} (to be popped).')
+                    #     async with self._steal_requests_lock:
+                    #         if lb_url in self._lb_to_steal_requests:
+                    #             if self._lb_to_steal_requests[lb_url]:
+                    #                 self._lb_to_steal_requests[lb_url].pop(0)
+                    #             if not self._lb_to_steal_requests[lb_url]:
+                    #                 await self._lb_pool.set_replica_unavailable(
+                    #                     lb_url)
+                    #                 logger.info(
+                    #                     f'{lb_url} has no steal '
+                    #                     'requests. Set it to unavailable.')
+                    #             # elif self._lb_to_steal_requests[lb_url][0] > 0:
+                    #             else:
+                    #                 await self._lb_pool.set_replica_available(
+                    #                     lb_url)
+                    #                 logger.info(f'{lb_url} has steal requests. '
+                    #                             'Set it to available.')
+                    #     continue
 
                     assert isinstance(entry, RequestEntry)
 
@@ -906,12 +932,13 @@ class SkyServeLoadBalancer:
         while True:
             await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
             try:
+                # Refresh the steal targets latency even if there is no stealing.
+                steal_targets, self_url = await self._steal_targets()
                 if not await self._request_queue.empty():
                     continue
                 # Don't steal if there is no available replica.
                 if not await self._replica_pool.available_replicas():
                     continue
-                steal_targets, self_url = self._steal_targets()
                 if self._url is None:
                     self._url = self_url
                 else:

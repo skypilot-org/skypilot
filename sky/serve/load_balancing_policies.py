@@ -6,17 +6,13 @@ import dataclasses
 import json
 import math
 import random
-import time
 import typing
 from typing import Dict, List, Optional
-from urllib import parse
-
-import aiohttp
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.serve import constants
 from sky.serve import prefix_tree
+from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
@@ -197,24 +193,6 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             self.load_map[replica_url] -= 1
 
 
-async def _check_lb_latency(url: str) -> float:
-    # TODO(tian): This only works for meta policy that applies to LB.
-    # Not works for replica LB policy.
-    path = constants.LB_HEALTH_ENDPOINT
-    url = parse.urljoin(url, path)
-    # TODO(tian): Hack. Dont use infinite loop.
-    while True:
-        start_time = time.perf_counter()
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    await response.text()
-            return time.perf_counter() - start_time
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Error checking LB latency: {e}')
-        await asyncio.sleep(1)
-
-
 class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
     """Proximate first load balancing policy."""
 
@@ -229,7 +207,10 @@ class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
         self.replica2latency = {}
         # TODO(tian): Parallel this.
         for url in self.ready_replicas:
-            self.replica2latency[url] = await _check_lb_latency(url)
+            lat = await serve_utils.check_lb_latency(url)
+            if lat is None:
+                lat = float('inf')
+            self.replica2latency[url] = lat
         logger.info(f'Updated latencies: {self.replica2latency}')
 
     async def _select_replica(self, request: 'fastapi.Request',
