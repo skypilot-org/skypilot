@@ -58,6 +58,7 @@ Install the SkyPilot Helm chart with the following command:
     # The following variables will be used throughout the guide
     RELEASE_NAME=skypilot
     WEB_USERNAME=skypilot
+    # Replace with your password to configure the password for the API server
     WEB_PASSWORD=yourpassword
     AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
@@ -72,10 +73,6 @@ To install a specific version, pass the ``--version`` flag to the ``helm upgrade
 .. tip::
 
     The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for more clouds and Kubernetes clusters.
-
-.. tip::
-
-    You can configure the password for the API server with the ``WEB_PASSWORD`` variable.
 
 .. dropdown:: Use existing basic auth credentials
 
@@ -184,7 +181,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
 .. note::
 
-   If you don't have SkyPillot API server deployed yet, please refer to :ref:`step 2...`, for the additional values you might want to set during the helm deployment below.
+   If you don't have SkyPilot API server deployed yet, please refer to :ref:`sky-api-server-helm-deploy-command`, for the additional values you might want to set during the helm deployment below.
 
     When you configure credentials after the API server is deployed, an API server restart will be automatically triggered to apply the new credentials. Refer to :ref:`sky-api-server-upgrade` for more details about the potential downtime and mitigation.
 
