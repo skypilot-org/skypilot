@@ -671,7 +671,9 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances.terminate()
+    instances_list = list(instances)
+    for instance in instances_list:
+        instance.terminate()
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need
@@ -681,7 +683,7 @@ def terminate_instances(
     # If ports are specified, we need to delete the newly created Security
     # Group. Here we wait for all instances to be terminated, since the
     # Security Group dependent on them.
-    for instance in instances:
+    for instance in instances_list:
         instance.wait_until_terminated()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
