@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import collections
+import random
 import time
 from typing import Any, Awaitable, Dict, List
 
@@ -21,12 +22,14 @@ CONV_SELECTOR = 'conversation_a'
 def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--num-conv', type=int, default=1000)
     parser.add_argument('--duration', type=int, default=120)
+    parser.add_argument('--seed', type=str, default='default')
 
 
 def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         'num-conv': args.num_conv,
         'duration': args.duration,
+        'seed': args.seed,
     }
 
 
@@ -42,8 +45,8 @@ def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
                 'user': d['judge'],
                 'conv': d[CONV_SELECTOR],
             })
-        if len(multi_turn_data) >= num_conv:
-            break
+    random.shuffle(multi_turn_data)
+    multi_turn_data = multi_turn_data[:num_conv]
     print(f'Got {len(multi_turn_data)} multi-turn conversations '
           f'(took {time.time() - tic:.2f}s)')
     return multi_turn_data
@@ -131,6 +134,7 @@ def launch_user_tasks(
                 f'[bold cyan]Loading dataset {DATASET_NAME}[/]')) as spinner:
         min_tstamp = float('inf')
         max_tstamp = 0
+        random.seed(args.seed)
         convs = _load_dataset(args.num_conv)
         spinner.update('[bold cyan]Grouping conversations[/]')
         user_to_convs: Dict[str,

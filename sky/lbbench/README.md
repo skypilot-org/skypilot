@@ -112,6 +112,9 @@ $ sky logs router
 (task, pid=2316) [Router (Rust)] 2025-04-22 15:35:10 - INFO - All workers are healthy
 (task, pid=2316) [Router (Rust)] 2025-04-22 15:35:10 - INFO - ✅ Serving router on 0.0.0.0:9001
 (task, pid=2316) [Router (Rust)] 2025-04-22 15:35:10 - INFO - ✅ Serving workers on ["http://18.181.146.117:8081", "http://3.145.88.41:8081", "http://13.114.183.132:8081", "http://18.223.43.145:8081"]
+```
+
+```bash
 $ sky logs sky-global
 (load-balancer, pid=1902) INFO:__main__:All ready LB URLs: {'us-east-2': ['http://13.58.50.43:8000'], 'ap-northeast-1': ['http://54.250.246.46:8000']}
 (load-balancer, pid=1902) INFO:__main__:Available Replica URLs: {'ap-northeast-1': ['http://54.95.77.129:8081', 'http://57.181.29.145:8081'], 'us-east-2': ['http://3.140.185.232:8081', 'http://3.144.115.76:8081']}, Ready URLs in local region global: ['http://54.95.77.129:8081', 'http://57.181.29.145:8081', 'http://3.140.185.232:8081', 'http://3.144.115.76:8081']

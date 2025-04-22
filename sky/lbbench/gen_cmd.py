@@ -74,7 +74,7 @@ def main():
             # scps.append(f'mkdir -p {output_local}/result/queue_size/{en}')
             for r in regions:
                 cluster = f'llmc-{r}'
-                region_cmd = cmd
+                region_cmd = f'{cmd} --seed {r}'
                 if isinstance(regions, dict):
                     region_cmd += f' {regions[r]}'
                 cn2cmds[cluster].append(
