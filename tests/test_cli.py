@@ -11,7 +11,8 @@ from sky import exceptions
 from sky import server
 
 CLOUDS_TO_TEST = [
-    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius', 'hyperstack'
+    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius',
+    'hyperstack'
 ]
 
 
