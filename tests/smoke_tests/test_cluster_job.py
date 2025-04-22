@@ -46,6 +46,7 @@ from sky.utils import resources_utils
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
@@ -85,6 +86,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_nebius  # Nebius does not support Docker
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -228,6 +230,7 @@ def test_scp_job_queue():
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus.
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -409,6 +412,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 @pytest.mark.resource_heavy
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -459,6 +463,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus for now
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):

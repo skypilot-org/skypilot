@@ -41,6 +41,7 @@ from sky.utils import common_utils
 # ---------- Dry run: 2 Tasks in a chain. ----------
 @pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
+@pytest.mark.no_hyperstack  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
@@ -511,6 +512,7 @@ class TestYamlSpecs:
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_nebius  # Nebius does not support K80s
+@pytest.mark.no_hyperstack  # Hyperstack does not support K80s
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -529,6 +531,7 @@ def test_multiple_accelerators_ordered():
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -547,6 +550,7 @@ def test_multiple_accelerators_ordered_with_default():
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -564,6 +568,7 @@ def test_multiple_accelerators_unordered():
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -580,6 +585,7 @@ def test_multiple_accelerators_unordered_with_default():
 
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_hyperstack  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -599,6 +605,7 @@ def test_multiple_resources():
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
+@pytest.mark.no_hyperstack  # Requires other clouds to be enabled
 @pytest.mark.aws  # SkyBenchmark requires S3 access
 def test_sky_bench(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()

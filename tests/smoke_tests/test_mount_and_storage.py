@@ -119,6 +119,7 @@ def test_oci_mounts():
 
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
+@pytest.mark.no_hyperstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
@@ -388,6 +389,7 @@ def test_kubernetes_context_switch():
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_nebius  # Docker image is currently not supported on Nebius.
+@pytest.mark.no_hyperstack  # Requires AWS
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize(
     'image_id',
