@@ -923,6 +923,16 @@ def get_config_schema():
                         for type in kubernetes_enums.KubernetesAutoscalerType
                     ]
                 },
+                'high_availability': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'storage_class_name': {
+                            'type': 'string',
+                        }
+                    }
+                },
             }
         },
         'oci': {

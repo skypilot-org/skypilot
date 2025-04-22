@@ -662,6 +662,9 @@ available_node_types:
         spec:
           accessModes:
             - ReadWriteOnce # Our controller pod is singleton
+          {% if k8s_high_availability_storage_class_name is not none %}
+          storageClassName: {{k8s_high_availability_storage_class_name}}
+          {% endif %}
           resources:
             requests:
               storage: {{disk_size}}

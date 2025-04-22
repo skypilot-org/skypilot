@@ -544,6 +544,13 @@ class Kubernetes(clouds.Cloud):
             # cpus is <1.
             'num-cpus': str(max(int(cpus), 1)),
         }
+
+        # Get the storage class name for high availability controller's PVC
+        k8s_ha_storage_class_name = skypilot_config.get_nested(
+            ('kubernetes', 'high_availability', 'storage_class_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -588,6 +595,8 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_SETUP_SCRIPT_PATH),
             'k8s_high_availability_deployment_run_script_dir':
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_storage_class_name':
+                (k8s_ha_storage_class_name),
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
