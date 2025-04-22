@@ -153,7 +153,8 @@ extras_require: Dict[str, List[str]] = {
     ],
     'nebius': [
         'nebius>=0.2.0',
-    ] + aws_dependencies
+    ] + aws_dependencies,
+    'hyperstack': []  # No dependencies needed for Hyperstack
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius
