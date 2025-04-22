@@ -71,7 +71,7 @@ To install a specific version, pass the ``--version`` flag to the ``helm upgrade
 
 .. tip::
 
-    The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for different clouds.
+    The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for more clouds and Kubernetes clusters.
 
 .. tip::
 
