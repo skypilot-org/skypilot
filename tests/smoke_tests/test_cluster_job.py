@@ -443,10 +443,13 @@ def test_multi_echo(generic_cloud: str):
                 job_id=i + 1,
                 job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=120) for i in range(32)
-        ] +
-        # Ensure monitor/autoscaler didn't crash on the 'assert not
-        # unfulfilled' error.  If process not found, grep->ssh returns 1.
-        [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
+        ] + [
+            # ssh record will only be created on cli command like sky status on client side.
+            f'sky status {name}',
+            # Ensure monitor/autoscaler didn't crash on the 'assert not
+            # unfulfilled' error.  If process not found, grep->ssh returns 1.
+            f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
+        ],
         f'sky down -y {name}',
         timeout=20 * 60,
     )
