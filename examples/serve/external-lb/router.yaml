@@ -2,8 +2,8 @@ envs:
   WORKER_URLS:
 
 resources:
-  cloud: gcp
-  cpus: 4
+  cloud: aws
+  cpus: 2+
   ports: 9001
 
 setup: pip install sglang-router

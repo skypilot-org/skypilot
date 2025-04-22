@@ -17,7 +17,7 @@ CONTROLLER_PORT = 20018
 MAX_CONCURRENCY = 5
 LB_PORTS = [6001 + i for i in range(3)]
 WORD_TO_STREAM = 'Hello world! Nice to meet you!'
-TIME_TO_SLEEP = 0.2
+TIME_TO_SLEEP = 1.2
 REPLICA_KEY = 'self'
 
 

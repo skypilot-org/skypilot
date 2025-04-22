@@ -147,10 +147,10 @@ async def pull_queue_status(exp_name: str, endpoints: List[str],
                     for endpoint in endpoints:
                         async with session.get(endpoint + '/conf') as resp:
                             conf = await resp.json()
-                        async with session.get(endpoint +
-                                               '/raw-queue-size') as resp:
-                            raw_queue_size = (await resp.json())['queue_size']
-                        conf['raw_queue_size'] = raw_queue_size
+                        # async with session.get(endpoint +
+                        #                        '/raw-queue-size') as resp:
+                        #     raw_queue_size = (await resp.json())['queue_size']
+                        conf['raw_queue_size'] = conf['queue_size']
                         lb2confs[endpoint] = conf
                     print(json.dumps(lb2confs), file=f, flush=True)
                     await asyncio.sleep(1)
