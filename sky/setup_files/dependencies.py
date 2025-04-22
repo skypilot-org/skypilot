@@ -8,6 +8,8 @@ This file is imported by setup.py, so:
 import sys
 from typing import Dict, List
 
+clouds_with_ray = ['ibm', 'docker', 'scp']
+
 install_requires = [
     'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
     'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
@@ -169,7 +171,7 @@ if sys.version_info < (3, 10):
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
     # that require ray.
-    clouds_for_all -= {'ibm', 'docker', 'scp'}
+    clouds_for_all -= set(clouds_with_ray)
     # vast requires setuptools==51.1.1 which will not work with python >= 3.12
     # TODO: Remove once https://github.com/vast-ai/vast-sdk/pull/6 is released
     clouds_for_all.remove('vast')
