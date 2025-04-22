@@ -4,8 +4,10 @@ Usage:
     python fetch_hyperstack.py [-h] [--api-key API_KEY]
                                     [--api-key-path API_KEY_PATH]
 
-If neither --api-key nor --api-key-path are provided, this script will parse
-`~/.hyperstack/api_key` to look for Hyperstack API key.
+If the --api-key parameter is provided, it will be used, if it is not provided
+and the --api-key-path parameter is provided, the --api-key-path will be used,
+if none of those parameters are provided,
+this script will parse `~/.hyperstack/api_key` to look for Hyperstack API key.
 """
 import argparse
 import csv
