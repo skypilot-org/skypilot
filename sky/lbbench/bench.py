@@ -204,6 +204,7 @@ def main():
         else:
             await asyncio.to_thread(
                 input, 'Skipping tasks. Press Enter to continue...')
+            print('Queue status puller finished.')
         event.set()
         if not args.skip_queue_status:
             await queue_status_task

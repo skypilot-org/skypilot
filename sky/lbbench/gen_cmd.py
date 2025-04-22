@@ -1,6 +1,7 @@
 """Utils for generating benchmark commands."""
 import argparse
 import collections
+import json
 import shlex
 
 from sky.lbbench import utils
@@ -16,6 +17,7 @@ def main():
     parser.add_argument('--extra-args', type=str, default='')
     parser.add_argument('--output-dir', type=str, default='@temp')
     parser.add_argument('--regions', type=str, default=None, nargs='+')
+    parser.add_argument('--region-to-args', type=str, default=None)
     args = parser.parse_args()
     sns = args.service_names
     if len(sns) != 3:
@@ -45,7 +47,15 @@ def main():
     scps = []
     cmd_run_locally = []
     cn2cmds = collections.defaultdict(list)
-    print('\n\n')
+
+    regions = None
+    if args.regions is not None and args.region_to_args is not None:
+        raise ValueError('--regions and --region-to-args cannot both be set')
+    if args.regions is not None:
+        regions = args.regions
+    elif args.region_to_args is not None:
+        regions = json.loads(args.region_to_args)
+
     for e, d, p in zip(endpoints, describes, presents):
         en = f'{args.exp_name}_{d}'
         ens.append(en)
@@ -53,7 +63,7 @@ def main():
         cmd = (
             f'python3 -m sky.lbbench.bench --exp-name {en} --backend-url {e} '
             f'{args.extra_args}')
-        if args.regions is None:
+        if regions is None:
             print(cmd)
         else:
             cmd_run_locally.append(f'{cmd} --skip-tasks')
@@ -62,11 +72,14 @@ def main():
             cmd += f' --skip-queue-status --output-dir {output} -y'
             scps.append(f'mkdir -p {output_local}/result/metric/{en}')
             # scps.append(f'mkdir -p {output_local}/result/queue_size/{en}')
-            for r in args.regions:
+            for r in regions:
                 cluster = f'llmc-{r}'
+                region_cmd = cmd
+                if isinstance(regions, dict):
+                    region_cmd += f' {regions[r]}'
                 cn2cmds[cluster].append(
                     f'sky launch --region {r} -c {cluster} --detach-run -y '
-                    f'--env CMD={shlex.quote(cmd)} --env HF_TOKEN '
+                    f'--env CMD={shlex.quote(region_cmd)} --env HF_TOKEN '
                     'examples/serve/external-lb/client.yaml')
                 output_remote = f'{cluster}:{output}/result'
                 met = f'{output_remote}/metric/{en}.json'
@@ -75,28 +88,28 @@ def main():
                 # qs = f'{output_remote}/queue_size/{en}.txt'
                 # scps.append(
                 #     f'scp {qs} {output}/result/queue_size/{en}/{cluster}.txt')
-            print()
-    print('=' * 30)
+    print(f'{"Queue status puller (Running locally)":=^70}')
     for c in cmd_run_locally:
         print(c)
-        print()
-    print('=' * 30)
+        print('*' * 30)
+    print(f'{"Launch Clients":=^70}')
     # Use this order so that the overhead to launch the cluster is aligned.
     for _, cmds in cn2cmds.items():
         for c in cmds:
             print(c)
-        print()
-    print('=' * 30)
+        print('*' * 30)
+    print(f'{"Sync down results":=^70}')
     for s in scps:
         print(s)
-    print('=' * 30)
-    for en in ens:
-        print(f'    \'{en}\',')
-    print('=' * 30)
+    print(f'{"Generate result table":=^70}')
+    # for en in ens:
+    #     print(f'    \'{en}\',')
+    # print('=' * 30)
     for nm in name_mapping:
         print(nm)
 
 
 if __name__ == '__main__':
     # py -m sky.lbbench.gen_cmd --service-names b1 b2 b3 --exp-name arena_syn_r3_c2000_u250_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000 --num-users 250' # pylint: disable=line-too-long
+    # py -m sky.lbbench.gen_cmd --service-names d1 d2 d3 --exp-name arena_syn_mrc_tail_c2000_u300_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000 --num-users 150' --region-to-users '{"us-east-2":200,"ap-northeast-1"}'
     main()
