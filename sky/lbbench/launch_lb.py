@@ -44,17 +44,17 @@ def main():
     parser.add_argument('--service-names', type=str, nargs='+', required=True)
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != 3:
-        raise ValueError('Expected 3 service names for '
-                         'sky, sky-sgl-enhanced, sgl')
+    if len(sns) != 4:
+        raise ValueError('Expected 4 service names for '
+                         'sgl, sky-sgl-enhanced, sky, sky-pushing')
     print(sns)
     all_st = utils.sky_serve_status()
     ct = utils.sky_status()
     sn2st = {s['name']: s for s in all_st}
+    sgl_cmd = _prepare_sgl_cmd(sn2st[sns[0]])
     sky_sgl_enhanced_cmd = _prepare_sky_sgl_enhanced_cmd(sn2st[sns[1]], ct)
-    sgl_cmd = _prepare_sgl_cmd(sn2st[sns[2]])
-    print(sky_sgl_enhanced_cmd)
     print(sgl_cmd)
+    print(sky_sgl_enhanced_cmd)
     input('Press Enter to launch LBs...')
     commands = [sky_sgl_enhanced_cmd, sgl_cmd]
     processes = []
@@ -64,7 +64,10 @@ def main():
         process.start()
     for process in processes:
         process.join()
-    print('Both load balancers have been launched successfully.')
+    print('Both load balancers have been launched successfully. '
+          'Check status with: \n'
+          f'sky logs {utils.sgl_cluster}\n'
+          f'sky logs {utils.sky_sgl_enhanced_cluster}\n')
 
 
 if __name__ == '__main__':

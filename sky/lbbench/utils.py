@@ -26,6 +26,7 @@ class Metric:
     """Metric for each request."""
     uid: int
     start: Optional[float] = None
+    streaming_start: Optional[float] = None
     end: Optional[float] = None
     ttft: Optional[float] = None
     e2e_latency: Optional[float] = None

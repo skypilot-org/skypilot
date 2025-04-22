@@ -46,12 +46,13 @@ Adjusting the service YAML (`examples/serve/external-lb/llm.yaml`) based on desi
 
 When adding replicas to other regions, make sure to update the `external_load_balancers` section to add one load balancer for the new region. **All load balancers should use AWS cloud**. The `route53_hosted_zone` should be configured in the given credentials and no changes is needed - if you need to add a new one, please contact the author.
 
-Running the following command for 3 times:
+Running the following command for 4 times. Notice the last one has `DO_PUSHING_ACROSS_LB=true` to enable 2 level pushing.
 
 ```bash
-sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n s1
-sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n s2
-sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n s3
+sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n f1
+sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n f2
+sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n f3
+sky serve up examples/serve/external-lb/llm.yaml --env HF_TOKEN -n f4 --env DO_PUSHING_ACROSS_LB=true
 ```
 
 Keep running `sky serve status -v` until all of them are ready (all replicas are ready):
@@ -59,34 +60,41 @@ Keep running `sky serve status -v` until all of them are ready (all replicas are
 ```bash
 $ sky serve status -v
 Services
-NAME  VERSION  UPTIME  STATUS  REPLICAS  EXTERNAL_LBS  ENDPOINT                 AUTOSCALING_POLICY  LOAD_BALANCING_POLICY  REQUESTED_RESOURCES  
-s1    1        3m 37s  READY   4/4       2/2           s1.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
-s2    1        2m 43s  READY   4/4       2/2           s2.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
-s3    1        51s     READY   4/4       2/2           s3.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
+NAME  VERSION  UPTIME   STATUS  REPLICAS  EXTERNAL_LBS  ENDPOINT                 AUTOSCALING_POLICY  LOAD_BALANCING_POLICY  REQUESTED_RESOURCES  
+f2    1        11m 37s  READY   4/4       2/2           f2.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
+f4    1        2m 40s   READY   4/4       2/2           f4.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
+f3    1        3m 52s   READY   4/4       2/2           f3.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
+f1    1        12m 24s  READY   4/4       2/2           f1.aws.cblmemo.net:8000  Fixed 4 replicas    prefix_tree            1x[L4:1]             
 
 Service Replicas
-SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED    RESOURCES                                     STATUS  REGION          ZONE             
-s1            1   1        http://43.207.108.144:8081  9 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
-s1            2   1        http://18.119.19.205:8081   9 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
-s1            3   1        http://13.230.228.163:8081  9 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
-s1            4   1        http://3.22.81.162:8081     9 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
-s2            1   1        http://54.95.77.129:8081    8 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
-s2            2   1        http://3.140.185.232:8081   8 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
-s2            3   1        http://57.181.29.145:8081   8 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
-s2            4   1        http://3.144.115.76:8081    8 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
-s3            1   1        http://18.181.146.117:8081  6 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
-s3            2   1        http://3.145.88.41:8081     6 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
-s3            3   1        http://13.114.183.132:8081  6 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
-s3            4   1        http://18.223.43.145:8081   6 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     RESOURCES                                     STATUS  REGION          ZONE             
+f2            1   1        http://3.112.132.61:8081    17 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f2            2   1        http://18.216.72.120:8081   17 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f2            3   1        http://13.230.8.93:8081     17 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f2            4   1        http://18.188.161.112:8081  17 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f4            1   1        http://52.197.215.252:8081  8 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f4            2   1        http://18.216.115.216:8081  8 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f4            3   1        http://13.230.232.136:8081  8 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f4            4   1        http://3.147.237.86:8081    8 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f3            1   1        http://3.112.189.75:8081    9 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f3            2   1        http://18.118.12.144:8081   9 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f3            3   1        http://18.179.31.22:8081    9 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f3            4   1        http://18.117.137.72:8081   9 mins ago   1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f1            1   1        http://52.195.12.96:8081    17 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f1            2   1        http://3.133.128.90:8081    18 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
+f1            3   1        http://35.77.104.21:8081    17 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   ap-northeast-1  ap-northeast-1a  
+f1            4   1        http://18.188.39.165:8081   18 mins ago  1x AWS(g6.xlarge, {'L4': 1}, ports=['8081'])  READY   us-east-2       us-east-2a       
 
 External Load Balancers
-SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES                          STATUS  REGION          ZONE             
-s1            1   1        http://18.188.107.47:8000  9 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
-s1            2   1        http://13.113.160.35:8000  9 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a  
-s2            1   1        http://13.58.50.43:8000    8 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
-s2            2   1        http://54.250.246.46:8000  8 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a  
-s3            1   1        http://18.188.99.148:8000  6 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
-s3            2   1        http://54.238.167.17:8000  6 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a  
+SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     RESOURCES                          STATUS  REGION          ZONE             
+f2            1   1        http://3.21.105.214:8000    17 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
+f2            2   1        http://54.199.244.142:8000  17 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a  
+f4            1   1        http://3.22.61.20:8000      8 mins ago   1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
+f4            2   1        http://54.95.39.148:8000    8 mins ago   1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a  
+f3            1   1        http://3.147.126.69:8000    9 mins ago   1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
+f3            2   1        http://13.115.40.251:8000   9 mins ago   1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a  
+f1            1   1        http://18.189.184.32:8000   18 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   us-east-2       us-east-2a       
+f1            2   1        http://52.194.243.253:8000  18 mins ago  1x AWS(m6i.large, ports=['8000'])  READY   ap-northeast-1  ap-northeast-1a 
 ```
 
 ## Step 2: Launch baseline load balancers
@@ -99,7 +107,7 @@ We compare the performance of our load balancer with the following baselines:
 The following util script will launch the baseline load balancers for the given service names. **The order of the service names matters here**. The first will be used as SGLang Router and the second will be used as SGLang Router with Rate Limiting. The third is our solution.
 
 ```bash
-python3 -m sky.lbbench.launch_lb --service-names s1 s2 s3
+python3 -m sky.lbbench.launch_lb --service-names f1 f2 f3 f4
 ```
 
 Press enter to confirm and launch the load balancers. After the script exits, run the following command to check the status of the load balancers. You should see the following output:
@@ -107,17 +115,15 @@ Press enter to confirm and launch the load balancers. After the script exits, ru
 ```bash
 $ sky logs router
 ...
-(task, pid=2316) [Router (Rust)] 2025-04-22 15:35:09 - INFO - 🚧 Policy Config: CacheAwareConfig { cache_threshold: 0.5, balance_abs_threshold: 32, balance_rel_threshold: 1.0001, eviction_interval_secs: 60, max_tree_size: 16777216, timeout_secs: 300, interval_secs: 10 }
-(task, pid=2316) [Router (Rust)] 2025-04-22 15:35:09 - INFO - 🚧 Max payload size: 4 MB
-(task, pid=2316) [Router (Rust)] 2025-04-22 15:35:10 - INFO - All workers are healthy
-(task, pid=2316) [Router (Rust)] 2025-04-22 15:35:10 - INFO - ✅ Serving router on 0.0.0.0:9001
-(task, pid=2316) [Router (Rust)] 2025-04-22 15:35:10 - INFO - ✅ Serving workers on ["http://18.181.146.117:8081", "http://3.145.88.41:8081", "http://13.114.183.132:8081", "http://18.223.43.145:8081"]
+(task, pid=2032) [Router (Rust)] 2025-04-22 21:56:49 - INFO - All workers are healthy
+(task, pid=2032) [Router (Rust)] 2025-04-22 21:56:49 - INFO - ✅ Serving router on 0.0.0.0:9001
+(task, pid=2032) [Router (Rust)] 2025-04-22 21:56:49 - INFO - ✅ Serving workers on ["http://52.195.12.96:8081", "http://3.133.128.90:8081", "http://35.77.104.21:8081", "http://18.188.39.165:8081"]
 ```
 
 ```bash
 $ sky logs sky-global
-(load-balancer, pid=1902) INFO:__main__:All ready LB URLs: {'us-east-2': ['http://13.58.50.43:8000'], 'ap-northeast-1': ['http://54.250.246.46:8000']}
-(load-balancer, pid=1902) INFO:__main__:Available Replica URLs: {'ap-northeast-1': ['http://54.95.77.129:8081', 'http://57.181.29.145:8081'], 'us-east-2': ['http://3.140.185.232:8081', 'http://3.144.115.76:8081']}, Ready URLs in local region global: ['http://54.95.77.129:8081', 'http://57.181.29.145:8081', 'http://3.140.185.232:8081', 'http://3.144.115.76:8081']
+(load-balancer, pid=2023) INFO:__main__:All ready LB URLs: {'us-east-2': ['http://3.21.105.214:8000'], 'ap-northeast-1': ['http://54.199.244.142:8000']}
+(load-balancer, pid=2023) INFO:__main__:Available Replica URLs: {'ap-northeast-1': ['http://3.112.132.61:8081', 'http://13.230.8.93:8081'], 'us-east-2': ['http://18.216.72.120:8081', 'http://18.188.161.112:8081']}, Ready URLs in local region global: ['http://3.112.132.61:8081', 'http://13.230.8.93:8081', 'http://18.216.72.120:8081', 'http://18.188.161.112:8081']
 ```
 
 Make sure each load balancer has the desired number of replicas.
@@ -137,7 +143,7 @@ Explanation of the arguments:
 **Notice that the `--extra-args` will be applied to all regions**. If you want a total concurrency of 300, you should set `--num-users (300 / num-regions)` for each region.
 
 ```bash
-python3 -m sky.lbbench.gen_cmd --service-names s1 s2 s3 \
+python3 -m sky.lbbench.gen_cmd --service-names f1 f2 f3 f4 \
   --exp-name arena_syn_mrc_tail_c2000_u300_d240 \
   --extra-args '--workload arena_syn --duration 240 --num-conv 2000 --num-users 150' \
   --regions us-east-2 ap-northeast-1
@@ -148,10 +154,10 @@ python3 -m sky.lbbench.gen_cmd --service-names s1 s2 s3 \
 For testing config that different regions have different configurations, you can use `--region-to-args`. This should be a json string. e.g.
 
 ```bash
-python3 -m sky.lbbench.gen_cmd --service-names s1 s2 s3 \
-  --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240 \
+python3 -m sky.lbbench.gen_cmd --service-names f1 f2 f3 f4 \
+  --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240 \
   --extra-args '--workload arena_syn --duration 240' \
-  --region-to-args '{"us-east-2":"--num-users 200","ap-northeast-1":"--num-users 100"}'
+  --region-to-args '{"us-east-2":"--num-users 200","ap-northeast-1":"--num-users 50"}'
 ```
 
 Only one of the `--regions` and `--region-to-args` should be set. If `--region-to-args` is set, the keys will be used. Remember to remove any arguments from `--extra-args` that are already specified in `--region-to-args`.
@@ -172,11 +178,13 @@ You will see #systems lines of commands. Each line will pull status from one sys
 
 ```bash
 ================Queue status puller (Running locally)=================
-python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sgl --backend-url 34.42.12.184:9001 --workload arena_syn --duration 240 --skip-tasks
+python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sgl --backend-url 184.73.149.39:9001 --workload arena_syn --duration 240 --skip-tasks
 ******************************
-python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sky_sgl_enhanced --backend-url 54.146.163.27:9002 --workload arena_syn --duration 240 --skip-tasks
+python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky_sgl_enhanced --backend-url 44.202.34.180:9002 --workload arena_syn --duration 240 --skip-tasks
 ******************************
-python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sky --backend-url s1.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-tasks
+python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky --backend-url f3.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-tasks
+******************************
+python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky_pushing --backend-url f4.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-tasks
 ******************************
 ```
 
@@ -194,13 +202,15 @@ You will see #regions lines of commands. Each line will launch clients in one re
 
 ```bash
 ============================Launch Clients============================
-sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sgl --backend-url 34.42.12.184:9001 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
-sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sky_sgl_enhanced --backend-url 54.146.163.27:9002 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
-sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sky --backend-url s1.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sgl --backend-url 184.73.149.39:9001 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed us-east-2 --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky_sgl_enhanced --backend-url 44.202.34.180:9002 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed us-east-2 --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky --backend-url f3.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed us-east-2 --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region us-east-2 -c llmc-us-east-2 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky_pushing --backend-url f4.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed us-east-2 --num-users 200' --env HF_TOKEN examples/serve/external-lb/client.yaml
 ******************************
-sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sgl --backend-url 34.42.12.184:9001 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --num-users 100' --env HF_TOKEN examples/serve/external-lb/client.yaml
-sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sky_sgl_enhanced --backend-url 54.146.163.27:9002 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --num-users 100' --env HF_TOKEN examples/serve/external-lb/client.yaml
-sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_100_200_tail_c2000_u300_d240_sky --backend-url s1.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --num-users 100' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sgl --backend-url 184.73.149.39:9001 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed ap-northeast-1 --num-users 50' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky_sgl_enhanced --backend-url 44.202.34.180:9002 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed ap-northeast-1 --num-users 50' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky --backend-url f3.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed ap-northeast-1 --num-users 50' --env HF_TOKEN examples/serve/external-lb/client.yaml
+sky launch --region ap-northeast-1 -c llmc-ap-northeast-1 --detach-run -y --env CMD='python3 -m sky.lbbench.bench --exp-name arena_syn_mrc_50_200_tail_c2000_u250_d240_sky_pushing --backend-url f4.aws.cblmemo.net:8000 --workload arena_syn --duration 240 --skip-queue-status --output-dir ~ -y --seed ap-northeast-1 --num-users 50' --env HF_TOKEN examples/serve/external-lb/client.yaml
 ******************************
 ```
 
@@ -224,21 +234,14 @@ Cluster name: llmc-us-east-2
 Monitor the job status until all of them are completed. It will shows `RUNNING` first:
 
 ```bash
-$ sky queue llmc-ap-northeast-1 llmc-us-east-2
-Fetching and parsing job queue...
-Fetching job queue for: llmc-ap-northeast-1, llmc-us-east-2
-
-Job queue of current user on cluster llmc-us-east-2
-ID  NAME  USER     SUBMITTED   STARTED     DURATION  RESOURCES   STATUS     LOG                                        
-15  -     tianxia  1 min ago   1 min ago   1m 5s     1x[CPU:8+]  RUNNING    ~/sky_logs/sky-2025-04-22-08-58-07-411053  
-14  -     tianxia  1 min ago   1 min ago   1m 29s    1x[CPU:8+]  RUNNING    ~/sky_logs/sky-2025-04-22-08-57-43-016507  
-13  -     tianxia  1 min ago   1 min ago   1m 53s    1x[CPU:8+]  RUNNING    ~/sky_logs/sky-2025-04-22-08-56-52-814746  
-
-Job queue of current user on cluster llmc-ap-northeast-1
-ID  NAME  USER     SUBMITTED    STARTED      DURATION  RESOURCES   STATUS     LOG                                        
-15  -     tianxia  34 secs ago  29 secs ago  29s       1x[CPU:8+]  RUNNING    ~/sky_logs/sky-2025-04-22-08-58-34-066940  
-14  -     tianxia  1 min ago    1 min ago    1m 3s     1x[CPU:8+]  RUNNING    ~/sky_logs/sky-2025-04-22-08-57-58-882792  
-13  -     tianxia  1 min ago    1 min ago    1m 37s    1x[CPU:8+]  RUNNING    ~/sky_logs/sky-2025-04-22-08-56-53-480548  
+$ sky queue llmc-ap-northeast-1 llmc-us-east-2 | grep RUNNING 
+3   -     tianxia  39 secs ago  34 secs ago  34s       1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-03-16-697533  
+2   -     tianxia  1 min ago    1 min ago    1m 10s    1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-02-40-245912  
+1   -     tianxia  1 min ago    1 min ago    1m 42s    1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-01-29-838721  
+4   -     tianxia  46 secs ago  42 secs ago  42s       1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-03-18-322517  
+3   -     tianxia  1 min ago    1 min ago    1m 8s     1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-02-52-637991  
+2   -     tianxia  1 min ago    1 min ago    1m 34s    1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-02-26-056918  
+1   -     tianxia  2 mins ago   1 min ago    1m 56s    1x[CPU:8+]  RUNNING  ~/sky_logs/sky-2025-04-22-15-01-28-622966 
 ...
 ```
 

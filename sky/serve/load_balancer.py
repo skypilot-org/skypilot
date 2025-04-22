@@ -23,6 +23,7 @@ from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
 from sky.utils import common_utils
+from sky.utils import env_options
 
 logger = sky_logging.init_logger(__name__)
 
@@ -32,8 +33,7 @@ _IE_QUEUE_PROBE_INTERVAL = 0.1
 # _MIN_STEAL_INTERVAL = 1.0
 # _MAX_CACHE_HIT_DELAY_TIMES = 3
 
-_DO_PUSHING_ACROSS_LB = os.environ.get('DO_PUSHING_ACROSS_LB',
-                                       'False').lower() == 'true'
+_DO_PUSHING_ACROSS_LB = env_options.Options.DO_PUSHING_ACROSS_LB.get()
 
 
 @dataclasses.dataclass
@@ -1411,7 +1411,9 @@ class SkyServeLoadBalancer:
         logger.info('SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}')
         logger.info('Started lb in version lock-queue-fixed-queue-size.')
-        logger.info(f'Do pushing across LBs: {_DO_PUSHING_ACROSS_LB}')
+        logger.info(f'Do pushing across LBs: {_DO_PUSHING_ACROSS_LB}, '
+                    'envs: DO_PUSHING_ACROSS_LB='
+                    f'{os.environ.get("DO_PUSHING_ACROSS_LB")}')
         uvicorn.run(self._app,
                     host='0.0.0.0',
                     port=self._load_balancer_port,

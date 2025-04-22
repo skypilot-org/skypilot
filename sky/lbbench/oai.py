@@ -65,12 +65,14 @@ async def call_chat_completion_async(
             timeout=100,
         )
         metric.headers = dict(res.response.headers)
-        st = time.perf_counter()
+        st = time.time()
         metric.start = st
         fetch_metric_at_end = False
         async for chunk in res:
-            t_this_round = time.perf_counter()
+            t_this_round = time.time()
             choice = chunk.choices[0]
+            if metric.streaming_start is None:
+                metric.streaming_start = t_this_round
             if metric.ttft is None:
                 metric.ttft = t_this_round - st
             if chunk.usage is None:

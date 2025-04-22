@@ -26,6 +26,7 @@ from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -218,6 +219,12 @@ def up(
                 local_user_config=mutated_user_config,
             ),
         }
+        # TODO(tian): Hack. This is for let the external LB inherit this option
+        # from task envs.
+        push_key = env_options.Options.DO_PUSHING_ACROSS_LB.env_key
+        assert isinstance(vars_to_fill['controller_envs'], dict)
+        vars_to_fill['controller_envs'][push_key] = task.envs.get(
+            push_key, 'False')
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                    vars_to_fill,
                                    output_path=controller_file.name)

@@ -6,8 +6,15 @@ import shlex
 
 from sky.lbbench import utils
 
-describes = ['sgl', 'sky_sgl_enhanced', 'sky']
-presents = ['Baseline', 'Baseline\\n[Enhanced]', 'Ours']
+describes = ['sgl', 'sky_sgl_enhanced', 'sky', 'sky_pushing']
+presents = ['Baseline', 'Baseline\\n[Enhanced]', 'Ours', 'Ours\\n[Pushing]']
+
+enabled_systems = [
+    0,  # sgl router
+    1,  # sgl router enhanced
+    2,  # sky pushing in replica, pulling in lb
+    3,  # sky 2 level pushing
+]
 
 
 def main():
@@ -20,9 +27,9 @@ def main():
     parser.add_argument('--region-to-args', type=str, default=None)
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != 3:
-        raise ValueError('Expected 3 service names for '
-                         'sky, sky-sgl-enhanced, sgl')
+    if len(sns) != 4:
+        raise ValueError('Expected 4 service names for '
+                         'sgl, sky-sgl-enhanced, sky, sky-pushing')
     print(sns)
     all_st = utils.sky_serve_status()
     ct = utils.sky_status()
@@ -32,14 +39,14 @@ def main():
             raise ValueError(f'Service {sn} not found')
     sky_sgl_enhanced_ip, sgl_ip = None, None
     for c in ct:
-        if c['name'] == utils.sky_sgl_enhanced_cluster:
-            sky_sgl_enhanced_ip = c['handle'].head_ip
-        elif c['name'] == utils.sgl_cluster:
+        if c['name'] == utils.sgl_cluster:
             sgl_ip = c['handle'].head_ip
+        elif c['name'] == utils.sky_sgl_enhanced_cluster:
+            sky_sgl_enhanced_ip = c['handle'].head_ip
 
     endpoints = [
         f'{sgl_ip}:9001', f'{sky_sgl_enhanced_ip}:9002',
-        sn2st[sns[0]]['endpoint']
+        sn2st[sns[2]]['endpoint'], sn2st[sns[3]]['endpoint']
     ]
     print(endpoints)
     name_mapping = []
@@ -56,7 +63,9 @@ def main():
     elif args.region_to_args is not None:
         regions = json.loads(args.region_to_args)
 
-    for e, d, p in zip(endpoints, describes, presents):
+    for i, (e, d, p) in enumerate(zip(endpoints, describes, presents)):
+        if i not in enabled_systems:
+            continue
         en = f'{args.exp_name}_{d}'
         ens.append(en)
         name_mapping.append(f'    \'{en}\': \'{p}\',')
@@ -71,7 +80,6 @@ def main():
             output_local = args.output_dir
             cmd += f' --skip-queue-status --output-dir {output} -y'
             scps.append(f'mkdir -p {output_local}/result/metric/{en}')
-            # scps.append(f'mkdir -p {output_local}/result/queue_size/{en}')
             for r in regions:
                 cluster = f'llmc-{r}'
                 region_cmd = f'{cmd} --seed {r}'
@@ -85,9 +93,6 @@ def main():
                 met = f'{output_remote}/metric/{en}.json'
                 scps.append(f'scp {met} {output_local}/result'
                             f'/metric/{en}/{cluster}.json')
-                # qs = f'{output_remote}/queue_size/{en}.txt'
-                # scps.append(
-                #     f'scp {qs} {output}/result/queue_size/{en}/{cluster}.txt')
     print(f'{"Queue status puller (Running locally)":=^70}')
     for c in cmd_run_locally:
         print(c)
@@ -102,9 +107,6 @@ def main():
     for s in scps:
         print(s)
     print(f'{"Generate result table":=^70}')
-    # for en in ens:
-    #     print(f'    \'{en}\',')
-    # print('=' * 30)
     for nm in name_mapping:
         print(nm)
 
