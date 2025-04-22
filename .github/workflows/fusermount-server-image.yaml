@@ -2,6 +2,9 @@ name: fusermount-server-image
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix-blobfuse
 
 jobs:
   build:

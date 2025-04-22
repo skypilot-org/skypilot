@@ -205,8 +205,11 @@ def get_az_mount_cmd(container_name: str,
     # blobfuse2 only get the mounted fd.
     # 2. {} is the mount point placeholder that will be replaced with the
     # mounted fd by fusermount-wrapper.
-    wrapped = (f'fusermount-wrapper -m {mount_path} {mount_options} '
-               f'-- {blobfuse2_cmd} -o nonempty {{}}')
+    # 3. set --foreground to workaround lock confliction of multiple blobfuse2
+    # daemon processes (#5307) and use -d to daemonsize blobfuse2 in
+    # fusermount-wrapper.
+    wrapped = (f'fusermount-wrapper -d -m {mount_path} {mount_options} '
+               f'-- {blobfuse2_cmd} -o nonempty --foreground {{}}')
     original = f'{blobfuse2_cmd} {mount_options} {mount_path}'
     # If fusermount-wrapper is available, use it to wrap the blobfuse2 command
     # to avoid requiring root privilege.
