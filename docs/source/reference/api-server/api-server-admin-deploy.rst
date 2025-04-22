@@ -33,7 +33,7 @@ The API server will be deployed in a namespace of your choice. You can either cr
     NAMESPACE=skypilot
     kubectl create namespace $NAMESPACE
 
-Or let Helm create it automatically by adding the ``--create-namespace`` flag to the helm install command in Step 2.
+Or, let Helm create it automatically by adding the ``--create-namespace`` flag to the helm install command in Step 2.
 
 Next, add the SkyPilot Helm repository:
 
@@ -183,6 +183,8 @@ Optional: Configure cloud accounts
 Following tabs describe how to configure credentials for different clouds on the API server. All cloud credentials are stored in Kubernetes secrets.
 
 .. note::
+
+   If you don't have SkyPillot API server deployed yet, please refer to :ref:`step 2...`, for the additional values you might want to set during the helm deployment below.
 
     When you configure credentials after the API server is deployed, an API server restart will be automatically triggered to apply the new credentials. Refer to :ref:`sky-api-server-upgrade` for more details about the potential downtime and mitigation.
 
