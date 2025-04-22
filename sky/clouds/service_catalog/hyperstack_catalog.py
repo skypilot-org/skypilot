@@ -113,7 +113,7 @@ def list_accelerators(
     require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Hyperstack offering GPUs."""
-    return common.list_accelerators_impl('Hyperstack', _df, gpus_only,
+    return common.list_accelerators_impl('hyperstack', _df, gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,
                                          all_regions, require_price)
