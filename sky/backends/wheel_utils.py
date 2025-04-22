@@ -74,11 +74,10 @@ def _build_sky_wheel() -> pathlib.Path:
             f'running version: {sky.__version__}\n'
             f'installed version: {version_on_disk}\n'
             f'{colorama.Style.RESET_ALL}'
-            # The following message only applies to local API server.
-            # We have no way to tell from here if this is a remote or
-            # local API server. But we expect this to happen much
-            # more commonly to a local API server, so just print
-            # the hint regardless.
+            # The following message only applies to local API server. We have no
+            # way to tell from here if this is a remote or local API server. But
+            # we expect this to happen much more commonly to a local API server,
+            # so just print the hint regardless.
             f'{colorama.Fore.YELLOW}'
             'Please restart the local API server by running:\n'
             f'{colorama.Style.BRIGHT}sky api stop; sky api start'
