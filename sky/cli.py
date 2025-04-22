@@ -4271,6 +4271,14 @@ def jobs_dashboard():
     managed_jobs.dashboard()
 
 
+@cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
+@usage_lib.entrypoint
+def dashboard() -> None:
+    """Starts the dashboard for skypilot."""
+    sdk.dashboard()
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
     """SkyServe CLI (multi-region, multi-cloud serving)."""

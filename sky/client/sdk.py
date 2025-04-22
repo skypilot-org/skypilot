@@ -18,6 +18,7 @@ import pathlib
 import subprocess
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+import webbrowser
 
 import click
 import colorama
@@ -292,6 +293,17 @@ def validate(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
                 response.json().get('detail'))
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def dashboard() -> None:
+    """Starts the dashboard for SkyPilot."""
+    api_server_url = server_common.get_server_url()
+    url = f'{api_server_url}/dashboard'
+    logger.info(f'Opening dashboard in browser: {url}')
+    webbrowser.open(url)
 
 
 @usage_lib.entrypoint
