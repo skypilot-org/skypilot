@@ -37,6 +37,8 @@ class Hyperstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.IMAGE_ID: f'Specifying image ID is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
+        # TODO: implement storage mounting
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING: f'Storage mounting is currently not supported in {_REPR}.',
     }
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
