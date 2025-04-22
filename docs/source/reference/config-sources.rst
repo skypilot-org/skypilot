@@ -138,7 +138,8 @@ CLI flag
 
 You can pass configuration arguments to the CLI using the ``--config`` flag.
 
-The ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs. Only one ``--config`` flag can be provided.
+The ``--config`` flag can either be a path to a config YAML file, or a dotlist of key-value pairs.
+If passing in a config file, only one ``--config`` flag can be provided.
 
 Example:
 
@@ -147,8 +148,8 @@ Example:
   # pass a config file
   sky launch --config my_config.yaml ...
   # pass individual config options
-  sky launch --config 'kubernetes.provision_timeout=600,kubernetes.pod_config.spec.priorityClassName=high-priority' ...
-  sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1,kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
+  sky launch --config 'kubernetes.provision_timeout=600' --config 'kubernetes.pod_config.spec.priorityClassName=high-priority' ...
+  sky launch --config 'kubernetes.custom_metadata.annotations.myannotation1=myvalue1' --config 'kubernetes.custom_metadata.annotations.myannotation2=myvalue2' ...
 
 
 .. _config-overrides:

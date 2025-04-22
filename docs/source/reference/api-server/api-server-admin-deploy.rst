@@ -79,7 +79,7 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
-        
+
         .. tip::
 
             If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
@@ -118,7 +118,10 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
-            helm --namespace $NAMESPACE upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                --namespace $NAMESPACE \
+                --set awsCredentials.enabled=true \
+                --set awsCredentials.awsSecretName=aws-credentials
 
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -141,7 +144,8 @@ Following tabs describe how to configure credentials for different clouds on the
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE
               --set gcpCredentials.enabled=true \
-              --set gcpCredentials.projectId=YOUR_PROJECT_ID
+              --set gcpCredentials.projectId=YOUR_PROJECT_ID \
+              --set gcpCredentials.gcpSecretName=gcp-credentials
 
         Replace ``YOUR_PROJECT_ID`` with your actual GCP project ID.
 
@@ -443,7 +447,7 @@ In helm deployment, a set of default permissions are granted to the API server t
         # TODO: replace ${RELEASE_NAME} with the actual release name in deployment step
         kubernetes:
           remote_identity: ${RELEASE_NAME}-api-sa
-    
+
     .. note::
 
         If you also grant external Kubernetes cluster permissions to the API server via ``kubernetesCredentials.useKubeconfig``, the same service account with enough permissions must be prepared in these Kubernetes clusters manually.

@@ -50,6 +50,7 @@ then:
 """
 import contextlib
 import copy
+import json
 import os
 import threading
 import typing
@@ -415,10 +416,26 @@ def override_skypilot_config(
         yield
         return
     original_config = _dict
+    override_configs = config_utils.Config(override_configs)
+    disallowed_diff_keys = []
+    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        value = override_configs.pop_nested(key, default_value=None)
+        if (value is not None and
+                value != original_config.get_nested(key, default_value=None)):
+            disallowed_diff_keys.append('.'.join(key))
+    # Only warn if there is a diff in disallowed override keys, as the client
+    # use the same config file when connecting to a local server.
+    if disallowed_diff_keys:
+        logger.warning(
+            f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
+            'different values in the client SkyPilot config with the server '
+            'and will be ignored. Remove these keys to disable this warning. '
+            'If you want to specify it, please modify it on server side or '
+            'contact your administrator.')
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
-        override_configs=override_configs,
+        override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     try:
@@ -440,14 +457,14 @@ def override_skypilot_config(
                 '=== SkyPilot config on API server ===\n'
                 f'{common_utils.dump_yaml_str(dict(original_config))}\n'
                 '=== Your local SkyPilot config ===\n'
-                f'{common_utils.dump_yaml_str(override_configs)}\n'
+                f'{common_utils.dump_yaml_str(dict(override_configs))}\n'
                 f'Details: {e}') from e
     finally:
         _dict = original_config
         _config_overridden = False
 
 
-def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     """Composes the skypilot CLI config.
     CLI config can either be:
     - A path to a config file
@@ -458,18 +475,19 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
         return config_utils.Config()
 
     config_source = 'CLI'
-    maybe_config_path = os.path.expanduser(cli_config)
     try:
+        maybe_config_path = os.path.expanduser(cli_config[0])
         if os.path.isfile(maybe_config_path):
+            if len(cli_config) != 1:
+                raise ValueError(
+                    'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
             parsed_config = OmegaConf.to_object(
                 OmegaConf.load(maybe_config_path))
         else:  # cli_config is a comma-separated list of key-value pairs
-            variables: List[str] = []
-            variables = cli_config.split(',')
             parsed_config = OmegaConf.to_object(
-                OmegaConf.from_dotlist(variables))
+                OmegaConf.from_dotlist(cli_config))
         _validate_config(parsed_config, config_source)
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
@@ -480,7 +498,7 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     return parsed_config
 
 
-def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     """Applies the CLI provided config.
     SAFETY:
     This function directly modifies the global _dict variable.

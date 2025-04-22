@@ -23,7 +23,7 @@ spec:
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
-      {{- end }}      
+      {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
       containers:
       - name: skypilot-api
@@ -145,13 +145,13 @@ spec:
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: aws-credentials
-              key: aws_access_key_id
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.accessKeyIdKeyName }}
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: aws-credentials
-              key: aws_secret_access_key
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.secretAccessKeyKeyName }}
         volumeMounts:
         - name: aws-config
           mountPath: /root/.aws
@@ -195,7 +195,7 @@ spec:
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
         secret:
-          secretName: gcp-credentials
+          secretName: {{ .Values.gcpCredentials.gcpSecretName }}
       - name: gcp-config
         emptyDir: {}
       {{- end }}

@@ -1,13 +1,11 @@
 name: Release Build
 
 on:
-  schedule:
-    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
   workflow_dispatch:
     inputs:
       release_version:
         description: 'Release version (e.g., 0.9.0)'
-        required: false
+        required: true
         type: string
 
 jobs:
@@ -18,56 +16,54 @@ jobs:
       smoke_tests_json: ${{ steps.trigger_smoke_tests.outputs.json }}
       quicktest_json: ${{ steps.trigger_quicktest_core.outputs.json }}
       release_test_json: ${{ steps.trigger_release_tests.outputs.json }}
-      release_version: ${{ steps.determine_version.outputs.release_version }}
+      manual_created_release_branch: ${{ steps.validate_input_version.outputs.manual_created_release_branch }}
+      pypi_base_branch: ${{ steps.verify_version.outputs.pypi_base_branch }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # Find the latest release branch to use as base branch for tests
-      - name: Find latest release branch
-        id: find_release_branch
+      - name: Validate Input Version and Branch
+        id: validate_input_version
         run: |
-          git fetch --all --tags
-          LATEST_RELEASE=$(git branch -r | grep 'origin/releases/' | sort -V | tail -n1 | sed 's/origin\///')
-          echo "Latest release branch: ${LATEST_RELEASE}"
-          echo "base_branch=${LATEST_RELEASE}" >> $GITHUB_OUTPUT
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          echo "Using manually specified version: ${RELEASE_VERSION}"
+          MANUAL_CREATED_RELEASE_BRANCH="releases/${RELEASE_VERSION}"
+          echo "Expected manual created release branch: ${MANUAL_CREATED_RELEASE_BRANCH}"
 
-      # Determine release version based on trigger type
-      - name: Determine release version
-        id: determine_version
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
-            # Manual trigger with input version provided
-            RELEASE_VERSION="${{ github.event.inputs.release_version }}"
-            echo "Using manually specified version: ${RELEASE_VERSION}"
+          # Fetch all remote heads and tags
+          git fetch --all --tags
+
+          # Check if the release branch exists remotely
+          if ! git ls-remote --heads origin ${MANUAL_CREATED_RELEASE_BRANCH} | grep -q refs/heads/${MANUAL_CREATED_RELEASE_BRANCH}; then
+            echo "Error: Manual release branch ${MANUAL_CREATED_RELEASE_BRANCH} does not exist remotely."
+            exit 1
           else
-            # Scheduled trigger or manual trigger without version - extract version from latest release and increment patch
-            LATEST_VERSION=$(echo "${{ steps.find_release_branch.outputs.base_branch }}" | sed 's/releases\///')
-            # Split version into parts
-            MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
-            MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
-            PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
-            # Increment patch version
-            NEW_PATCH=$((PATCH + 1))
-            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-            echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
+            echo "Found manual created release branch ${MANUAL_CREATED_RELEASE_BRANCH} remotely."
           fi
-          echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+          echo "manual_created_release_branch=${MANUAL_CREATED_RELEASE_BRANCH}" >> $GITHUB_OUTPUT
 
       - name: Verify release version > latest PyPI version
         id: verify_version
         run: |
-          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          echo "Determined release version: ${RELEASE_VERSION}"
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          echo "Validated release version: ${RELEASE_VERSION}"
 
           # Get the latest version from PyPI using JSON API
           LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
           echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
+
+          # Determine the base branch for PyPI version
+          PYPI_BASE_BRANCH="releases/${LATEST_PYPI_VERSION}"
+          echo "pypi_base_branch=${PYPI_BASE_BRANCH}" >> $GITHUB_OUTPUT
+          echo "Determined PyPI base branch for comparison: ${PYPI_BASE_BRANCH}"
 
           # Parse latest PyPI version
           PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
@@ -92,27 +88,39 @@ jobs:
       - name: Set release version and commit changes
         id: commit_changes
         run: |
-          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          MANUAL_CREATED_RELEASE_BRANCH="${{ steps.validate_input_version.outputs.manual_created_release_branch }}"
 
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Make version changes
-          sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          # Checkout the base release branch
+          echo "Checking out manual created release branch ${MANUAL_CREATED_RELEASE_BRANCH}..."
+          git checkout ${MANUAL_CREATED_RELEASE_BRANCH}
 
-          # Commit the changes
+          # Make version changes
+          echo "Updating __version__ in sky/__init__.py and Dockerfile to ${RELEASE_VERSION}..."
+          sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/skypilot-nightly\[all\]/skypilot[all]==${RELEASE_VERSION}/g" Dockerfile
+
+          # Create the test branch from the *current* state (base branch with version bump)
+          TEST_BRANCH="test_releases/${RELEASE_VERSION}"
+          echo "Creating test branch ${TEST_BRANCH}..."
+          git checkout -b ${TEST_BRANCH}
+
+          # Commit the version change on the new test branch
           git add sky/__init__.py
+          git add Dockerfile
           git commit -m "Release ${RELEASE_VERSION}"
 
-          # Get the new commit SHA
+          # Get the new commit SHA from the test branch
           NEW_COMMIT_SHA=$(git rev-parse HEAD)
           echo "new_commit_sha=${NEW_COMMIT_SHA}" >> $GITHUB_OUTPUT
-          echo "New commit SHA: ${NEW_COMMIT_SHA}"
+          echo "New commit SHA on ${TEST_BRANCH}: ${NEW_COMMIT_SHA}"
 
-          # Create and push the branch
-          TEST_BRANCH="test_releases/${RELEASE_VERSION}"
-          git checkout -b ${TEST_BRANCH}
+          # Push the new test branch
+          echo "Pushing ${TEST_BRANCH}..."
           git push -f origin ${TEST_BRANCH}
           echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
 
@@ -125,7 +133,7 @@ jobs:
           pipeline: "skypilot-1/full-smoke-tests-run"
           branch: "${{ steps.commit_changes.outputs.test_branch }}"
           commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          message: "Release ${{ github.event.inputs.release_version }}"
           ignore_pipeline_branch_filter: true
 
       # Trigger Buildkite quicktest-core
@@ -137,9 +145,9 @@ jobs:
           pipeline: "skypilot-1/quicktest-core"
           branch: "${{ steps.commit_changes.outputs.test_branch }}"
           commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          message: "Release ${{ github.event.inputs.release_version }}"
           ignore_pipeline_branch_filter: true
-          build_env_vars: '{"ARGS": "--base-branch ${{ steps.find_release_branch.outputs.base_branch }}"}'
+          build_env_vars: '{"ARGS": "--base-branch ${{ steps.verify_version.outputs.pypi_base_branch }}"}'
 
       # Trigger Buildkite release tests
       - name: Trigger Release Tests
@@ -150,7 +158,7 @@ jobs:
           pipeline: "skypilot-1/release"
           branch: "${{ steps.commit_changes.outputs.test_branch }}"
           commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          message: "Release ${{ github.event.inputs.release_version }}"
           ignore_pipeline_branch_filter: true
 
   # Call extract-buildkite workflow for each job
@@ -209,24 +217,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
-          RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
+          RELEASE_VERSION: ${{ github.event.inputs.release_version }}
+          MANUAL_CREATED_RELEASE_BRANCH: ${{ needs.release-build.outputs.manual_created_release_branch }}
           SMOKE_TEST_BUILD: ${{ needs.extract-smoke-tests.outputs.build_number }}
           QUICKTEST_BUILD: ${{ needs.extract-quicktest.outputs.build_number }}
           RELEASE_TEST_BUILD: ${{ needs.extract-release-test.outputs.build_number }}
         run: |
-          RELEASE_BRANCH="releases/${RELEASE_VERSION}"
 
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-
-          # Check if the release branch already exists remotely
-          if ! git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
-            echo "Release branch ${RELEASE_BRANCH} does not exist, creating it..."
-            # Create the release branch from the current commit
-            git checkout -b ${RELEASE_BRANCH}
-            git push origin ${RELEASE_BRANCH}
-          fi
 
           # Create PR with buildkite links
           PR_BODY="Release ${RELEASE_VERSION}
@@ -238,6 +238,8 @@ jobs:
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
 
-          gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
+          echo "Creating PR from ${TEST_BRANCH} to ${MANUAL_CREATED_RELEASE_BRANCH}"
+
+          gh pr create --base ${MANUAL_CREATED_RELEASE_BRANCH} --head ${TEST_BRANCH} \
             --title "Release ${RELEASE_VERSION}" \
             --body "${PR_BODY}"
