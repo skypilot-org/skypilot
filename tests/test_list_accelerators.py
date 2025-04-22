@@ -1,7 +1,8 @@
 import sky
 
 CLOUDS_TO_TEST = [
-    'AWS', 'GCP', 'IBM', 'Azure', 'Lambda', 'OCI', 'scp', 'vsphere', 'nebius', 'hyperstack'
+    'AWS', 'GCP', 'IBM', 'Azure', 'Lambda', 'OCI', 'scp', 'vsphere', 'nebius',
+    'hyperstack'
 ]
 
 
