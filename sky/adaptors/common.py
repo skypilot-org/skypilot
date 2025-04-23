@@ -2,10 +2,11 @@
 import functools
 import importlib
 import threading
+from types import ModuleType
 from typing import Any, Callable, Optional, Tuple
 
 
-class LazyImport:
+class LazyImport(ModuleType):
     """Lazy importer for modules.
 
     This is mainly used in two cases:

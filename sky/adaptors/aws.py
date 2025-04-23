@@ -31,11 +31,23 @@ This is informed by the following boto3 docs:
 import logging
 import threading
 import time
-from typing import Any, Callable
+import typing
+from typing import Callable, Literal, Optional, TypeVar
 
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import boto3  # type: ignore
+    _ = boto3  # Supress pylint use before assignment error
+    from mypy_boto3_ec2 import EC2Client
+    from mypy_boto3_ec2.service_resource import EC2ServiceResource
+    from mypy_boto3_iam.service_resource import IAMServiceResource
+    from mypy_boto3_s3 import S3Client
+    from mypy_boto3_s3.service_resource import S3ServiceResource
+    from mypy_boto3_service_quotas import ServiceQuotasClient
+    from mypy_boto3_sts import STSClient
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
                          'Try pip install "skypilot[aws]"')
@@ -43,6 +55,8 @@ boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 _LAZY_MODULES = (boto3, botocore)
+
+T = TypeVar('T')
 
 logger = logging.getLogger(__name__)
 _session_creation_lock = threading.RLock()
@@ -73,8 +87,8 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
-def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
-                       object_name: str) -> Any:
+def _create_aws_object(creation_fn_or_cls: Callable[[], T],
+                       object_name: str) -> T:
     """Create an AWS object.
 
     Args:
@@ -123,6 +137,22 @@ def session(check_credentials: bool = True):
     return s
 
 
+# New typing overloads can be added as needed.
+@typing.overload
+def resource(service_name: Literal['ec2'], **kwargs) -> 'EC2ServiceResource':
+    ...
+
+
+@typing.overload
+def resource(service_name: Literal['s3'], **kwargs) -> 'S3ServiceResource':
+    ...
+
+
+@typing.overload
+def resource(service_name: Literal['iam'], **kwargs) -> 'IAMServiceResource':
+    ...
+
+
 # Avoid caching the resource/client objects. If we are using the assumed role,
 # the credentials will be automatically rotated, but the cached resource/client
 # object will only refresh the credentials with a fixed 15 minutes interval,
@@ -142,7 +172,7 @@ def resource(service_name: str, **kwargs):
     """
     _assert_kwargs_builtin_type(kwargs)
 
-    max_attempts = kwargs.pop('max_attempts', None)
+    max_attempts: Optional[int] = kwargs.pop('max_attempts', None)
     if max_attempts is not None:
         config = botocore_config().Config(
             retries={'max_attempts': max_attempts})
@@ -156,6 +186,28 @@ def resource(service_name: str, **kwargs):
     return _create_aws_object(
         lambda: session(check_credentials=check_credentials).resource(
             service_name, **kwargs), 'resource')
+
+
+# New typing overloads can be added as needed.
+@typing.overload
+def client(service_name: Literal['s3'], **kwargs) -> 'S3Client':
+    pass
+
+
+@typing.overload
+def client(service_name: Literal['ec2'], **kwargs) -> 'EC2Client':
+    pass
+
+
+@typing.overload
+def client(service_name: Literal['sts'], **kwargs) -> 'STSClient':
+    pass
+
+
+@typing.overload
+def client(service_name: Literal['service-quotas'],
+           **kwargs) -> 'ServiceQuotasClient':
+    pass
 
 
 def client(service_name: str, **kwargs):
