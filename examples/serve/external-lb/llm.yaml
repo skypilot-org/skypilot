@@ -38,6 +38,8 @@ service:
 
 resources:
   cloud: aws
+  cpus: 16+
+  disk_tier: high
   accelerators: L4:1
   ordered:
     - region: ap-northeast-1
@@ -50,8 +52,19 @@ setup: |
   # pip install transformers==4.48.3 "sglang[all]==0.4.3.post2" \
   #   --find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/
   # For cache report
-  pip install "sglang[all]>=0.4.5" \
-    --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python
+  # pip install "sglang[all]>=0.4.5" \
+  #   --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python
+
+  uv venv -p 3.10
+  source .venv/bin/activate
+  uv pip install huggingface-hub==0.30.2
+  # Parallel the installation and download the model.
+  uv pip install setuptools==79.0.0 "sglang[all]==0.4.5" \
+    --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python &
+  huggingface-cli download $MODEL_NAME \
+    --max-workers 32 \
+    --include "*.safetensors"
+  wait
 
 run: |
   # vllm serve $MODEL_NAME \
@@ -59,6 +72,8 @@ run: |
   #   --enable-prefix-caching \
   #   --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
   #   --max-model-len 4096
+
+  source .venv/bin/activate
   python -m sglang.launch_server \
     --model-path $MODEL_NAME \
     --port 8081 \
