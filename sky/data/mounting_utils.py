@@ -196,9 +196,11 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
     mount_options = ['allow_other', 'default_permissions']
     # Format: -o flag1,flag2
-    fusermount_options = '-o ' + ','.join(mount_options)
+    fusermount_options = '-o ' + ','.join(
+        mount_options) if mount_options else ''
     # Format: -o flag1 -o flag2
-    blobfuse2_options = ' '.join(f'-o {opt}' for opt in mount_options)
+    blobfuse2_options = ' '.join(
+        f'-o {opt}' for opt in mount_options) if mount_options else ''
     # TODO(zpoint): clear old cache that has been created in the previous boot.
     # Do not set umask to avoid permission problems for non-root users.
     blobfuse2_cmd = ('blobfuse2 --no-symlinks '
