@@ -9,11 +9,11 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.provision.aws import instance as aws_instance
 from sky.utils import db_utils
 from sky.utils import env_options
-from sky import sky_logging
 
 
 @pytest.fixture
@@ -29,9 +29,9 @@ def test_aws_region_failover(enable_all_clouds, _mock_db_conn, mock_aws_backend,
     """Test SkyPilot's ability to failover between AWS regions."""
     # Set the debug info to True to print the debug info
     monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
-                       lambda: True)
+                        lambda: True)
     sky_logging.reload_logger()
-    
+
     region_attempt_count = {'count': 0}
 
     def mock_create_instances(ec2_fail_fast, cluster_name, node_config, tags,
