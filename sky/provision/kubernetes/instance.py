@@ -88,7 +88,10 @@ def is_high_availability_cluster_by_kubectl(
             label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
     except kubernetes.api_exception():
         return False
-    return bool(deployments.items)
+    # Should not use deployments.items here, because we may utilize this
+    # function to terminate the deployment, especially when it's in abnormal
+    # state and has no ready replicas.
+    return bool(deployments)
 
 
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
@@ -706,11 +709,12 @@ def _wait_for_deployment_pod(context,
         for key, value in deployment.spec.selector.match_labels.items()
     ])
     target_replicas = deployment.spec.replicas
+    deployment_name = deployment.metadata.name
     start_time = time.time()
     while time.time() - start_time < timeout:
         # Refresh the deployment status
         deployment = kubernetes.apps_api(
-            context).read_namespaced_deployment_status(deployment.metadata.name,
+            context).read_namespaced_deployment_status(deployment_name,
                                                        namespace)
         if (deployment.status and
                 deployment.status.ready_replicas is not None and
@@ -718,14 +722,16 @@ def _wait_for_deployment_pod(context,
             pods = kubernetes.core_api(context).list_namespaced_pod(
                 namespace, label_selector=label_selector).items
             return pods
+
+        ready_replicas = (deployment.status.ready_replicas if
+                           deployment.status is not None else 0)
         logger.debug(
-            f'Waiting for deployment {deployment.metadata.name!r} to be ready. '
-            f'Ready replicas: {deployment.status.ready_replicas}/'
-            f'{target_replicas}')
+            f'Waiting for deployment {deployment_name!r} to be ready. '
+            f'Ready replicas: {ready_replicas}/{target_replicas}')
         time.sleep(2)
 
     raise TimeoutError(
-        f'Timeout: Deployment {deployment.metadata.name!r} did not become '
+        f'Timeout: Deployment {deployment_name!r} did not become '
         'ready.')
 
 
@@ -1146,8 +1152,9 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    if is_high_availability_controller_by_name(cluster_name_on_cloud):
+    if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context, namespace):
         # For high availability controllers, terminate the deployment
+        logger.debug(f'Terminating deployment {cluster_name_on_cloud}')
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
