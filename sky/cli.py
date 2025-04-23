@@ -5734,6 +5734,7 @@ def build_cluster_configs(ips: str, ssh_user: str, ssh_key_path: str,
                     if not cluster_ips:
                         raise click.BadParameter(
                             f'No IPs specified for cluster {cluster}')
+                    # Check for duplicate IPs
                     for ip in cluster_ips:
                         if ip in ips_dict:
                             raise click.BadParameter(
@@ -5798,6 +5799,7 @@ def build_cluster_configs(ips: str, ssh_user: str, ssh_key_path: str,
             'context_name': context_name
         })
     else:
+        # For local kind cluster
         cluster_configs.append({
             'ips': None,
             'ssh_user': ssh_user,
