@@ -723,11 +723,10 @@ def _wait_for_deployment_pod(context,
                 namespace, label_selector=label_selector).items
             return pods
 
-        ready_replicas = (deployment.status.ready_replicas if
-                           deployment.status is not None else 0)
-        logger.debug(
-            f'Waiting for deployment {deployment_name!r} to be ready. '
-            f'Ready replicas: {ready_replicas}/{target_replicas}')
+        ready_replicas = (deployment.status.ready_replicas
+                          if deployment.status is not None else 0)
+        logger.debug(f'Waiting for deployment {deployment_name!r} to be ready. '
+                     f'Ready replicas: {ready_replicas}/{target_replicas}')
         time.sleep(2)
 
     raise TimeoutError(
@@ -1152,7 +1151,8 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context, namespace):
+    if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context,
+                                               namespace):
         # For high availability controllers, terminate the deployment
         logger.debug(f'Terminating deployment {cluster_name_on_cloud}')
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
