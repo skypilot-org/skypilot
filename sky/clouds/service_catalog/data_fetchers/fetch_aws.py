@@ -24,7 +24,7 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from mypy_boto3_ec2.type_defs import SpotPriceTypeDef
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
     import pandas as pd
 else:
     pd = adaptors_common.LazyImport('pandas')
@@ -193,7 +193,7 @@ def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
     paginator = client.get_paginator('describe_spot_price_history')
     response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
                                            StartTime=datetime.datetime.utcnow())
-    ret: List['SpotPriceTypeDef'] = []
+    ret: List['ec2_type_defs.SpotPriceTypeDef'] = []
     for response in response_iterator:
         # response['SpotPriceHistory'] is a list of dicts, each dict is like:
         # {

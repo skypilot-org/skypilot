@@ -39,7 +39,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from google.cloud import storage  # type: ignore
-    from mypy_boto3_s3.client import S3Client
+    import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1363,7 +1363,7 @@ class S3Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'S3Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         # TODO(romilb): This is purely a stopgap fix for
         #  https://github.com/skypilot-org/skypilot/issues/3405
@@ -3295,7 +3295,7 @@ class R2Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'S3Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
@@ -4700,7 +4700,7 @@ class NebiusStore(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'S3Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)

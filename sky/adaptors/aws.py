@@ -39,15 +39,13 @@ from sky.utils import annotations
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
-    import boto3  # type: ignore
+    import boto3
     _ = boto3  # Supress pylint use before assignment error
-    from mypy_boto3_ec2 import EC2Client
-    from mypy_boto3_ec2.service_resource import EC2ServiceResource
-    from mypy_boto3_iam.service_resource import IAMServiceResource
-    from mypy_boto3_s3 import S3Client
-    from mypy_boto3_s3.service_resource import S3ServiceResource
-    from mypy_boto3_service_quotas import ServiceQuotasClient
-    from mypy_boto3_sts import STSClient
+    import mypy_boto3_ec2
+    import mypy_boto3_iam
+    import mypy_boto3_s3
+    import mypy_boto3_service_quotas
+    import mypy_boto3_sts
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
                          'Try pip install "skypilot[aws]"')
@@ -139,17 +137,20 @@ def session(check_credentials: bool = True):
 
 # New typing overloads can be added as needed.
 @typing.overload
-def resource(service_name: Literal['ec2'], **kwargs) -> 'EC2ServiceResource':
+def resource(service_name: Literal['ec2'],
+             **kwargs) -> 'mypy_boto3_ec2.ServiceResource':
     ...
 
 
 @typing.overload
-def resource(service_name: Literal['s3'], **kwargs) -> 'S3ServiceResource':
+def resource(service_name: Literal['s3'],
+             **kwargs) -> 'mypy_boto3_s3.ServiceResource':
     ...
 
 
 @typing.overload
-def resource(service_name: Literal['iam'], **kwargs) -> 'IAMServiceResource':
+def resource(service_name: Literal['iam'],
+             **kwargs) -> 'mypy_boto3_iam.ServiceResource':
     ...
 
 
@@ -190,23 +191,23 @@ def resource(service_name: str, **kwargs):
 
 # New typing overloads can be added as needed.
 @typing.overload
-def client(service_name: Literal['s3'], **kwargs) -> 'S3Client':
+def client(service_name: Literal['s3'], **kwargs) -> 'mypy_boto3_s3.Client':
     pass
 
 
 @typing.overload
-def client(service_name: Literal['ec2'], **kwargs) -> 'EC2Client':
+def client(service_name: Literal['ec2'], **kwargs) -> 'mypy_boto3_ec2.Client':
     pass
 
 
 @typing.overload
-def client(service_name: Literal['sts'], **kwargs) -> 'STSClient':
+def client(service_name: Literal['sts'], **kwargs) -> 'mypy_boto3_sts.Client':
     pass
 
 
 @typing.overload
 def client(service_name: Literal['service-quotas'],
-           **kwargs) -> 'ServiceQuotasClient':
+           **kwargs) -> 'mypy_boto3_service_quotas.Client':
     pass
 
 

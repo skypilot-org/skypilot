@@ -25,8 +25,8 @@ from sky.utils import annotations
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
-    from mypy_boto3_ec2.service_resource import EC2ServiceResource
-    from mypy_boto3_ec2.type_defs import FilterTypeDef as EC2FilterTypeDef
+    import mypy_boto3_ec2
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
 
 logger = sky_logging.init_logger(__name__)
 
@@ -228,8 +228,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
 
 
 @annotations.lru_cache(scope='request', maxsize=128)  # Keep bounded.
-def _get_route_tables(ec2: 'EC2ServiceResource', vpc_id: Optional[str],
-                      region: str, main: bool) -> List[Any]:
+def _get_route_tables(ec2: 'mypy_boto3_ec2.ServiceResource',
+                      vpc_id: Optional[str], region: str,
+                      main: bool) -> List[Any]:
     """Get route tables associated with a VPC and region
 
     Args:
@@ -253,7 +254,7 @@ def _get_route_tables(ec2: 'EC2ServiceResource', vpc_id: Optional[str],
         'RouteTables', [])
 
 
-def _is_subnet_public(ec2: 'EC2ServiceResource', subnet_id,
+def _is_subnet_public(ec2: 'mypy_boto3_ec2.ServiceResource', subnet_id,
                       vpc_id: Optional[str]) -> bool:
     """Checks if a subnet is public by existence of a route to an IGW.
 
@@ -447,11 +448,14 @@ def _usable_subnets(
     return subnets, first_subnet_vpc_id
 
 
-def _vpc_id_from_security_group_ids(ec2: 'EC2ServiceResource',
+def _vpc_id_from_security_group_ids(ec2: 'mypy_boto3_ec2.ServiceResource',
                                     sg_ids: List[str]) -> Any:
     # sort security group IDs to support deterministic unit test stubbing
     sg_ids = sorted(set(sg_ids))
-    filters: List['EC2FilterTypeDef'] = [{'Name': 'group-id', 'Values': sg_ids}]
+    filters: List['ec2_type_defs.FilterTypeDef'] = [{
+        'Name': 'group-id',
+        'Values': sg_ids
+    }]
     security_groups = ec2.security_groups.filter(Filters=filters)
     vpc_ids = [sg.vpc_id for sg in security_groups]
     vpc_ids = list(set(vpc_ids))
@@ -469,7 +473,7 @@ def _vpc_id_from_security_group_ids(ec2: 'EC2ServiceResource',
     return vpc_ids[0]
 
 
-def _get_vpc_id_by_name(ec2: 'EC2ServiceResource', vpc_name: str,
+def _get_vpc_id_by_name(ec2: 'mypy_boto3_ec2.ServiceResource', vpc_name: str,
                         region: str) -> str:
     """Returns the VPC ID of the unique VPC with a given name.
 
@@ -478,7 +482,7 @@ def _get_vpc_id_by_name(ec2: 'EC2ServiceResource', vpc_name: str,
       - More than 1 VPC with the given name are found in the current region.
     """
     # Look in the 'Name' tag (shown as Name column in console).
-    filters: List['EC2FilterTypeDef'] = [{
+    filters: List['ec2_type_defs.FilterTypeDef'] = [{
         'Name': 'tag:Name',
         'Values': [vpc_name]
     }]
@@ -497,7 +501,7 @@ def _get_vpc_id_by_name(ec2: 'EC2ServiceResource', vpc_name: str,
     return vpcs[0].id
 
 
-def _get_subnet_and_vpc_id(ec2: 'EC2ServiceResource',
+def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
                            security_group_ids: Optional[List[str]], region: str,
                            availability_zone: Optional[str],
                            use_internal_ips: bool,
@@ -526,8 +530,8 @@ def _get_subnet_and_vpc_id(ec2: 'EC2ServiceResource',
     return subnets, vpc_id
 
 
-def _configure_security_group(ec2: 'EC2ServiceResource', vpc_id: str,
-                              expected_sg_name: str,
+def _configure_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
+                              vpc_id: str, expected_sg_name: str,
                               extended_ip_rules: List) -> List[str]:
     security_group = _get_or_create_vpc_security_group(ec2, vpc_id,
                                                        expected_sg_name)
@@ -564,7 +568,8 @@ def _configure_security_group(ec2: 'EC2ServiceResource', vpc_id: str,
     return sg_ids
 
 
-def _get_or_create_vpc_security_group(ec2: 'EC2ServiceResource', vpc_id: str,
+def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
+                                      vpc_id: str,
                                       expected_sg_name: str) -> Any:
     """Find or create a security group in the specified VPC.
 
@@ -625,7 +630,8 @@ def _get_or_create_vpc_security_group(ec2: 'EC2ServiceResource', vpc_id: str,
     return security_group
 
 
-def _get_security_group_from_vpc_id(ec2: 'EC2ServiceResource', vpc_id: str,
+def _get_security_group_from_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
+                                    vpc_id: str,
                                     group_name: str) -> Optional[Any]:
     """Get security group by VPC ID and group name."""
     existing_groups = list(
