@@ -282,7 +282,7 @@ SSH_MAX_SESSIONS_CONFIG = (
     'sudo bash -c \''
     'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
     'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
-    'systemctl restart sshd; '
+    '(systemctl restart sshd || service ssh restart); '
     '\'')
 
 # Internal: Env var indicating the system is running with a remote API server.

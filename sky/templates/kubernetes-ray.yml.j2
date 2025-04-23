@@ -669,6 +669,7 @@ setup_commands:
     # must and see if there's a workaround to grant minimum permission.
     sudo chmod 777 /tmp/tpu_logs;
     {% endif %}
+    {{ ssh_max_sessions_config }}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
