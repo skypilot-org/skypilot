@@ -263,9 +263,10 @@ def _create_template_for_docker_login(
     return login_config.format_image(image_name), create_template_resp['id']
 
 
-def launch(cluster_name: str, node_type: str, instance_type: str, region: str, zone: str,
-           disk_size: int, image_name: str, ports: Optional[List[int]],
-           public_key: str, preemptible: Optional[bool], bid_per_gpu: float,
+def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
+           zone: str, disk_size: int, image_name: str,
+           ports: Optional[List[int]], public_key: str,
+           preemptible: Optional[bool], bid_per_gpu: float,
            docker_login_config: Optional[Dict[str, str]]) -> str:
     """Launches an instance with the given parameters.
 

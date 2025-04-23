@@ -98,7 +98,7 @@ class RunPod(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
+    ) -> Iterator[Optional[List['clouds.Zone']]]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
