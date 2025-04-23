@@ -195,7 +195,7 @@ def get_az_mount_cmd(container_name: str,
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
     mount_options = ['allow_other', 'default_permissions']
-    # Format: -o flag1, flag2
+    # Format: -o flag1,flag2
     fusermount_options = '-o ' + ','.join(mount_options)
     # Format: -o flag1 -o flag2
     blobfuse2_options = ' '.join(f'-o {opt}' for opt in mount_options)
