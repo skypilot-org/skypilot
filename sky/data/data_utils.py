@@ -6,6 +6,7 @@ from multiprocessing import pool
 import os
 import re
 import subprocess
+import tempfile
 import textwrap
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -563,6 +564,26 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
         # such as [[ ... ]]
         executable='/bin/bash',
         log_cmd=True)
+    if returncode == 255 and 'too long' in stdout + stderr:
+        # If the generated script is too long, we retry it with dumping
+        # the script to a file and running it with SSH. We use a general
+        # length limit check before but it could be inaccurate on some
+        # systems.
+        logger.debug('Failed to run upload CLI due to command length limit. '
+                     'Dumping command to file and running it with SSH.')
+        with tempfile.NamedTemporaryFile('w', prefix='sky_upload_cli_') as fp:
+            fp.write(command)
+            fp.flush()
+            returncode, stdout, stderr = log_lib.run_with_log(
+                f'/bin/bash {fp.name}',
+                log_path,
+                shell=True,
+                require_outputs=True,
+                # We need to use bash as some of the cloud commands
+                # uses bash syntax, such as [[ ... ]]
+                executable='/bin/bash',
+                log_cmd=True)
+
     if access_denied_message in stderr:
         with ux_utils.print_exception_no_traceback():
             raise PermissionError('Failed to upload files to '
