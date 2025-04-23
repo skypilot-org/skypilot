@@ -685,6 +685,8 @@ available_node_types:
             metadata:
               # should be replaced by pod metadata
             spec:
+              securityContext:
+                fsGroup: 1000
               # To prevent the home dir provided by the docker image from being overriden by pvc mounting,
               # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
               initContainers:
@@ -710,11 +712,12 @@ available_node_types:
                         echo "Marker '$MARKER_FILE' not found. PVC likely needs initialization."
                         echo "Copying initial home directory from image ($SOURCE_PATH/) to PVC ($DEST_PATH)..."
 
-                        # The -a flag includes preserving owner/group, which can cause permission
-                        # issues in PVCs if the image UID/GID differs from the container's runtime UID/GID.
-                        # --no-owner --no-group prevents this by using the initContainer's runtime user/group
-                        # for the copied files in the PVC, ensuring better compatibility.
-                        rsync -a --no-owner --no-group "$SOURCE_PATH/" "$DEST_PATH"
+                        # Use rsync with -rl (recursive, links) instead of -a (archive).
+                        # This avoids preserving times (-t) and permissions (-p) implied by -a,
+                        # which caused 'Operation not permitted' errors on the PVC root directory (/mnt/home).
+                        # Owner/group preservation (-o, -g) is also skipped (default for -rl), ensuring
+                        # files are owned by the container's user/group.
+                        rsync -rl "$SOURCE_PATH/" "$DEST_PATH"
 
                         # Check if rsync failed
                         if [ $? -ne 0 ]; then
