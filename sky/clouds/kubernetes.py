@@ -35,6 +35,10 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
+# Shared directory to communicate with fusermount-server, refer to
+# addons/fuse-proxy/README.md for more details.
+_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
+
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
@@ -42,8 +46,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-
-    LEGACY_SINGLETON_REGION = 'kubernetes'
 
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
@@ -110,9 +112,13 @@ class Kubernetes(clouds.Cloud):
             # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to terminate itself with exec auth.
+            # Pod does not have permissions to down itself with exec auth.
             unsupported_features[
-                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+                clouds.CloudImplementationFeatures.AUTODOWN] = message
+        unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
+            'Stopping clusters is not supported on Kubernetes.')
+        unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
+            'Auto-stop is not supported on Kubernetes.')
         # Allow spot instances if supported by the cluster
         try:
             spot_label_key, _ = kubernetes_utils.get_spot_label(context)
@@ -551,8 +557,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': k8s_automount_sa_token,
             'k8s_fuse_device_required': fuse_device_required,
-            # Namespace to run the FUSE device manager in
+            # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,
@@ -658,6 +665,14 @@ class Kubernetes(clouds.Cloud):
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to
         Kubernetes."""
+        # Check for port forward dependencies
+        reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
+        if reasons is not None:
+            formatted = '\n'.join(
+                [reasons[0]] +
+                [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
+            return (False, formatted)
+
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
@@ -736,12 +751,6 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region == self.LEGACY_SINGLETON_REGION:
-            # For backward compatibility, we allow the region to be set to the
-            # legacy singleton region.
-            # TODO: Remove this after 0.9.0.
-            return region, zone
-
         if region == kubernetes.in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
             # since there is no context name available.

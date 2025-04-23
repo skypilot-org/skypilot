@@ -27,7 +27,9 @@ from sky.resources import Resources
 @mock.patch('sky.utils.common_utils.fill_template')
 def test_write_cluster_config_w_remote_identity(mock_fill_template,
                                                 *mocks) -> None:
-    os.environ['SKYPILOT_CONFIG'] = './tests/test_yamls/test_aws_config.yaml'
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config.yaml'
     skypilot_config._reload_config()
 
     cloud = clouds.AWS()

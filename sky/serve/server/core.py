@@ -1,9 +1,11 @@
 """SkyServe core APIs."""
+import pathlib
 import re
 import signal
 import tempfile
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+import typing
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -28,6 +30,9 @@ from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky.backends import cloud_vm_ray_backend
 
 logger = sky_logging.init_logger(__name__)
 
@@ -62,6 +67,41 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
     service_spec.tls_credential = serve_utils.TLSCredential(
         remote_tls_keyfile, remote_tls_certfile)
     return tls_template_vars
+
+
+def _get_all_replica_targets(
+    service_name: str, backend: backends.CloudVmRayBackend,
+    handle: backends.CloudVmRayResourceHandle
+) -> Set[serve_utils.ServiceComponentTarget]:
+    """Helper function to get targets for all live replicas."""
+    code = serve_utils.ServeCodeGen.get_service_status([service_name])
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch services',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_records = serve_utils.load_service_status(serve_status_payload)
+    if not service_records:
+        raise ValueError(f'Service {service_name!r} not found.')
+    assert len(service_records) == 1
+    service_record = service_records[0]
+
+    return {
+        serve_utils.ServiceComponentTarget(serve_utils.ServiceComponent.REPLICA,
+                                           replica_info['replica_id'])
+        for replica_info in service_record['replica_info']
+    }
 
 
 @usage_lib.entrypoint
@@ -179,14 +219,17 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        controller_idle_minutes_to_autostop, controller_down = (
+            controller_utils.get_controller_autostop_config(
+                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER))
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
             controller_job_id, controller_handle = execution.launch(
                 task=controller_task,
                 cluster_name=controller_name,
-                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                idle_minutes_to_autostop=controller_idle_minutes_to_autostop,
+                down=controller_down,
                 retry_until_up=True,
                 _disable_controller_check=True,
             )
@@ -682,11 +725,14 @@ def status(
     return service_records
 
 
+ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]
+
+
 @usage_lib.entrypoint
 def tail_logs(
     service_name: str,
     *,
-    target: Union[str, serve_utils.ServiceComponent],
+    target: ServiceComponentOrStr,
     replica_id: Optional[int] = None,
     follow: bool = True,
 ) -> None:
@@ -740,10 +786,11 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
+
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                         value.default_hint_if_non_existent))
+        controller=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
@@ -772,3 +819,141 @@ def tail_logs(
                         stream_logs=True,
                         process_stream=False,
                         ssh_mode=command_runner.SshMode.INTERACTIVE)
+
+
+@usage_lib.entrypoint
+def sync_down_logs(
+    service_name: str,
+    *,
+    local_dir: str,
+    targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
+                   None] = None,
+    replica_ids: Optional[List[int]] = None,
+) -> str:
+    """Sync down logs from the controller for the given service.
+
+    This function is called by the server endpoint. It gathers logs from the
+    controller, load balancer, and/or replicas and places them in a directory
+    under the user's log space on the API server filesystem.
+
+    Args:
+        service_name: The name of the service to download logs from.
+        local_dir: The local directory to save the logs to.
+        targets: Which component(s) to download logs for. If None or empty,
+            means download all logs (controller, load-balancer, all replicas).
+            Can be a string (e.g. "controller"), or a `ServiceComponent` object,
+            or a list of them for multiple components. Currently accepted
+            values:
+                - "controller"/ServiceComponent.CONTROLLER
+                - "load_balancer"/ServiceComponent.LOAD_BALANCER
+                - "replica"/ServiceComponent.REPLICA
+        replica_ids: The list of replica IDs to download logs from, specified
+            when target includes `ServiceComponent.REPLICA`. If target includes
+            `ServiceComponent.REPLICA` but this is None/empty, logs for all
+            replicas will be downloaded.
+
+    Returns:
+        A dict mapping component names to local paths where the logs were synced
+        down to.
+
+    Raises:
+        RuntimeError: If fails to gather logs or fails to rsync from the
+          controller.
+        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        ValueError: Arguments not valid.
+    """
+    # Step 0) get the controller handle
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking service status...')):
+        controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=controller_type.value.default_hint_if_non_existent)
+        backend: backends.CloudVmRayBackend = (
+            backend_utils.get_backend_from_handle(handle))
+
+    requested_components: Set[serve_utils.ServiceComponent] = set()
+    if not targets:
+        # No targets specified -> request all components
+        requested_components = {
+            serve_utils.ServiceComponent.CONTROLLER,
+            serve_utils.ServiceComponent.LOAD_BALANCER,
+            serve_utils.ServiceComponent.REPLICA
+        }
+    else:
+        # Parse provided targets
+        if isinstance(targets, (str, serve_utils.ServiceComponent)):
+            requested_components = {serve_utils.ServiceComponent(targets)}
+        else:  # list
+            requested_components = {
+                serve_utils.ServiceComponent(t) for t in targets
+            }
+
+    normalized_targets: Set[serve_utils.ServiceComponentTarget] = set()
+    if serve_utils.ServiceComponent.CONTROLLER in requested_components:
+        normalized_targets.add(
+            serve_utils.ServiceComponentTarget(
+                serve_utils.ServiceComponent.CONTROLLER))
+    if serve_utils.ServiceComponent.LOAD_BALANCER in requested_components:
+        normalized_targets.add(
+            serve_utils.ServiceComponentTarget(
+                serve_utils.ServiceComponent.LOAD_BALANCER))
+    if serve_utils.ServiceComponent.REPLICA in requested_components:
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Getting live replica infos...')):
+            replica_targets = _get_all_replica_targets(service_name, backend,
+                                                       handle)
+        if not replica_ids:
+            # Replica target requested but no specific IDs
+            # -> Get all replica logs
+            normalized_targets.update(replica_targets)
+        else:
+            # Replica target requested with specific IDs
+            requested_replica_targets = [
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.REPLICA, rid)
+                for rid in replica_ids
+            ]
+            for target in requested_replica_targets:
+                if target not in replica_targets:
+                    logger.warning(f'Replica ID {target.replica_id} not found '
+                                   f'for {service_name}. Skipping...')
+                else:
+                    normalized_targets.add(target)
+
+    def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
+        component = target.component
+        # We need to set one side of the pipe to a logs stream, and the other
+        # side to a file.
+        log_path = str(pathlib.Path(local_dir) / f'{target}.log')
+        stream_logs_code: str
+
+        if component == serve_utils.ServiceComponent.CONTROLLER:
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name, stream_controller=True, follow=False))
+        elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name, stream_controller=False, follow=False))
+        elif component == serve_utils.ServiceComponent.REPLICA:
+            replica_id = target.replica_id
+            assert replica_id is not None, service_name
+            stream_logs_code = serve_utils.ServeCodeGen.stream_replica_logs(
+                service_name, replica_id, follow=False)
+        else:
+            assert False, component
+
+        # Refer to the notes in
+        # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
+        backend.run_on_head(handle,
+                            stream_logs_code,
+                            stream_logs=False,
+                            process_stream=False,
+                            ssh_mode=command_runner.SshMode.INTERACTIVE,
+                            log_path=log_path)
+
+    subprocess_utils.run_in_parallel(sync_down_logs_by_target,
+                                     list(normalized_targets))
+
+    return local_dir

@@ -159,8 +159,5 @@ def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
 
 @register_encoder('kubernetes_node_info')
 def encode_kubernetes_node_info(
-        return_value: Dict[str, 'models.KubernetesNodeInfo']) -> Dict[str, Any]:
-    return {
-        node_name: dataclasses.asdict(node_info)
-        for node_name, node_info in return_value.items()
-    }
+        return_value: 'models.KubernetesNodesInfo') -> Dict[str, Any]:
+    return return_value.to_dict()

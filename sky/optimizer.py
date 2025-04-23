@@ -6,6 +6,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
+import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -28,12 +29,10 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-    import numpy as np
 
     from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
-    np = adaptors_common.LazyImport('numpy')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -336,9 +335,6 @@ class Optimizer:
                             orig_resources)
 
                 for resources in launchable_list:
-                    if do_print:
-                        logger.debug(f'resources: {resources}')
-
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = (
@@ -356,13 +352,14 @@ class Optimizer:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
                     if do_print:
-                        logger.debug(
-                            '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
-                                estimated_runtime, estimated_runtime / 3600))
+                        debug_msg = (
+                            f'resources: {resources}, '
+                            f'estimated_runtime: {estimated_runtime} s '
+                            f'({estimated_runtime / 3600:.1f} hr)')
                         if minimize_cost:
-                            logger.debug(
-                                '  estimated_cost (not incl. egress): ${:.1f}'.
-                                format(estimated_cost_or_time))
+                            debug_msg += (', estimated_cost: '
+                                          f'${estimated_cost_or_time:.1f}')
+                        logger.debug(debug_msg)
                     node_to_cost_map[node][resources] = estimated_cost_or_time
             if not node_to_cost_map[node]:
                 source_hint = 'catalog'

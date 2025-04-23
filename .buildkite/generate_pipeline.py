@@ -112,6 +112,8 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument("--remote-server", action="store_true")
 
+    parser.add_argument('--base-branch')
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -138,6 +140,8 @@ def _parse_args(args: Optional[str] = None):
     extra_args = []
     if parsed_args.remote_server:
         extra_args.append('--remote-server')
+    if parsed_args.base_branch:
+        extra_args.append(f'--base-branch {parsed_args.base_branch}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -162,10 +166,8 @@ def _extract_marked_tests(
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
-    print(f'args: {args}')
     default_clouds_to_run, k_value, extra_args = _parse_args(args)
 
-    print(f'default_clouds_to_run: {default_clouds_to_run}, k_value: {k_value}')
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
     remote_server = '--remote-server' in extra_args
@@ -294,6 +296,7 @@ def _generate_pipeline(test_file: str,
 
 def _dump_pipeline_to_file(yaml_file_path: str,
                            pipelines: List[Dict[str, Any]],
+                           trigger_command: str,
                            extra_env: Optional[Dict[str, str]] = None):
     default_env = {
         'LOG_TO_STDOUT': '1',
@@ -306,11 +309,30 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         all_steps = []
         for pipeline in pipelines:
             all_steps.extend(pipeline['steps'])
-        final_pipeline = {'steps': all_steps, 'env': default_env}
+
+        # Extract key from trigger command, keeping only valid characters
+        key = re.sub(r'[^a-zA-Z0-9_\-:]', '',
+                     re.match(r'^[^ ]*', trigger_command).group(0))
+        # Generate formatted group name from key
+        group_name = ' '.join(
+            word.capitalize() for word in re.split(r'[-_]', key))
+
+        grouped_steps = [{
+            'group': group_name,
+            'key': key,
+            'notify': [{
+                'github_commit_status': {
+                    'context': f'{trigger_command}'
+                }
+            }],
+            'steps': all_steps
+        }]
+
+        final_pipeline = {'steps': grouped_steps, 'env': default_env}
         yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
-def _convert_release(test_files: List[str], args: str):
+def _convert_release(test_files: List[str], args: str, trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -319,10 +341,12 @@ def _convert_release(test_files: List[str], args: str):
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines)
+    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
+                           trigger_command)
 
 
-def _convert_quick_tests_core(test_files: List[str], args: List[str]):
+def _convert_quick_tests_core(test_files: List[str], args: List[str],
+                              trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -335,6 +359,7 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str]):
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
                            output_file_pipelines,
+                           trigger_command,
                            extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
@@ -357,9 +382,13 @@ def main(args):
 
     args = args or os.getenv('ARGS', '')
     print(f'args: {args}')
+    # If trigger via buildkite, TRIGGER_COMMAND should be set.
+    # Otherwise, use the args passed in for local testing.
+    trigger_command = os.getenv('TRIGGER_COMMAND', '') or args or '/smoke-test'
+    print(f'trigger_command: {trigger_command}')
 
-    _convert_release(release_files, args)
-    _convert_quick_tests_core(quick_tests_core_files, args)
+    _convert_release(release_files, args, trigger_command)
+    _convert_quick_tests_core(quick_tests_core_files, args, trigger_command)
 
 
 if __name__ == '__main__':

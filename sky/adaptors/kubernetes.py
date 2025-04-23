@@ -160,6 +160,13 @@ def api_client(context: Optional[str] = None):
     return kubernetes.client.ApiClient()
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
+@annotations.lru_cache(scope='request')
+def watch(context: Optional[str] = None):
+    _load_config(context)
+    return kubernetes.watch.Watch()
+
+
 def api_exception():
     return kubernetes.client.rest.ApiException
 

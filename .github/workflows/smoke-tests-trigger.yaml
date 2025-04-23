@@ -1,8 +1,6 @@
 name: Smoke Tests Trigger
 
 on:
-  schedule:
-    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
   workflow_dispatch:
     inputs:
       param:
@@ -19,7 +17,6 @@ jobs:
     steps:
       - name: Trigger Smoke Tests
         uses: buildkite/trigger-pipeline-action@v2.3.0
-        if: github.event_name == 'workflow_dispatch'
         with:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
           pipeline: "skypilot-1/smoke-tests"
@@ -28,14 +25,3 @@ jobs:
           message: "Manual Smoke Tests: ${{ github.event.inputs.param }}"
           ignore_pipeline_branch_filter: true
           build_env_vars: '{"ARGS": "${{ github.event.inputs.param }}"}'
-
-      - name: Trigger Full Smoke Tests
-        uses: buildkite/trigger-pipeline-action@v2.3.0
-        if: github.event_name != 'workflow_dispatch'
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/full-smoke-tests-run"
-          branch: "master"
-          commit: "HEAD"
-          message: "Biweekly Smoke Tests"
-          ignore_pipeline_branch_filter: true
