@@ -87,8 +87,8 @@ def main():
                     region_cmd += f' {regions[r]}'
                 cn2cmds[cluster].append(
                     f'sky launch --region {r} -c {cluster} --detach-run -y '
-                    f'--env CMD={shlex.quote(region_cmd)} --env HF_TOKEN '
-                    'examples/serve/external-lb/client.yaml')
+                    f'--fast --env CMD={shlex.quote(region_cmd)} '
+                    '--env HF_TOKEN examples/serve/external-lb/client.yaml')
                 output_remote = f'{cluster}:{output}/result'
                 met = f'{output_remote}/metric/{en}.json'
                 scps.append(f'scp {met} {output_local}/result'

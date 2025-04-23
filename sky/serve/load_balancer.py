@@ -30,6 +30,7 @@ logger = sky_logging.init_logger(__name__)
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
 _IE_QUEUE_PROBE_INTERVAL = 0.1
+_STEAL_TRIGGER_THRESHOLD = 10
 # _MIN_STEAL_INTERVAL = 1.0
 # _MAX_CACHE_HIT_DELAY_TIMES = 3
 
@@ -987,7 +988,8 @@ class SkyServeLoadBalancer:
             try:
                 # Refresh the steal targets latency even if there is no stealing.
                 steal_targets, self_url = await self._steal_targets()
-                if not await self._request_queue.empty():
+                self_qsize = await self._request_queue.qsize()
+                if self_qsize > _STEAL_TRIGGER_THRESHOLD:
                     continue
                 # Don't steal if there is no available replica.
                 if not await self._replica_pool.available_replicas():
@@ -1006,9 +1008,10 @@ class SkyServeLoadBalancer:
                 conf_results = await asyncio.gather(*conf_tasks)
                 self_replica_queue_size_total = sum(
                     (await self._replica_pool.active_requests()).values())
-                total_queue_size = sum(
-                    result.queue_size + result.replica_queue_size_total
-                    for result in conf_results) + self_replica_queue_size_total
+                total_queue_size = (
+                    sum(result.queue_size + result.replica_queue_size_total
+                        for result in conf_results) + self_qsize +
+                    self_replica_queue_size_total)
                 if total_queue_size <= 0:
                     continue
                 self_num_replicas = len(self._replica_pool.ready_replicas())
@@ -1021,7 +1024,7 @@ class SkyServeLoadBalancer:
                 fair_share = unit_fair_share * self_num_replicas
                 if fair_share <= 0:
                     continue
-                fair_share_remaining = (fair_share -
+                fair_share_remaining = (fair_share - self_qsize -
                                         self_replica_queue_size_total)
                 logger.info(f'total_queue_size: {total_queue_size}, '
                             'self_replica_queue_size_total: '

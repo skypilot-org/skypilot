@@ -53,6 +53,8 @@ async def call_chat_completion_async(
     exception: Optional[Exception] = None
     assert async_client is not None and model is not None
     try:
+        st = time.time()
+        metric.start = st
         res = await async_client.chat.completions.create(
             model=model,
             messages=typed_messages,
@@ -65,8 +67,7 @@ async def call_chat_completion_async(
             timeout=100,
         )
         metric.headers = dict(res.response.headers)
-        st = time.time()
-        metric.start = st
+        metric.response_start = time.time()
         fetch_metric_at_end = False
         async for chunk in res:
             t_this_round = time.time()
