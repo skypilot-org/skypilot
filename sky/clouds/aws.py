@@ -71,8 +71,12 @@ DEFAULT_AMI_GB = 45
 # (username, last 4 chars of hash of hostname): for uniquefying
 # users on shared-account scenarios.
 DEFAULT_SECURITY_GROUP_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
-# Security group to use when user specified ports in their resources.
-USER_PORTS_SECURITY_GROUP_NAME = 'sky-sg-{}'
+# Security group name to use for per-cluster security groups.
+PER_CLUSTER_SECURITY_GROUP_NAME = 'sky-sg-{}'
+# User-provided value for "security_group" in resources.yaml
+# if the user wants to create a security group per-cluster
+# that is deleted when the cluster is terminated.
+PER_CLUSTER_SECURITY_GROUP_DESIGNATION = 'per-cluster'
 
 
 class AWSIdentityType(enum.Enum):
@@ -465,8 +469,11 @@ class AWS(clouds.Cloud):
             security_group = DEFAULT_SECURITY_GROUP_NAME
             if resources.ports is not None:
                 # Already checked in Resources._try_validate_ports
-                security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
+                security_group = PER_CLUSTER_SECURITY_GROUP_NAME.format(
                     cluster_name.display_name)
+        if security_group == PER_CLUSTER_SECURITY_GROUP_DESIGNATION:
+            security_group = PER_CLUSTER_SECURITY_GROUP_NAME.format(
+                cluster_name.display_name)
         elif resources.ports is not None:
             with ux_utils.print_exception_no_traceback():
                 logger.warning(

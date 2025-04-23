@@ -486,6 +486,9 @@ Some example use cases are shown below. All fields are optional.
   name, SkyPilot will use the default security group name as mentioned above:
   ``sky-sg-<hash>``. To specify your default, use ``*`` as the wildcard expression.
 
+  If value of `per-cluster` is specified as the security group name, SkyPilot will
+  create a security group per cluster and delete it when the cluster is terminated.
+
 Example:
 
 .. code-block:: yaml
