@@ -672,8 +672,7 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances_list = list(instances)
-    for instance in instances_list:
-        instance.terminate()
+    instances.terminate()
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need
