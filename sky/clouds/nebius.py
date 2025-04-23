@@ -59,10 +59,6 @@ class Nebius(clouds.Cloud):
             ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is currently not supported on {_REPR}. '
-             'You can try running docker command inside the '
-             '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tier is currently not supported on {_REPR}.'),
     }
@@ -211,7 +207,8 @@ class Nebius(clouds.Cloud):
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
-        return {
+
+        resources_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
@@ -219,6 +216,14 @@ class Nebius(clouds.Cloud):
             # Nebius does not support specific zones.
             'zones': None,
         }
+
+        if acc_dict is not None:
+            # Nebius cloud's docker runtime information does not contain
+            # 'nvidia-container-runtime', causing no GPU option is added to
+            # the docker run command. We patch this by adding it here.
+            resources_vars['docker_run_options'] = ['--gpus all']
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

@@ -28,6 +28,9 @@ SETUP_ENV_VARS_CMD = (
 # the command.
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
+
+DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
@@ -173,22 +176,25 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
-                    wait_for_docker_daemon):
-                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
-                    if rc == 0:
-                        # Set returncode to 1 if failed to connect to docker
-                        # daemon after timeout.
-                        rc = 1
-                    break
-                # Close the cached connection to make the permission update of
-                # ssh user take effect, e.g. usermod -aG docker $USER, called
-                # by cloud-init of Azure.
-                self.runner.close_cached_connection()
-                logger.info('Failed to connect to docker daemon. It might be '
-                            'initializing, retrying in 5 seconds...')
-                time.sleep(5)
-                continue
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr or
+                    DOCKER_SOCKET_NOT_READY_STR in stdout + stderr):
+                if wait_for_docker_daemon:
+                    if time.time(
+                    ) - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                        if rc == 0:
+                            # Set returncode to 1 if failed to connect to docker
+                            # daemon after timeout.
+                            rc = 1
+                        break
+                    # Close the cached connection to make the permission update
+                    # of ssh user take effect, e.g. usermod -aG docker $USER,
+                    # called by cloud-init of Azure.
+                    self.runner.close_cached_connection()
+                    logger.info(
+                        'Failed to connect to docker daemon. It might be '
+                        'initializing, retrying in 5 seconds...')
+                    time.sleep(5)
+                    continue
             break
         subprocess_utils.handle_returncode(
             rc,
