@@ -5642,16 +5642,21 @@ def local():
               required=False,
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
+@click.option('--k8s-clusters',
+              type=str,
+              required=False,
+              help='Kubernetes clusters config file.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
              cleanup: bool, context_name: Optional[str],
-             password: Optional[str], async_call: bool):
+             password: Optional[str], k8s_clusters: Optional[str],
+             async_call: bool):
     """Creates a local or remote cluster."""
 
-    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
+    def _validate_args(ips, ssh_user, ssh_key_path, cleanup, k8s_clusters):
         # If any of --ips, --ssh-user, or --ssh-key-path is specified,
         # all must be specified
         if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
@@ -5661,14 +5666,110 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
                     'must be specified together.')
 
         # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key_path):
+        # are all provided or --k8s-clusters is specified
+        if cleanup and not (ips and ssh_user and
+                            ssh_key_path) and not k8s_clusters:
             raise click.BadParameter('--cleanup can only be used with '
-                                     '--ips, --ssh-user and --ssh-key-path.')
+                                     '--ips, --ssh-user and --ssh-key-path '
+                                     'or --k8s-clusters.')
 
-    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
+    _validate_args(ips, ssh_user, ssh_key_path, cleanup, k8s_clusters)
+
+    cluster_configs = build_cluster_configs(ips, ssh_user, ssh_key_path,
+                                            context_name, password,
+                                            k8s_clusters)
+
+    for cluster_config in cluster_configs:
+        request_id = sdk.local_up(gpus, cluster_config['ips'],
+                                  cluster_config['ssh_user'],
+                                  cluster_config['ssh_key'], cleanup,
+                                  cluster_config['context_name'],
+                                  cluster_config['password'])
+        _async_call_or_wait(request_id, async_call, request_name='local up')
+
+
+def build_cluster_configs(ips: str, ssh_user: str, ssh_key_path: str,
+                          context_name: Optional[str], password: Optional[str],
+                          k8s_clusters: Optional[str]) -> List[Dict[str, Any]]:
+    """Build cluster configs from command line arguments."""
+
+    def _read_and_validate_ssh_key_file(ssh_key_path) -> str:
+        if not ssh_key_path:
+            raise click.BadParameter('SSH key path is required')
+
+        # Read and validate SSH key file
+        try:
+            with open(os.path.expanduser(ssh_key_path), 'r',
+                      encoding='utf-8') as f:
+                ssh_key = f.read()
+            if not ssh_key:
+                raise click.BadParameter(
+                    f'SSH key file is empty: {ssh_key_path}')
+            return ssh_key
+        except (IOError, OSError) as e:
+            raise click.BadParameter(
+                f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
     # If remote deployment arguments are specified, run remote up script
+    cluster_configs = []
+    if k8s_clusters:
+        try:
+            with open(os.path.expanduser(k8s_clusters), 'r',
+                      encoding='utf-8') as f:
+                # Parse the yaml file and get the ips, ssh_user,
+                # password, and ssh_key_path for each cluster.
+                k8s_clusters_config = yaml.safe_load(f)
+                global_ssh_user = k8s_clusters_config.get('ssh_user', '')
+                global_password = k8s_clusters_config.get('password', '')
+                global_ssh_key_path = k8s_clusters_config.get(
+                    'ssh_key_path', '')
+                clusters = k8s_clusters_config.get('clusters', {})
+                if not clusters:
+                    raise click.BadParameter(
+                        'No clusters specified in the k8s clusters file')
+                for cluster in clusters.keys():
+                    cluster_config = {}
+                    cluster_ips = clusters[cluster].get('ips', [])
+                    if not cluster_ips:
+                        raise click.BadParameter(
+                            f'No IPs specified for cluster {cluster}')
+                    cluster_config['ips'] = cluster_ips
+
+                    cluster_ssh_user = clusters[cluster].get('ssh_user', '')
+                    cluster_config['ssh_user'] = (
+                        ssh_user if ssh_user else cluster_ssh_user
+                        if cluster_ssh_user else global_ssh_user)
+                    if not cluster_config['ssh_user']:
+                        raise click.BadParameter(
+                            f'No ssh_user specified for cluster {cluster}')
+
+                    cluster_password = clusters[cluster].get('password', '')
+                    cluster_config['password'] = (
+                        password if password else cluster_password
+                        if cluster_password else global_password)
+
+                    cluster_ssh_key_path = clusters[cluster].get(
+                        'ssh_key_path', '')
+                    final_ssh_keypath = (
+                        ssh_key_path if ssh_key_path else cluster_ssh_key_path
+                        if cluster_ssh_key_path else global_ssh_key_path)
+                    cluster_config['ssh_key'] = _read_and_validate_ssh_key_file(
+                        final_ssh_keypath)
+
+                    cluster_config['context_name'] = cluster
+
+                    cluster_configs.append(cluster_config)
+
+                if not cluster_configs:
+                    raise click.BadParameter(
+                        'No valid clusters specified in the k8s clusters file')
+                return cluster_configs
+        except click.BadParameter as e:
+            raise e
+        except (IOError, OSError) as e:
+            raise click.BadParameter(
+                f'Failed to read k8s clusters file {k8s_clusters}: {str(e)}')
+
     ip_list = None
     ssh_key = None
     if ips and ssh_user and ssh_key_path:
@@ -5681,21 +5782,24 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
         except (IOError, OSError) as e:
             raise click.BadParameter(f'Failed to read IP file {ips}: {str(e)}')
 
-        # Read and validate SSH key file
-        try:
-            with open(os.path.expanduser(ssh_key_path), 'r',
-                      encoding='utf-8') as f:
-                ssh_key = f.read()
-            if not ssh_key:
-                raise click.BadParameter(
-                    f'SSH key file is empty: {ssh_key_path}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(
-                f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
+        ssh_key = _read_and_validate_ssh_key_file(ssh_key_path)
+        cluster_configs.append({
+            'ips': ip_list,
+            'ssh_user': ssh_user,
+            'password': password,
+            'ssh_key': ssh_key,
+            'context_name': context_name
+        })
+    else:
+        cluster_configs.append({
+            'ips': None,
+            'ssh_user': ssh_user,
+            'password': password,
+            'ssh_key': None,
+            'context_name': context_name
+        })
 
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password)
-    _async_call_or_wait(request_id, async_call, request_name='local up')
+    return cluster_configs
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
