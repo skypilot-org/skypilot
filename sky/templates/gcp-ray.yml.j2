@@ -1,5 +1,6 @@
-
 cluster_name: {{cluster_name_on_cloud}}
+
+{%- set ssh_max_sessions_config = 'sudo bash -c \'echo "MaxSessions 200" >> /etc/ssh/sshd_config; echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; systemctl restart sshd\';' -%}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
@@ -225,6 +226,7 @@ setup_commands:
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    {{ ssh_max_sessions_config }}
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.

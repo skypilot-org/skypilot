@@ -786,6 +786,7 @@ def write_cluster_config(
                 'sky_wheel_hash': wheel_hash,
                 # Authentication (optional).
                 **auth_config,
+                'ssh_max_sessions_config': constants.SSH_MAX_SESSIONS_CONFIG,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name

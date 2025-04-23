@@ -258,7 +258,7 @@ available_node_types:
         # service is required.
         labels:
             parent: skypilot
-            # component will be set for the head node pod to be the same as the head node service selector above if a 
+            # component will be set for the head node pod to be the same as the head node service selector above if a
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
@@ -331,15 +331,15 @@ available_node_types:
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
-          args: 
+          args:
             - |
               # For backwards compatibility, we put a marker file in the pod
-              # to indicate that the pod is running with the changes introduced 
+              # to indicate that the pod is running with the changes introduced
               # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
               # TODO: Remove this marker file and it's usage in setup_commands
               # after v0.10.0 release.
               touch /tmp/skypilot_is_nimbus
-              
+
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -382,7 +382,7 @@ available_node_types:
                 fi;
                 # SSH and other packages are not necessary, so we disable set -e
                 set +e
-                
+
                 if [ ! -z "$MISSING_PACKAGES" ]; then
                   # Install missing packages individually to avoid failure installation breaks the whole install process,
                   # e.g. fuse3 is not available on some distributions.
@@ -435,7 +435,7 @@ available_node_types:
                     $(prefix_cmd) rm -f /bin/fusermount-wrapper
                     $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
                 fi
-                {% endif %}            
+                {% endif %}
 
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
@@ -565,7 +565,7 @@ available_node_types:
                       # File is already being monitored
                       continue
                     fi
-                    
+
                     # Monitor the new file
                     monitor_file $file &
                     already_monitored="${already_monitored} ${file}"
@@ -616,7 +616,7 @@ available_node_types:
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
             {% endif %}
-            
+
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
@@ -636,7 +636,7 @@ setup_commands:
     echo "=== Logs for asynchronous ray and skypilot installation ===";
     if [ -f /tmp/skypilot_is_nimbus ]; then
       echo "=== Logs for asynchronous ray and skypilot installation ===";
-      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log || 
+      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
       { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
       [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
     fi
@@ -666,9 +666,10 @@ setup_commands:
     # properly written.
     # TODO(Doyoung): Investigate to see why TPU workload fails to run without
     # execution permission, such as granting 766 to log file. Check if it's a
-    # must and see if there's a workaround to grant minimum permission. 
+    # must and see if there's a workaround to grant minimum permission.
     sudo chmod 777 /tmp/tpu_logs;
     {% endif %}
+    {{ ssh_max_sessions_config }}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
