@@ -1015,14 +1015,17 @@ async def health() -> Dict[str, str]:
         A dictionary with the following keys:
         - status: str; The status of the API server.
         - api_version: str; The API version of the API server.
-        - commit: str; The commit hash of SkyPilot used for API server.
         - version: str; The version of SkyPilot used for API server.
+        - version_on_disk: str; The version of the SkyPilot installation on
+          disk, which can be used to warn about restarting the API server
+        - commit: str; The commit hash of SkyPilot used for API server.
     """
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
-        'commit': sky.__commit__,
         'version': sky.__version__,
+        'version_on_disk': common.get_skypilot_version_on_disk(),
+        'commit': sky.__commit__,
     }
 
 

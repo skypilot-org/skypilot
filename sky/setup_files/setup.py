@@ -45,6 +45,7 @@ original_init_content = None
 system = platform.system()
 
 
+# Keep in sync with sky/server/common.py get_skypilot_version_on_disk()
 def find_version():
     # Extract version information from filepath
     # Adapted from:
