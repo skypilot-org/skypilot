@@ -1,7 +1,5 @@
 cluster_name: {{cluster_name_on_cloud}}
 
-{%- set ssh_max_sessions_config = 'sudo bash -c \'echo "MaxSessions 200" >> /etc/ssh/sshd_config; echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; systemctl restart sshd\';' -%}
-
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
