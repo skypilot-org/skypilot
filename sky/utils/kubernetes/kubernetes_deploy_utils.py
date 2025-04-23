@@ -48,7 +48,7 @@ def deploy_remote_cluster(ip_list: List[str],
                           f'{ssh_user} {key_file.name}')
         if context_name is not None:
             deploy_command += f' {context_name}'
-        if password is not None:
+        if password:
             deploy_command += f' --password {password}'
         if cleanup:
             deploy_command += ' --cleanup'

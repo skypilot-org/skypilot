@@ -5720,19 +5720,26 @@ def build_cluster_configs(ips: str, ssh_user: str, ssh_key_path: str,
                 # password, and ssh_key_path for each cluster.
                 k8s_clusters_config = yaml.safe_load(f)
                 global_ssh_user = k8s_clusters_config.get('ssh_user', '')
-                global_password = k8s_clusters_config.get('password', '')
+                global_password = k8s_clusters_config.get('password', None)
                 global_ssh_key_path = k8s_clusters_config.get(
                     'ssh_key_path', '')
                 clusters = k8s_clusters_config.get('clusters', {})
                 if not clusters:
                     raise click.BadParameter(
                         'No clusters specified in the k8s clusters file')
+                ips_dict = {}
                 for cluster in clusters.keys():
                     cluster_config = {}
                     cluster_ips = clusters[cluster].get('ips', [])
                     if not cluster_ips:
                         raise click.BadParameter(
                             f'No IPs specified for cluster {cluster}')
+                    for ip in cluster_ips:
+                        if ip in ips_dict:
+                            raise click.BadParameter(
+                                f'Duplicate IP {ip} specified'
+                                f' for cluster {cluster}')
+                        ips_dict[ip] = cluster
                     cluster_config['ips'] = cluster_ips
 
                     cluster_ssh_user = clusters[cluster].get('ssh_user', '')
@@ -5743,7 +5750,7 @@ def build_cluster_configs(ips: str, ssh_user: str, ssh_key_path: str,
                         raise click.BadParameter(
                             f'No ssh_user specified for cluster {cluster}')
 
-                    cluster_password = clusters[cluster].get('password', '')
+                    cluster_password = clusters[cluster].get('password', None)
                     cluster_config['password'] = (
                         password if password else cluster_password
                         if cluster_password else global_password)
