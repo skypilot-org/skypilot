@@ -194,9 +194,14 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
-    mount_options = '-o allow_other -o default_permissions'
+    mount_options = ['allow_other', 'default_permissions']
+    # Format: -o flag1, flag2
+    fusermount_options = '-o ' + ','.join(mount_options)
+    # Format: -o flag1 -o flag2
+    blobfuse2_options = ' '.join(f'-o {opt}' for opt in mount_options)
     # TODO(zpoint): clear old cache that has been created in the previous boot.
-    blobfuse2_cmd = ('blobfuse2 --no-symlinks -o umask=022 '
+    # Do not set umask to avoid permission problems for non-root users.
+    blobfuse2_cmd = ('blobfuse2 --no-symlinks '
                      f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
                      f'{bucket_sub_path_arg}'
                      f'--container-name {container_name}')
@@ -208,9 +213,9 @@ def get_az_mount_cmd(container_name: str,
     # 3. set --foreground to workaround lock confliction of multiple blobfuse2
     # daemon processes (#5307) and use -d to daemonsize blobfuse2 in
     # fusermount-wrapper.
-    wrapped = (f'fusermount-wrapper -d -m {mount_path} {mount_options} '
+    wrapped = (f'fusermount-wrapper -d -m {mount_path} {fusermount_options} '
                f'-- {blobfuse2_cmd} -o nonempty --foreground {{}}')
-    original = f'{blobfuse2_cmd} {mount_options} {mount_path}'
+    original = f'{blobfuse2_cmd} {blobfuse2_options} {mount_path}'
     # If fusermount-wrapper is available, use it to wrap the blobfuse2 command
     # to avoid requiring root privilege.
     # TODO(aylei): feeling hacky, refactor this.
