@@ -1222,12 +1222,12 @@ def get_accelerator_label_key_values(
                                 # different topologies that maps to identical
                                 # number of TPU chips.
                                 if tpu_topology_chip_count == acc_count:
-                                    return (label, value, topology_label_key,
+                                    return (label, [value], topology_label_key,
                                             topology_value)
                                 else:
                                     continue
                         else:
-                            return label, value, None, None
+                            return label, [value], None, None
 
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
