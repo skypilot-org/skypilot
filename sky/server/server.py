@@ -304,7 +304,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
         loop = asyncio.get_running_loop()
-        # Apply admin policy and validate DAG can
+        # Apply admin policy and validate DAG is blocking, run it in a separate
+        # thread executor to avoid blocking the uvicorn event loop.
         await loop.run_in_executor(None, validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
