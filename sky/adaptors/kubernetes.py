@@ -67,7 +67,14 @@ def _load_config(context: Optional[str] = None):
 
     def _load_config_from_kubeconfig(context: Optional[str] = None):
         try:
-            kubernetes.config.load_kube_config(context=context)
+            k8s_config = kubernetes.client.Configuration()
+            kubernetes.config.load_kube_config(context=context,
+                                               client_configuration=k8s_config)
+            # Crusoe managed kubernetes clusters don't work with
+            # python kubernetes package's SSL verification.
+            if k8s_config.host.endswith('cmk.crusoecloudcompute.com'):
+                k8s_config.verify_ssl = False
+            kubernetes.client.Configuration.set_default(k8s_config)
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             # Check if exception was due to no current-context

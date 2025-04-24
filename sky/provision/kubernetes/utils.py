@@ -1326,10 +1326,10 @@ def check_credentials(context: Optional[str],
             return False, f'Failed to communicate with the cluster: {str(e)}'
     except kubernetes.config_exception() as e:
         return False, f'Invalid configuration file: {str(e)}'
-    except kubernetes.max_retry_error():
+    except kubernetes.max_retry_error() as e:
         return False, ('Failed to communicate with the cluster - timeout. '
                        'Check if your cluster is running and your network '
-                       'is stable.')
+                       f'is stable. Details: {str(e)}')
     except ValueError as e:
         return False, common_utils.format_exception(e)
     except Exception as e:  # pylint: disable=broad-except
