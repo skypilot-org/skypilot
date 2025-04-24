@@ -287,8 +287,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # these into a single call or have a TTL cache for (task, admin_policy)
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
-    try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+
+    def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -296,14 +296,17 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # server thread.
         dag, _ = admin_policy_utils.apply(
             dag, request_options=validate_body.request_options)
-        for task in dag.tasks:
-            # Will validate workdir and file_mounts in the backend, as those
-            # need to be validated after the files are uploaded to the SkyPilot
-            # API server with `upload_mounts_to_api_server`.
-            task.validate_name()
-            task.validate_run()
-            for r in task.resources:
-                r.validate()
+        # Skip validating workdir and file_mounts, as those need to be
+        # validated after the files are uploaded to the SkyPilot API server
+        # with `upload_mounts_to_api_server`.
+        dag.validate(skip_file_mounts=True, skip_workdir=True)
+
+    try:
+        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        loop = asyncio.get_running_loop()
+        # Apply admin policy and validate DAG is blocking, run it in a separate
+        # thread executor to avoid blocking the uvicorn event loop.
+        await loop.run_in_executor(None, validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e

@@ -30,6 +30,7 @@ types-aiofiles
 pytest
 pytest-xdist
 pytest-env>=0.6
+pytest-asyncio
 
 # memory profiler
 memory_profiler==0.61.0
