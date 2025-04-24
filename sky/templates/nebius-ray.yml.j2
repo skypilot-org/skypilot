@@ -48,6 +48,7 @@ available_node_types:
           - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
           - systemctl restart sshd
 
+          {%- if image_id == 'ubuntu22.04-driverless' %}
         apt:
           sources:
             docker.list:
@@ -78,6 +79,7 @@ available_node_types:
         system_info:
           default_user:
             groups: [docker]
+          {%- endif %}
         {%- endif %}
         users:
           - name: skypilot:ssh_user

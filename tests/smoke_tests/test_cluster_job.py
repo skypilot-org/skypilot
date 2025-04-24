@@ -46,9 +46,8 @@ from sky.utils import resources_utils
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
-@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -85,8 +84,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-@pytest.mark.no_nebius  # Nebius does not work with Cuda 11
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -109,6 +107,11 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str,
     name = smoke_tests_utils.get_cluster_name() + image_id[len('docker:'):][:4]
     total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
     time_to_sleep = 300 if generic_cloud == 'azure' else 200
+    # Nebius support Cuda >= 12.0
+    if (image_id == 'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04' and
+            generic_cloud == 'nebius'):
+        image_id = 'docker:nvidia/cuda:12.1.0-devel-ubuntu18.04'
+
     test = smoke_tests_utils.Test(
         'job_queue_with_docker',
         [
