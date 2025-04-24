@@ -81,9 +81,9 @@ def vpc():
     return vpc_v1
 
 
-def get_iam_token():
+def get_iam_token(force_update=False):
     global _iam_token
-    if _iam_token is None:
+    if _iam_token is None or force_update:
         try:
             with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
                       encoding='utf-8') as file:
@@ -110,9 +110,9 @@ def get_project_id():
     return _project_id
 
 
-def get_tenant_id():
+def get_tenant_id(force_update=False):
     global _tenant_id
-    if _tenant_id is None:
+    if _tenant_id is None or force_update:
         try:
             with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
                       encoding='utf-8') as file:
@@ -122,11 +122,12 @@ def get_tenant_id():
     return _tenant_id
 
 
-def sdk():
+def sdk(force_update=False):
     global _sdk
-    if _sdk is None:
-        if get_iam_token() is not None:
-            _sdk = nebius.sdk.SDK(credentials=get_iam_token())
+    if _sdk is None or force_update:
+        token = get_iam_token(force_update)
+        if token is not None:
+            _sdk = nebius.sdk.SDK(credentials=token)
             return _sdk
         _sdk = nebius.sdk.SDK(
             credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
