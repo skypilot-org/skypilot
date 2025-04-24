@@ -279,11 +279,9 @@ USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 # The new values (MaxSessions 200, MaxStartups 150:30:200) increase these
 # limits significantly.
 SSH_MAX_SESSIONS_CONFIG = (
-    'sudo bash -c \''
-    'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
-    'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
-    '(systemctl restart sshd || service ssh restart); '
-    '\'')
+    'sudo echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
+    'sudo echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
+    'sudo (systemctl reload sshd || service ssh reload); ')
 
 # Internal: Env var indicating the system is running with a remote API server.
 # It is used for internal purposes, including the jobs controller to mark

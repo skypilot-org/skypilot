@@ -784,9 +784,9 @@ def write_cluster_config(
                 'sky_ray_yaml_local_path': tmp_yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
+                'ssh_max_sessions_config': constants.SSH_MAX_SESSIONS_CONFIG,
                 # Authentication (optional).
                 **auth_config,
-                'ssh_max_sessions_config': constants.SSH_MAX_SESSIONS_CONFIG,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
