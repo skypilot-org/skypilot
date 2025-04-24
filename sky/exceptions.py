@@ -294,7 +294,7 @@ class ClusterDoesNotExist(ValueError):
 
 
 class CachedClusterUnavailable(Exception):
-    """Raised wehn a cached cluster record is unavailable."""
+    """Raised when a cached cluster record is unavailable."""
     pass
 
 
