@@ -3,7 +3,7 @@ GCP
 
 .. note::
 
-    By default, SkyPilot will pick up the credentials you have set up. For most cases, the :ref:`getting started instructions <installation-gcp>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
+    By default, SkyPilot will pick up the credentials you have set up. For most cases, the :ref:`installation instructions <installation-gcp>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
 
 
 .. _gcp-service-account:

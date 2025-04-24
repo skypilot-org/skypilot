@@ -3,7 +3,7 @@
 Cloud Accounts and Permissions
 ==============================
 
-Individual clouds may have unique advanced configuration options. These are optional and mostly targeted at cloud admins. **For most users, SkyPilot should work out of the box** with the permissions you have configured locally during :ref:`installation <cloud-account-setup>`.
+Some providers in SkyPilot may offer identity and permission-related configuration options. These are **optional** and mostly targeted at cloud admins. **For most users, SkyPilot should work out of the box** with the permissions you have configured locally during :ref:`installation <cloud-account-setup>`.
 
 The subpages here document cloud configuration details that admins may want to use to limit access, set up advanced features, etc.
 

@@ -3,7 +3,7 @@ AWS
 
 .. note::
 
-    By default, SkyPilot will use the credentials you have set up locally. For most cases, the :ref:`getting started instructions <aws-installation>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
+    By default, SkyPilot will use the credentials you have set up locally. For most cases, the :ref:`installation instructions <aws-installation>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
 
 
 .. _aws-sso:
@@ -11,7 +11,7 @@ AWS
 Using AWS SSO
 -------------
 
-`AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (Successor to AWS Single Sign-On, or SSO) is supported.
+`AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (successor to AWS Single Sign-On, or SSO) is supported.
 
 .. _sso-feature-compat:
 
@@ -159,8 +159,8 @@ Follow these steps to create a new AWS user:
 
 .. _several-aws-profiles:
 
-Switch profiles or accounts
----------------------------
+Switching profiles or accounts
+------------------------------
 
 You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
 
@@ -174,7 +174,7 @@ Example of mixing the default profile and another profile:
     $ # A cluster launched under a different profile.
     $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
 
-If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` won't work.
+If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` on the client side won't work.
 
 
 .. _aws-troubleshooting:
@@ -223,7 +223,7 @@ If your credentials are not being picked up, or you're seeing the wrong credenti
 Common issues
 ~~~~~~~~~~~~~
 
-- **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set - see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
+- **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set; see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
 
   You may have previously set ``AWS_PROFILE`` in your ``.bashrc`` file or similar. Try to double-check the value:
 
