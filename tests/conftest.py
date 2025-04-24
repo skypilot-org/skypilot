@@ -151,6 +151,8 @@ def pytest_configure(config):
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
+    config.addinivalue_line('asyncio_default_fixture_loop_scope', 'function')
+
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 
