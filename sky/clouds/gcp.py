@@ -175,7 +175,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
         f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
         'google-cloud-sdk -y\n'
-        'If gcloud was recently installed with wget, API server',
+        f'{_INDENT_PREFIX} If gcloud was recently installed with wget, API server'
         ' may need to be restarted with following commands:\n'
         f'{_INDENT_PREFIX}  $ sky api stop; sky api start')
 
