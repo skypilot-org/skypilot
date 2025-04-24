@@ -243,7 +243,7 @@ class GPULabelFormatter:
         raise NotImplementedError
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
+    def get_label_values(cls, accelerator: str) -> List[str]:
         """Given a GPU type, returns the label value to be used"""
         raise NotImplementedError
 
@@ -311,10 +311,10 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         return [cls.LABEL_KEY]
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
+    def get_label_values(cls, accelerator: str) -> List[str]:
         # For SkyPilot formatter, we use the accelerator str directly.
         # See sky.utils.kubernetes.gpu_labeler.
-        return accelerator.lower()
+        return [accelerator.lower()]
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
@@ -351,8 +351,8 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
         return [cls.LABEL_KEY]
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return accelerator.upper()
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        return [accelerator.upper()]
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
@@ -438,8 +438,8 @@ class GKELabelFormatter(GPULabelFormatter):
         return count_to_topology
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_accelerator_name(accelerator)
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        return [get_gke_accelerator_name(accelerator)]
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -472,7 +472,7 @@ class GFDLabelFormatter(GPULabelFormatter):
     https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
 
     This LabelFormatter can't be used in autoscaling clusters since accelerators
-    may map to multiple label, so we're not implementing `get_label_value`
+    may map to multiple label, so we're not implementing `get_label_values`
     """
 
     LABEL_KEY = 'nvidia.com/gpu.product'
@@ -486,10 +486,10 @@ class GFDLabelFormatter(GPULabelFormatter):
         return [cls.LABEL_KEY]
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        """An accelerator can map to many Nvidia GFD labels
-        (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
-        As a result, we do not support get_label_value for GFDLabelFormatter."""
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        # An accelerator can map to many Nvidia GFD labels
+        # (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
+        # TODO implement get_label_values for GFDLabelFormatter
         raise NotImplementedError
 
     @classmethod
@@ -1032,15 +1032,17 @@ def check_instance_fits(context: Optional[str],
         # met.
         assert acc_count is not None, (acc_type, acc_count)
         try:
-            gpu_label_key, gpu_label_val, _, _ = (
-                get_accelerator_label_key_value(context, acc_type, acc_count))
+            gpu_label_key, gpu_label_values, _, _ = (
+                get_accelerator_label_key_values(context, acc_type, acc_count))
+            if gpu_label_values is None:
+                gpu_label_values = []
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
         # Get the set of nodes that have the GPU type
         gpu_nodes = [
             node for node in nodes if gpu_label_key in node.metadata.labels and
-            node.metadata.labels[gpu_label_key] == gpu_label_val
+            node.metadata.labels[gpu_label_key] in gpu_label_values
         ]
         if not gpu_nodes:
             return False, f'No GPU nodes found with {acc_type} on the cluster'
@@ -1082,12 +1084,12 @@ def check_instance_fits(context: Optional[str],
         return fits, reason
 
 
-def get_accelerator_label_key_value(
+def get_accelerator_label_key_values(
     context: Optional[str],
     acc_type: str,
     acc_count: int,
     check_mode=False
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[Optional[str], Optional[List[str]], Optional[str], Optional[str]]:
     """Returns the label key and value for the given GPU/TPU type.
 
     Args:
@@ -1141,7 +1143,7 @@ def get_accelerator_label_key_value(
             tpu_topology_label_key = formatter.get_tpu_topology_label_key()
             tpu_topology_label_value = formatter.get_tpu_topology_label_value(
                 acc_type, acc_count)
-        return formatter.get_label_key(acc_type), formatter.get_label_value(
+        return formatter.get_label_key(acc_type), formatter.get_label_values(
             acc_type), tpu_topology_label_key, tpu_topology_label_value
 
     has_gpus, cluster_resources = detect_accelerator_resource(context)
@@ -1387,10 +1389,10 @@ def check_credentials(context: Optional[str],
             # `get_unlabeled_accelerator_nodes`.
             # Therefore, if `get_unlabeled_accelerator_nodes` detects unlabelled
             # nodes, we skip this check.
-            get_accelerator_label_key_value(context,
-                                            acc_type='',
-                                            acc_count=0,
-                                            check_mode=True)
+            get_accelerator_label_key_values(context,
+                                             acc_type='',
+                                             acc_count=0,
+                                             check_mode=True)
         except exceptions.ResourcesUnavailableError as e:
             # If GPUs are not available, we return cluster as enabled
             # (since it can be a CPU-only cluster) but we also return the
