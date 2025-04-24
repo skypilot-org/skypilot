@@ -2,8 +2,7 @@
 
 import json
 import os
-import sys
-import time
+from sky.authentication import get_or_generate_keys
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -139,6 +138,13 @@ class SimplePodClient:
         # 2. gpu_1x_p104-100
         # 3. A100:1
         # 4. A100 1
+
+          # Download public key path
+        _, public_key_path = get_or_generate_keys()
+
+        # Read public key from file
+        with open(public_key_path, 'r', encoding='utf-8') as f:
+            public_key = f.read().strip()
         parts = instance_type.split()
 
         if len(parts) == 2 and parts[0].startswith('gpu_'):
@@ -174,12 +180,18 @@ class SimplePodClient:
         payload = {
             'gpuCount': gpu_count,
             'instanceMarket': f"/instances/market/{market_instance['id']}",
+            'startScript': (
+            "sudo apt update && sudo apt install rsync -y && "
+            "mkdir -p /root/.ssh && "
+            f"echo '{public_key}' > /root/.ssh/authorized_keys && "
+            "chmod 600 /root/.ssh/authorized_keys"
+            )
         }
 
         if template_id:
             payload['instanceTemplate'] = f'/instances/templates/{template_id}'
         else:
-            payload['instanceTemplate'] = f'/instances/templates/2164'
+            payload['instanceTemplate'] = f'/instances/templates/2189'
 
         if env_variables:
             payload['envVariables'] = env_variables
