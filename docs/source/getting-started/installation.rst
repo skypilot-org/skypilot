@@ -132,9 +132,12 @@ Installing via ``uv`` is also supported:
 .. code-block:: shell
 
   uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
+  # Explicitly install prerelease dependency to work around https://docs.astral.sh/uv/pip/compatibility/#pre-release-compatibility
+  uv pip install 'omegaconf>=2.4.0dev3'
+  # Install skypilot!
+  uv pip install 'skypilot[kubernetes,aws,gcp]'
+  # Azure CLI requires '--prerelease allow' with uv.
+  uv pip install --prerelease allow 'azure-cli>=2.65.0'
   uv pip install "skypilot[all]"
 
 
