@@ -19,7 +19,7 @@ def _prepare_sky_sgl_enhanced_cmd(st: Dict[str, Any],
     if ip is None:
         raise ValueError('SkyServe controller not found')
     controller_port = st['controller_port']
-    return (f'sky launch -c {utils.sky_sgl_enhanced_cluster} -d '
+    return (f'sky launch -c {utils.sky_sgl_enhanced_cluster} -d --fast '
             '-y examples/serve/external-lb/global-sky-lb.yaml '
             f'--env IP={ip} --env PORT={controller_port}')
 

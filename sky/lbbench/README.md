@@ -65,6 +65,31 @@ sky serve up examples/serve/external-lb/llm.yaml -y -n svc4 --env HF_TOKEN --env
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc5 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env DO_PUSHING_TO_REPLICA=true
 ```
 
+Here is a easy-to-use script:
+
+```bash
+# ----- CONFIG -----
+PREFIX="test"        # ← change to whatever prefix you like, e.g. "svc" in the above example
+# ------------------
+
+names=()
+for i in {1..5}; do
+  name="${PREFIX}${i}"
+  names+=("$name")
+
+  # Build the argument list safely with an array
+  cmd=( sky serve up examples/serve/external-lb/llm.yaml -y -n "$name" --env HF_TOKEN )
+  (( i >= 4 )) && cmd+=( --env DO_PUSHING_ACROSS_LB=true )
+  (( i == 5 )) && cmd+=( --env DO_PUSHING_TO_REPLICA=true )
+
+  printf '>>> %q ' "${cmd[@]}"; echo         # show the exact command
+  "${cmd[@]}"                                # run it
+done
+
+# This will be used in the following commands
+echo ${names[@]}
+```
+
 Keep running `sky serve status -v` until all of them are ready (all replicas are ready):
 
 ```bash
