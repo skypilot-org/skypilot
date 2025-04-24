@@ -18,6 +18,7 @@ import pathlib
 import subprocess
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+import webbrowser
 
 import click
 import colorama
@@ -292,6 +293,17 @@ def validate(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
                 response.json().get('detail'))
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def dashboard() -> None:
+    """Starts the dashboard for SkyPilot."""
+    api_server_url = server_common.get_server_url()
+    url = f'{api_server_url}/dashboard'
+    logger.info(f'Opening dashboard in browser: {url}')
+    webbrowser.open(url)
 
 
 @usage_lib.entrypoint
@@ -1713,8 +1725,9 @@ def api_start(
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
+    dashboard_msg = f'Dashboard: {server_common.get_server_url(host)}/dashboard'
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{server_common.get_server_url(host)}\n'
+                f'{server_common.get_server_url(host)} {dashboard_msg}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 

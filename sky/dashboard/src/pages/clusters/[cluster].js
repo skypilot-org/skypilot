@@ -14,6 +14,7 @@ import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
 } from '@/components/elements/modals';
+import { useMobile } from '@/hooks/useMobile';
 
 function ClusterDetails() {
   const router = useRouter();
@@ -23,7 +24,7 @@ function ClusterDetails() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
-
+  const isMobile = useMobile();
   const { clusterData, clusterJobData, loading, refreshData } =
     useClusterDetails({ cluster });
 
@@ -89,7 +90,7 @@ function ClusterDetails() {
                     className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                   >
                     <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                    <span>Refresh</span>
+                    {!isMobile && <span>Refresh</span>}
                   </button>
                 </Tooltip>
                 <Status2Actions
