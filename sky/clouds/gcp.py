@@ -476,7 +476,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
-            **GCP._get_disk_specs(_failover_disk_tier()),
+            **GCP._get_disk_specs(r.instance_type, _failover_disk_tier()),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -1016,7 +1016,7 @@ class GCP(clouds.Cloud):
         # types. Reference:
         # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
         series = instance_type.split('-')[0]
-        if series in ['m2', 'm3', 'n2']:
+        if series in ['m2', 'm3', 'n2', 'a3']:
             if series == 'n2':
                 num_cpus = int(instance_type.split('-')[2])
                 if num_cpus < 64:
@@ -1036,7 +1036,7 @@ class GCP(clouds.Cloud):
                 raise exceptions.NotSupportedError(msg)
 
     @classmethod
-    def _get_disk_type(cls,
+    def _get_disk_type(cls, instance_type: Optional[str],
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls._translate_disk_tier(disk_tier)
         tier2name = {
@@ -1045,13 +1045,23 @@ class GCP(clouds.Cloud):
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
+
+        # Remap series-specific disk types
+        series = instance_type.split('-')[0]  # type: ignore
+        if series == 'a3':
+            tier2name[resources_utils.DiskTier.LOW] = tier2name[
+                resources_utils.DiskTier.MEDIUM]
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+
         return tier2name[tier]
 
     @classmethod
     def _get_disk_specs(
-            cls,
+            cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
-        specs: Dict[str, Any] = {'disk_tier': cls._get_disk_type(disk_tier)}
+        specs: Dict[str, Any] = {
+            'disk_tier': cls._get_disk_type(instance_type, disk_tier)
+        }
         if disk_tier == resources_utils.DiskTier.ULTRA:
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
