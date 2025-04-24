@@ -166,7 +166,7 @@ class RunPod(clouds.Cloud):
         del dryrun, cluster_name  # unused
         assert zones is not None, (region, zones)
 
-        zone_name = zones[0].name
+        zone_names = [zone.name for zone in zones]
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -195,7 +195,7 @@ class RunPod(clouds.Cloud):
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'availability_zone': zone_name,
+            'availability_zone': ','.join(zone_names),
             'image_id': image_id,
             'use_spot': use_spot,
             'bid_per_gpu': str(hourly_cost),
