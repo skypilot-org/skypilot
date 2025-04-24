@@ -7,14 +7,9 @@ envs:
 
 service:
   readiness_probe:
+    # Don't use /v1/chat/completions as that will be
+    # queued and it is possible to fail for timeout.
     path: /v1/models
-    # path: /v1/chat/completions
-    # post_data:
-    #   model: $MODEL_NAME
-    #   messages:
-    #     - role: user
-    #       content: Hello! What is your name?
-    #   max_tokens: 1
   replicas: 4
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
@@ -41,8 +36,8 @@ resources:
   disk_tier: high
   accelerators: L4:1
   ordered:
-    - region: ap-northeast-1
     - region: us-east-2
+    - region: ap-northeast-1
     # - region: eu-central-1
   ports: 8081
 

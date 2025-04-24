@@ -70,7 +70,7 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
     if not args.yes:
         input('Press Enter to save results...')
 
-    result_file = (Path(args.output_dir).expanduser() / 'result' / 'metric' /
+    result_file = (Path(args.output_dir).expanduser() / 'metric' /
                    f'{args.exp_name}.json')
     result_file.parent.mkdir(parents=True, exist_ok=True)
 

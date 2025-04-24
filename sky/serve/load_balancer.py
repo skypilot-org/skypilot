@@ -611,7 +611,9 @@ class SkyServeLoadBalancer:
         steal_targets = [target for target, _ in steal_targets_with_latencies]
         logger.info('Steal targets with latencies: '
                     f'{steal_targets_with_latencies}, '
-                    f'Steal targets: {steal_targets}')
+                    f'Steal targets: {steal_targets}, '
+                    f'Self URL: {self_url}, '
+                    f'External Host: {self._external_host}')
         self._steal_targets_cache = steal_targets
         self._self_url_cache = self_url
         return steal_targets, self_url

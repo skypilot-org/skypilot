@@ -145,7 +145,7 @@ $ sky logs sgl-router-pull
 
 Make sure each load balancer has the desired number of replicas.
 
-## Step 3: Generate Commands
+## Step 3: Generate Bash Scripts to Use
 
 We have a util script to generate the benchmark commands. This doc will only cover the usage of multi-region clients, which means the requests will be simultaneously sent from multiple regions.
 
@@ -173,15 +173,68 @@ For testing config that different regions have different configurations, you can
 ```bash
 python3 -m sky.lbbench.gen_cmd --service-names svc1 svc2 svc3 svc4 svc5 \
   --exp-name arena_syn_mrc_100_50_tail_c2000_u150_d240 \
-  --extra-args '--workload arena_syn --duration 240' \
+  --extra-args '--workload arena_syn --duration 240 --num-conv 2000' \
   --region-to-args '{"us-east-2":"--num-users 100","ap-northeast-1":"--num-users 50"}'
 ```
 
-Only one of the `--regions` and `--region-to-args` should be set. If `--region-to-args` is set, the keys will be used. Remember to remove any arguments from `--extra-args` that are already specified in `--region-to-args`.
+One and only one of the `--regions` and `--region-to-args` should be set. If `--region-to-args` is set, the keys will be used. Remember to remove any arguments from `--extra-args` that are already specified in `--region-to-args`.
 
-You should see a group of commands printed out. Follow next steps to run them.
+You should see the following output:
+
+```bash
+======================Parallel execution script=======================
+Generated parallel execution script at @temp/result/scripts/arena_syn_mrc_100_50_tail_c2000_u150_d240.bash
+Run with: bash @temp/result/scripts/arena_syn_mrc_100_50_tail_c2000_u150_d240.bash
+```
 
 ## Step 4: Run the commands
+
+A script will be generated at `@temp/result/scripts/`. Run it with:
+
+```bash
+bash @temp/result/scripts/arena_syn_mrc_100_50_tail_c2000_u150_d240.bash
+```
+
+And wait for it to finish.
+
+## Step 5: Plot
+
+Final step is to plot the results. You should see the following output from the gen cmd script:
+
+```bash
+========================Generate result table=========================
+    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sgl': 'Baseline',
+    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_sgl_enhanced': 'Baseline\n[Pull]',
+    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_pull_pull': 'Ours\n[Pull+Pull]',
+    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_push_pull': 'Ours\n[Push+Pull]',
+    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_push_push': 'Ours\n[Push+Push]',
+```
+
+Copy-pasting them into the `gn2alias` variable in the `@temp/result/plot.py` script and run it. **Make sure to comment out other parts in the variable**.
+
+```bash
+python3 @temp/result/plot.py
+```
+
+You should see the figures in the `@temp/result/fig` directory.
+
+## Step 6: Cleanup
+
+**Notice: please terminate all the clusters after use**.
+
+```bash
+# Terminate all services
+sky serve down -ay
+
+# Stop all LBs and clients
+sky stop -ay
+# Or only cancel it if you want to keep using them in the next run
+sky cancel -ay sgl-router && sky cancel -ay sgl-router-pull
+```
+
+> The following content is stale. Don't need to check it.
+
+## [Stale] Step 6: Run the commands
 
 You will need a lot of terminals to run the commands. Specifically, #regions + 1 (2 + 1 in the default configurations). There are 3 types of commands:
 
@@ -322,35 +375,5 @@ scp llmc-ap-northeast-1:~/result/metric/arena_syn_mrc_100_50_tail_c2000_u150_d24
 
 ```bash
 Queue status puller finished.
-```
-
-### Plot
-
-Final step is to plot the results. You should see the following output from the gen cmd script:
-
-```bash
-========================Generate result table=========================
-    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sgl': 'Baseline',
-    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_sgl_enhanced': 'Baseline\n[Pull]',
-    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_pull_pull': 'Ours\n[Pull+Pull]',
-    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_push_pull': 'Ours\n[Push+Pull]',
-    'arena_syn_mrc_100_50_tail_c2000_u150_d240_sky_push_push': 'Ours\n[Push+Push]',
-```
-
-Copy-pasting them into the `gn2alias` variable in the `@temp/result/plot.py` script and run it. **Make sure to comment out other parts in the variable**.
-
-```bash
-python3 @temp/result/plot.py
-```
-
-You should see the figures in the `@temp/result/fig` directory.
-
-## Step 5: Cleanup
-
-**Notice: please terminate all the clusters after use**.
-
-```bash
-sky serve down -ay
-sky stop -ay
 ```
 

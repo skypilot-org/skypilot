@@ -14,63 +14,57 @@ import colorama
 
 import sky
 from sky.lbbench import utils
-from sky.utils import rich_utils
-from sky.utils import ux_utils
 
 
 def prepare_lb_endpoints_and_confirm(exp2backend: Dict[str, str],
                                      yes: bool) -> Dict[str, List[str]]:
-    with rich_utils.client_status(
-            ux_utils.spinner_message(
-                '[bold cyan]Checking External LB Endpoints[/]')) as spinner:
-        req = sky.serve.status(None)
-        st = sky.client.sdk.get(req)
-        print(sky.serve.format_service_table(st, show_all=False))
+    req = sky.serve.status(None)
+    st = sky.client.sdk.get(req)
+    print(sky.serve.format_service_table(st, show_all=False))
 
-        def _get_one_endpoints(backend_url: str) -> List[str]:
-            if 'aws.cblmemo.net' in backend_url:
-                service_name = backend_url.split('.')[0]
-                st4svc = None
-                for svc in st:
-                    if svc['name'] == service_name:
-                        st4svc = svc
-                        break
-                if st4svc is None:
-                    raise ValueError(f'Service {service_name} not found')
-                endpoints = [r['endpoint'] for r in st4svc['external_lb_info']]
-            elif '9002' in backend_url:  # Single Global Sky LB
-                url = backend_url
-                if not url.startswith('http://'):
-                    url = 'http://' + url
-                endpoints = [url]
-            elif '9001' in backend_url:  # SGLang Router
-                endpoints = [utils.sgl_cluster]
-            else:
-                return []
-                # raise ValueError(f'Unknown backend URL: {backend_url}')
-            print(f'External Load Balancer Endpoints for {backend_url}: '
-                  f'{colorama.Fore.GREEN}{endpoints}{colorama.Style.RESET_ALL}')
-            return endpoints
+    def _get_one_endpoints(backend_url: str) -> List[str]:
+        if 'aws.cblmemo.net' in backend_url:
+            service_name = backend_url.split('.')[0]
+            st4svc = None
+            for svc in st:
+                if svc['name'] == service_name:
+                    st4svc = svc
+                    break
+            if st4svc is None:
+                raise ValueError(f'Service {service_name} not found')
+            endpoints = [r['endpoint'] for r in st4svc['external_lb_info']]
+        elif '9002' in backend_url:  # Single Global Sky LB
+            url = backend_url
+            if not url.startswith('http://'):
+                url = 'http://' + url
+            endpoints = [url]
+        elif '9001' in backend_url:  # SGLang Router
+            endpoints = [utils.sgl_cluster]
+        else:
+            return []
+            # raise ValueError(f'Unknown backend URL: {backend_url}')
+        print(f'External Load Balancer Endpoints for {backend_url}: '
+              f'{colorama.Fore.GREEN}{endpoints}{colorama.Style.RESET_ALL}')
+        return endpoints
 
-        exp2endpoints = {
-            exp: _get_one_endpoints(backend)
-            for exp, backend in exp2backend.items()
-        }
-        if not yes:
-            spinner.update(
-                'Press Enter to confirm the endpoints are correct...')
-            input()
-        return exp2endpoints
+    exp2endpoints = {
+        exp: _get_one_endpoints(backend)
+        for exp, backend in exp2backend.items()
+    }
+    if not yes:
+        input('Press Enter to confirm the endpoints are correct...')
+    return exp2endpoints
 
 
 async def pull_queue_status(exp_name: str, endpoints: List[str],
                             event: asyncio.Event, output_dir: str) -> None:
     tmp_name = os.path.join(tempfile.gettempdir(),
                             f'result_queue_size_{exp_name}.txt')
-    dest_name = (Path(output_dir).expanduser() / 'result' / 'queue_size' /
+    dest_name = (Path(output_dir).expanduser() / 'queue_size' /
                  f'{exp_name}.txt')
     dest_name.parent.mkdir(parents=True, exist_ok=True)
-    print(f'Pulling queue status:      tail -f {tmp_name} | jq')
+    # Force flush it to make the tee works
+    print(f'Pulling queue status:      tail -f {tmp_name} | jq', flush=True)
     if utils.sgl_cluster in endpoints:
         while not event.is_set():
             await asyncio.sleep(1)
@@ -100,6 +94,7 @@ def main():
     parser.add_argument('--exp2backend', type=str, required=True)
     parser.add_argument('-y', '--yes', action='store_true')
     parser.add_argument('--output-dir', type=str, default='@temp')
+    parser.add_argument('--signal-file', type=str, required=True)
     args = parser.parse_args()
     exp2backend = json.loads(args.exp2backend)
     exp2endpoints = prepare_lb_endpoints_and_confirm(exp2backend, args.yes)
@@ -114,8 +109,13 @@ def main():
                 asyncio.create_task(
                     pull_queue_status(exp_name, endpoints, event,
                                       args.output_dir)))
-        await asyncio.to_thread(  # type: ignore[attr-defined]
-            input, 'Press Enter to continue...')
+        while True:
+            if os.path.exists(args.signal_file):
+                with open(args.signal_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                if 'stop' in content:
+                    break
+            await asyncio.sleep(1)
         for event in events:
             event.set()
         await asyncio.gather(*tasks)
