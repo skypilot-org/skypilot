@@ -38,7 +38,7 @@ _DO_PUSHING_ACROSS_LB = env_options.Options.DO_PUSHING_ACROSS_LB.get()
 # Use load balancing, or use dynamic rate limiting.
 # Currently we forcely override this to True to do the actual "pushing".
 # Not that kind of similar to pulling.
-_LB_PUSHING_ENABLE_LB = True
+_LB_PUSHING_ENABLE_LB = env_options.Options.LB_PUSHING_ENABLE_LB.get()
 _DO_PUSHING_TO_REPLICA = env_options.Options.DO_PUSHING_TO_REPLICA.get()
 
 

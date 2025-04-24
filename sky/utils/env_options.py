@@ -22,6 +22,7 @@ class Options(enum.Enum):
     # TODO(tian): Hack. This is for let the external LB inherit this option.
     # This should not be included in the controller envs.
     DO_PUSHING_ACROSS_LB = ('DO_PUSHING_ACROSS_LB', False)
+    LB_PUSHING_ENABLE_LB = ('LB_PUSHING_ENABLE_LB', True)
     DO_PUSHING_TO_REPLICA = ('ENABLE_PREFIX_LOAD_BALANCING', False)
 
     def __init__(self, env_var: str, default: bool) -> None:

@@ -16,21 +16,24 @@ describes = [
     'sky_pull_pull',
     'sky_push_pull',
     'sky_push_push',
+    'sky_pull_pull_rate_limit',
 ]
 presents = [
     'Baseline',
     'Baseline\\n[Pull]',
-    'Ours\\n[Pull+Pull]',
+    'Ours\\n[Pull/Stealing+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
+    'Ours\\n[Pull/RateLimit+Pull]',
 ]
 
 enabled_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
-    2,  # sky pulling in lb, pulling in replica
+    2,  # sky pulling in lb, pulling in replica, but workload stealing
     3,  # sky pushing in lb, pulling in replica
     4,  # sky pushing in lb, pushing in replica
+    5,  # sky pulling in lb, pulling in replica, but rate limit
 ]
 
 describes = [describes[i] for i in enabled_systems]
@@ -87,6 +90,8 @@ def main():
 
     endpoints = [_get_endpoint_for_traffic(i, sns) for i in enabled_systems]
     print(endpoints)
+    if any('None' in e for e in endpoints):
+        raise ValueError('Some endpoints are not found')
 
     name_mapping = []
     ens = []
@@ -148,6 +153,13 @@ def main():
     script_path = Path(output_local) / 'scripts' / f'{args.exp_name}.bash'
     script_path.parent.mkdir(parents=True, exist_ok=True)
     # Generate bash script for parallel execution
+    cnt = 1
+    # Sometimes we want to add another system but still under the same exp name.
+    # In this case, we keep the old script.
+    while script_path.exists():
+        script_path = (Path(output_local) / 'scripts' /
+                       f'{args.exp_name}_v{cnt}.bash')
+        cnt += 1
     with open(script_path, 'w', encoding='utf-8') as f:
         f.write('#!/usr/bin/env bash\n')
         f.write('set -euo pipefail\n\n')

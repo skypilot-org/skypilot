@@ -53,6 +53,7 @@ Running the following command for 4 times.
 - `svc3`: LB Pull + Replica Pull
 - `svc4`: LB Push + Replica Pull
 - `svc5`: LB Push + Replica Push
+- `svc6`: LB Pull + Replica Pull, but Pull by rate limiting instead of stealing
 - There is no LB Pull + Replica Push since no request will left in replica. Hence no request left in LB to pull.
 
 You can launch all of them at once by:
@@ -63,6 +64,7 @@ sky serve up examples/serve/external-lb/llm.yaml -y -n svc2 --env HF_TOKEN
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc3 --env HF_TOKEN
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc4 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc5 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env DO_PUSHING_TO_REPLICA=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc6 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env LB_PUSHING_ENABLE_LB=false
 ```
 
 Here is a easy-to-use script:
@@ -73,7 +75,7 @@ PREFIX="test"        # ← change to whatever prefix you like, e.g. "svc" in the
 # ------------------
 
 names=()
-for i in {1..5}; do
+for i in {1..6}; do
   name="${PREFIX}${i}"
   names+=("$name")
 
@@ -81,6 +83,7 @@ for i in {1..5}; do
   cmd=( sky serve up examples/serve/external-lb/llm.yaml -y -n "$name" --env HF_TOKEN )
   (( i >= 4 )) && cmd+=( --env DO_PUSHING_ACROSS_LB=true )
   (( i == 5 )) && cmd+=( --env DO_PUSHING_TO_REPLICA=true )
+  (( i == 6 )) && cmd+=( --env LB_PUSHING_ENABLE_LB=false )
 
   printf '>>> %q ' "${cmd[@]}"; echo         # show the exact command
   "${cmd[@]}"                                # run it
