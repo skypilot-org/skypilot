@@ -13,27 +13,9 @@ Using AWS SSO
 
 `AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (successor to AWS Single Sign-On, or SSO) is supported.
 
-.. _sso-feature-compat:
+.. note::
 
-SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
-
-.. list-table::
-   :header-rows: 1
-
-   * - *Supported features:*
-     - SSO credentials
-     - Static credentials
-   * - Use S3 buckets on an AWS cluster
-     - |:white_check_mark:|
-     - |:white_check_mark:|
-   * - Use S3 buckets on a cluster in another cloud
-     - |:x:|
-     - |:white_check_mark:|
-   * - Run :ref:`managed jobs <managed-jobs>` across multiple clouds
-     - |:yellow_circle:| [1]_
-     - |:white_check_mark:|
-
-.. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
+    If you want to use multiple clouds with SkyPilot, check the :ref:`SSO multi-cloud compatibility notes <sso-feature-compat>`.
 
 
 To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the aboslute path to the CLI (by default, `/usr/local/aws-cli/aws`) or create an alias `alias awsv2=/usr/local/aws-cli/aws`.
@@ -69,6 +51,31 @@ Log in and approve the request in your web browser. Then back in the CLI, comple
 
 If everything is set up correctly, :code:`sky check aws` should succeed!
 
+
+.. _sso-feature-compat:
+
+Multi-cloud access with SSO login
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
+
+.. list-table::
+   :header-rows: 1
+
+   * - *Supported features:*
+     - SSO credentials
+     - Static credentials
+   * - Use S3 buckets on an AWS cluster
+     - |:white_check_mark:|
+     - |:white_check_mark:|
+   * - Use S3 buckets on a cluster in another cloud
+     - |:x:|
+     - |:white_check_mark:|
+   * - Run :ref:`managed jobs <managed-jobs>` across multiple clouds
+     - |:yellow_circle:| [1]_
+     - |:white_check_mark:|
+
+.. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
 
 ..
     These two aren't currently used, but keep them so that old links like

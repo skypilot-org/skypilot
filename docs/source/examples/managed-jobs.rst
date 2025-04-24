@@ -636,14 +636,14 @@ Setup and best practices
 Using static credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks.
+Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks. For this reason, it's preferred to set up static credential access, such as a ``~/.aws/credentials`` file on AWS, or a service account json key file on GCP.
 
 To use static credentials for the jobs controller, just make sure the static credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller. **If you're already using local credentials that don't expire, no action is needed.**
 
 To set up static credentials:
 
-- **AWS**: :ref:`Create a dedicated SkyPilot IAM user <dedicated-aws-user>`.
-- **GCP**: :ref:`Create a GCP service account <gcp-service-account>`.
+- **AWS**: :ref:`Create a dedicated SkyPilot IAM user <dedicated-aws-user>` and use a static ``~/.aws/credentials`` file.
+- **GCP**: :ref:`Create a GCP service account <gcp-service-account>` with a static JSON key file.
 - **Other clouds**: Make sure you are using credentials that do not expire.
 
 .. _jobs-controller-custom-resources:
