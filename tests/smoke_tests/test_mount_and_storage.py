@@ -556,7 +556,6 @@ def test_ibm_storage_mounts():
                          [constants.SKY_IGNORE_FILE, constants.GIT_IGNORE_FILE])
 def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
     """Tests that .skyignore patterns correctly exclude files when using sky launch and sky jobs launch.
-
     Creates a temporary directory with various files and folders, adds a .skyignore file
     that excludes specific files and folders, then verifies the exclusions work properly
     when using sky launch and sky jobs launch commands.
