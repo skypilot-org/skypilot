@@ -118,7 +118,9 @@ def launch(
                     cluster_name=cluster_name,
                     force_refresh_statuses=set(status_lib.ClusterStatus),
                     acquire_per_cluster_status_lock=False)
-            except Exception as e:  # pylint: disable=broad-except
+            except (exceptions.ClusterOwnerIdentityMismatchError,
+                    exceptions.CloudUserIdentityError,
+                    exceptions.ClusterStatusFetchingError) as e:
                 # we weren't able to refresh the cluster for its status.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CachedClusterUnavailable(
