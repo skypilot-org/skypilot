@@ -120,7 +120,7 @@ export function TopBar() {
     const isActive = isActivePath(path);
     const baseClasses = isActive
       ? 'border-transparent text-blue-600'
-      : 'border-transparent hover:text-blue-600 hover:border-blue-600';
+      : 'border-transparent hover:text-blue-600';
 
     return `inline-flex items-center border-b-2 ${baseClasses} ${
       isMobile ? 'px-2 py-1' : 'px-1 pt-1 space-x-2'

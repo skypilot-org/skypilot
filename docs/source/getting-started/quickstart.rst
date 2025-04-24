@@ -135,9 +135,22 @@ See here for a list of all possible :ref:`cluster states <sky-status>`.
 Access the dashboard
 ====================
 
-If you install SkyPilot from the official package, after starting the API server (when running locally, the first CLI or SDK call will automatically start a SkyPilot API server), run :code:`sky dashboard` to access the dashboard. This automatically opens a browser tab to show the dashboard for the clusters and managed jobs status.
+SkyPilot offers a dashboard for all clusters and jobs launched with SkyPilot. To open the dashboard, run :code:`sky dashboard`, which will automatically opens a browser tab for the dashboard.
 
-If you install SkyPilot from source, before starting the API server, refer to the `Dashboard README <https://github.com/skypilot-org/skypilot/blob/master/sky/dashboard/README.md#access-the-dashboard>`_ to build the dashboard. Then you can start your API server and access the dashboard through :code:`sky dashboard`.
+.. dropdown:: Start dashboard when installing SkyPilot from source
+
+    If you install SkyPilot from source, before starting the API server:
+
+    * Run the following commands to generate the dashboard build:
+
+    .. code-block:: console
+
+      # Install all dependencies
+      $ npm --prefix sky/dashboard install
+      # Build
+      $ npm --prefix sky/dashboard run build
+
+    * Start the dashboard with :code:`sky dashboard`.
 
 The clusters page example:
 
