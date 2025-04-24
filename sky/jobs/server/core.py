@@ -124,13 +124,12 @@ def launch(
                 # we weren't able to refresh the cluster for its status.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CachedClusterUnavailable(
-                        f'{colorama.Fore.RED}Cached jobs controller cluster '
+                        f'Cached jobs controller cluster '
                         f'{cluster_name} cannot be refreshed. Please check if '
                         'the cluster is accessible. If the cluster was '
                         'removed, consider removing the cluster from SkyPilot '
-                        f'with:\n\n`sky down {cluster_name} --purge`'
-                        f'{colorama.Style.RESET_ALL}\n\nReason: '
-                        f'{common_utils.format_exception(e)}')
+                        f'with:\n\n`sky down {cluster_name} --purge`\n\n'
+                        f'Reason: {common_utils.format_exception(e)}')
 
         local_to_controller_file_mounts = {}
 
