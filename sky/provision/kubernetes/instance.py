@@ -1031,6 +1031,9 @@ def get_cluster_info(
             head_spec = pod.spec
             assert head_spec is not None, pod
             cpu_request = head_spec.containers[0].resources.requests['cpu']
+            if cpu_request.endswith('m'):
+                # Convert to int by /1000 then flooring, but not <1
+                cpu_request = str(max(int(float(cpu_request[:-1])/1000), 1))
 
     assert cpu_request is not None, 'cpu_request should not be None'
 
