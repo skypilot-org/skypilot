@@ -10,8 +10,8 @@ Tuning API server resources
 
 The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it. Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
 
-* ``Long-running request``: request that takes long time and more resources to run, including ``launch``, ``exec``, ``jobs.launch``, etc.
-* ``Short-running request``: request that takes short time or less resources to run, including ``status``, ``logs``, etc.
+* ``Long-running requests``: requests that take longer time and more resources to run, including ``launch``, ``exec``, ``jobs.launch``, etc.
+* ``Short-running requests``: requests that take shorter time or less resources to run, including ``status``, ``logs``, etc.
 
 .. note::
 
@@ -94,7 +94,9 @@ The following table shows the maximum concurrency for different resource configu
 Queuing requests and polling status asynchronously
 --------------------------------------------------
 
-There is no limit on the number of queued requests, i.e. despite increasing the allocated resources to improve the maximum concurrency, you can also submit requests with :ref:`async<async>` (``--async``) and poll the status asynchronously to avoid blocking. For example:
+There is no limit on the number of queued requests. To avoid request blocking, you can either (1) allocate more resources to increase the maximum concurrency (described above), or (2) :ref:`submit requests asynchronously <async>` (``--async``) and poll the status asynchronously.
+
+For example:
 
 .. code-block:: bash
 
@@ -115,7 +117,7 @@ The requests will be queued on the API server and be processed in submission ord
     767182fd-0202-4ae5-b2d7-ddfabea5c821  alice sky.jobs.launch  a few secs ago  PENDING
     5667cff2-e953-4b80-9e5f-546cea83dc59  alice sky.jobs.launch  a few secs ago  RUNNING
 
-Check logs for a request
+Checking the logs of a request
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 There should be some ``RUNNING`` requests that occupy the concurrency limit. Usually the ``RUNNING`` requests make progress and finally your requests will be processed, but if the ``RUNNING`` requests are stuck, you can inspect the request log with:
@@ -125,7 +127,7 @@ There should be some ``RUNNING`` requests that occupy the concurrency limit. Usu
     # Replace <request_id> with the actual request id from the ID column
     $ sky api logs <request_id>
 
-Cancel a request
+Canceling a request
 ^^^^^^^^^^^^^^^^
 
 If the request is stuck according to the log, e.g. retrying to launch VMs that is out of stock, you can cancel the request with:
@@ -137,7 +139,7 @@ If the request is stuck according to the log, e.g. retrying to launch VMs that i
 Avoid concurrent logs requests
 ------------------------------
 
-If you run ``sky logs`` to tail the logs of a task, the log tailing will keep taking off the resources of the API server as long as the task being tailed is running. So concurrent log requests will occupy the concurrency and make other requests to be delayed.
+If you run ``sky logs`` to tail the logs of a task, the log tailing will keep taking  resources off the API server as long as the task being tailed is still running. Thus, concurrent log requests will occupy the concurrency limit and potentially delay other requests.
 
 To avoid this, it is recommended to run ``sky logs`` and ``sky jobs logs`` with ``--no-follow`` flag if there is a large number of concurrent log requests:
 
