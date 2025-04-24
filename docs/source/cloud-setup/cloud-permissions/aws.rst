@@ -77,6 +77,48 @@ SSO login has limited functionality *across multiple clouds*. If you use multipl
 
 .. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
 
+
+.. _several-aws-profiles:
+
+Switching profiles or accounts
+------------------------------
+
+You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
+
+Example of mixing the default profile and another profile:
+
+.. code-block:: console
+
+    $ # A cluster launched under the default AWS identity.
+    $ sky launch --cloud aws -c default
+
+    $ # A cluster launched under a different profile.
+    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
+
+If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` on the client side won't work.
+
+
+Using a specific VPC
+-----------------------
+By default, SkyPilot uses the "default" VPC in each region. If a region does not have a `default VPC <https://docs.aws.amazon.com/vpc/latest/userguide/work-with-default-vpc.html#create-default-vpc>`_, SkyPilot will not be able to use the region.
+
+To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``
+field:
+
+.. code-block:: yaml
+
+    aws:
+      vpc_name: my-vpc-name
+
+See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
+VPC with fine-grained constraints, typically created via Terraform or manually.
+
+To manually create a private VPC (i.e., all nodes will have internal IPs only),
+you can use the AWS console; see instructions `here
+<https://github.com/skypilot-org/skypilot/pull/1512>`_.
+
+
 ..
     These two aren't currently used, but keep them so that old links like
     /aws.html#cloud-permissions-aws will still jump to here.
@@ -162,170 +204,6 @@ Follow these steps to create a new AWS user:
 
      $ # Validate that credentials are working
      $ sky check aws -v
-
-
-.. _several-aws-profiles:
-
-Switching profiles or accounts
-------------------------------
-
-You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
-
-Example of mixing the default profile and another profile:
-
-.. code-block:: console
-
-    $ # A cluster launched under the default AWS identity.
-    $ sky launch --cloud aws -c default
-
-    $ # A cluster launched under a different profile.
-    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
-
-If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` on the client side won't work.
-
-
-.. _aws-troubleshooting:
-
-Troubleshooting
----------------
-
-If your credentials are not being picked up, or you're seeing the wrong credentials in SkyPilot, here are some steps you can take to troubleshoot:
-
-1. **Check** ``aws configure list``. This command should show the currently configured credentials.
-
-   If you have static credentials set up correctly, you should see something like this:
-
-   .. code-block:: console
-
-       $ aws configure list
-             Name                    Value             Type    Location
-             ----                    -----             ----    --------
-          profile                <not set>             None    None
-       access_key     ****************xxxx shared-credentials-file
-       secret_key     ****************xxxx shared-credentials-file
-           region                <not set>             None    None
-
-   If you have SSO credentials set up correctly, you should see something like this:
-
-   .. code-block:: console
-
-       $ aws configure list
-             Name                    Value             Type    Location
-             ----                    -----             ----    --------
-          profile                <not set>             None    None
-       access_key     ****************xxxx              sso
-       secret_key     ****************xxxx              sso
-           region                <not set>             None    None
-
-2. **Check** ``sky check aws``. This should show whether SkyPilot is picking up the credentials and has the necessary permissions.
-
-   .. code-block:: console
-
-       $ sky check aws -v
-       Checking credentials to enable clouds for SkyPilot.
-         AWS: enabled [compute, storage]
-           Activated account: VRSC9IFFYQI7THCKR5UVC [account=190763068689]
-       ...
-
-Common issues
-~~~~~~~~~~~~~
-
-- **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set; see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
-
-  You may have previously set ``AWS_PROFILE`` in your ``.bashrc`` file or similar. Try to double-check the value:
-
-  .. code-block:: console
-      :emphasize-lines: 13
-
-      $ # Check the account being used by skypilot
-      $ sky check aws -v
-      Checking credentials to enable clouds for SkyPilot.
-        AWS: enabled [compute, storage]
-          Activated account: XXXXXXXXXXXXXXXXXXXXX:user [account=123456789012]
-        ...
-      $ # AWS account 1234-5678-9012 is enabled via @user SSO login.
-
-      $ # See the currently enabled profile.
-      $ aws configure list
-            Name                    Value             Type    Location
-            ----                    -----             ----    --------
-         profile AWSPowerUserAccess-123456789012              env    ['AWS_DEFAULT_PROFILE', 'AWS_PROFILE']
-      access_key     ****************xxxx              sso
-      secret_key     ****************xxxx              sso
-          region                <not set>             None    None
-      $ # SSO profile AWSPowerUserAccess-123456789012 is enabled
-      $ # via environment variable.
-
-      $ # See details of the currently enabled AWS account and user/role.
-      $ aws sts get-caller-identity
-
-      $ # See if the environment variable has been set.
-      $ echo $AWS_PROFILE
-      AWSPowerUserAccess-123456789012
-
-      $ unset AWS_PROFILE
-      $ # Delete from .bashrc/.zshrc to make the change permanent.
-      $ # Now, default profile will be used.
-      $ aws configure list
-            Name                    Value             Type    Location
-            ----                    -----             ----    --------
-         profile                <not set>             None    None
-         ...
-      $ sky check aws -v
-      Checking credentials to enable clouds for SkyPilot.
-        AWS: enabled [compute, storage]
-          Activated account: XXXXXXXXXXXXXXXXXXXXX [account=987654321098]
-        ...
-      $ # Now AWS account 9876-5432-1098 is enabled via default profile.
-
-
-- **Profile is not set**. If ``sky check aws`` and ``aws configure list`` cannot find credentials, you may not have a default profile set.
-
-  1. If the environment variable ``AWS_PROFILE`` is set, this profile name will be used.
-  2. If there is a profile named ``default``, it will be used.
-  3. Otherwise, the profile will not be accessible.
-
-  Even if there is only one profile, it will not be used unless ``AWS_PROFILE`` is set or the profile is named ``default``.
-
-  In AWS CLI v1, you can check ``~/.aws/credentials`` and ``~/.aws/config`` to look for profile names. In AWS CLI v2, you can check from the CLI.
-
-  .. code-block:: console
-
-      $ # AWS CLI v2 only
-      $ aws --version
-      aws-cli/2.25.6 ...
-
-      $ # List all profiles
-      $ aws configure list-profiles
-      AWSPowerUserAccess-xxxxxxx
-      default
-
-  If there is no ``default`` profile, you can edit the configuration directly:
-
-  .. code-block:: cfg
-      :emphasize-lines: 2
-
-      # ~/.aws/config
-      [profile default]
-      sso_session = my-skypilot-session
-      sso_account_id = XXXXXXXXXX
-      ...
-
-  .. code-block:: cfg
-      :emphasize-lines: 2
-
-      # ~/.aws/config
-      [default]
-      aws_access_key_id = XXXXXXXXXXXXXXXXXXXX
-      aws_secret_access_key = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-
-  Or, you can set the ``AWS_PROFILE`` environment variable in your shell config:
-
-  .. code-block:: shell
-
-      # .bashrc / .zshrc
-      # Enable AWS profile named "AWSPowerUserAccess-123456789012"
-      export AWS_PROFILE='AWSPowerUserAccess-123456789012'
 
 
 Minimal permissions
@@ -539,22 +417,146 @@ These are the minimal policy rules required by SkyPilot:
 
 **Once you have added all needed policies, click Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
-Using a specific VPC
------------------------
-By default, SkyPilot uses the "default" VPC in each region. If a region does not have a `default VPC <https://docs.aws.amazon.com/vpc/latest/userguide/work-with-default-vpc.html#create-default-vpc>`_, SkyPilot will not be able to use the region.
 
-To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
-file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``
-field:
+.. _aws-troubleshooting:
 
-.. code-block:: yaml
+Troubleshooting
+---------------
 
-    aws:
-      vpc_name: my-vpc-name
+If your credentials are not being picked up, or you're seeing the wrong credentials in SkyPilot, here are some steps you can take to troubleshoot:
 
-See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
-VPC with fine-grained constraints, typically created via Terraform or manually.
+1. **Check** ``aws configure list``. This command should show the currently configured credentials.
 
-To manually create a private VPC (i.e., all nodes will have internal IPs only),
-you can use the AWS console; see instructions `here
-<https://github.com/skypilot-org/skypilot/pull/1512>`_.
+   If you have static credentials set up correctly, you should see something like this:
+
+   .. code-block:: console
+
+       $ aws configure list
+             Name                    Value             Type    Location
+             ----                    -----             ----    --------
+          profile                <not set>             None    None
+       access_key     ****************xxxx shared-credentials-file
+       secret_key     ****************xxxx shared-credentials-file
+           region                <not set>             None    None
+
+   If you have SSO credentials set up correctly, you should see something like this:
+
+   .. code-block:: console
+
+       $ aws configure list
+             Name                    Value             Type    Location
+             ----                    -----             ----    --------
+          profile                <not set>             None    None
+       access_key     ****************xxxx              sso
+       secret_key     ****************xxxx              sso
+           region                <not set>             None    None
+
+2. **Check** ``sky check aws``. This should show whether SkyPilot is picking up the credentials and has the necessary permissions.
+
+   .. code-block:: console
+
+       $ sky check aws -v
+       Checking credentials to enable clouds for SkyPilot.
+         AWS: enabled [compute, storage]
+           Activated account: VRSC9IFFYQI7THCKR5UVC [account=190763068689]
+       ...
+
+Common issues
+~~~~~~~~~~~~~
+
+- **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set; see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
+
+  You may have previously set ``AWS_PROFILE`` in your ``.bashrc`` file or similar. Try to double-check the value:
+
+  .. code-block:: console
+      :emphasize-lines: 13
+
+      $ # Check the account being used by skypilot
+      $ sky check aws -v
+      Checking credentials to enable clouds for SkyPilot.
+        AWS: enabled [compute, storage]
+          Activated account: XXXXXXXXXXXXXXXXXXXXX:user [account=123456789012]
+        ...
+      $ # AWS account 1234-5678-9012 is enabled via @user SSO login.
+
+      $ # See the currently enabled profile.
+      $ aws configure list
+            Name                    Value             Type    Location
+            ----                    -----             ----    --------
+         profile AWSPowerUserAccess-123456789012              env    ['AWS_DEFAULT_PROFILE', 'AWS_PROFILE']
+      access_key     ****************xxxx              sso
+      secret_key     ****************xxxx              sso
+          region                <not set>             None    None
+      $ # SSO profile AWSPowerUserAccess-123456789012 is enabled
+      $ # via environment variable.
+
+      $ # See details of the currently enabled AWS account and user/role.
+      $ aws sts get-caller-identity
+
+      $ # See if the environment variable has been set.
+      $ echo $AWS_PROFILE
+      AWSPowerUserAccess-123456789012
+
+      $ unset AWS_PROFILE
+      $ # Delete from .bashrc/.zshrc to make the change permanent.
+      $ # Now, default profile will be used.
+      $ aws configure list
+            Name                    Value             Type    Location
+            ----                    -----             ----    --------
+         profile                <not set>             None    None
+         ...
+      $ sky check aws -v
+      Checking credentials to enable clouds for SkyPilot.
+        AWS: enabled [compute, storage]
+          Activated account: XXXXXXXXXXXXXXXXXXXXX [account=987654321098]
+        ...
+      $ # Now AWS account 9876-5432-1098 is enabled via default profile.
+
+
+- **Profile is not set**. If ``sky check aws`` and ``aws configure list`` cannot find credentials, you may not have a default profile set.
+
+  1. If the environment variable ``AWS_PROFILE`` is set, this profile name will be used.
+  2. If there is a profile named ``default``, it will be used.
+  3. Otherwise, the profile will not be accessible.
+
+  Even if there is only one profile, it will not be used unless ``AWS_PROFILE`` is set or the profile is named ``default``.
+
+  In AWS CLI v1, you can check ``~/.aws/credentials`` and ``~/.aws/config`` to look for profile names. In AWS CLI v2, you can check from the CLI.
+
+  .. code-block:: console
+
+      $ # AWS CLI v2 only
+      $ aws --version
+      aws-cli/2.25.6 ...
+
+      $ # List all profiles
+      $ aws configure list-profiles
+      AWSPowerUserAccess-xxxxxxx
+      default
+
+  If there is no ``default`` profile, you can edit the configuration directly:
+
+  .. code-block:: cfg
+      :emphasize-lines: 2
+
+      # ~/.aws/config
+      [profile default]
+      sso_session = my-skypilot-session
+      sso_account_id = XXXXXXXXXX
+      ...
+
+  .. code-block:: cfg
+      :emphasize-lines: 2
+
+      # ~/.aws/config
+      [default]
+      aws_access_key_id = XXXXXXXXXXXXXXXXXXXX
+      aws_secret_access_key = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+  Or, you can set the ``AWS_PROFILE`` environment variable in your shell config:
+
+  .. code-block:: shell
+
+      # .bashrc / .zshrc
+      # Enable AWS profile named "AWSPowerUserAccess-123456789012"
+      export AWS_PROFILE='AWSPowerUserAccess-123456789012'
