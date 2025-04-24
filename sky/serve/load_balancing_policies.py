@@ -332,8 +332,10 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
 
 
 @dataclasses.dataclass
-class ProximateTreeConfig:
+class PrefixTreeConfig:
     cache_threshold: float = 0.5
+    balance_abs_threshold: int = 32
+    balance_rel_threshold: float = 1.0001
     eviction_interval_secs: int = 60
     max_tree_size: int = 2**24
 
@@ -358,8 +360,8 @@ async def _get_text(request: 'fastapi.Request') -> Optional[str]:
     return None
 
 
-class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
-    """Proximate tree load balancing policy."""
+class PrefixTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
+    """Prefix tree load balancing policy."""
 
     async def _background_eviction_thread(self) -> None:
         logger.info('Starting background eviction thread')
@@ -370,7 +372,11 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
     def __init__(self) -> None:
         super().__init__()
         self.tree = prefix_tree.PrefixTree()
-        self.config = ProximateTreeConfig()
+        self.config = PrefixTreeConfig()
+        self.load_balancing_enabled: bool = False
+
+    def enable_load_balancing(self) -> None:
+        self.load_balancing_enabled = True
 
     async def background_task(self) -> None:
         await self._background_eviction_thread()
@@ -392,15 +398,29 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         if not self.ready_replicas:
             return None
         text = await _get_text(request)
-        if text is None:
-            logger.debug(f'No text found in request {_request_repr(request)}. '
-                         'Falling back to least load.')
-            return await super()._select_replica(request, **kwargs)
-        disabled_url = kwargs.get('disabled_url_in_low_match_rate', None)
-        cache_threshold = kwargs.get('cache_threshold', None)
         replica2load: Dict[str, int] = {
             r: self.load_map.get(r, 0) for r in self.ready_replicas
         }
+        if text is None:
+            logger.debug(f'No text found in request {_request_repr(request)}. '
+                         'Falling back to least load.')
+            return min(replica2load, key=lambda r: replica2load[r])
+            # return await super()._select_replica(request, **kwargs)
+        is_imbalanced = False
+        min_replica = None
+        if self.load_balancing_enabled:
+            min_replica = min(replica2load, key=lambda r: replica2load[r])
+            min_load = replica2load[min_replica]
+            max_load = max(replica2load.values())
+            if (max_load - min_load > self.config.balance_abs_threshold and
+                    max_load > self.config.balance_rel_threshold * min_load):
+                is_imbalanced = True
+        if is_imbalanced:
+            logger.debug('Load is imbalanced. Falling back to least load.')
+            assert min_replica is not None
+            return min_replica
+        disabled_url = kwargs.get('disabled_url_in_low_match_rate', None)
+        cache_threshold = kwargs.get('cache_threshold', None)
         # if len(text) < 1024:
         #     replica2load.pop(disabled_url, None)
         #     if not replica2load:

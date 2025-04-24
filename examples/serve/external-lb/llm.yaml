@@ -34,7 +34,6 @@ service:
     #     region: eu-central-1
     #   load_balancing_policy: prefix_tree
   # max_concurrent_requests: 50
-  # max_queue_size: 10000
 
 resources:
   cloud: aws

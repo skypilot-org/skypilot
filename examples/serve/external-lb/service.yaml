@@ -26,7 +26,6 @@ service:
         region: ap-northeast-1
       load_balancing_policy: consistent_hashing
   max_concurrent_requests: 1
-  max_queue_size: 10000
 
 resources:
   cloud: aws

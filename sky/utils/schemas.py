@@ -429,10 +429,6 @@ def get_service_schema():
                 'type': 'integer',
                 'minimum': 1,
             },
-            'max_queue_size': {
-                'type': 'integer',
-                'minimum': 0,
-            },
         }
     }
 

@@ -204,7 +204,6 @@ def _start_lb_in_process(lb_port):
         # load_balancing_policy_name='least_load',
         region=f'{REPLICA_KEY}-{lb_port}',
         max_concurrent_requests=MAX_CONCURRENCY,
-        max_queue_size=10000,
         is_local_debug_mode=True,
         use_ie_queue_indicator=False)
     lb_proc = threading.Thread(target=lb.run, daemon=True)

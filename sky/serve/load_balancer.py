@@ -5,7 +5,6 @@ import collections
 import copy
 import dataclasses
 import logging
-import os
 import time
 import traceback
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar, Union
@@ -34,7 +33,13 @@ _STEAL_TRIGGER_THRESHOLD = 10
 # _MIN_STEAL_INTERVAL = 1.0
 # _MAX_CACHE_HIT_DELAY_TIMES = 3
 
+# Whether to push requests across load balancers.
 _DO_PUSHING_ACROSS_LB = env_options.Options.DO_PUSHING_ACROSS_LB.get()
+# Use load balancing, or use dynamic rate limiting.
+# Currently we forcely override this to True to do the actual "pushing".
+# Not that kind of similar to pulling.
+_LB_PUSHING_ENABLE_LB = True
+_DO_PUSHING_TO_REPLICA = env_options.Options.DO_PUSHING_TO_REPLICA.get()
 
 
 @dataclasses.dataclass
@@ -109,9 +114,7 @@ T = TypeVar('T')
 class QueueWithLock(Generic[T]):
     """A queue with an async lock to allow concurrent access."""
 
-    def __init__(self, max_queue_size: int = 1000):
-        # TODO(tian): max_queue_size.
-        del max_queue_size
+    def __init__(self) -> None:
         self._queue: List[T] = []
         self._lock = asyncio.Lock()
         self._actual_size = 0
@@ -186,10 +189,15 @@ class ClientPool:
         self._lock: asyncio.Lock = asyncio.Lock()
         self._use_ie_queue_indicator = use_ie_queue_indicator
 
-    async def re_init_lock(self):
+    def enable_load_balancing(self) -> None:
+        if isinstance(self._load_balancing_policy,
+                      lb_policies.PrefixTreePolicy):
+            self._load_balancing_policy.enable_load_balancing()
+
+    async def re_init_lock(self) -> None:
         self._lock = asyncio.Lock()
 
-    async def background_task(self):
+    async def background_task(self) -> None:
         await self._load_balancing_policy.background_task()
 
     async def active_requests(self) -> Dict[str, int]:
@@ -308,7 +316,6 @@ class SkyServeLoadBalancer:
         region: Optional[str] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
         max_concurrent_requests: int = 10,
-        max_queue_size: int = 1000,
         is_local_debug_mode: bool = False,
         use_ie_queue_indicator: bool = True,
     ) -> None:
@@ -326,7 +333,6 @@ class SkyServeLoadBalancer:
                 to None.
             max_concurrent_requests: Maximum concurrent requests per replica.
                 Defaults to 10.
-            max_queue_size: Maximum size of the request queue. Defaults to 1000.
             use_ie_queue_indicator: Whether to use "whether the inference
                 engine queue is full or not" as an indicator for available
                 replicas. Defaults to True.
@@ -355,7 +361,6 @@ class SkyServeLoadBalancer:
         self._lb_pool_probe_session: Optional[aiohttp.ClientSession] = None
         self._request_queue: Optional[QueueWithLock[RequestQueueEntry]] = None
         self._tasks: List[asyncio.Task] = []
-        self._max_queue_size: int = max_queue_size
         self._external_host: str = serve_utils.get_external_host()
         self._handle_request_tasks: List[asyncio.Task] = []
         # Mapping from LB URL to a list of number of requests to be stolen.
@@ -478,7 +483,7 @@ class SkyServeLoadBalancer:
             await proxy_response.aclose()
             await pool_to_use.post_execute_hook(url, request)
             # Post execute hook for self LB here.
-            if not is_from_lb and self._url is not None:
+            if not is_from_lb and self._url is not None and not _LB_PUSHING_ENABLE_LB:
                 await self._lb_pool.post_execute_hook(self._url, request)
 
         decision_id = len(proxy_response.headers)
@@ -519,7 +524,7 @@ class SkyServeLoadBalancer:
             pool_to_use = self._lb_pool if is_from_lb else self._replica_pool
             await pool_to_use.pre_execute_hook(url, entry.request)
             # Record the cache for self LB here.
-            if not is_from_lb and self._url is not None:
+            if not is_from_lb and self._url is not None and not _LB_PUSHING_ENABLE_LB:
                 await self._lb_pool.pre_execute_hook(self._url, entry.request)
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_put_request_to_queue` but refreshed before
@@ -661,6 +666,41 @@ class SkyServeLoadBalancer:
                     #     continue
 
                     assert isinstance(entry, RequestEntry)
+                    if (_LB_PUSHING_ENABLE_LB and _DO_PUSHING_ACROSS_LB and
+                            not entry.request.headers.get(
+                                _IS_FROM_LB_HEADER, False)):
+                        # is not from lb. forward to lb first.
+                        try:
+                            ready_lb_url = await self._lb_pool.select_replica(
+                                entry.request)
+                        except starlette_requests.ClientDisconnect as e:
+                            # Client disconnected. Skip this request.
+                            await self._request_queue.get_and_remove()
+                            entry.set_failed_on(e)
+                            continue
+
+                        # We can forward to self.
+                        # if ready_lb_url is not None and ready_lb_url != self._url:
+                        if ready_lb_url is not None:
+                            # Process the request if a LB is available
+                            # Now we can safely remove it from the queue
+                            await self._request_queue.get_and_remove()
+                            try:
+                                logger.info(
+                                    f'Processing queued request {entry.request.url} '
+                                    f'from User to LB {ready_lb_url}.')
+                                await self._handle_requests(ready_lb_url,
+                                                            entry,
+                                                            is_from_lb=True)
+                            except Exception as e:  # pylint: disable=broad-except
+                                logger.error(
+                                    f'Error when processing queued request '
+                                    f'to LB {ready_lb_url}: '
+                                    f'{common_utils.format_exception(e)}\n'
+                                    f'  Traceback: {traceback.format_exc()}')
+                                # Set exception to propagate to the waiting handler
+                                entry.set_failed_on(e)
+                            continue
 
                     # TODO(tian): In this no replica case, if there is any replica
                     # in other LB region, we should let them steal instead of
@@ -764,7 +804,7 @@ class SkyServeLoadBalancer:
                         continue
 
                     # If not enabled, skip.
-                    if not _DO_PUSHING_ACROSS_LB:
+                    if not _DO_PUSHING_ACROSS_LB or _LB_PUSHING_ENABLE_LB:
                         continue
                     # If the request is already from another LB, avoid pushing
                     # it elsewhere. This should not happen since we only push
@@ -785,7 +825,8 @@ class SkyServeLoadBalancer:
                         entry.set_failed_on(e)
                         continue
 
-                    if ready_lb_url is not None:
+                    # Don't forward to self.
+                    if ready_lb_url is not None and ready_lb_url != self._url:
                         # Process the request if a LB is available
                         # Now we can safely remove it from the queue
                         await self._request_queue.get_and_remove()
@@ -806,7 +847,7 @@ class SkyServeLoadBalancer:
                             entry.set_failed_on(e)
                         continue
 
-                    logger.info('No available LB or replica available.')
+                    # logger.info('No available LB or replica available.')
 
                     # If a request stuck at head of queue for too long (happens
                     # due to we have a cache hit larger than threshold on local
@@ -934,7 +975,6 @@ class SkyServeLoadBalancer:
                 'num_replicas': len(self._replica_pool.ready_replicas()),
                 'num_available_replicas': len(
                     await self._replica_pool.available_replicas()),
-                'max_queue_size': self._max_queue_size,
                 'max_concurrent_requests': self._max_concurrent_requests,
                 'load_balancing_policy_name': self._load_balancing_policy_name
             })
@@ -1353,7 +1393,20 @@ class SkyServeLoadBalancer:
             self._workload_steal_session = aiohttp.ClientSession()
             self._ie_queue_probe_session = aiohttp.ClientSession()
             self._lb_pool_probe_session = aiohttp.ClientSession()
-            self._request_queue = QueueWithLock(self._max_queue_size)
+            self._request_queue = QueueWithLock()
+
+            if _DO_PUSHING_ACROSS_LB:
+                if _LB_PUSHING_ENABLE_LB:
+                    self._lb_pool.enable_load_balancing()
+                else:
+                    self._tasks.append(
+                        self._loop.create_task(self._probe_lb_status()))
+            if _DO_PUSHING_TO_REPLICA:
+                self._replica_pool.enable_load_balancing()
+            else:
+                if self._use_ie_queue_indicator:
+                    self._tasks.append(
+                        self._loop.create_task(self._probe_ie_queue()))
 
             await self._lb_pool.re_init_lock()
             await self._replica_pool.re_init_lock()
@@ -1374,14 +1427,6 @@ class SkyServeLoadBalancer:
             if self._region is not None and not _DO_PUSHING_ACROSS_LB:
                 self._tasks.append(
                     self._loop.create_task(self._request_stealing_loop()))
-
-            if self._use_ie_queue_indicator:
-                self._tasks.append(
-                    self._loop.create_task(self._probe_ie_queue()))
-
-            if _DO_PUSHING_ACROSS_LB:
-                self._tasks.append(
-                    self._loop.create_task(self._probe_lb_status()))
 
             self._tasks.append(
                 self._loop.create_task(self._replica_pool.background_task()))
@@ -1414,9 +1459,10 @@ class SkyServeLoadBalancer:
         logger.info('SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}')
         logger.info('Started lb in version lock-queue-fixed-queue-size.')
-        logger.info(f'Do pushing across LBs: {_DO_PUSHING_ACROSS_LB}, '
-                    'envs: DO_PUSHING_ACROSS_LB='
-                    f'{os.environ.get("DO_PUSHING_ACROSS_LB")}')
+        logger.info(f'===============System Config===============\n'
+                    f'Do pushing across LBs: {_DO_PUSHING_ACROSS_LB}, '
+                    f'Do pushing to replicas: {_DO_PUSHING_TO_REPLICA}, '
+                    f'Load balancing across LBs: {_LB_PUSHING_ENABLE_LB}')
         uvicorn.run(self._app,
                     host='0.0.0.0',
                     port=self._load_balancer_port,
@@ -1431,7 +1477,6 @@ def run_load_balancer(
     region: Optional[str] = None,
     tls_credential: Optional[serve_utils.TLSCredential] = None,
     max_concurrent_requests: int = 10,
-    max_queue_size: int = 1000,
     use_ie_queue_indicator: bool = True,
 ) -> None:
     """ Run the load balancer.
@@ -1447,7 +1492,6 @@ def run_load_balancer(
         tls_credential: The TLS credential for HTTPS endpoint. Defaults to None.
         max_concurrent_requests: Maximum concurrent requests per replica.
             Defaults to 10.
-        max_queue_size: Maximum size of the request queue. Defaults to 1000.
     """
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
@@ -1457,7 +1501,6 @@ def run_load_balancer(
         region=region,
         tls_credential=tls_credential,
         max_concurrent_requests=max_concurrent_requests,
-        max_queue_size=max_queue_size,
         use_ie_queue_indicator=use_ie_queue_indicator,
     )
     load_balancer.run()
@@ -1495,10 +1538,6 @@ if __name__ == '__main__':
                         type=int,
                         default=10,
                         help='Maximum concurrent requests per replica.')
-    parser.add_argument('--max-queue-size',
-                        type=int,
-                        default=1000,
-                        help='Maximum size of the request queue.')
     args = parser.parse_args()
     run_load_balancer(
         args.controller_addr,
@@ -1508,5 +1547,4 @@ if __name__ == '__main__':
         args.region,
         tls_credential=None,
         max_concurrent_requests=args.max_concurrent_requests,
-        max_queue_size=args.max_queue_size,
     )

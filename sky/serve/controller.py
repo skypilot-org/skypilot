@@ -43,8 +43,7 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
 def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
                     lb_policy: str, meta_lb_policy: str,
-                    max_concurrent_requests: int,
-                    max_queue_size: int) -> Dict[str, Any]:
+                    max_concurrent_requests: int) -> Dict[str, Any]:
     return {
         'load_balancer_port': lb_port,
         'controller_addr': controller_addr,
@@ -55,7 +54,6 @@ def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
         'load_balancing_policy': lb_policy,
         'meta_lb_policy': meta_lb_policy,
         'max_concurrent_requests': max_concurrent_requests,
-        'max_queue_size': max_queue_size,
     }
 
 
@@ -115,8 +113,7 @@ class SkyServeController:
                 lb_config['load_balancing_policy'],
                 ss.load_balancing_policy,
                 # TODO(tian): Constant for default.
-                ss.max_concurrent_requests or 10,
-                ss.max_queue_size or 10000)
+                ss.max_concurrent_requests or 10)
             rc = copy.deepcopy(lb_config['resources'])
             if 'cloud' in rc:
                 rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])

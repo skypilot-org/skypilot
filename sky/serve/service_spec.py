@@ -39,7 +39,6 @@ class SkyServiceSpec:
         external_load_balancers: Optional[List[Dict[str, Any]]] = None,
         route53_hosted_zone: Optional[str] = None,
         max_concurrent_requests: Optional[int] = None,
-        max_queue_size: Optional[int] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -171,7 +170,6 @@ class SkyServiceSpec:
             external_load_balancers)
         self._route53_hosted_zone = route53_hosted_zone
         self._max_concurrent_requests: Optional[int] = max_concurrent_requests
-        self._max_queue_size: Optional[int] = max_queue_size
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -277,7 +275,6 @@ class SkyServiceSpec:
             'route53_hosted_zone', None)
         service_config['max_concurrent_requests'] = config.get(
             'max_concurrent_requests', None)
-        service_config['max_queue_size'] = config.get('max_queue_size', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -348,7 +345,6 @@ class SkyServiceSpec:
         add_if_not_none('route53_hosted_zone', None, self.route53_hosted_zone)
         add_if_not_none('max_concurrent_requests', None,
                         self.max_concurrent_requests)
-        add_if_not_none('max_queue_size', None, self.max_queue_size)
         return config
 
     def probe_str(self):
@@ -499,7 +495,3 @@ class SkyServiceSpec:
     @property
     def max_concurrent_requests(self) -> Optional[int]:
         return self._max_concurrent_requests
-
-    @property
-    def max_queue_size(self) -> Optional[int]:
-        return self._max_queue_size

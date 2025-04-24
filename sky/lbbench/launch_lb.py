@@ -44,9 +44,9 @@ def main():
     parser.add_argument('--service-names', type=str, nargs='+', required=True)
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != 4:
-        raise ValueError('Expected 4 service names for '
-                         'sgl, sky-sgl-enhanced, sky, sky-pushing')
+    if len(sns) != 2:
+        raise ValueError('Expected 2 service names for '
+                         'sgl, sky-sgl-enhanced')
     print(sns)
     all_st = utils.sky_serve_status()
     ct = utils.sky_status()

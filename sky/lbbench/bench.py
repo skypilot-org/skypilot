@@ -7,21 +7,12 @@ import importlib
 import json
 import os
 from pathlib import Path
-import tempfile
 import time
-from typing import List
 
-import aiohttp
-import colorama
 import numpy as np
 from rich import print as rp
 
-import sky
 from sky.lbbench import oai
-from sky.utils import rich_utils
-from sky.utils import ux_utils
-
-SGL_ROUTER_IDENTIFIER = 'sglang-router'
 
 
 async def launch_task(args: argparse.Namespace, workload_module) -> None:
@@ -94,69 +85,6 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
         fout.write(json.dumps(value) + '\n')
 
 
-def prepare_lb_endpoints_and_confirm(backend_url: str, yes: bool) -> List[str]:
-    with rich_utils.client_status(
-            ux_utils.spinner_message(
-                '[bold cyan]Checking External LB Endpoints[/]')) as spinner:
-        if 'aws.cblmemo.net' in backend_url:
-            service_name = backend_url.split('.')[0]
-            req = sky.serve.status(service_name)
-            st = sky.client.sdk.get(req)
-            # rp('Service status:')
-            print(sky.serve.format_service_table(st, show_all=False))
-            if len(st) != 1:
-                raise ValueError('More than one service found. '
-                                 'Please specify the service name.')
-            endpoints = [r['endpoint'] for r in st[0]['external_lb_info']]
-        elif '9002' in backend_url:  # Single Global Sky LB
-            url = backend_url
-            if not url.startswith('http://'):
-                url = 'http://' + url
-            endpoints = [url]
-        elif '9001' in backend_url:  # SGLang Router
-            endpoints = [SGL_ROUTER_IDENTIFIER]
-        else:
-            return []
-            # raise ValueError(f'Unknown backend URL: {backend_url}')
-        print(f'External Load Balancer Endpoints: {colorama.Fore.GREEN}'
-              f'{endpoints}{colorama.Style.RESET_ALL}')
-        if not yes:
-            spinner.update(
-                'Press Enter to confirm the endpoints are correct...')
-            input()
-        return endpoints
-
-
-async def pull_queue_status(exp_name: str, endpoints: List[str],
-                            event: asyncio.Event, output_dir: str) -> None:
-    tmp_name = os.path.join(tempfile.gettempdir(),
-                            f'result_queue_size_{exp_name}.txt')
-    dest_name = (Path(output_dir).expanduser() / 'result' / 'queue_size' /
-                 f'{exp_name}.txt')
-    dest_name.parent.mkdir(parents=True, exist_ok=True)
-    print(f'Pulling queue status:      tail -f {tmp_name} | jq')
-    if SGL_ROUTER_IDENTIFIER in endpoints:
-        while not event.is_set():
-            await asyncio.sleep(1)
-        os.system(f'sky logs router --no-follow > {dest_name} 2>&1')
-    else:
-        async with aiohttp.ClientSession() as session:
-            with open(tmp_name, 'w', encoding='utf-8') as f:
-                while not event.is_set():
-                    lb2confs = {'time': time.time()}
-                    for endpoint in endpoints:
-                        async with session.get(endpoint + '/conf') as resp:
-                            conf = await resp.json()
-                        # async with session.get(endpoint +
-                        #                        '/raw-queue-size') as resp:
-                        #     raw_queue_size = (await resp.json())['queue_size']
-                        conf['raw_queue_size'] = conf['queue_size']
-                        lb2confs[endpoint] = conf
-                    print(json.dumps(lb2confs), file=f, flush=True)
-                    await asyncio.sleep(1)
-        os.rename(tmp_name, dest_name)
-
-
 def main():
     # py examples/serve/external-lb/bench.py
     # --exp-name sky-exp --num-branches 2 --num-users 5 --num-questions 1
@@ -170,8 +98,6 @@ def main():
     parser.add_argument('--backend-url', type=str, default=None)
     parser.add_argument('-y', '--yes', action='store_true')
     parser.add_argument('--output-dir', type=str, default='@temp')
-    parser.add_argument('--skip-queue-status', action='store_true')
-    parser.add_argument('--skip-tasks', action='store_true')
     parser.add_argument('--workload',
                         type=str,
                         required=True,
@@ -188,28 +114,7 @@ def main():
     # Parse all arguments after adding workload-specific ones
     args = parser.parse_args()
 
-    if args.skip_queue_status:
-        endpoints = []
-    else:
-        endpoints = prepare_lb_endpoints_and_confirm(args.backend_url, args.yes)
-
-    async def run_all():
-        event = asyncio.Event()
-        if not args.skip_queue_status:
-            queue_status_task = asyncio.create_task(
-                pull_queue_status(args.exp_name, endpoints, event,
-                                  args.output_dir))
-        if not args.skip_tasks:
-            await launch_task(args, workload_module)
-        else:
-            await asyncio.to_thread(
-                input, 'Skipping tasks. Press Enter to continue...')
-            print('Queue status puller finished.')
-        event.set()
-        if not args.skip_queue_status:
-            await queue_status_task
-
-    asyncio.run(run_all())
+    asyncio.run(launch_task(args, workload_module))
 
 
 if __name__ == '__main__':

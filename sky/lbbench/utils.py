@@ -7,8 +7,8 @@ import sky
 
 OAIChatHistory = List[Dict[str, str]]
 
-sky_sgl_enhanced_cluster = 'sky-global'
-sgl_cluster = 'router'
+sky_sgl_enhanced_cluster = 'sgl-router-pull'
+sgl_cluster = 'sgl-router'
 
 
 def sky_serve_status() -> List[Dict[str, Any]]:

@@ -6,14 +6,20 @@ import shlex
 
 from sky.lbbench import utils
 
-describes = ['sgl', 'sky_sgl_enhanced', 'sky', 'sky_pushing']
-presents = ['Baseline', 'Baseline\\n[Enhanced]', 'Ours', 'Ours\\n[Pushing]']
+describes = [
+    'sgl', 'sky_sgl_enhanced', 'sky_pull_pull', 'sky_push_pull', 'sky_push_push'
+]
+presents = [
+    'Baseline', 'Baseline\\n[Pull]', 'Ours\\n[Pull+Pull]', 'Ours\\n[Push+Pull]',
+    'Ours\\n[Push+Push]'
+]
 
 enabled_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
-    2,  # sky pushing in replica, pulling in lb
-    3,  # sky 2 level pushing
+    2,  # sky pulling in lb, pulling in replica
+    3,  # sky pushing in lb, pulling in replica
+    4,  # sky pushing in lb, pushing in replica
 ]
 
 
@@ -27,9 +33,9 @@ def main():
     parser.add_argument('--region-to-args', type=str, default=None)
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != 4:
-        raise ValueError('Expected 4 service names for '
-                         'sgl, sky-sgl-enhanced, sky, sky-pushing')
+    if len(sns) != len(describes):
+        raise ValueError(f'Expected {len(describes)} service names for '
+                         f'{", ".join(describes)}')
     print(sns)
     all_st = utils.sky_serve_status()
     ct = utils.sky_status()
@@ -46,13 +52,14 @@ def main():
 
     endpoints = [
         f'{sgl_ip}:9001', f'{sky_sgl_enhanced_ip}:9002',
-        sn2st[sns[2]]['endpoint'], sn2st[sns[3]]['endpoint']
+        sn2st[sns[2]]['endpoint'], sn2st[sns[3]]['endpoint'],
+        sn2st[sns[4]]['endpoint']
     ]
     print(endpoints)
     name_mapping = []
     ens = []
     scps = []
-    cmd_run_locally = []
+    exp2backend = {}
     cn2cmds = collections.defaultdict(list)
 
     regions = None
@@ -62,6 +69,9 @@ def main():
         regions = args.regions
     elif args.region_to_args is not None:
         regions = json.loads(args.region_to_args)
+
+    output = '~'
+    output_local = args.output_dir
 
     for i, (e, d, p) in enumerate(zip(endpoints, describes, presents)):
         if i not in enabled_systems:
@@ -75,16 +85,16 @@ def main():
         if regions is None:
             print(cmd)
         else:
-            cmd_run_locally.append(f'{cmd} --skip-tasks')
-            output = '~'
-            output_local = args.output_dir
-            cmd += f' --skip-queue-status --output-dir {output} -y'
+            exp2backend[en] = e
+            cmd += f' --output-dir {output} -y'
             scps.append(f'mkdir -p {output_local}/result/metric/{en}')
             for r in regions:
                 cluster = f'llmc-{r}'
                 region_cmd = f'{cmd} --seed {r}'
                 if isinstance(regions, dict):
                     region_cmd += f' {regions[r]}'
+                # TODO(tian): Instead of --fast, how about sky launch once
+                # and then sky exec?
                 cn2cmds[cluster].append(
                     f'sky launch --region {r} -c {cluster} --detach-run -y '
                     f'--fast --env CMD={shlex.quote(region_cmd)} '
@@ -94,9 +104,9 @@ def main():
                 scps.append(f'scp {met} {output_local}/result'
                             f'/metric/{en}/{cluster}.json')
     print(f'{"Queue status puller (Running locally)":=^70}')
-    for c in cmd_run_locally:
-        print(c)
-        print('*' * 30)
+    print(f'python3 -m sky.lbbench.queue_fetcher '
+          f'--exp2backend {shlex.quote(json.dumps(exp2backend))} '
+          f'--output-dir {output_local}')
     print(f'{"Launch Clients":=^70}')
     # Use this order so that the overhead to launch the cluster is aligned.
     for _, cmds in cn2cmds.items():
