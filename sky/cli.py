@@ -3629,8 +3629,9 @@ def show_gpus(
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
                 k8s_realtime_infos = _get_kubernetes_realtime_gpu_tables(
-                    name_filter=name, quantity_filter=quantity)
-                for (_, k8s_realtime_table) in k8s_realtime_infos:
+                    context=region, name_filter=name, quantity_filter=quantity)
+                for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+                    context_str = f'(Context: {ctx})' if ctx else ''
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                            f'Kubernetes GPUs {context_str}'
                            f'{colorama.Style.RESET_ALL}\n')

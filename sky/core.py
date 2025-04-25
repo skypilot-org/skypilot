@@ -1053,7 +1053,10 @@ def realtime_kubernetes_gpu_availability(
                                    List[models.RealtimeGpuAvailability]]] = []
     cumulative_count = 0
     parallel_queried = subprocess_utils.run_in_parallel(
-        _realtime_kubernetes_gpu_availability_single, context_list)
+        lambda ctx: _realtime_kubernetes_gpu_availability_single(
+            context=ctx,
+            name_filter=name_filter,
+            quantity_filter=quantity_filter), context_list)
 
     for ctx, queried in zip(context_list, parallel_queried):
         cumulative_count += len(queried)
