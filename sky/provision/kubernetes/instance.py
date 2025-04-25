@@ -939,7 +939,8 @@ def _terminate_node(namespace: str, context: Optional[str],
         delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
             name=pod_name,
             namespace=namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT),
+            _request_timeout=config_lib.DELETION_TIMEOUT,
+            grace_period_seconds=10),  # Grace period before force deletion
         resource_type='pod',
         resource_name=pod_name)
 
