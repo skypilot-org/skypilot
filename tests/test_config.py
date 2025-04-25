@@ -781,6 +781,12 @@ def test_parse_dotlist():
     config = skypilot_config._parse_dotlist(dotlist)
     assert config.get_nested(('key1', 'key2', 'key3'), None) == 'value3'
 
+    # test parsing complex parameters
+    dotlist = ['key1.key2={"key3": [1,2,3], "key4": {"key5": "value5"}}']
+    config = skypilot_config._parse_dotlist(dotlist)
+    assert config.get_nested(('key1', 'key2', 'key3'), None) == [1, 2, 3]
+    assert config.get_nested(('key1', 'key2', 'key4', 'key5'), None) == 'value5'
+
     # test parsing values with special characters
     dotlist = ['key1="a,b,c=d"']
     config = skypilot_config._parse_dotlist(dotlist)
