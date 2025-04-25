@@ -32,6 +32,7 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { useMobile } from '@/hooks/useMobile';
 
 export function ManagedJobs() {
   const [loading, setLoading] = useState(false);
@@ -42,6 +43,7 @@ export function ManagedJobs() {
     message: '',
     onConfirm: null,
   });
+  const isMobile = useMobile();
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
@@ -76,7 +78,7 @@ export function ManagedJobs() {
             title="Refresh"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            <span>Refresh</span>
+            {!isMobile && <span>Refresh</span>}
           </Button>
         </div>
       </div>

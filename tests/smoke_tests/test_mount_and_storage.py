@@ -425,10 +425,13 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     if azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
-        # azure blob. That will not be supported on the ubuntu 18.04 image
-        # and thus fail. For other clouds, the private mount on other
-        # storage types (GCS/S3) should succeed.
-        include_private_mount = False if generic_cloud == 'azure' else True
+        # azure blob. Also, if we're running on Kubernetes, the private mount
+        # might be created on azure blob to avoid the issue of the fuse adapter
+        # not being able to access the mount point. That will not be supported on
+        # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
+        # on other storage types (GCS/S3) should succeed.
+        include_private_mount = False if (
+            generic_cloud == 'azure' or generic_cloud == 'kubernetes') else True
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
                                   include_private_mount=include_private_mount)

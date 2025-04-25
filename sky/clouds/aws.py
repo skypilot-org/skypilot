@@ -312,13 +312,12 @@ class AWS(clouds.Cloud):
             'Example: ami-0729d913a335efca7')
         try:
             client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id])
-            image_info = image_info.get('Images', [])
+            image_info = client.describe_images(ImageIds=[image_id]).get(
+                'Images', [])
             if not image_info:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(image_not_found_message)
-            image_info = image_info[0]
-            image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
+            image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except (aws.botocore_exceptions().NoCredentialsError,
                 aws.botocore_exceptions().ProfileNotFound):

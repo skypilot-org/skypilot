@@ -174,7 +174,10 @@ class GCP(clouds.Cloud):
         # Install the Google Cloud SDK:
         f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
         f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
-        'google-cloud-sdk -y')
+        'google-cloud-sdk -y\n'
+        f'{_INDENT_PREFIX} If gcloud was recently installed with wget, API server'
+        ' may need to be restarted with following commands:\n'
+        f'{_INDENT_PREFIX}  $ sky api stop; sky api start')
 
     _CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -776,7 +779,7 @@ class GCP(clouds.Cloud):
                         raise FileNotFoundError(file)
             except FileNotFoundError as e:
                 return False, (
-                    f'Credentails are not set. '
+                    f'Credentials are not set. '
                     f'{cls._CREDENTIAL_HINT}\n'
                     f'{cls._INDENT_PREFIX}Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
