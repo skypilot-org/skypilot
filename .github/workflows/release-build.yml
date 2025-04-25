@@ -120,9 +120,20 @@ jobs:
           uv pip install --prerelease=allow "azure-cli>=2.65.0" "omegaconf>=2.4.0dev3"
           uv pip install skypilot==${LATEST_PYPI_VERSION}
 
-          echo "Extracting API version from installed PyPI package using uv's python..."
-          # Python command now runs within the activated venv
+          echo "Extracting API version from installed PyPI package..."
+          # Store current directory and change to a temporary one to avoid importing local sky package
+          ORIGINAL_DIR=$(pwd)
+          TEMP_DIR=$(mktemp -d)
+          cd "${TEMP_DIR}"
+          echo "Changed directory to ${TEMP_DIR} to ensure correct package import."
+
+          # Python command now runs within the activated venv and outside the project directory
           PYPI_API_VERSION=$(python -c "import sky.server.constants; print(sky.server.constants.API_VERSION)")
+
+          # Change back to original directory and clean up temp dir
+          cd "${ORIGINAL_DIR}"
+          rm -rf "${TEMP_DIR}"
+          echo "Restored original directory: ${ORIGINAL_DIR}"
 
           # Deactivate environment
           deactivate
