@@ -799,6 +799,7 @@ def open_ports(
                 range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
         elif existing_rule['IpProtocol'] == '-1':
             # For AWS, IpProtocol = -1 means all traffic
+            all_traffic_allowed: bool = False
             for group_pairs in existing_rule['UserIdGroupPairs']:
                 if group_pairs['GroupId'] != sg.id:
                     # We skip the port opening when the rule allows access from
@@ -807,8 +808,10 @@ def open_ports(
                     # The security group created by SkyPilot allows all traffic
                     # from the same security group, which should not be skipped.
                     existing_ports.add(-1)
+                    all_traffic_allowed = True
                     break
-            break
+            if all_traffic_allowed:
+                break
 
     ports_to_open = []
     # Do not need to open any ports when all traffic is already allowed.
