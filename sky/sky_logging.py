@@ -1,15 +1,18 @@
 """Logging utilities."""
 import builtins
 import contextlib
+import copy
 from datetime import datetime
 import logging
 import os
 import sys
 import threading
+from typing import Dict, Optional
 
 import colorama
 
 from sky.skylet import constants
+from sky.utils import context
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -23,6 +26,58 @@ INFO = logging.INFO
 WARNING = logging.WARNING
 ERROR = logging.ERROR
 CRITICAL = logging.CRITICAL
+
+
+class ContextAwareHandler(logging.StreamHandler):
+    """A logging handler that awares the SkyPilot context."""
+
+    def __init__(self, origin: logging.StreamHandler):
+        self._origin = origin
+
+    def get_active_handler(self):
+        """Get the active handler based on context."""
+        ctx = context.get()
+        if ctx is not None and ctx.log_handler is not None:
+            return ctx.log_handler
+        return self._origin
+
+    def apply_env(self):
+        """Apply the environment variables to the active handler."""
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            self.setLevel(logging.DEBUG)
+        else:
+            self.setLevel(logging.INFO)
+        if _show_logging_prefix():
+            self.setFormatter(FORMATTER)
+        else:
+            self.setFormatter(NO_PREFIX_FORMATTER)
+
+    def __getattr__(self, name):
+        """Route all method calls to the active handler."""
+        active_handler = self.get_active_handler()
+        return getattr(active_handler, name)
+
+
+class SensitiveWrapper(ContextAwareHandler):
+    """A handler wrapper that filters the sensitive logs."""
+
+    def __init__(self, origin: logging.StreamHandler):
+        super().__init__(origin)
+
+    @property
+    def level(self):
+        """Evalute the level based on environment variables.
+
+        For sensitive handler, if SUPPRESS_SENSITIVE_LOG is set, we set
+        the level to at least INFO to suppress the debug logs which may
+        contain sensitive information. SKYPILOT_DEBUG is not respected in
+        this case.
+        """
+        # Evalute the level on the fly to avoid overriding the level
+        # of the contextual handler.
+        if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
+            return min(logging.INFO, super().level)
+        return super().level
 
 
 def _show_logging_prefix():
@@ -48,7 +103,8 @@ class NewLineFormatter(logging.Formatter):
 
 
 _root_logger = logging.getLogger('sky')
-_default_handler = None
+_default_handler: Optional[ContextAwareHandler] = None
+_child_handlers: Dict[str, ContextAwareHandler] = {}
 _logging_config = threading.local()
 
 NO_PREFIX_FORMATTER = NewLineFormatter(None, datefmt=_DATE_FORMAT)
@@ -67,37 +123,25 @@ def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = rich_utils.RichSafeStreamHandler(sys.stdout)
-        _default_handler.flush = sys.stdout.flush  # type: ignore
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            _default_handler.setLevel(logging.DEBUG)
-        else:
-            _default_handler.setLevel(logging.INFO)
+        _default_handler = ContextAwareHandler(
+            rich_utils.RichSafeStreamHandler(sys.stdout))
         _root_logger.addHandler(_default_handler)
-    if _show_logging_prefix():
-        _default_handler.setFormatter(FORMATTER)
-    else:
-        _default_handler.setFormatter(NO_PREFIX_FORMATTER)
+    _default_handler.apply_env()
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
-    if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
-        # If the sensitive log is enabled, we reinitialize a new handler
-        # and force set the level to INFO to suppress the debug logs
-        # for certain loggers.
-        for logger_name in _SENSITIVE_LOGGER:
-            logger = logging.getLogger(logger_name)
-            handler_to_logger = rich_utils.RichSafeStreamHandler(sys.stdout)
-            handler_to_logger.flush = sys.stdout.flush  # type: ignore
-            logger.addHandler(handler_to_logger)
-            logger.setLevel(logging.INFO)
-            if _show_logging_prefix():
-                handler_to_logger.setFormatter(FORMATTER)
-            else:
-                handler_to_logger.setFormatter(NO_PREFIX_FORMATTER)
-            # Do not propagate to the parent logger to avoid parent
-            # logger printing the logs.
-            logger.propagate = False
+    for logger_name in _SENSITIVE_LOGGER:
+        logger = logging.getLogger(logger_name)
+        # Use sensitive handler for sensitive loggers to honor the
+        # SKYPILOT_SUPPRESS_SENSITIVE_LOG environment variable.
+        handler_to_logger = SensitiveWrapper(
+            rich_utils.RichSafeStreamHandler(sys.stdout))
+        handler_to_logger.apply_env()
+        logger.addHandler(handler_to_logger)
+        _child_handlers[logger_name] = handler_to_logger
+        # Do not propagate to the parent logger to avoid parent
+        # logger printing the logs.
+        logger.propagate = False
 
 
 def reload_logger():
@@ -106,10 +150,9 @@ def reload_logger():
     This ensures that the logger takes the new environment variables,
     such as SKYPILOT_DEBUG.
     """
-    global _default_handler
-    _root_logger.removeHandler(_default_handler)
-    _default_handler = None
-    _setup_logger()
+    _default_handler.apply_env()
+    for handler in _child_handlers.values():
+        handler.apply_env()
 
 
 # The logger is initialized when the module is imported.

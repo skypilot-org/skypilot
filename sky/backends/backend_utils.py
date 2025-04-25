@@ -40,6 +40,7 @@ from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import registry
@@ -2185,6 +2186,7 @@ def refresh_cluster_record(
 
 
 @timeline.event
+@context.cancellation_guard
 def refresh_cluster_status_handle(
     cluster_name: str,
     *,
@@ -2234,6 +2236,7 @@ def check_cluster_available(
     ...
 
 
+@context.cancellation_guard
 def check_cluster_available(
     cluster_name: str,
     *,

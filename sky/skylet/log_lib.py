@@ -21,6 +21,8 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -77,6 +79,9 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
+                ctx = context.get()
+                if ctx is not None and ctx.is_canceled():
+                    return
                 line = out_io.readline()
                 if not line:
                     break
@@ -135,6 +140,7 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
     return stdout, stderr
 
 
+@context.cancellation_guard
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
@@ -224,7 +230,14 @@ def run_with_log(
                     streaming_prefix=streaming_prefix,
                 )
                 stdout, stderr = process_subprocess_stream(proc, args)
-            proc.wait()
+            ctx = context.get()
+            if ctx is not None:
+                context_utils.wait_or_cancel_process(
+                    ctx,
+                    proc,
+                    cancel_callback=subprocess_utils.kill_children_processes)
+            else:
+                proc.wait()
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode

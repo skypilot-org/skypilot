@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import control_master_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -573,6 +574,7 @@ class SSHCommandRunner(CommandRunner):
                                      shell=True)
 
     @timeline.event
+    @context.cancellation_guard
     def run(
             self,
             cmd: Union[str, List[str]],
@@ -768,6 +770,7 @@ class KubernetesCommandRunner(CommandRunner):
         return kubectl_cmd
 
     @timeline.event
+    @context.cancellation_guard
     def run(
             self,
             cmd: Union[str, List[str]],

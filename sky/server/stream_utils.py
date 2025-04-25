@@ -2,6 +2,7 @@
 
 import asyncio
 import collections
+import io
 import pathlib
 from typing import AsyncGenerator, Deque, Optional
 
@@ -142,3 +143,50 @@ def stream_response(
             'X-Accel-Buffering': 'no',
             'Transfer-Encoding': 'chunked'
         })
+
+
+class StreamingBuffer:
+    """Memory backed streaming buffer."""
+
+    def __init__(self):
+        self._buffer = io.StringIO()
+        self._event = asyncio.Event()
+        self._closed = False
+
+    def write(self, data: str) -> int:
+        """Write data to the buffer."""
+        if self._closed:
+            raise ValueError('Buffer is closed')
+        n = self._buffer.write(data)
+        self._event.set()
+        return n
+
+    def flush(self) -> None:
+        """Flush the buffer."""
+        self._buffer.flush()
+
+    def close(self) -> None:
+        """Close the buffer."""
+        self._closed = True
+        self._event.set()
+
+    async def read(self) -> AsyncGenerator[str, None]:
+        """Read from the buffer as a stream."""
+        # Start position in the buffer
+        pos = 0
+
+        while True:
+            # Get current buffer contents
+            current = self._buffer.getvalue()
+            if pos < len(current):
+                # New data available, yield it
+                chunk = current[pos:]
+                pos = len(current)
+                yield chunk
+            elif self._closed:
+                # Buffer is closed and no more data
+                break
+            else:
+                # Wait for new data
+                self._event.clear()
+                await self._event.wait()

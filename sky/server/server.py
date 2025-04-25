@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime
+import functools
 import logging
 import multiprocessing
 import os
@@ -46,6 +47,7 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
@@ -669,24 +671,23 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    executor.schedule_request(
+    # Only initialize the context in logs handler to limit the scope of this
+    # experimental change.
+    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
+    logger.info('Initializing context')
+    context.initialize()
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
-        # should be responsive. However, it can be long running if the user's
-        # job keeps running, and we should avoid it taking the SHORT worker.
         schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=cluster_job_body.cluster_name,
     )
-
-    request_task = requests_lib.get_request(request.state.request_id)
-
+    asyncio.create_task(executor.execute_request(request_task))
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(
-        request_id=request_task.request_id,
+        request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )

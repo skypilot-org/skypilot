@@ -18,10 +18,15 @@ The number of the workers is determined by the system resources.
 
 See the [README.md](../README.md) for detailed architecture of the executor.
 """
+import asyncio
 import contextlib
+import contextvars
 import enum
+import functools
+import logging
 import multiprocessing
 import os
+import pathlib
 import queue as queue_lib
 import signal
 import sys
@@ -47,6 +52,7 @@ from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -60,7 +66,6 @@ else:
     from typing_extensions import ParamSpec
 
 P = ParamSpec('P')
-
 logger = sky_logging.init_logger(__name__)
 
 # On macOS, the default start method for multiprocessing is 'fork', which
@@ -390,6 +395,91 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
 
 
+async def execute_request(request: api_requests.Request):
+    """Execute a request in current event loop.
+    
+    Similar to _request_execution_wrapper, but executed as coroutine in current
+    event loop. This is designed for executing tasks that are not CPU
+    intensive, e.g. sky logs.
+    """
+    ctx = context.get()
+    if ctx is None:
+        raise ValueError('Context is not initialized')
+    log_path = request.log_path
+    func = request.entrypoint
+    request_body = request.request_body
+    with api_requests.update_request(request.request_id) as request_task:
+        request_task.status = api_requests.RequestStatus.RUNNING
+    ctx.log_handler = logging.FileHandler(log_path.absolute())
+    sky_logging.reload_logger()
+    task: asyncio.Task = asyncio.create_task(
+        asyncio.to_thread(func, **request_body.to_kwargs()))
+
+    async def wait_for_task(request_id: str) -> bool:
+        request = api_requests.get_request(request_id)
+        if request is None:
+            raise RuntimeError('Request not found')
+
+        if request.status == api_requests.RequestStatus.CANCELLED:
+            ctx.cancel()
+            return True
+
+        if task.done():
+            try:
+                result = await task
+                api_requests.set_request_succeeded(request_id, result)
+            except asyncio.CancelledError:
+                # Only occurs when the request is cancelled, where the status
+                # should already be set to CANCELLED.
+                pass
+            except Exception as e:
+                api_requests.set_request_failed(request_id, e)
+            return True
+        return False
+
+    try:
+        while await wait_for_task(request.request_id):
+            await asyncio.sleep(1)
+    except Exception as e:
+        ctx.cancel()
+        api_requests.set_request_failed(request.request_id, e)
+        raise
+
+
+def prepare_request(
+    request_id: str,
+    request_name: str,
+    request_body: payloads.RequestBody,
+    func: Callable[P, Any],
+    request_cluster_name: Optional[str] = None,
+    schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
+    is_skypilot_system: bool = False,
+) -> Optional[api_requests.Request]:
+    """Prepare a request for execution."""
+    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+    if is_skypilot_system:
+        user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
+        global_user_state.add_or_update_user(
+            models.User(id=user_id, name=user_id))
+    request = api_requests.Request(request_id=request_id,
+                                   name=server_constants.REQUEST_NAME_PREFIX +
+                                   request_name,
+                                   entrypoint=func,
+                                   request_body=request_body,
+                                   status=api_requests.RequestStatus.PENDING,
+                                   created_at=time.time(),
+                                   schedule_type=schedule_type,
+                                   user_id=user_id,
+                                   cluster_name=request_cluster_name)
+
+    if not api_requests.create_if_not_exists(request):
+        logger.debug(f'Request {request_id} already exists.')
+        return None
+
+    request.log_path.touch()
+    return request
+
+
 def schedule_request(
         request_id: str,
         request_name: str,
@@ -421,27 +511,11 @@ def schedule_request(
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
-    if is_skypilot_system:
-        user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
-        global_user_state.add_or_update_user(
-            models.User(id=user_id, name=user_id))
-    request = api_requests.Request(request_id=request_id,
-                                   name=server_constants.REQUEST_NAME_PREFIX +
-                                   request_name,
-                                   entrypoint=func,
-                                   request_body=request_body,
-                                   status=api_requests.RequestStatus.PENDING,
-                                   created_at=time.time(),
-                                   schedule_type=schedule_type,
-                                   user_id=user_id,
-                                   cluster_name=request_cluster_name)
-
-    if not api_requests.create_if_not_exists(request):
-        logger.debug(f'Request {request_id} already exists.')
+    request = prepare_request(request_id, request_name, request_body, func,
+                              request_cluster_name, schedule_type,
+                              is_skypilot_system)
+    if request is None:
         return
-
-    request.log_path.touch()
 
     def enqueue():
         input_tuple = (request_id, ignore_return_value)
