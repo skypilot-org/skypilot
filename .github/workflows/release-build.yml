@@ -112,7 +112,8 @@ jobs:
           source ~/pypi-check-env/bin/activate
 
           echo "Installing skypilot==${LATEST_PYPI_VERSION} from PyPI using uv..."
-          uv pip install --quiet skypilot==${LATEST_PYPI_VERSION}
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
+          uv pip install skypilot==${LATEST_PYPI_VERSION}
 
           echo "Extracting API version from installed PyPI package using uv's python..."
           # Python command now runs within the activated venv
