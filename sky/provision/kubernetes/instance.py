@@ -935,12 +935,15 @@ def _terminate_node(namespace: str, context: Optional[str],
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
+    # Note - some misbehaving pods may not terminate gracefully if they have
+    # open file descriptors. In this case, we force delete the pod after
+    # grace_period_seconds.
     _delete_k8s_resource_with_retry(
         delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
             name=pod_name,
             namespace=namespace,
             _request_timeout=config_lib.DELETION_TIMEOUT,
-            grace_period_seconds=10),  # Grace period before force deletion
+            grace_period_seconds=10),
         resource_type='pod',
         resource_name=pod_name)
 
