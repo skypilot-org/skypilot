@@ -81,57 +81,49 @@ def vpc():
     return vpc_v1
 
 
-def get_iam_token(force_update=False):
-    global _iam_token
-    if _iam_token is None or force_update:
-        try:
-            with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
-                      encoding='utf-8') as file:
-                _iam_token = file.read().strip()
-        except FileNotFoundError:
-            return None
-    return _iam_token
+@annotations.lru_cache(scope='request')
+def get_iam_token():
+    try:
+        with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
+                  encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
+@annotations.lru_cache(scope='request')
 def is_token_or_cred_file_exist():
     return (os.path.exists(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH)) or
             os.path.exists(os.path.expanduser(NEBIUS_CREDENTIALS_PATH)))
 
 
+@annotations.lru_cache(scope='request')
 def get_project_id():
-    global _project_id
-    if _project_id is None:
-        try:
-            with open(os.path.expanduser(NEBIUS_PROJECT_ID_PATH),
-                      encoding='utf-8') as file:
-                _project_id = file.read().strip()
-        except FileNotFoundError:
-            return None
-    return _project_id
+    try:
+        with open(os.path.expanduser(NEBIUS_PROJECT_ID_PATH),
+                  encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
-def get_tenant_id(force_update=False):
-    global _tenant_id
-    if _tenant_id is None or force_update:
-        try:
-            with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
-                      encoding='utf-8') as file:
-                _tenant_id = file.read().strip()
-        except FileNotFoundError:
-            return None
-    return _tenant_id
+@annotations.lru_cache(scope='request')
+def get_tenant_id():
+    try:
+        with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
+                  encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
-def sdk(force_update=False):
-    global _sdk
-    if _sdk is None or force_update:
-        token = get_iam_token(force_update)
-        if token is not None:
-            _sdk = nebius.sdk.SDK(credentials=token)
-            return _sdk
-        _sdk = nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
-    return _sdk
+@annotations.lru_cache(scope='request')
+def sdk():
+    token = get_iam_token()
+    if token is not None:
+        return nebius.sdk.SDK(credentials=token)
+    return nebius.sdk.SDK(
+        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
 
 
 def get_nebius_credentials(boto3_session):
