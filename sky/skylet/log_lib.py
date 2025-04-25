@@ -140,7 +140,7 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
     return stdout, stderr
 
 
-@context.cancellation_guard
+@context_utils.cancellation_guard
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,

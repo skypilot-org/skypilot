@@ -31,7 +31,6 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import context
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib

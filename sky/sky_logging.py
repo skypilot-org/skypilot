@@ -1,7 +1,6 @@
 """Logging utilities."""
 import builtins
 import contextlib
-import copy
 from datetime import datetime
 import logging
 import os
@@ -27,45 +26,46 @@ WARNING = logging.WARNING
 ERROR = logging.ERROR
 CRITICAL = logging.CRITICAL
 
+_internal_logger = logging.getLogger('internal')
+_HANDLER_RESERVED_ATTRS = ['__init__', 'get_active_handler', 'apply_env']
 
-class ContextAwareHandler(logging.StreamHandler):
+
+def get_active_handler() -> Optional[logging.StreamHandler]:
+    """Get the active handler based on context."""
+    ctx = context.get()
+    if ctx is not None and ctx.log_handler is not None:
+        return ctx.log_handler
+    return None
+
+
+def apply_env(handler: logging.StreamHandler):
+    """Apply the environment variables to the active handler."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        handler.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
+    if _show_logging_prefix():
+        handler.setFormatter(FORMATTER)
+    else:
+        handler.setFormatter(NO_PREFIX_FORMATTER)
+
+
+class ContextAwareHandler(rich_utils.RichSafeStreamHandler):
     """A logging handler that awares the SkyPilot context."""
 
-    def __init__(self, origin: logging.StreamHandler):
-        self._origin = origin
-
-    def get_active_handler(self):
-        """Get the active handler based on context."""
-        ctx = context.get()
-        if ctx is not None and ctx.log_handler is not None:
-            return ctx.log_handler
-        return self._origin
-
-    def apply_env(self):
-        """Apply the environment variables to the active handler."""
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            self.setLevel(logging.DEBUG)
-        else:
-            self.setLevel(logging.INFO)
-        if _show_logging_prefix():
-            self.setFormatter(FORMATTER)
-        else:
-            self.setFormatter(NO_PREFIX_FORMATTER)
-
-    def __getattr__(self, name):
+    def __getattribute__(self, name):
         """Route all method calls to the active handler."""
-        active_handler = self.get_active_handler()
-        return getattr(active_handler, name)
+        active_handler = get_active_handler()
+        if active_handler is not None:
+            return getattr(active_handler, name)
+        return super().__getattribute__(name)
 
 
 class SensitiveWrapper(ContextAwareHandler):
     """A handler wrapper that filters the sensitive logs."""
 
-    def __init__(self, origin: logging.StreamHandler):
-        super().__init__(origin)
-
-    @property
-    def level(self):
+    # TODO(aylei): figure out how to handle sensitive logs.
+    def get_level(self):
         """Evalute the level based on environment variables.
 
         For sensitive handler, if SUPPRESS_SENSITIVE_LOG is set, we set
@@ -123,10 +123,18 @@ def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = ContextAwareHandler(
-            rich_utils.RichSafeStreamHandler(sys.stdout))
+        _default_handler = ContextAwareHandler(sys.stdout)
         _root_logger.addHandler(_default_handler)
-    _default_handler.apply_env()
+    apply_env(_default_handler)
+
+    # Add configuration for internal logger
+    internal_logger = logging.getLogger('internal')
+    internal_logger.setLevel(logging.DEBUG)
+    internal_handler = rich_utils.RichSafeStreamHandler(sys.stdout)
+    internal_handler.setFormatter(FORMATTER)
+    internal_logger.addHandler(internal_handler)
+    internal_logger.propagate = False
+
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
@@ -134,9 +142,8 @@ def _setup_logger():
         logger = logging.getLogger(logger_name)
         # Use sensitive handler for sensitive loggers to honor the
         # SKYPILOT_SUPPRESS_SENSITIVE_LOG environment variable.
-        handler_to_logger = SensitiveWrapper(
-            rich_utils.RichSafeStreamHandler(sys.stdout))
-        handler_to_logger.apply_env()
+        handler_to_logger = SensitiveWrapper(sys.stdout)
+        apply_env(handler_to_logger)
         logger.addHandler(handler_to_logger)
         _child_handlers[logger_name] = handler_to_logger
         # Do not propagate to the parent logger to avoid parent
@@ -150,9 +157,9 @@ def reload_logger():
     This ensures that the logger takes the new environment variables,
     such as SKYPILOT_DEBUG.
     """
-    _default_handler.apply_env()
+    apply_env(_default_handler)
     for handler in _child_handlers.values():
-        handler.apply_env()
+        apply_env(handler)
 
 
 # The logger is initialized when the module is imported.

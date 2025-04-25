@@ -2,15 +2,12 @@
 
 import asyncio
 import contextvars
-import functools
-import logging
-import sys
-from typing import Dict, Optional, TextIO
+from typing import Optional
 
 
 class Context(object):
     """SkyPilot typed context vars for threads and coroutines.
-    
+
     This is a wrapper around `contextvars.ContextVar` that provides a typed
     interface for the SkyPilot specific context variables that can be accessed
     at any layer of the call stack. ContextVar is coroutine local, an empty
@@ -18,7 +15,7 @@ class Context(object):
 
     Adding a new context variable for a new feature is as simple as:
     1. Add a new instance variable to the Context class.
-    2. (Optional) Add new accessor methods if the variable should be protected. 
+    2. (Optional) Add new accessor methods if the variable should be protected.
 
     To propagate the context to a new thread/coroutine, use
     `contextvars.copy_context()`.
@@ -34,7 +31,7 @@ class Context(object):
                 if context.get().is_canceled():
                     break
                 time.sleep(1)
-            
+
         async def fastapi_handler():
             # context.initialize() has been called in lifespan
             ctx = contextvars.copy_context()
@@ -65,7 +62,7 @@ _CONTEXT = contextvars.ContextVar('sky_context', default=None)
 
 def get() -> Optional[Context]:
     """Get the current SkyPilot context.
-    
+
     If the context is not initialized, get() will return None. This helps
     sync code to check whether it runs in a cancellable context and avoid
     polling the cancellation event if it is not.
@@ -76,34 +73,3 @@ def get() -> Optional[Context]:
 def initialize():
     """Initialize the current SkyPilot context."""
     _CONTEXT.set(Context())
-
-
-def cancellation_guard(func):
-    """Decorator to make a synchronous function cancellable via context.
-    
-    Guards the function execution by checking context.is_canceled() before
-    executing the function and raises asyncio.CancelledError if the context
-    is already cancelled.
-
-    This basically mimics the behavior of asyncio, which checks coroutine
-    cancelled in await call.
-    
-    Args:
-        func: The function to be decorated.
-        
-    Returns:
-        The wrapped function that checks cancellation before execution.
-        
-    Raises:
-        asyncio.CancelledError: If the context is cancelled before execution.
-    """
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        ctx = get()
-        if ctx is not None and ctx.is_canceled():
-            raise asyncio.CancelledError(
-                f'Function {func.__name__} cancelled before execution')
-        return func(*args, **kwargs)
-
-    return wrapper

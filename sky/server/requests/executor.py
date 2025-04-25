@@ -26,7 +26,6 @@ import functools
 import logging
 import multiprocessing
 import os
-import pathlib
 import queue as queue_lib
 import signal
 import sys
@@ -397,7 +396,7 @@ def _request_execution_wrapper(request_id: str,
 
 async def execute_request(request: api_requests.Request):
     """Execute a request in current event loop.
-    
+
     Similar to _request_execution_wrapper, but executed as coroutine in current
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
@@ -412,8 +411,10 @@ async def execute_request(request: api_requests.Request):
         request_task.status = api_requests.RequestStatus.RUNNING
     ctx.log_handler = logging.FileHandler(log_path.absolute())
     sky_logging.reload_logger()
-    task: asyncio.Task = asyncio.create_task(
-        asyncio.to_thread(func, **request_body.to_kwargs()))
+    loop = asyncio.get_running_loop()
+    pyctx = contextvars.copy_context()
+    func_call = functools.partial(pyctx.run, func, **request_body.to_kwargs())
+    fut: asyncio.Future = loop.run_in_executor(None, func_call)
 
     async def wait_for_task(request_id: str) -> bool:
         request = api_requests.get_request(request_id)
@@ -424,21 +425,28 @@ async def execute_request(request: api_requests.Request):
             ctx.cancel()
             return True
 
-        if task.done():
+        if fut.done():
+            logger.info('Task done, setting request status to succeeded')
             try:
-                result = await task
+                result = await fut
                 api_requests.set_request_succeeded(request_id, result)
             except asyncio.CancelledError:
                 # Only occurs when the request is cancelled, where the status
                 # should already be set to CANCELLED.
                 pass
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 api_requests.set_request_failed(request_id, e)
             return True
+        logger.info('Task not done yet, waiting for it to finish')
         return False
 
     try:
-        while await wait_for_task(request.request_id):
+        while True:
+            res = await wait_for_task(request.request_id)
+            if res:
+                logger.info('Task done, breaking')
+                break
+            logger.info('Task not done yet, sleeping for 1 second')
             await asyncio.sleep(1)
     except Exception as e:
         ctx.cancel()
@@ -454,7 +462,7 @@ def prepare_request(
     request_cluster_name: Optional[str] = None,
     schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
     is_skypilot_system: bool = False,
-) -> Optional[api_requests.Request]:
+) -> api_requests.Request:
     """Prepare a request for execution."""
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
@@ -473,8 +481,7 @@ def prepare_request(
                                    cluster_name=request_cluster_name)
 
     if not api_requests.create_if_not_exists(request):
-        logger.debug(f'Request {request_id} already exists.')
-        return None
+        raise RuntimeError(f'Request {request_id} already exists.')
 
     request.log_path.touch()
     return request
@@ -511,11 +518,8 @@ def schedule_request(
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request = prepare_request(request_id, request_name, request_body, func,
-                              request_cluster_name, schedule_type,
-                              is_skypilot_system)
-    if request is None:
-        return
+    prepare_request(request_id, request_name, request_body, func,
+                    request_cluster_name, schedule_type, is_skypilot_system)
 
     def enqueue():
         input_tuple = (request_id, ignore_return_value)

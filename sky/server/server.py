@@ -5,7 +5,6 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime
-import functools
 import logging
 import multiprocessing
 import os

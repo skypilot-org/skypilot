@@ -19,7 +19,7 @@ import uuid
 from sky import models
 from sky import sky_logging
 from sky.utils import common_utils
-from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import db_utils
 from sky.utils import registry
 from sky.utils import status_lib
@@ -671,7 +671,7 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
-@context.cancellation_guard
+@context_utils.cancellation_guard
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute(
