@@ -185,6 +185,10 @@ jobs:
           RELEASE_VERSION="${{ github.event.inputs.release_version }}"
           MANUAL_CREATED_RELEASE_BRANCH="${{ steps.validate_input_version.outputs.manual_created_release_branch }}"
 
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
           # Checkout the base release branch
           echo "Checking out manual created release branch ${MANUAL_CREATED_RELEASE_BRANCH}..."
           git checkout ${MANUAL_CREATED_RELEASE_BRANCH}
@@ -313,6 +317,10 @@ jobs:
           QUICKTEST_BUILD: ${{ needs.extract-quicktest.outputs.build_number }}
           RELEASE_TEST_BUILD: ${{ needs.extract-release-test.outputs.build_number }}
         run: |
+
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
 
           # Create PR with buildkite links
           PR_BODY="Release ${RELEASE_VERSION}
