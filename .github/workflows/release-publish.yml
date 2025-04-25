@@ -83,12 +83,15 @@ jobs:
         run: |
           # Wait a moment for package to be available
           sleep 30
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
           pip install fastapi
           # Install skypilot from Test PyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
           # Verify installation
           sky -v
           sky -c
+          sky check
+          sky show-gpus
           # Verify version
           EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
