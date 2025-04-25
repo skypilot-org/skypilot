@@ -4524,7 +4524,8 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
               default=False,
               is_flag=True,
               required=False,
-              help='Force refresh of endpoint cache.')
+              help='Force refresh of endpoint cache. '
+              'Only takes effect with the --endpoint flag.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
