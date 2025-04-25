@@ -1316,7 +1316,9 @@ def _fill_in_launchable_resources(
                                     'to allow for larger instances.'
                                     f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
-                    logger.info(f'{repr(cloud)}: {hint}')
+                    logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                f'{repr(cloud)}: {hint}'
+                                f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
