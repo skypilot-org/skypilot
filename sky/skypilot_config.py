@@ -329,7 +329,11 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
     """
     config: config_utils.Config = config_utils.Config()
     for arg in dotlist:
-        key, value = arg.split('=', 1)
+        try:
+            key, value = arg.split('=', 1)
+        except ValueError as e:
+            raise ValueError(f'Invalid config override: {arg}. '
+                             'Please use the format: key=value') from e
         if len(key) == 0 or len(value) == 0:
             raise ValueError(f'Invalid config override: {arg}. '
                              'Please use the format: key=value')
