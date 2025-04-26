@@ -293,6 +293,11 @@ class ClusterDoesNotExist(ValueError):
     pass
 
 
+class CachedClusterUnavailable(Exception):
+    """Raised when a cached cluster record is unavailable."""
+    pass
+
+
 class NotSupportedError(Exception):
     """Raised when a feature is not supported."""
     pass

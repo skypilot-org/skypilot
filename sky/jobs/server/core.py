@@ -14,6 +14,7 @@ from sky import backends
 from sky import core
 from sky import exceptions
 from sky import execution
+from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import task as task_lib
@@ -64,6 +65,8 @@ def launch(
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
+        sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
+            is unavailable
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -102,6 +105,31 @@ def launch(
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing managed job')):
+
+        # Check whether cached jobs controller cluster is accessible
+        cluster_name = (
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is not None:
+            # there is a cached jobs controller cluster
+            try:
+                # TODO: do something with returned status?
+                _, _ = backend_utils.refresh_cluster_status_handle(
+                    cluster_name=cluster_name,
+                    force_refresh_statuses=set(status_lib.ClusterStatus),
+                    acquire_per_cluster_status_lock=False)
+            except (exceptions.ClusterOwnerIdentityMismatchError,
+                    exceptions.CloudUserIdentityError,
+                    exceptions.ClusterStatusFetchingError) as e:
+                # we weren't able to refresh the cluster for its status.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CachedClusterUnavailable(
+                        f'Cached jobs controller cluster '
+                        f'{cluster_name} cannot be refreshed. Please check if '
+                        'the cluster is accessible. If the cluster was '
+                        'removed, consider removing the cluster from SkyPilot '
+                        f'with:\n\n`sky down {cluster_name} --purge`\n\n'
+                        f'Reason: {common_utils.format_exception(e)}')
 
         local_to_controller_file_mounts = {}
 
@@ -142,11 +170,11 @@ def launch(
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
         controller_resources = controller_utils.get_controller_resources(
-            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            controller=controller,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
         controller_idle_minutes_to_autostop, controller_down = (
             controller_utils.get_controller_autostop_config(
-                controller=controller_utils.Controllers.JOBS_CONTROLLER))
+                controller=controller))
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
@@ -162,7 +190,7 @@ def launch(
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             'dashboard_user_id': common.SERVER_ID,
             **controller_utils.shared_controller_vars_to_fill(
-                controller_utils.Controllers.JOBS_CONTROLLER,
+                controller,
                 remote_user_config_path=remote_user_config_path,
                 local_user_config=mutated_user_config,
             ),

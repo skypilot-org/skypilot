@@ -10,6 +10,7 @@ import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { LogFilter, formatLogs } from '@/components/utils';
+import { useMobile } from '@/hooks/useMobile';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -20,6 +21,7 @@ function JobHeader({
   isRefreshing,
   loading,
 }) {
+  const isMobile = useMobile();
   return (
     <div className="flex items-center justify-between mb-4 h-5">
       <div className="text-base flex items-center">
@@ -57,7 +59,7 @@ function JobHeader({
             className="text-sm text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
           >
             <RotateCwIcon className="w-4 h-4 mr-1.5" />
-            <span>Refresh</span>
+            {!isMobile && <span>Refresh</span>}
           </button>
         </Tooltip>
       </div>

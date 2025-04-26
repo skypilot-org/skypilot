@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/card';
 import { CopyIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { BASE_PATH } from '@/data/connectors/constants';
+import { useMobile } from '@/hooks/useMobile';
 
 export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
   const [copied, setCopied] = React.useState(false);
@@ -77,6 +78,8 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
 }
 
 export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
+  const isMobile = useMobile();
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-3xl">
@@ -101,7 +104,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                   Connect with VSCode/Cursor
                 </h3>
                 <div
-                  className="relative -mt-10"
+                  className={`relative ${isMobile ? '-mt-5' : '-mt-10'}`}
                   style={{ paddingBottom: '75%' }}
                 >
                   <video

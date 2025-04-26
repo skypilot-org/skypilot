@@ -156,9 +156,21 @@ CONDA_INSTALLATION_COMMANDS = (
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
+    # If conda was not installed and the image is a docker image,
+    # we deactivate any active conda environment we set.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "true" ]; then '
+    'conda deactivate;'
+    'fi;'
     '}; '
+    # run this command only if the image is not a docker image assuming
+    # that if a user is using a docker image, they know what they are doing
+    # in terms of conda setup/activation.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
+    'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.

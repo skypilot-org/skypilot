@@ -76,9 +76,12 @@ class Dag:
 
         return out_degree_condition and in_degree_condition
 
-    def validate(self, workdir_only: bool = False):
+    def validate(self,
+                 skip_file_mounts: bool = False,
+                 skip_workdir: bool = False):
         for task in self.tasks:
-            task.validate(workdir_only=workdir_only)
+            task.validate(skip_file_mounts=skip_file_mounts,
+                          skip_workdir=skip_workdir)
 
 
 class _DagContext(threading.local):
