@@ -358,6 +358,8 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
 
 # Constants for path in K8S pod to store persistent setup and run scripts
 # so that we can run them again after the pod restarts.
+# Path within user home. For HA controller, assumes home directory is
+# persistent through PVC. See kubernetes-ray.yml.j2.
 PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/.controller_recovery_setup_commands.sh'
 PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
 
