@@ -60,21 +60,6 @@ def _head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
-def is_high_availability_controller_by_name(cluster_name: str) -> bool:
-    """Check if a cluster is a high availability controller based on naming
-    pattern.
-    """
-    # TODO(andyl): We should let config['cluster_name'] be the deployment name.
-    # Or even k8s identifier like 'deployment/sky-serve-controller-deployment'.
-    # Otherwise, we have no place to store the custom info that the cluster is
-    # high availability.
-    # But this means we need to change the update_cluster_info logic and
-    # what stored in handle.cluster_name_on_cloud as well.
-    # Is it worth to call `kubectl get deployment` to check if the cluster is
-    # high availability? Like `is_high_availability_cluster_by_kubectl`?
-    return '-deployment-' in cluster_name
-
-
 def is_high_availability_cluster_by_kubectl(
         cluster_name: str,
         context: Optional[str] = None,
