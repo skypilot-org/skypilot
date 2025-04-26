@@ -9,22 +9,6 @@ build:
   os: "ubuntu-22.04"
   tools:
     python: "3.10"
-  jobs:
-    post_checkout:
-      # Cancel building pull requests when there aren't changed in the docs
-      # directory.
-      # `--quiet` exits with a 1 when there **are** changes,
-      # so we invert the logic with a !
-      #
-      # If there are no changes (exit 0) we force the command to return with 183.
-      # This is a special exit code on Read the Docs that will cancel the build
-      # immediately.
-      # Reference: https://docs.readthedocs.com/platform/stable/build-customization.html#cancel-build-based-on-a-condition
-      - |
-        if [ "$READTHEDOCS_VERSION_TYPE" = "external" ] && git diff --quiet origin/master -- docs/ .readthedocs.yml;
-        then
-          exit 183;
-        fi
 
 # Build documentation in the docs/ directory with Sphinx
 sphinx:

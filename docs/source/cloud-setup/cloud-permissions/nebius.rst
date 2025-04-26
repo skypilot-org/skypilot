@@ -13,7 +13,8 @@ To use *Service Account* authentication, follow these steps:
 
 .. code-block:: shell
 
-   openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
+   openssl genrsa -out private.pem 4096
+   openssl rsa -in private.pem -outform PEM -pubout -out public.pem
 
 3.  **Generate and Save the Credentials File**:
 
