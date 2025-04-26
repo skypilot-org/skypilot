@@ -547,9 +547,9 @@ Nebius
 
   echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
 
-Alternatively, you can also use a service account to access Nebius, see 
+Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
-Nebius offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
 SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
 
 .. code-block:: shell
