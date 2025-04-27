@@ -2,6 +2,8 @@
 
 import argparse
 import asyncio
+import threading
+import time
 from unittest import mock
 
 import fastapi
@@ -10,6 +12,7 @@ import uvicorn
 
 from sky.server import server
 from sky.utils import common_utils
+from sky.utils import context
 
 
 @mock.patch('uvicorn.run')
@@ -135,7 +138,6 @@ async def test_validate():
 
     def slow_validate(*args, **kwargs):
         # Simulate slow validation
-        import time
         time.sleep(0.1)
         validation_complete.set()
 
@@ -155,3 +157,57 @@ async def test_validate():
         # Wait for validation to complete
         await validation_task
         assert validation_complete.is_set()
+
+
+@pytest.mark.asyncio
+async def test_logs():
+    """Test the logs endpoint."""
+    mock_cluster_job_body = mock.MagicMock()
+    mock_cluster_job_body.cluster_name = 'test-cluster'
+    mock_background_tasks = mock.MagicMock()
+
+    # Create an event to track when logs streaming starts
+    streaming_started = threading.Event()
+
+    # Mock the stream_response function
+    def mock_stream_response(*args, **kwargs):
+        streaming_started.set()
+        return fastapi.responses.StreamingResponse(
+            content=iter([]),  # Empty iterator for testing
+            media_type='text/plain')
+
+    def slow_execute(*args, **kwargs):
+        # Simulate slow execution
+        time.sleep(1)
+
+    with mock.patch('sky.server.requests.executor.prepare_request') as mock_prepare, \
+         mock.patch('sky.server.requests.executor.execute_request',
+                   side_effect=slow_execute) as mock_execute, \
+         mock.patch('sky.server.stream_utils.stream_response',
+                   side_effect=mock_stream_response) as mock_stream:
+
+        # Mock prepare_request to return a request task
+        mock_request_task = mock.MagicMock()
+        mock_request_task.log_path = '/tmp/test.log'
+        mock_prepare.return_value = mock_request_task
+
+        # Start logs endpoint in background
+        logs_task = asyncio.create_task(
+            server.logs(mock.MagicMock(), mock_cluster_job_body,
+                        mock_background_tasks))
+
+        # Execute should be run in background and does not block streaming start
+        streaming_started.wait(timeout=0.1)
+
+        # Verify the response was created
+        response = await logs_task
+        assert isinstance(response, fastapi.responses.StreamingResponse)
+        assert response.media_type == 'text/plain'
+
+        # Verify the executor calls
+        mock_prepare.assert_called_once()
+        mock_execute.assert_called_once_with(mock_request_task)
+        mock_stream.assert_called_once_with(
+            request_id=mock.ANY,
+            logs_path=mock_request_task.log_path,
+            background_tasks=mock_background_tasks)

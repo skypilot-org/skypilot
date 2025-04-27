@@ -673,7 +673,6 @@ async def logs(
     # Only initialize the context in logs handler to limit the scope of this
     # experimental change.
     # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
-    logger.info('Initializing context')
     context.initialize()
     request_task = executor.prepare_request(
         request_id=request.state.request_id,
@@ -682,7 +681,12 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
-    asyncio.create_task(executor.execute_request(request_task))
+    task = asyncio.create_task(executor.execute_request(request_task))
+
+    def cancel_task():
+        task.cancel()
+
+    background_tasks.add_task(cancel_task)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(

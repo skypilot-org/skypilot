@@ -1,17 +1,18 @@
 """Utilities for SkyPilot context."""
 import asyncio
 import functools
+import io
 import multiprocessing
-import shutil
 import subprocess
 import sys
-from typing import Callable, Optional, TextIO
+from typing import Any, Callable, IO, Optional
 
 from sky import sky_logging
 from sky.utils import context
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
+
 
 def pipe_and_wait_process(ctx: context.Context,
                           proc: subprocess.Popen,
@@ -24,12 +25,18 @@ def pipe_and_wait_process(ctx: context.Context,
         poll_interval: The interval to poll the process.
         cancel_callback: The callback to call if the context is cancelled.
     """
-    def pipe(stream: TextIO, output_stream: TextIO):
-        logger.info(f'Piping {stream} to {output_stream}')
+
+    def pipe(in_stream: IO[Any], out_stream: IO[Any]):
+        wrapped = io.TextIOWrapper(in_stream,
+                                   encoding='utf-8',
+                                   newline='',
+                                   errors='replace',
+                                   write_through=True)
         while True:
-            line = stream.readline()
+            line = wrapped.readline()
             if line:
-                output_stream.write(line)
+                out_stream.write(line)
+                out_stream.flush()
             else:
                 break
 
@@ -38,7 +45,6 @@ def pipe_and_wait_process(ctx: context.Context,
         # Context will be lost in the new thread, capture current output stream
         # and pass it to the new thread directly.
         futs = []
-        logger.info("Start piping")
         futs.append(
             pool.apply_async(pipe,
                              (proc.stdout, ctx.output_stream(sys.stdout))))

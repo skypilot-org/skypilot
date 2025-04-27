@@ -3,6 +3,8 @@ import enum
 import os
 from typing import Dict
 
+from sky.utils import context
+
 
 class Options(enum.Enum):
     """Environment variables for SkyPilot."""
@@ -29,8 +31,12 @@ class Options(enum.Enum):
 
     def get(self) -> bool:
         """Check if an environment variable is set to True."""
-        return os.getenv(self.env_var,
-                         str(self.default)).lower() in ('true', '1')
+        ctx = context.get()
+        if ctx is not None:
+            v = ctx.getenv(self.env_var, str(self.default))
+        else:
+            v = os.getenv(self.env_var, str(self.default))
+        return v.lower() in ('true', '1')
 
     @property
     def env_key(self) -> str:

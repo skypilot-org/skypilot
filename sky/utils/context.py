@@ -2,9 +2,10 @@
 
 import asyncio
 import contextvars
+import os
 import pathlib
 import sys
-from typing import Optional, TextIO
+from typing import Dict, Optional, TextIO
 
 
 class Context(object):
@@ -52,6 +53,7 @@ class Context(object):
         self._canceled = asyncio.Event()
         self._log_file = None
         self._log_file_handle = None
+        self._env_overrides = {}
 
     def cancel(self):
         """Cancel the context."""
@@ -89,6 +91,15 @@ class Context(object):
             return fallback
         else:
             return self._log_file_handle
+
+    def override_envs(self, envs: Dict[str, str]):
+        for k, v in envs.items():
+            self._env_overrides[k] = v
+
+    def getenv(self, key: str, fallback: Optional[str] = None):
+        if key in self._env_overrides:
+            return self._env_overrides[key]
+        return os.getenv(key, fallback)
 
 
 _CONTEXT = contextvars.ContextVar('sky_context', default=None)

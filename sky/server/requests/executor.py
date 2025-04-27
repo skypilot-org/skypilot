@@ -409,13 +409,19 @@ async def execute_request(request: api_requests.Request):
         request_task.status = api_requests.RequestStatus.RUNNING
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
+    # Override environment variables that backs env_options.Options
+    # TODO(aylei): compared to process executor, running task in coroutine has
+    # two issues to fix:
+    # 1. skypilot config is not contextual
+    # 2. envs that read directly from os.environ are not contextual
+    ctx.override_envs(request_body.env_vars)
     sky_logging.reload_logger()
     loop = asyncio.get_running_loop()
     pyctx = contextvars.copy_context()
     func_call = functools.partial(pyctx.run, func, **request_body.to_kwargs())
     fut: asyncio.Future = loop.run_in_executor(None, func_call)
 
-    async def wait_for_task(request_id: str) -> bool:
+    async def poll_task(request_id: str) -> bool:
         request = api_requests.get_request(request_id)
         if request is None:
             raise RuntimeError('Request not found')
@@ -425,34 +431,41 @@ async def execute_request(request: api_requests.Request):
             return True
 
         if fut.done():
-            logger.info('Task done, setting request status to succeeded')
             try:
                 result = await fut
                 api_requests.set_request_succeeded(request_id, result)
             except asyncio.CancelledError:
-                # Only occurs when the request is cancelled, where the status
+                # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.
                 pass
             except Exception as e:  # pylint: disable=broad-except
+                ctx.redirect_log(original_output)
                 api_requests.set_request_failed(request_id, e)
+                logger.error(f'Request {request_id} failed due to '
+                             f'{common_utils.format_exception(e)}')
             return True
-        logger.info('Task not done yet, waiting for it to finish')
         return False
 
     try:
         while True:
-            res = await wait_for_task(request.request_id)
+            res = await poll_task(request.request_id)
             if res:
-                logger.info('Task done, breaking')
                 break
-            logger.info('Task not done yet, sleeping for 1 second')
-            await asyncio.sleep(1)
-    except Exception as e:
+            await asyncio.sleep(0.5)
+    except asyncio.CancelledError:
+        # Current coroutine is cancelled due to client disconnect, set the
+        # request status for consistency.
+        api_requests.set_request_cancelled(request.request_id)
+        pass
+    # pylint: disable=broad-except
+    except (Exception, KeyboardInterrupt, SystemExit) as e:
+        # Handle any other error
+        ctx.redirect_log(original_output)
         ctx.cancel()
         api_requests.set_request_failed(request.request_id, e)
+        logger.error(f'Request {request.request_id} interrupted due to '
+                     f'unhandled exception: {common_utils.format_exception(e)}')
         raise
-    finally:
-        ctx.redirect_log(original_output)
 
 
 def prepare_request(
