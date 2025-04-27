@@ -25,11 +25,9 @@ def handler(stream):
 @pytest.fixture
 def sensitive_handler(stream):
     """Fixture to provide a sensitive EnvAwareHandler instance."""
-    return sky_logging.EnvAwareHandler(
-        stream=stream,
-        level=logging.INFO,
-        sensitive=True
-    )
+    return sky_logging.EnvAwareHandler(stream=stream,
+                                       level=logging.INFO,
+                                       sensitive=True)
 
 
 def test_handler_default_level(handler):
@@ -43,15 +41,13 @@ def test_handler_with_debug_env(handler, monkeypatch):
     """Test handler respects SHOW_DEBUG_INFO env var."""
     context.initialize()
     # Mock the env var to enable debug
-    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO,
-                       'get',
-                       lambda: True)
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: True)
     assert handler.level == logging.DEBUG
 
     # Mock the env var to disable debug
-    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO,
-                       'get',
-                       lambda: False)
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: False)
     assert handler.level == logging.INFO
 
 
@@ -59,31 +55,27 @@ def test_handler_without_context(handler, monkeypatch):
     """Test handler behavior when no context is available."""
     # Ensure no context is set
     context._CONTEXT.set(None)
-    
+
     # Even with debug env var set, should return original level
-    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO,
-                       'get',
-                       lambda: True)
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: True)
     assert handler.level == logging.INFO
 
 
 def test_sensitive_handler(sensitive_handler, monkeypatch):
     """Test sensitive handler's log level behavior."""
     context.initialize()
-    
+
     # Test when sensitive logs are suppressed
-    monkeypatch.setattr(env_options.Options.SUPPRESS_SENSITIVE_LOG,
-                       'get',
-                       lambda: True)
-    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO,
-                       'get',
-                       lambda: True)
+    monkeypatch.setattr(env_options.Options.SUPPRESS_SENSITIVE_LOG, 'get',
+                        lambda: True)
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: True)
     assert sensitive_handler.level == logging.INFO
 
     # Test when sensitive logs are not suppressed
-    monkeypatch.setattr(env_options.Options.SUPPRESS_SENSITIVE_LOG,
-                       'get',
-                       lambda: False)
+    monkeypatch.setattr(env_options.Options.SUPPRESS_SENSITIVE_LOG, 'get',
+                        lambda: False)
     assert sensitive_handler.level == logging.DEBUG
 
 
