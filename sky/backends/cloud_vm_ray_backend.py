@@ -302,6 +302,8 @@ class RayCodeGen:
             from sky.skylet import autostop_lib
             from sky.skylet import constants
             from sky.skylet import job_lib
+            from sky.utils import context
+            from sky.utils import context_utils
             from sky.utils import log_utils
             from sky.utils import subprocess_utils
 
