@@ -15,7 +15,9 @@ The number of requests that the API server can handle concurrently is proportion
 
 .. note::
 
-    Though a task (or job) can run for any length of time, concurrent tasks does not occupy the concurrency. Because once a task is submitted to the cluster, it will be detached and no longer takes any resources off the API server.
+    Requests are queued and processed by the API server. Therefore, they only take resources off the API server when they are in queue or being processed. Once requests are processed and remote clusters start doing real work, they no longer require API server's resources or count against its concurrency limit.
+
+    For example, long-running requests for ``launch`` and ``exec`` no longer take resources off the API server once a cluster has been provisioned, or once a job has been submitted to a cluster, respectively.
 
 It is recommended to tune the resources allocated to the API server based on the expected concurrency to avoid queuing:
 
@@ -35,7 +37,7 @@ It is recommended to tune the resources allocated to the API server based on the
             
         .. note:: 
 
-            If you specify a resources that is lower than the minimum recommended resources (4 CPUs with 8GB of memory) for team usage, an error will be raised on ``helm upgrade``. You can specify ``--set apiService.skipResourcesCheck=true`` to skip the check if performance and stability is not an issue for you scenario.
+            If you specify a resources that is lower than the recommended minimum resources for team usage (4 CPUs with 8GB of memory, which is also the default value when ``apiService.resources`` are not specified), an error will be raised on ``helm upgrade``. You can specify ``--set apiService.skipResourcesCheck=true`` to skip the check if performance and stability is not an issue for you scenario.
 
         .. dropdown:: Why set the same value for the limits and requests?
 
@@ -91,8 +93,8 @@ The following table shows the maximum concurrency for different resource configu
      - 256 Long requests, 589 Short requests
      - 10~100 users
 
-Queuing requests and polling status asynchronously
---------------------------------------------------
+Use asynchronous requests to avoid blocking
+-------------------------------------------
 
 There is no limit on the number of queued requests. To avoid request blocking, you can either (1) allocate more resources to increase the maximum concurrency (described above), or (2) :ref:`submit requests asynchronously <async>` (``--async``) and poll the status asynchronously.
 
@@ -118,7 +120,7 @@ The requests will be queued on the API server and be processed in submission ord
     5667cff2-e953-4b80-9e5f-546cea83dc59  alice sky.jobs.launch  a few secs ago  RUNNING
 
 Checking the logs of a request
-^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There should be some ``RUNNING`` requests that occupy the concurrency limit. Usually the ``RUNNING`` requests make progress and finally your requests will be processed, but if the ``RUNNING`` requests are stuck, you can inspect the request log with:
 
@@ -128,7 +130,7 @@ There should be some ``RUNNING`` requests that occupy the concurrency limit. Usu
     $ sky api logs <request_id>
 
 Canceling a request
-^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
 
 If the request is stuck according to the log, e.g. retrying to launch VMs that is out of stock, you can cancel the request with:
 
@@ -147,7 +149,7 @@ To avoid this, it is recommended to run ``sky logs`` and ``sky jobs logs`` with 
 
     sky logs --no-follow my_cluster
 
-Commands that execute jobs like ``sky jobs launch`` and ``sky exec`` will also tail the logs of the job after the job is started by default. You can add ``--async`` flag to submit the job without tailing the logs:
+Commands that execute tasks like ``sky jobs launch`` and ``sky exec`` will also tail the logs of the task after the task is started by default. You can add ``--async`` flag to submit the job without tailing the logs:
 
 .. code-block:: bash
 
