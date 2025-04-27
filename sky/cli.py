@@ -23,6 +23,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import collections
 import copy
 import datetime
 import functools
@@ -3446,6 +3447,8 @@ def show_gpus(
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
         realtime_gpu_infos = []
+        total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
+            lambda: [0, 0])
 
         for (ctx, availability_list) in realtime_gpu_availability_lists:
             realtime_gpu_table = log_utils.create_table(
@@ -3462,8 +3465,24 @@ def show_gpus(
                     gpu_availability.capacity,
                     available_qty,
                 ])
+                gpu = gpu_availability.gpu
+                cap = gpu_availability.capacity
+                # we want total, so skip permission denied.
+                avl = max(gpu_availability.available, 0)
+                if cap > 0:
+                    total_gpu_info[gpu][0] += cap
+                    total_gpu_info[gpu][1] += avl
             realtime_gpu_infos.append((ctx, realtime_gpu_table))
-        return realtime_gpu_infos
+
+        if len(realtime_gpu_infos) > 1:
+            total_realtime_gpu_table = log_utils.create_table(
+                ['GPU', 'TOTAL_GPUS', free_header])
+            for gpu, stats in total_gpu_info.items():
+                total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
+        else:
+            total_realtime_gpu_table = None
+
+        return realtime_gpu_infos, total_realtime_gpu_table
 
     def _format_kubernetes_node_info(context: Optional[str]):
         node_table = log_utils.create_table(
@@ -3521,8 +3540,7 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_infos = _get_kubernetes_realtime_gpu_tables(
-                        context)
+                    k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3530,6 +3548,16 @@ def show_gpus(
                     k8s_messages += str(e)
                 else:
                     print_section_titles = True
+
+                    # print total table
+                    if total_table is not None:
+                        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                               'Total Kubernetes GPUs'
+                               f'{colorama.Style.RESET_ALL}\n')
+                        yield from total_table.get_string()
+                        yield '\n-----\n\n'
+
+                    # print individual infos.
                     for (ctx, k8s_realtime_table) in k8s_realtime_infos:
                         context_str = f'(Context: {ctx})' if ctx else ''
                         yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -3628,8 +3656,20 @@ def show_gpus(
             print_section_titles = True
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
-                k8s_realtime_infos = _get_kubernetes_realtime_gpu_tables(
-                    context=region, name_filter=name, quantity_filter=quantity)
+                k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(  # pylint: disable=line-too-long
+                    context=region,
+                    name_filter=name,
+                    quantity_filter=quantity)
+
+                # print total table
+                if total_table is not None:
+                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                           'Total Kubernetes GPUs'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    yield from total_table.get_string()
+                    yield '\n-----\n\n'
+
+                # print individual tables
                 for (ctx, k8s_realtime_table) in k8s_realtime_infos:
                     context_str = f'(Context: {ctx})' if ctx else ''
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
