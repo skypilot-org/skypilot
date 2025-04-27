@@ -1702,9 +1702,10 @@ def test_aws_disk_tier():
 
 
 @pytest.mark.gcp
-def test_gcp_disk_tier():
+@pytest.mark.parametrize('instance_type', ['n2-standard-64'])
+def test_gcp_disk_tier(instance_type: str):
     for disk_tier in list(resources_utils.DiskTier):
-        disk_types = [GCP._get_disk_type(disk_tier)]
+        disk_types = [GCP._get_disk_type(instance_type, disk_tier)]
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
@@ -1714,10 +1715,12 @@ def test_gcp_disk_tier():
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             # If using default instance type, it will only enable the high disk tier.
             disk_types = [
-                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
-                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.ULTRA),
             ]
-            instance_type_options = ['', '--instance-type n2-standard-64']
+            instance_type_options = ['', f'--instance-type {instance_type}']
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
             test = smoke_tests_utils.Test(
