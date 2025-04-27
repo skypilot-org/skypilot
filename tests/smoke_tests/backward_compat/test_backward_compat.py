@@ -390,7 +390,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'{cmd_to_sdk_file} launch-cluster --cloud {generic_cloud} --cluster-name {cluster_name} --command "echo hello world; sleep 60"',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
-            f'{cmd_to_sdk_file} get-cluster-status --cluster-name {cluster_name} | grep "\'name\': \'ttt\'"',
+            f'{cmd_to_sdk_file} get-cluster-status --cluster-name {cluster_name} | grep "\'name\': \'{cluster_name}\'"',
             f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} queue --cluster-name {cluster_name} | grep "\'job_id\': 1"',
             f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} cluster-logs --cluster-name {cluster_name} --job-id 1 | grep "hello world"',
             # # managed job test
