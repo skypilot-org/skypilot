@@ -87,7 +87,7 @@ def managed_job_logs(job_name: str) -> None:
 
 @cli.command()
 def managed_job_queue() -> None:
-    request_id = jobs_sdk.queue()
+    request_id = jobs_sdk.queue(refresh=True)
     records = jobs_sdk.stream_and_get(request_id)
     print(records)
 
