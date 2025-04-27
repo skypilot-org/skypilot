@@ -114,6 +114,7 @@ To verify that the API server is working, run ``sky api info``:
 
    Deploying API Server <api-server-admin-deploy>
    Upgrading API Server <api-server-upgrade>
+   Performance Best Practices <api-server-tunning>
    Troubleshooting <api-server-troubleshooting>
 
 By default, each user connected to the API server will only see their own resources.
