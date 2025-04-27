@@ -1715,8 +1715,10 @@ def test_gcp_disk_tier(instance_type: str):
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             # If using default instance type, it will only enable the high disk tier.
             disk_types = [
-                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
-                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.ULTRA),
             ]
             instance_type_options = ['', f'--instance-type {instance_type}']
         for disk_type, instance_type_option in zip(disk_types,
