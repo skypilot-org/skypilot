@@ -550,18 +550,24 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file = managed_job_state.get_local_log_file(job_id, None)
-            if log_file is not None:
-                with open(os.path.expanduser(log_file), 'r',
-                          encoding='utf-8') as f:
-                    # Stream the logs to the console without reading the whole
-                    # file into memory.
-                    start_streaming = False
-                    for line in f:
-                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                            start_streaming = True
-                        if start_streaming:
-                            print(line, end='', flush=True)
+            log_file_exists = False
+            for job_task_id in range(num_tasks):
+                log_file = managed_job_state.get_local_log_file(
+                    job_id, job_task_id)
+                if log_file is not None:
+                    log_file_exists = True
+                    with open(os.path.expanduser(log_file),
+                              'r',
+                              encoding='utf-8') as f:
+                        # Stream the logs to the console without
+                        # reading the whole file into memory.
+                        start_streaming = False
+                        for line in f:
+                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                                start_streaming = True
+                            if start_streaming:
+                                print(line, end='', flush=True)
+            if log_file_exists:
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (f'{colorama.Fore.YELLOW}'
