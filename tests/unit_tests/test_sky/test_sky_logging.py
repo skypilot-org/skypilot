@@ -2,6 +2,7 @@
 
 import io
 import logging
+from unittest import mock
 
 import pytest
 
@@ -30,16 +31,19 @@ def sensitive_handler(stream):
                                        sensitive=True)
 
 
-def test_handler_default_level(handler):
+@mock.patch('sky.utils.context.get', return_value=None)
+def test_handler_default_level(mock_get, handler, monkeypatch):
     """Test handler's default log level behavior."""
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: False)
     assert handler.level == logging.INFO
     handler.level = logging.DEBUG
     assert handler.level == logging.DEBUG
 
 
-def test_handler_with_debug_env(handler, monkeypatch):
+@mock.patch('sky.utils.context.get', return_value=context.Context())
+def test_handler_with_debug_env(mock_get, handler, monkeypatch):
     """Test handler respects SHOW_DEBUG_INFO env var."""
-    context.initialize()
     # Mock the env var to enable debug
     monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
                         lambda: True)
@@ -51,21 +55,18 @@ def test_handler_with_debug_env(handler, monkeypatch):
     assert handler.level == logging.INFO
 
 
-def test_handler_without_context(handler, monkeypatch):
+@mock.patch('sky.utils.context.get', return_value=None)
+def test_handler_without_context(mock_get, handler, monkeypatch):
     """Test handler behavior when no context is available."""
-    # Ensure no context is set
-    context._CONTEXT.set(None)
-
     # Even with debug env var set, should return original level
     monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
                         lambda: True)
     assert handler.level == logging.INFO
 
 
-def test_sensitive_handler(sensitive_handler, monkeypatch):
+@mock.patch('sky.utils.context.get', return_value=context.Context())
+def test_sensitive_handler(mock_get, sensitive_handler, monkeypatch):
     """Test sensitive handler's log level behavior."""
-    context.initialize()
-
     # Test when sensitive logs are suppressed
     monkeypatch.setattr(env_options.Options.SUPPRESS_SENSITIVE_LOG, 'get',
                         lambda: True)
@@ -79,8 +80,11 @@ def test_sensitive_handler(sensitive_handler, monkeypatch):
     assert sensitive_handler.level == logging.DEBUG
 
 
-def test_handler_level_setter(handler):
+@mock.patch('sky.utils.context.get', return_value=context.Context())
+def test_handler_invalid_level(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: False)
     with pytest.raises(ValueError):
         handler.level = 'INVALID_LEVEL'
 
@@ -89,21 +93,31 @@ def test_handler_level_setter(handler):
     assert handler._level == logging.WARNING
 
 
-def test_handler_output(handler, stream):
-    """Test handler actually logs messages at appropriate levels."""
+@mock.patch('sky.utils.context.get', return_value=None)
+def test_handler_with_context_override(mock_get, handler, monkeypatch):
+    """Test setting invalid log levels."""
+    assert handler.level == logging.INFO
+    ctx = context.Context()
+    ctx.override_envs({'SKYPILOT_DEBUG': '1'})
+    mock_get.return_value = ctx
+    assert handler.level == logging.DEBUG
+
+
+@mock.patch('sky.utils.context.get', return_value=None)
+def test_handler_output(mock_get, handler, stream, monkeypatch):
+    """Sanity check."""
+    monkeypatch.setattr(env_options.Options.SHOW_DEBUG_INFO, 'get',
+                        lambda: False)
     logger = logging.getLogger('test')
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
-    # Debug message should not appear at INFO level
     logger.debug('Debug message')
     assert stream.getvalue() == ''
 
-    # Info message should appear
     logger.info('Info message')
     assert 'Info message' in stream.getvalue()
 
-    # Set to debug level
     handler.level = logging.DEBUG
     logger.debug('Debug message 2')
     assert 'Debug message 2' in stream.getvalue()
