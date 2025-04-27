@@ -136,6 +136,7 @@ jobs:
           # Install skypilot from Test PyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot-nightly
           pip show skypilot-nightly
+          rm -rf/home/runner/.local/lib/python3.12/site-packages/sky/dashboard/out
           # Verify installation
           sky -v
           sky -c
@@ -143,7 +144,7 @@ jobs:
           sky show-gpus
           sky dashboard          
           # Verify dashboard endpoint is accessible
-          curl -f http://127.0.0.1:46580/dashboard/ || exit 1
+          curl -f http://127.0.0.1:46580/dashboard/ > /dev/null || exit 1
           # Verify version
           EXPECTED_VERSION="${{ needs.nightly-build-pypi.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot-nightly | grep Version | awk '{print $2}')
