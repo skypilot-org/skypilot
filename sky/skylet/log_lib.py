@@ -182,7 +182,12 @@ def run_with_log(
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None
-    if process_stream:
+    ctx = context.get()
+    if process_stream or ctx is not None:
+        # Capture stdout/stderr of the subprocess if:
+        # 1. Post-processing is needed (process_stream=True)
+        # 2. Potential contextual handling is needed (ctx is not None)
+        # TODO(aylei): can we always capture the stdout/stderr?
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
     # Use stdin=subprocess.DEVNULL by default, as allowing inputs will mess up
@@ -229,10 +234,14 @@ def run_with_log(
                     replace_crlf=with_ray,
                     streaming_prefix=streaming_prefix,
                 )
+                # TODO(aylei): Process_subprocess_stream can be blocking when
+                # waiting for an new line, should figure out how to run this
+                # asynchonously. Currently we did not do this since:
+                # 1. this may call rich.status, which only works in main-thread
+                # 2. we do not call this in coroutine yet
                 stdout, stderr = process_subprocess_stream(proc, args)
-            ctx = context.get()
             if ctx is not None:
-                context_utils.wait_or_cancel_process(
+                context_utils.pipe_and_wait_process(
                     ctx,
                     proc,
                     cancel_callback=subprocess_utils.kill_children_processes)

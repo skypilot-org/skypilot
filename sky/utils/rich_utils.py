@@ -229,6 +229,13 @@ class RichSafeStreamHandler(logging.StreamHandler):
             return super().emit(record)
 
 
+class RichSafeFileHandler(logging.FileHandler):
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with safe_logger():
+            return super().emit(record)
+
+
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel

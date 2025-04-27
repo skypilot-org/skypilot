@@ -23,7 +23,6 @@ import contextlib
 import contextvars
 import enum
 import functools
-import logging
 import multiprocessing
 import os
 import queue as queue_lib
@@ -404,12 +403,12 @@ async def execute_request(request: api_requests.Request):
     ctx = context.get()
     if ctx is None:
         raise ValueError('Context is not initialized')
-    log_path = request.log_path
     func = request.entrypoint
     request_body = request.request_body
     with api_requests.update_request(request.request_id) as request_task:
         request_task.status = api_requests.RequestStatus.RUNNING
-    ctx.log_handler = logging.FileHandler(log_path.absolute())
+    # Redirect stdout and stderr to the request log path.
+    original_output = ctx.redirect_log(request.log_path)
     sky_logging.reload_logger()
     loop = asyncio.get_running_loop()
     pyctx = contextvars.copy_context()
@@ -452,6 +451,8 @@ async def execute_request(request: api_requests.Request):
         ctx.cancel()
         api_requests.set_request_failed(request.request_id, e)
         raise
+    finally:
+        ctx.redirect_log(original_output)
 
 
 def prepare_request(

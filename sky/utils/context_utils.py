@@ -1,18 +1,65 @@
 """Utilities for SkyPilot context."""
 import asyncio
 import functools
+import multiprocessing
+import shutil
 import subprocess
-from typing import Callable, Optional
+import sys
+from typing import Callable, Optional, TextIO
 
+from sky import sky_logging
 from sky.utils import context
 from sky.utils import subprocess_utils
 
+logger = sky_logging.init_logger(__name__)
 
-def wait_or_cancel_process(ctx: context.Context,
-                           proc: subprocess.Popen,
-                           poll_interval: float = 0.5,
-                           cancel_callback: Optional[Callable[[],
-                                                              None]] = None):
+def pipe_and_wait_process(ctx: context.Context,
+                          proc: subprocess.Popen,
+                          poll_interval: float = 0.5,
+                          cancel_callback: Optional[Callable[[], None]] = None):
+    """Wait for the process to finish or cancel it if the context is cancelled.
+
+    Args:
+        proc: The process to wait for.
+        poll_interval: The interval to poll the process.
+        cancel_callback: The callback to call if the context is cancelled.
+    """
+    def pipe(stream: TextIO, output_stream: TextIO):
+        logger.info(f'Piping {stream} to {output_stream}')
+        while True:
+            line = stream.readline()
+            if line:
+                output_stream.write(line)
+            else:
+                break
+
+    # Threads are lazily created, so no harm if stderr is None
+    with multiprocessing.pool.ThreadPool(processes=2) as pool:
+        # Context will be lost in the new thread, capture current output stream
+        # and pass it to the new thread directly.
+        futs = []
+        logger.info("Start piping")
+        futs.append(
+            pool.apply_async(pipe,
+                             (proc.stdout, ctx.output_stream(sys.stdout))))
+        if proc.stderr is not None:
+            futs.append(
+                pool.apply_async(pipe,
+                                 (proc.stderr, ctx.output_stream(sys.stderr))))
+        try:
+            wait_process(ctx,
+                         proc,
+                         poll_interval=poll_interval,
+                         cancel_callback=cancel_callback)
+        finally:
+            for fut in futs:
+                fut.wait()
+
+
+def wait_process(ctx: context.Context,
+                 proc: subprocess.Popen,
+                 poll_interval: float = 0.5,
+                 cancel_callback: Optional[Callable[[], None]] = None):
     """Wait for the process to finish or cancel it if the context is cancelled.
 
     Args:
@@ -25,8 +72,8 @@ def wait_or_cancel_process(ctx: context.Context,
             if cancel_callback is not None:
                 cancel_callback()
             # Kill the process despite the caller's callback, the utility
-            # function gracefully handles the case where the process is already
-            # terminated.
+            # function gracefully handles the case where the process is
+            # already terminated.
             subprocess_utils.kill_process_with_grace_period(proc)
             raise asyncio.CancelledError()
         try:
