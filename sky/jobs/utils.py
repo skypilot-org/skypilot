@@ -551,7 +551,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file_exists = False
-            for job_task_id in range(num_tasks):
+            task_ids = managed_job_state.get_all_task_ids(job_id)
+            for job_task_id in task_ids:
                 log_file = managed_job_state.get_local_log_file(
                     job_id, job_task_id)
                 if log_file is not None:

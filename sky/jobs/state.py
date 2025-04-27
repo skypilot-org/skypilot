@@ -861,6 +861,16 @@ def _get_all_task_ids_statuses(
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
+def get_all_task_ids(job_id: int) -> List[int]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT task_id FROM spot
+            WHERE spot_job_id=(?)
+            ORDER BY task_id ASC""", (job_id,)).fetchall()
+        return [row[0] for row in rows if row[0] is not None]
+
+
 def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
