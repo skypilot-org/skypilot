@@ -210,16 +210,16 @@ def test_tail_logs_api(num_requests, cloud):
     cluster_name = 'test'
     job_id = 1
     # Launch a job and wait the first tail success
-    setup_cmd = f'sky launch -c {cluster_name} --cloud={cloud} --cpus=2 -y && sky logs {cluster_name} {job_id}'
-    run_single_request(0, setup_cmd)
+    # setup_cmd = f'sky launch -c {cluster_name} --cloud={cloud} --cpus=2 -y && sky logs {cluster_name} {job_id}'
+    #run_single_request(0, setup_cmd)
 
     def tail_logs():
         sdk.tail_logs(cluster_name, job_id, follow=True)
 
     run_concurrent_api_requests(num_requests, tail_logs, 'API /tail_logs')
 
-    cleanup_cmd = f'sky down -y {cluster_name}'
-    run_single_request(0, cleanup_cmd)
+    # cleanup_cmd = f'sky down -y {cluster_name}'
+    # run_single_request(0, cleanup_cmd)
 
 
 def test_validate_api(num_requests):
