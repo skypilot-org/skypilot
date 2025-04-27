@@ -1876,7 +1876,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if show_services:
         # Run the sky serve service query in parallel to speed up the
         # status query.
-        service_status_request_id = serve_lib.status(service_names=None)
+        service_status_request_id = serve_lib.status(service_names=None,
+                                                     use_endpoint_cache=False)
 
     if ip or show_endpoints:
         if refresh:
@@ -2982,7 +2983,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
-            request_id = serve_lib.status(service_names=None)
+            request_id = serve_lib.status(service_names=None,
+                                          use_endpoint_cache=False)
             services = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
@@ -4627,15 +4629,25 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
               is_flag=True,
               required=False,
               help='Show service endpoint.')
+@click.option('--force-refresh',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Force refresh of endpoint cache. '
+              'Only takes effect with the --endpoint flag.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
+def serve_status(verbose: bool, endpoint: bool, force_refresh: bool,
+                 service_names: List[str]):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
     provided, show all services' status. If --endpoint is specified, output
-    the endpoint of the service only.
+    the endpoint of the service only. When the command is invoked with
+    --endpoint, the returned endpoint will be cached for future invocations.
+    The cache can be refreshed by using the --force-refresh flag (only
+    applicable when --endpoint flag is used).
 
     Each service can have one of the following statuses:
 
@@ -4721,13 +4733,21 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
       \b
       # Only show status of my-service
       sky serve status my-service
+      \b
+      # Show endpoint only
+      sky serve status --endpoint
+      \b
+      # Show endpoint only (with refresh)
+      sky serve status --endpoint --force-refresh
     """
     service_names_to_query: Optional[List[str]] = service_names
     if not service_names:
         service_names_to_query = None
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
-        service_status_request_id = serve_lib.status(service_names_to_query)
+        use_endpoint_cache = endpoint and not force_refresh
+        service_status_request_id = serve_lib.status(service_names_to_query,
+                                                     use_endpoint_cache)
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
                                           show_all=verbose,
