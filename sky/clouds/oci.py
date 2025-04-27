@@ -69,19 +69,22 @@ class OCI(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        features = {
+        unsupported_features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.DOCKER_IMAGE:
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
-            features[clouds.CloudImplementationFeatures.STOP] = (
+            unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
                 f'Stopping spot instances is currently not supported on '
                 f'{cls._REPR}.')
-        return features
+        return unsupported_features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

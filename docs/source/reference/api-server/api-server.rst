@@ -14,6 +14,7 @@ Local API server (individual users)
 For an individual user, SkyPilot can be used as a normal command line
 tool. Whenever a SkyPilot command is run and an API server is not detected, SkyPilot will automatically start
 a SkyPilot API server running locally in the background. No user action is needed.
+And you can access the dashboard at `http://127.0.0.1:46580/dashboard` by default.
 
 .. image:: ../../images/client-server/local.png
     :alt: SkyPilot API server local mode
@@ -90,7 +91,7 @@ To verify that the API server is working, run ``sky api info``:
 .. code-block:: console
 
     $ sky api info
-    Using SkyPilot API server: http://127.0.0.1:46580
+    Using SkyPilot API server: http://127.0.0.1:46580 Dashboard: http://127.0.0.1:46580/dashboard
     ├── Status: healthy, commit: xxxxx, version: 1.0.0-dev0
     └── User: skypilot-user (xxxxxx)
 
@@ -103,7 +104,7 @@ To verify that the API server is working, run ``sky api info``:
 
         $ export SKYPILOT_API_SERVER_ENDPOINT=http://skypilot:password@myendpoint.com:30050
         $ sky api info
-        Using SkyPilot API server: http://myendpoint.com:30050
+        Using SkyPilot API server: http://myendpoint.com:30050 Dashboard: http://myendpoint.com:30050/dashboard
         ├── Status: healthy, commit: xxxxx, version: 1.0.0-dev0
         └── User: skypilot-user (xxxxxx)
 
@@ -113,6 +114,7 @@ To verify that the API server is working, run ``sky api info``:
 
    Deploying API Server <api-server-admin-deploy>
    Upgrading API Server <api-server-upgrade>
+   Performance Best Practices <api-server-tunning>
    Troubleshooting <api-server-troubleshooting>
 
 By default, each user connected to the API server will only see their own resources.

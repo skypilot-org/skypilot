@@ -501,7 +501,7 @@ def start_skylet_on_head_node(cluster_name: str,
 def _internal_file_mounts(file_mounts: Dict,
                           runner: command_runner.CommandRunner,
                           log_path: str) -> None:
-    if file_mounts is None or not file_mounts:
+    if not file_mounts:
         return
 
     for dst, src in file_mounts.items():

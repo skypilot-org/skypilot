@@ -44,13 +44,10 @@ apiService:
     requests:
       cpu: "4"
       memory: "8Gi"
-      # Additional resource types like ephemeral-storage can be specified here
-  # TODO: Setting limits causes issues with the API server. For now we advise
-  # not to set limits.
-  # limits:
-  #  cpu: "4"
-  #  memory: "8Gi"
-
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+  
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
@@ -196,12 +193,19 @@ kubernetesCredentials:
 
 awsCredentials:
   enabled: false
+  # Name of the secret containing the aws credentials. Only used if enabled is true.
+  awsSecretName: aws-credentials
+  # Key name used to set AWS_ACCESS_KEY_ID.
+  accessKeyIdKeyName: aws_access_key_id
+  # Key name used to set AWS_SECRET_ACCESS_KEY.
+  secretAccessKeyKeyName: aws_secret_access_key
 
 gcpCredentials:
   enabled: false
   # TODO(romilb): This can be made optional by using the project in the key json by default.
   projectId: null
-
+  # Name of the secret containing the gcp credentials. Only used if enabled is true.
+  gcpSecretName: gcp-credentials
 
 # Set securityContext for the api pod
 podSecurityContext: {}

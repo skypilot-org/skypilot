@@ -443,10 +443,13 @@ def test_multi_echo(generic_cloud: str):
                 job_id=i + 1,
                 job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=120) for i in range(32)
-        ] +
-        # Ensure monitor/autoscaler didn't crash on the 'assert not
-        # unfulfilled' error.  If process not found, grep->ssh returns 1.
-        [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
+        ] + [
+            # ssh record will only be created on cli command like sky status on client side.
+            f'sky status {name}',
+            # Ensure monitor/autoscaler didn't crash on the 'assert not
+            # unfulfilled' error.  If process not found, grep->ssh returns 1.
+            f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
+        ],
         f'sky down -y {name}',
         timeout=20 * 60,
     )
@@ -1699,9 +1702,10 @@ def test_aws_disk_tier():
 
 
 @pytest.mark.gcp
-def test_gcp_disk_tier():
+@pytest.mark.parametrize('instance_type', ['n2-standard-64'])
+def test_gcp_disk_tier(instance_type: str):
     for disk_tier in list(resources_utils.DiskTier):
-        disk_types = [GCP._get_disk_type(disk_tier)]
+        disk_types = [GCP._get_disk_type(instance_type, disk_tier)]
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
@@ -1711,10 +1715,12 @@ def test_gcp_disk_tier():
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             # If using default instance type, it will only enable the high disk tier.
             disk_types = [
-                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
-                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.ULTRA),
             ]
-            instance_type_options = ['', '--instance-type n2-standard-64']
+            instance_type_options = ['', f'--instance-type {instance_type}']
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
             test = smoke_tests_utils.Test(

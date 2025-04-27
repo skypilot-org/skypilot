@@ -156,9 +156,21 @@ CONDA_INSTALLATION_COMMANDS = (
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
+    # If conda was not installed and the image is a docker image,
+    # we deactivate any active conda environment we set.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "true" ]; then '
+    'conda deactivate;'
+    'fi;'
     '}; '
+    # run this command only if the image is not a docker image assuming
+    # that if a user is using a docker image, they know what they are doing
+    # in terms of conda setup/activation.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
+    'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.
@@ -355,6 +367,13 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
+
+# Constants for path in K8S pod to store persistent setup and run scripts
+# so that we can run them again after the pod restarts.
+# Path within user home. For HA controller, assumes home directory is
+# persistent through PVC. See kubernetes-ray.yml.j2.
+PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/.controller_recovery_setup_commands.sh'
+PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
 
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.

@@ -19,6 +19,8 @@ Refer to :ref:`config-sources-and-overrides` for more details.
 Syntax
 ------
 
+For details about SkyServe controller and its customization, see :ref:`customizing-sky-serve-controller-resources`.
+
 Below is the configuration syntax and some example values. See detailed explanations under each field.
 
 .. parsed-literal::

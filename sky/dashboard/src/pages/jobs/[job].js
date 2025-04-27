@@ -10,6 +10,7 @@ import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { useMobile } from '@/hooks/useMobile';
 
 function JobDetails() {
   const router = useRouter();
@@ -25,7 +26,7 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [logsRefreshKey, setLogsRefreshKey] = useState(0);
   const [controllerLogsRefreshKey, setControllerLogsRefreshKey] = useState(0);
-
+  const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
     if (!loading && isInitialLoad) {
@@ -165,7 +166,7 @@ function JobDetails() {
               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
             >
               <RotateCwIcon className="w-4 h-4 mr-1.5" />
-              <span>Refresh</span>
+              {!isMobile && <span>Refresh</span>}
             </button>
           </Tooltip>
         </div>
@@ -299,9 +300,11 @@ function JobDetailsContent({
 
   const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
   const PRE_START_STATUSES = ['PENDING', 'SUBMITTED'];
+  const RECOVERING_STATUSES = ['RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(jobData.status);
   const isPreStart = PRE_START_STATUSES.includes(jobData.status);
+  const isRecovering = RECOVERING_STATUSES.includes(jobData.status);
 
   // Clear logs when activeTab changes or when jobData.id changes
   useEffect(() => {
@@ -319,7 +322,7 @@ function JobDetailsContent({
       const controller = new AbortController();
 
       // Don't fetch logs if job is in pending state
-      if (logType === 'logs' && isPending) {
+      if (logType === 'logs' && (isPending || isRecovering)) {
         setIsLoading(false);
         return () => {};
       }
@@ -374,7 +377,7 @@ function JobDetailsContent({
         active = false;
       };
     },
-    [activeTab, isPending, isPreStart]
+    [activeTab, isPending, isPreStart, isRecovering]
   );
 
   // Only fetch logs when actually viewing the logs tab
@@ -401,6 +404,12 @@ function JobDetailsContent({
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>
               Waiting for the job to start, please refresh after a while
+            </span>
+          </div>
+        ) : isRecovering ? (
+          <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+            <span>
+              Waiting for the job to recover, please refresh after a while
             </span>
           </div>
         ) : isLoadingLogs ? (

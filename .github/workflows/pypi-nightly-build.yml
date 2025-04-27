@@ -127,3 +127,45 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
+
+  notify-slack-failure:
+    runs-on: ubuntu-latest
+    needs: [check-date, nightly-build-pypi, extract-build-number, wait-for-buildkite, publish-to-pypi]
+    if: failure() # Only run this job if any of the previous jobs failed
+    steps:
+      - name: Prepare failure message
+        id: message_content
+        run: |
+          TITLE_TEXT="Workflow ${{ github.workflow }} failed."
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
+          SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+          if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}|Buildkite Log>"
+            echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
+            echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
+          else
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
+            echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
+            echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack channel on failure
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.SLACK_CHANNEL_ID }}",
+              "text": "${{ steps.message_content.outputs.message_text }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.message_content.outputs.message_block }}"
+                  }
+                }
+              ]
+            }

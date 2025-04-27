@@ -179,6 +179,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'azure_arm_parameters', 'cloudInitSetupCommands'),
+    ('available_node_types', 'ray_head_default', 'node_config', 'pvc_spec'),
+    ('available_node_types', 'ray_head_default', 'node_config',
+     'deployment_spec'),
 ]
 # These keys are expected to change when provisioning on an existing cluster,
 # but they don't actually represent a change that requires re-provisioning the
@@ -702,6 +705,15 @@ def write_cluster_config(
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
+    is_custom_docker = ('true' if to_provision.extract_docker_image()
+                        is not None else 'false')
+
+    # Here, if users specify the controller to be high availability, we will
+    # provision a high availability controller. Whether the cloud supports
+    # this feature has been checked by
+    # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
+    high_availability_specified = controller_utils.high_availability_specified(
+        cluster_name_on_cloud)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -741,7 +753,9 @@ def write_cluster_config(
                 # syntax.
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}', conda_auto_activate),
+                        '{conda_auto_activate}',
+                        conda_auto_activate).replace('{is_custom_docker}',
+                                                     is_custom_docker),
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',
@@ -786,6 +800,9 @@ def write_cluster_config(
                 'sky_wheel_hash': wheel_hash,
                 # Authentication (optional).
                 **auth_config,
+
+                # High availability
+                'high_availability': high_availability_specified,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -798,8 +815,12 @@ def write_cluster_config(
             cluster_config_overrides=to_provision.cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
-        pod_config = yaml_obj['available_node_types']['ray_head_default'][
-            'node_config']
+        pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']
+
+        # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
+        pod_config.pop('deployment_spec', None)
+        pod_config.pop('pvc_spec', None)
         valid, message = kubernetes_utils.check_pod_config(pod_config)
         if not valid:
             raise exceptions.InvalidCloudConfigs(
