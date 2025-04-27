@@ -368,6 +368,13 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
 
+# Constants for path in K8S pod to store persistent setup and run scripts
+# so that we can run them again after the pod restarts.
+# Path within user home. For HA controller, assumes home directory is
+# persistent through PVC. See kubernetes-ray.yml.j2.
+PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/.controller_recovery_setup_commands.sh'
+PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
+
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
