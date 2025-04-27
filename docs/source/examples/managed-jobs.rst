@@ -516,6 +516,28 @@ you can still tear it down manually with
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
+To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+
+Setup and best practices
+------------------------
+
+.. _managed-jobs-creds:
+
+Using long-lived credentials
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks. For this reason, it's preferred to set up long-lived credential access, such as a ``~/.aws/credentials`` file on AWS, or a service account json key file on GCP.
+
+To use long-lived static credentials for the jobs controller, just make sure the right credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller. **If you're already using local credentials that don't expire, no action is needed.**
+
+To set up credentials:
+
+- **AWS**: :ref:`Create a dedicated SkyPilot IAM user <dedicated-aws-user>` and use a static ``~/.aws/credentials`` file.
+- **GCP**: :ref:`Create a GCP service account <gcp-service-account>` with a static JSON key file.
+- **Other clouds**: Make sure you are using credentials that do not expire.
+
+.. _jobs-controller-custom-resources:
 
 Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -597,7 +619,7 @@ Best practices for scaling up the jobs controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
-  For managed jobs, it's highly recommended to use service accounts for :ref:`cloud authentication <cloud-auth>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
+  For managed jobs, it's highly recommended to use :ref:`long-lived credentials for cloud authentication <managed-jobs-creds>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 

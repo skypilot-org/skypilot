@@ -56,8 +56,7 @@ ALLOWED_TERMS = {
 MULTI_WORD_TERMS = {
     'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
     'Google Cloud', 'LoadBalancer Service', 'Dynamic Workload Scheduler',
-    'Sky Computing', 'VS Code', 'GCP Service Account', 'Cudo Compute',
-    'Samsung Cloud Platform'
+    'Sky Computing', 'VS Code', 'Cudo Compute', 'Samsung Cloud Platform'
 }
 
 
