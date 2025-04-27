@@ -79,21 +79,19 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-
       - name: Validate published package
         run: |
           # Wait a moment for package to be available
           sleep 30
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+          pip install fastapi
           # Install skypilot from Test PyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
           # Verify installation
           sky -v
           sky -c
+          sky check
+          sky show-gpus
           # Verify version
           EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
@@ -103,6 +101,12 @@ jobs:
             exit 1
           fi
           echo "Version verified successfully!"
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
 
   trigger-docker-build:
     needs: [extract-version, publish-to-pypi]

@@ -70,21 +70,26 @@ def _load_config(context: Optional[str] = None):
             kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
+            context_name = '(current-context)' if context is None else context
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
-                err_str = (
-                    f'Failed to load Kubernetes configuration for {context!r}. '
-                    'Kubeconfig does not contain any valid context(s).'
-                    f'\n{suffix}\n'
-                    '    If you were running a local Kubernetes '
-                    'cluster, run `sky local up` to start the cluster.')
+                err_str = ('Failed to load Kubernetes configuration for '
+                           f'{context_name!r}. '
+                           'Kubeconfig does not contain any valid context(s).'
+                           f'\n{suffix}\n'
+                           '    If you were running a local Kubernetes '
+                           'cluster, run `sky local up` to start the cluster.')
             else:
                 kubeconfig_path = os.environ.get('KUBECONFIG', '~/.kube/config')
                 err_str = (
-                    f'Failed to load Kubernetes configuration for {context!r}. '
-                    'Please check if your kubeconfig file exists at '
-                    f'{kubeconfig_path} and is valid.\n{suffix}')
+                    f'Failed to load Kubernetes configuration for '
+                    f'{context_name!r}. Please check if your kubeconfig file '
+                    f'exists at {kubeconfig_path} and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
+            if context is None:  # kubernetes defaults to current-context.
+                err_str += (
+                    '\nHint: Kubernetes attempted to query the current-context '
+                    'set in kubeconfig. Check if the current-context is valid.')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
 

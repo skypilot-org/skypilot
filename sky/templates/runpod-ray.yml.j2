@@ -9,6 +9,7 @@ provider:
   type: external
   module: sky.provision.runpod
   region: "{{region}}"
+  availability_zone: "{{availability_zone}}"
   disable_launch_config_check: true
   # For RunPod, we directly set the image id for the docker as runtime environment
   # support, thus we need to avoid the DockerInitializer detects the docker field

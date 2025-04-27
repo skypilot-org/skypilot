@@ -212,13 +212,19 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTA
 
 
 def get_cmd_wait_until_job_status_contains_matching_job_id(
-        cluster_name: str, job_id: str, job_status: List[sky.JobStatus],
-        timeout: int):
-    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+        cluster_name: str,
+        job_id: str,
+        job_status: List[sky.JobStatus],
+        timeout: int,
+        all_users: bool = False):
+    cmd = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
         cluster_name=cluster_name,
         job_id=job_id,
         job_status=_statuses_to_str(job_status),
         timeout=timeout)
+    if all_users:
+        cmd = cmd.replace('sky queue ', 'sky queue -u ')
+    return cmd
 
 
 def get_cmd_wait_until_job_status_contains_without_matching_job(
