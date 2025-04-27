@@ -55,11 +55,14 @@ jobs:
           build
           --user
       - name: Set release version
+        id: set-release-version
         run: |
           RELEASE_VERSION=$(date +%Y%m%d)
           sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
+          echo "version=1.0.0.dev${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: $version"
       - name: Build a binary wheel and a source tarball
         run: >-
           python -m
@@ -75,97 +78,125 @@ jobs:
           path: dist/
 
       # Trigger Buildkite smoke tests
-      - name: Trigger Buildkite Smoke Tests
-        id: trigger_buildkite
-        uses: buildkite/trigger-pipeline-action@v2.3.0
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/smoke-tests"
-          branch: "master"
-          commit: "${{ github.sha }}"
-          message: "nightly-build-pypi"
-          ignore_pipeline_branch_filter: true
-          build_env_vars: '{"ARGS": "--aws"}'
+      # - name: Trigger Buildkite Smoke Tests
+      #   id: trigger_buildkite
+      #   uses: buildkite/trigger-pipeline-action@v2.3.0
+      #   with:
+      #     buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+      #     pipeline: "skypilot-1/smoke-tests"
+      #     branch: "master"
+      #     commit: "${{ github.sha }}"
+      #     message: "nightly-build-pypi"
+      #     ignore_pipeline_branch_filter: true
+      #     build_env_vars: '{"ARGS": "--aws"}'
 
-  extract-build-number:
-    needs: nightly-build-pypi
-    uses: ./.github/workflows/extract-buildkite.yml
-    with:
-      json_data: ${{ needs.nightly-build-pypi.outputs.buildkite_json }}
+  # extract-build-number:
+  #   needs: nightly-build-pypi
+  #   uses: ./.github/workflows/extract-buildkite.yml
+  #   with:
+  #     json_data: ${{ needs.nightly-build-pypi.outputs.buildkite_json }}
 
-  wait-for-buildkite:
-    needs: extract-build-number
-    uses: ./.github/workflows/wait-for-buildkite.yml
-    with:
-      organization: "skypilot-1"
-      pipeline: "smoke-tests"
-      build_number: ${{ needs.extract-build-number.outputs.build_number }}
-      timeout_minutes: 120
-    secrets:
-      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+  # wait-for-buildkite:
+  #   needs: extract-build-number
+  #   uses: ./.github/workflows/wait-for-buildkite.yml
+  #   with:
+  #     organization: "skypilot-1"
+  #     pipeline: "smoke-tests"
+  #     build_number: ${{ needs.extract-build-number.outputs.build_number }}
+  #     timeout_minutes: 120
+  #   secrets:
+  #     BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   publish-to-pypi:
-    needs: wait-for-buildkite
-    if: needs.wait-for-buildkite.outputs.build_status == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
+    needs: [set-release-version]
+    # needs: [set-release-version, wait-for-buildkite]
+    # if: needs.wait-for-buildkite.outputs.build_status == 'success'
+    # runs-on: ubuntu-latest
+    # steps:
+    #   - name: Download distribution artifacts
+    #     uses: actions/download-artifact@v4
+    #     with:
+    #       name: python-package-distributions
+    #       path: dist/
 
-      - name: Publish distribution to Test PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
+    #   - name: Publish distribution to Test PyPI
+    #     uses: pypa/gh-action-pypi-publish@release/v1
+    #     with:
+    #       password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+    #       repository-url: https://test.pypi.org/legacy/
+    #       skip-existing: true
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-
-  notify-slack-failure:
-    runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, extract-build-number, wait-for-buildkite, publish-to-pypi]
-    if: failure() # Only run this job if any of the previous jobs failed
-    steps:
-      - name: Prepare failure message
-        id: message_content
+      - name: Validate published package
         run: |
-          TITLE_TEXT="Workflow ${{ github.workflow }} failed."
-          COMMIT_SHA="${{ github.sha }}"
-          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
-          SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
-          if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}|Buildkite Log>"
-            echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
-            echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
-          else
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
-            echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
-            echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
+          # Wait a moment for package to be available
+          sleep 30
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+          pip install fastapi
+          # Install skypilot from Test PyPI with fallback to PyPI for dependencies
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot-nightly
+          pip show skypilot-nightly
+          # Verify installation
+          sky -v
+          sky -c
+          sky check
+          sky show-gpus
+          sky dashboard          
+          # Verify dashboard endpoint is accessible
+          curl -f http://127.0.0.1:46580/dashboard/ || exit 1
+          # Verify version
+          EXPECTED_VERSION="${{ needs.set-release-version.outputs.version }}"
+          INSTALLED_VERSION=$(pip show skypilot-nightly | grep Version | awk '{print $2}')
+          echo "Expected version: $EXPECTED_VERSION, Installed version: $INSTALLED_VERSION"
+          if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch!"
+            exit 1
           fi
+          echo "Version verified successfully!"
 
-      - name: Notify Slack channel on failure
-        uses: slackapi/slack-github-action@v2.0.0
-        with:
-          method: chat.postMessage
-          token: ${{ secrets.SLACK_BOT_TOKEN }}
-          payload: |
-            {
-              "channel": "${{ secrets.SLACK_CHANNEL_ID }}",
-              "text": "${{ steps.message_content.outputs.message_text }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "${{ steps.message_content.outputs.message_block }}"
-                  }
-                }
-              ]
-            }
+      # - name: Publish distribution to PyPI
+      #   uses: pypa/gh-action-pypi-publish@release/v1
+      #   with:
+      #     password: ${{ secrets.PYPI_API_TOKEN }}
+      #     skip-existing: true
+
+  # notify-slack-failure:
+  #   runs-on: ubuntu-latest
+  #   needs: [check-date, nightly-build-pypi, extract-build-number, wait-for-buildkite, publish-to-pypi]
+  #   if: failure() # Only run this job if any of the previous jobs failed
+  #   steps:
+  #     - name: Prepare failure message
+  #       id: message_content
+  #       run: |
+  #         TITLE_TEXT="Workflow ${{ github.workflow }} failed."
+  #         COMMIT_SHA="${{ github.sha }}"
+  #         COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
+  #         SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+  #         if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
+  #           MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}|Buildkite Log>"
+  #           echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
+  #           echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
+  #         else
+  #           MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
+  #           echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
+  #           echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: Notify Slack channel on failure
+  #       uses: slackapi/slack-github-action@v2.0.0
+  #       with:
+  #         method: chat.postMessage
+  #         token: ${{ secrets.SLACK_BOT_TOKEN }}
+  #         payload: |
+  #           {
+  #             "channel": "${{ secrets.SLACK_CHANNEL_ID }}",
+  #             "text": "${{ steps.message_content.outputs.message_text }}",
+  #             "blocks": [
+  #               {
+  #                 "type": "section",
+  #                 "text": {
+  #                   "type": "mrkdwn",
+  #                   "text": "${{ steps.message_content.outputs.message_block }}"
+  #                 }
+  #               }
+  #             ]
+  #           }

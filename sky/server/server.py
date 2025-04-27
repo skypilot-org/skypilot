@@ -1121,25 +1121,24 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
-# Add a route to serve static files
-@app.get('/{full_path:path}')
-async def serve_static_or_dashboard(full_path: str):
-    """Serves static files for any unmatched routes.
+@app.get('/dashboard/{full_path:path}')
+async def serve_dashboard(full_path: str):
+    """Serves the Next.js dashboard application.
 
-    Handles the /dashboard prefix from Next.js configuration.
+    Args:
+        full_path: The path requested by the client.
+
+    Returns:
+        FileResponse for static files or index.html for client-side routing.
     """
-    # Check if the path starts with 'dashboard/' and remove it if it does
-    if full_path.startswith('dashboard/'):
-        full_path = full_path[len('dashboard/'):]
-
-    # Try to serve the file directly from the out directory first
+    # Try to serve the file directly e.g. /skypilot.svg,
+    # /favicon.ico, and static files in /_next/static
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
-    # If file not found, serve the index.html for client-side routing.
-    # For example, the non-matched arbitrary route (/ or /test) from
-    # client will be redirected to the index.html.
+    # Fallback to index.html for client-side routing
+    # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
@@ -1148,6 +1147,12 @@ async def serve_static_or_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+# Redirect the root path to dashboard
+@app.get('/')
+async def root():
+    return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
 if __name__ == '__main__':
