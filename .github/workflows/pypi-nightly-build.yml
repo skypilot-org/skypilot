@@ -111,8 +111,8 @@ jobs:
     needs: [set-release-version]
     # needs: [set-release-version, wait-for-buildkite]
     # if: needs.wait-for-buildkite.outputs.build_status == 'success'
-    # runs-on: ubuntu-latest
-    # steps:
+    runs-on: ubuntu-latest
+    steps:
     #   - name: Download distribution artifacts
     #     uses: actions/download-artifact@v4
     #     with:
