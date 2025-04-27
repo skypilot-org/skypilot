@@ -136,7 +136,7 @@ jobs:
           # Install skypilot from Test PyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot-nightly
           pip show skypilot-nightly
-          rm -rf/home/runner/.local/lib/python3.12/site-packages/sky/dashboard/out
+          rm -rf /home/runner/.local/lib/python3.12/site-packages/sky/dashboard/out
           # Verify installation
           sky -v
           sky -c
