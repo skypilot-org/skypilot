@@ -1119,7 +1119,8 @@ class FailoverCloudErrorHandlerV2:
         del region  # Unused.
         logger.debug(
             f'Got error(s) in {launchable_resources.cloud}:'
-            f'{common_utils.format_exception(error, use_bracket=True)}')
+            f'{common_utils.format_exception(error, use_bracket=True)}',
+            exc_info=error)
         if zones is None:
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=None))
