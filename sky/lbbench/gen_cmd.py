@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import tempfile
-from typing import List
+from typing import List, Optional
 
 from sky.lbbench import utils
 
@@ -17,6 +17,7 @@ describes = [
     'sky_push_pull',
     'sky_push_push',
     'sky_pull_pull_rate_limit',
+    'gke_gateway',
 ]
 presents = [
     'Baseline',
@@ -25,19 +26,22 @@ presents = [
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
     'Ours\\n[Pull/RateLimit+Pull]',
+    'GKE Gateway',
 ]
 
-enabled_systems = [
+# Full list of systems indices - will be filtered by --run-systems
+all_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
     2,  # sky pulling in lb, pulling in replica, but workload stealing
     3,  # sky pushing in lb, pulling in replica
     4,  # sky pushing in lb, pushing in replica
     5,  # sky pulling in lb, pulling in replica, but rate limit
+    6,  # gke
 ]
 
-describes = [describes[i] for i in enabled_systems]
-presents = [presents[i] for i in enabled_systems]
+# Default to just running GKE
+enabled_systems = [6]  # gke
 
 ct = None
 sn2st = None
@@ -53,7 +57,15 @@ def _get_head_ip_for_cluster(cluster: str) -> str:
     raise ValueError(f'Cluster {cluster} not found')
 
 
-def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
+def _get_endpoint_for_traffic(index: int,
+                              sns: List[str],
+                              gke_endpoint: Optional[str] = None) -> str:
+    if index == 6:  # GKE Gateway
+        if gke_endpoint:
+            if not gke_endpoint.startswith(('http://', 'https://')):
+                return f'http://{gke_endpoint}'
+            return gke_endpoint
+        return 'http://34.117.239.237:80'  # Default GKE endpoint
     if index == 0:
         sgl_ip = _get_head_ip_for_cluster(utils.sgl_cluster)
         return f'{sgl_ip}:9001'
@@ -76,19 +88,55 @@ def _region_cluster_name(r: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--service-names', type=str, nargs='+', required=True)
+    parser.add_argument(
+        '--service-names',
+        type=str,
+        nargs='*',
+        default=[],
+        help='Service names for SkyPilot services (indices 2-5)')
     parser.add_argument('--exp-name', type=str, required=True)
     parser.add_argument('--extra-args', type=str, default='')
     parser.add_argument('--output-dir', type=str, default='@temp')
     parser.add_argument('--regions', type=str, default=None, nargs='+')
     parser.add_argument('--region-to-args', type=str, default=None)
+    parser.add_argument('--gke-endpoint',
+                        type=str,
+                        default='34.117.239.237:80',
+                        help='GKE Gateway endpoint (IP:port)')
+    parser.add_argument(
+        '--run-systems',
+        type=int,
+        nargs='+',
+        default=[6],
+        help='Indices of systems to run (default: [6] for GKE only)')
     args = parser.parse_args()
-    sns = args.service_names
-    if len(sns) != len(describes):
-        raise ValueError(f'Expected {len(describes)} service names for '
-                         f'{", ".join(describes)}')
 
-    endpoints = [_get_endpoint_for_traffic(i, sns) for i in enabled_systems]
+    # Update enabled_systems based on --run-systems
+    global enabled_systems, describes, presents
+    enabled_systems = args.run_systems if args.run_systems else [
+        6
+    ]  # Default to GKE if not specified
+
+    # Filter describes and presents based on enabled_systems
+    describes = [describes[i] for i in enabled_systems]
+    presents = [presents[i] for i in enabled_systems]
+
+    # Only require service-names for SkyPilot systems (2-5)
+    sky_systems_count = sum(1 for s in enabled_systems if 2 <= s <= 5)
+    sns = args.service_names
+    if len(sns) != sky_systems_count:
+        if sky_systems_count > 0:
+            raise ValueError(
+                f'Expected {sky_systems_count} service names for SkyPilot')
+
+    # If no SkyPilot services needed, use empty list for non-sky systems
+    if sky_systems_count == 0:
+        sns = [''] * len(enabled_systems)
+
+    endpoints = [
+        _get_endpoint_for_traffic(i, sns, args.gke_endpoint)
+        for i in enabled_systems
+    ]
     print(endpoints)
     if any('None' in e for e in endpoints):
         raise ValueError('Some endpoints are not found')
@@ -212,8 +260,9 @@ def main():
         f.write('# Wait for queue status puller to initialize\n')
         f.write('echo "Waiting for queue status puller to initialize..."\n')
         f.write(f'echo "Check log file: tail -f {queue_status_file}"\n')
-        f.write('while ! grep -q "Pulling queue status" '
-                f'{queue_status_file}; do\n')
+        f.write(
+            'while ! grep -q "Pulling queue status\\|Skipping queue polling" '
+            f'{queue_status_file}; do\n')
         f.write('  sleep 1\n')
         f.write('  echo -n "."\n')
         f.write('done\n')

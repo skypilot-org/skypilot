@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import time
 from typing import Dict, List
@@ -18,12 +19,30 @@ from sky.lbbench import utils
 
 def prepare_lb_endpoints_and_confirm(exp2backend: Dict[str, str],
                                      yes: bool) -> Dict[str, List[str]]:
-    req = sky.serve.status(None)
-    st = sky.client.sdk.get(req)
-    print(sky.serve.format_service_table(st, show_all=False))
+    # Only fetch Serve status if there are SkyPilot Serve endpoints
+    st = []
+    needs_serve_status = any(
+        'aws.cblmemo.net' in url for url in exp2backend.values())
+
+    if needs_serve_status:
+        try:
+            req = sky.serve.status(None)
+            st = sky.client.sdk.get(req)
+            print(sky.serve.format_service_table(st, show_all=False))
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Warning: Could not fetch SkyPilot Serve status: {e}')
+            st = []
+    else:
+        print('No SkyPilot Serve endpoints found; skipping `sky serve status` '
+              'call.')
 
     def _get_one_endpoints(backend_url: str) -> List[str]:
         if 'aws.cblmemo.net' in backend_url:
+            if not st:
+                print(f'Warning: No SkyPilot Serve status available for '
+                      f'{backend_url}')
+                return []
+
             service_name = backend_url.split('.')[0]
             st4svc = None
             for svc in st:
@@ -40,6 +59,11 @@ def prepare_lb_endpoints_and_confirm(exp2backend: Dict[str, str],
             endpoints = [url]
         elif '9001' in backend_url:  # SGLang Router
             endpoints = [utils.sgl_cluster]
+        elif '34.117.239.237' in backend_url:  # GKE endpoint
+            url = backend_url
+            if not url.startswith('http://'):
+                url = 'http://' + url
+            endpoints = [url]
         else:
             return []
             # raise ValueError(f'Unknown backend URL: {backend_url}')
@@ -58,11 +82,32 @@ def prepare_lb_endpoints_and_confirm(exp2backend: Dict[str, str],
 
 async def pull_queue_status(exp_name: str, endpoints: List[str],
                             event: asyncio.Event, output_dir: str) -> None:
+    # Check if this is a GKE endpoint (34.117.239.237)
+    is_gke_baseline = False
+    if endpoints and any(
+            '34.117.239.237' in endpoint for endpoint in endpoints):
+        is_gke_baseline = True
+
     tmp_name = os.path.join(tempfile.gettempdir(),
                             f'result_queue_size_{exp_name}.txt')
     dest_name = (Path(output_dir).expanduser() / 'queue_size' /
                  f'{exp_name}.txt')
     dest_name.parent.mkdir(parents=True, exist_ok=True)
+
+    # If this is GKE, skip queue polling
+    if is_gke_baseline:
+        print(f'Skipping queue polling for GKE baseline: {exp_name}',
+              flush=True)
+        with open(dest_name, 'w', encoding='utf-8') as f:
+            f.write(
+                json.dumps({
+                    'time': time.time(),
+                    'status': 'skipped'
+                }) + '\n')
+        await event.wait()  # Wait for stop signal
+        print(f'Queue fetcher finished (skipped) for GKE: {exp_name}')
+        return
+
     # Force flush it to make the tee works
     print(f'Pulling queue status:      tail -f {tmp_name} | jq', flush=True)
     if utils.sgl_cluster in endpoints:
@@ -86,7 +131,7 @@ async def pull_queue_status(exp_name: str, endpoints: List[str],
                         lb2confs[endpoint] = conf
                     print(json.dumps(lb2confs), file=f, flush=True)
                     await asyncio.sleep(1)
-        os.rename(tmp_name, dest_name)
+        shutil.move(tmp_name, dest_name)
 
 
 def main():
