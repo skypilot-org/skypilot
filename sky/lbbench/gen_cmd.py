@@ -107,22 +107,20 @@ def main():
         '--run-systems',
         type=int,
         nargs='+',
-        default=[6],
-        help='Indices of systems to run (default: [6] for GKE only)')
+        default=all_systems,
+        help='Indices of systems to run (default: all)')
     args = parser.parse_args()
 
     # Update enabled_systems based on --run-systems
     global enabled_systems, describes, presents
-    enabled_systems = args.run_systems if args.run_systems else [
-        6
-    ]  # Default to GKE if not specified
+    enabled_systems = args.run_systems
 
     # Filter describes and presents based on enabled_systems
     describes = [describes[i] for i in enabled_systems]
     presents = [presents[i] for i in enabled_systems]
 
     # Only require service-names for SkyPilot systems (2-5)
-    sky_systems_count = sum(1 for s in enabled_systems if 2 <= s <= 5)
+    sky_systems_count = sum(1 for s in enabled_systems if 0 <= s <= 5)
     sns = args.service_names
     if len(sns) != sky_systems_count:
         if sky_systems_count > 0:
