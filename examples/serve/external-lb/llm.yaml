@@ -24,10 +24,10 @@ service:
         cloud: aws
         region: ap-northeast-1
       load_balancing_policy: prefix_tree
-    # - resources:
-    #     cloud: aws
-    #     region: eu-central-1
-    #   load_balancing_policy: prefix_tree
+    - resources:
+        cloud: aws
+        region: eu-central-1
+      load_balancing_policy: prefix_tree
   # max_concurrent_requests: 50
 
 resources:
@@ -38,7 +38,7 @@ resources:
   ordered:
     - region: us-east-2
     - region: ap-northeast-1
-    # - region: eu-central-1
+    - region: eu-central-1
   ports: 8081
 
 setup: |

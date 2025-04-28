@@ -77,7 +77,7 @@ async def _tree_search(uid: int, question: str,
                 call_llm_coro = oai.call_chat_completion_async(s,
                                                                temperature=temp,
                                                                max_tokens=256,
-                                                               uid=uid,
+                                                               uid=str(uid),
                                                                stop=None)
                 tasks.append(asyncio.create_task(call_llm_coro))
     return results

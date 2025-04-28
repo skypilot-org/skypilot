@@ -24,7 +24,7 @@ def sky_status() -> List[Dict[str, Any]]:
 @dataclasses.dataclass
 class Metric:
     """Metric for each request."""
-    uid: int
+    uid: str
     start: Optional[float] = None
     response_start: Optional[float] = None
     streaming_start: Optional[float] = None

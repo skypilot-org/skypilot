@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import collections
+import os
 import random
 import time
 from typing import Any, Awaitable, Dict, List
@@ -15,9 +16,7 @@ from sky.lbbench import utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
-DATASET_NAME = 'lmsys/chatbot_arena_conversations'
-# DATASET_NAME = 'lmsys/lmsys-chat-1m'
-CONV_SELECTOR = 'conversation_a'
+DATASET_NAME = 'lmsys/lmsys-chat-1m'
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
@@ -36,22 +35,23 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
 
 def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
     tic = time.time()
+    chunk_data = datasets.load_dataset(DATASET_NAME, split='train'+'[:50000]')
     multi_turn_data = []
-    chunk_data = datasets.load_dataset(DATASET_NAME, split='train')
     for d in chunk_data:
         if d['turn'] > 1:
             multi_turn_data.append({
                 'turn': d['turn'],
-                'tstamp': d['tstamp'],
-                'user': d['judge'],
-                'conv': d[CONV_SELECTOR],
+                'id': d['conversation_id'],
+                'conv': d['conversation'],
             })
+            print(len(multi_turn_data))
+    print(len(multi_turn_data))
     random.shuffle(multi_turn_data)
     multi_turn_data = multi_turn_data[:num_conv]
     print(f'Got {len(multi_turn_data)} multi-turn conversations '
           f'(took {time.time() - tic:.2f}s)')
     return multi_turn_data
-
+_load_dataset(1)
 
 async def _multi_turn_conv(duration: int, tic: float, uid: str,
                            conv: Dict[str, Any]) -> List[utils.OAIChatHistory]:
