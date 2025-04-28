@@ -32,4 +32,4 @@ run: |
   # --tp 4 is required even with 8 GPUs, as the output size
   # of qwen3 is not divisible by quantization block_n=128
   python3 -m sglang.launch_server --model $MODEL_NAME \
-    --tp 4 --reasoning-parser qwen3 --port 8000
+    --tp 4 --reasoning-parser qwen3 --port 8000 --host 0.0.0.0
