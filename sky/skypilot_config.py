@@ -72,6 +72,7 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# The config is generated as described below:
 #
 # (*) (Used internally) If env var {ENV_VAR_SKYPILOT_CONFIG} exists, use its
 #     path as the config file. Do not use any other config files.
