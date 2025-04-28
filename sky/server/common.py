@@ -333,7 +333,7 @@ def _start_api_server(deploy: bool = False,
                 break
 
         server_url = get_server_url(host)
-        dashboard_msg = (f'Dashboard: {get_dashboard_url(server_url)}')
+        dashboard_msg = ''
         api_server_info = get_api_server_status(server_url)
         if api_server_info.version == _DEV_VERSION:
             dashboard_msg += (
@@ -343,12 +343,15 @@ def _start_api_server(deploy: bool = False,
                 dashboard_msg += (
                     'Dashboard is not built, '
                     'to build: npm --prefix sky/dashboard install '
-                    '&& npm --prefix sky/dashboard run build')
+                    '&& npm --prefix sky/dashboard run build\n')
             else:
                 dashboard_msg += (
                     'Dashboard may be stale when installed from source, '
                     'to rebuild: npm --prefix sky/dashboard install '
-                    '&& npm --prefix sky/dashboard run build')
+                    '&& npm --prefix sky/dashboard run build\n')
+            dashboard_msg += (
+                f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                f'Dashboard: {get_dashboard_url(server_url)}')
             dashboard_msg += f'{colorama.Style.RESET_ALL}'
         logger.info(
             ux_utils.finishing_message(
