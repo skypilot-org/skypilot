@@ -106,7 +106,6 @@ RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     conda activate base && \
     export PATH="$PATH:$HOME/.local/bin" && \
     uv pip uninstall skypilot && \
-    uv pip install --prerelease=allow "azure-cli>=2.65.0" && \
     uv pip install -r requirements-dev.txt && \
     uv pip install -e ".[all]" && \
     # Install httpx with SOCKS support for proxy environments - necessary when system has proxy enabled

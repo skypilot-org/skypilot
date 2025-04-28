@@ -96,14 +96,12 @@ class TestBackwardCompatibility:
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
 
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
 
         yield  # Optional teardown logic

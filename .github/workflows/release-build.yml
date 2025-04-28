@@ -117,7 +117,6 @@ jobs:
           source ~/pypi-check-env/bin/activate
 
           echo "Installing skypilot==${LATEST_PYPI_VERSION} from PyPI using uv..."
-          uv pip install --prerelease=allow "azure-cli>=2.65.0" "omegaconf>=2.4.0dev3"
           uv pip install skypilot==${LATEST_PYPI_VERSION}
 
           echo "Extracting API version from installed PyPI package..."
