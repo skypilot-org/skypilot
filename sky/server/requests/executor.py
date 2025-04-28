@@ -70,6 +70,7 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
+
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing.
 
@@ -113,7 +114,9 @@ class RequestQueue:
         """Get the length of the queue."""
         return self.queue.qsize()
 
+
 queue_backend = server_config.QueueBackend.MULTIPROCESSING
+
 
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
