@@ -59,7 +59,7 @@ def test_aws_with_ssh_proxy_command():
         f.write(
             textwrap.dedent(f"""\
         aws:
-            ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
+            ssh_proxy_command: ssh -W '[%h]:%p' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
         f.write(
             textwrap.dedent(f"""\
