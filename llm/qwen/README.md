@@ -1,13 +1,21 @@
-# Serving Qwen2 on Your Own Kubernetes or Cloud
+# Serving Qwen3/Qwen2 on Your Own Kubernetes or Cloud
 
 [Qwen2](https://github.com/QwenLM/Qwen2) is one of the top open LLMs.
 As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS Chatbot Arena Leaderboard](https://chat.lmsys.org/?leaderboard).
 
-**Update (Sep 18, 2024) -** SkyPilot now supports the [**Qwen2.5**](https://qwenlm.github.io/blog/qwen2.5/) model! 
+**Update (Apr 28, 2025) -** SkyPilot now supports the [**Qwen3**](https://qwenlm.github.io/blog/qwen3/) model! 
+
+📰 **Update (Sep 18, 2024) -** SkyPilot now supports the [**Qwen2.5**](https://qwenlm.github.io/blog/qwen2.5/) model! 
 
 📰 **Update (Jun 6, 2024) -** SkyPilot now also supports the [**Qwen2**](https://qwenlm.github.io/blog/qwen2/) model! It further improves the competitive model, Qwen1.5.
 
 📰 **Update (April 26, 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [qwen15-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen15-110b.yaml) to serve the 110B model.
+
+## One command to start a Qwen3
+
+```bash
+sky launch -c qwen qwen3-235b.yaml
+```
 
 <p align="center">
     <img src="https://i.imgur.com/d7tEhAl.gif" alt="qwen" width="600"/>
