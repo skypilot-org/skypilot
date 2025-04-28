@@ -40,6 +40,16 @@ Prepare your Hugging Face Token:
 export HF_TOKEN=<your-huggingface-token>
 ```
 
+To ensure the SkyServe controller has sufficient capacity to manage multiple services and replicas (up to 16 concurrent services) and can properly communicate with the load balancer, configure your `~/.sky/config.yaml` as follows:
+
+```yaml
+serve:
+  controller:
+    resources:
+      cloud: aws
+      cpus: 16+
+```
+
 This token should have access to `meta-llama/Llama-3.1-8B-Instruct` and `lmsys/chatbot_arena_conversations`.
 
 ### B. GKE Environment Setup
@@ -282,6 +292,13 @@ echo "Gateway IP: $GKE_GATEWAY_IP"
 
 #### Step 6: Ensure GKE Deployment is running
 
+Scale the node pool of the GKE cluster:
+
+```bash
+gcloud container clusters resize sglang-us --node-pool=default-pool --num-nodes=2 --region=us-central1 -q
+gcloud container clusters resize sglang-asia --node-pool=default-pool --num-nodes=2 --region=asia-northeast1 -q
+```
+
 Scale the deployment to the desired number of replicas in both clusters:
 
 ```bash
@@ -388,6 +405,14 @@ sky serve down -ay
 sky stop -ay
 # Or only cancel it if you want to keep using them in the next run
 sky cancel -ay sgl-router && sky cancel -ay sgl-router-pull
+
+kubectl scale deployment sglang-deployment --replicas=0 -n default --context=$US_CONTEXT
+kubectl scale deployment sglang-deployment --replicas=0 -n default --context=$ASIA_CONTEXT
+# Scale down GKE node pools completely
+# Note: This is critical as autoscaling alone may not fully release resources
+# due to system pods that keep nodes alive
+gcloud container clusters resize sglang-us --node-pool=default-pool --num-nodes=0 --region=us-central1 -q
+gcloud container clusters resize sglang-asia --node-pool=default-pool --num-nodes=0 --region=asia-northeast1 -q
 ```
 
 > The following content is stale. Don't need to check it.
