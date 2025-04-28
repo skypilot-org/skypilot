@@ -162,7 +162,7 @@ def _get_cluster_records_and_set_ssh_config(
                 '-o StrictHostKeyChecking=no '
                 '-o UserKnownHostsFile=/dev/null '
                 '-o IdentitiesOnly=yes '
-                '-W [%h]:%p '
+                '-W \'[%h]:%p\' '
                 f'{handle.ssh_user}@127.0.0.1 '
                 '-o ProxyCommand='
                 # TODO(zhwu): write the template to a temp file, don't use
