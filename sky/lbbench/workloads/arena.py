@@ -23,6 +23,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--num-conv', type=int, default=1000)
     # parser.add_argument('--scale-factor', type=int, default=300)
     parser.add_argument('--run-seconds', type=int, default=120)
+    parser.add_argument('--uid', type=str, default='default')
 
 
 def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
@@ -30,6 +31,7 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
         'num-conv': args.num_conv,
         # 'scale-factor': args.scale_factor,
         'run-seconds': args.run_seconds,
+        'uid': args.uid,
     }
 
 
@@ -84,7 +86,7 @@ def _plot_request_rate(groups: Dict[int, List[Dict[str, Any]]]) -> None:
     rp(f'Aggregated request rate plot saved to {fn}')
 
 
-async def _multi_turn_conv(uid: int,
+async def _multi_turn_conv(uid: str,
                            conv: Dict[str, Any]) -> List[utils.OAIChatHistory]:
     history = []
     for i, msg in enumerate(conv['conv']):
@@ -107,8 +109,9 @@ async def _multi_turn_conv(uid: int,
     return history
 
 
-async def _user_task(uid: int, convs: List[Dict[str, Any]],
-                     intervals: List[int]) -> List[utils.OAIChatHistory]:
+async def _user_task(uid: int, convs: List[Dict[str,
+                                                Any]], intervals: List[int],
+                     real_uid: str) -> List[utils.OAIChatHistory]:
     rp(f'User {uid}: {len(convs)} conversations in total. '
        f'Duration: {sum(intervals)} seconds')
     time_to_sleep = uid * 10
@@ -119,7 +122,7 @@ async def _user_task(uid: int, convs: List[Dict[str, Any]],
     tasks = []
     for interval, conv in zip(intervals, convs):
         await asyncio.sleep(interval)
-        tasks.append(asyncio.create_task(_multi_turn_conv(uid, conv)))
+        tasks.append(asyncio.create_task(_multi_turn_conv(real_uid, conv)))
     rp(f'User {uid}: All requests ({len(tasks)}) scheduled')
     results = []
     for i, task in enumerate(asyncio.as_completed(tasks)):
@@ -193,5 +196,5 @@ def launch_user_tasks(
             assert interval > 0, interval
             interval /= scale_factor
             intervals.append(interval)
-        tasks.append(_user_task(uid, user_convs, intervals))
+        tasks.append(_user_task(uid, user_convs, intervals, str(args.uid)))
     return tasks

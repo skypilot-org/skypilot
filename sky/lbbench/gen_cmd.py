@@ -311,8 +311,12 @@ def main():
         # Phase 4: Sync results
         f.write('\n# ---------- phase 4: sync results\n')
         f.write('echo "Starting to sync results at $(date)"\n')
-        for s in scps:
-            f.write(f'{s}\n')
+        f.write('# Run scp commands in parallel\n')
+        for i, s in enumerate(scps):
+            f.write(f'{s} & pid_scp_{i}=$!\n')
+        f.write('\n# Wait for all scp commands to complete\n')
+        for i in range(len(scps)):
+            f.write(f'wait $pid_scp_{i}\n')
         f.write('echo "Finished syncing results at $(date)"\n')
 
         # Phase 4: Stop the status puller

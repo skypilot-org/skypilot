@@ -154,6 +154,12 @@ class QueueWithLock(Generic[T]):
             return self._actual_size
 
 
+@dataclasses.dataclass
+class PoolEntry:
+    client: httpx.AsyncClient
+    latency: float
+
+
 class ClientPool:
     """ClientPool: A pool of httpx.AsyncClient for the load balancer.
 
@@ -161,9 +167,11 @@ class ClientPool:
     It also incorporates the load balancing policy to select the replica.
     """
 
-    def __init__(self, load_balancing_policy_name: Optional[str],
+    def __init__(self,
+                 load_balancing_policy_name: Optional[str],
                  max_concurrent_requests: int,
-                 use_ie_queue_indicator: bool) -> None:
+                 use_ie_queue_indicator: bool,
+                 enable_latency_check: bool = False) -> None:
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
         # Use the registry to create the load balancing policy
@@ -178,7 +186,7 @@ class ClientPool:
         # httpx.Client will queue the requests and send them when a
         # connection is available.
         # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # pylint: disable=line-too-long
-        self._pool: Dict[str, httpx.AsyncClient] = dict()
+        self._pool: Dict[str, PoolEntry] = dict()
         # Track current active requests per replica
         self._active_requests: Dict[str, int] = dict()
         self._available_replicas: List[str] = []
@@ -188,6 +196,7 @@ class ClientPool:
         # updating it from _sync_with_controller.
         self._lock: asyncio.Lock = asyncio.Lock()
         self._use_ie_queue_indicator = use_ie_queue_indicator
+        self._enable_latency_check = enable_latency_check
 
     def enable_load_balancing(self) -> None:
         if isinstance(self._load_balancing_policy,
@@ -204,15 +213,25 @@ class ClientPool:
         async with self._lock:
             return copy.copy(self._active_requests)
 
+    async def set_replica_latency(self, url: str) -> None:
+        latency = await serve_utils.check_lb_latency(url)
+        if latency is not None:
+            async with self._lock:
+                self._pool[url].latency = latency
+
     async def refresh_with_new_urls(
             self, ready_urls: List[str]) -> List[asyncio.Task]:
-        close_client_tasks = []
+        tasks = []
         async with self._lock:
             await self._load_balancing_policy.set_ready_replicas(ready_urls)
             for replica_url in ready_urls:
                 if replica_url not in self._pool:
-                    self._pool[replica_url] = httpx.AsyncClient(
-                        base_url=replica_url)
+                    self._pool[replica_url] = PoolEntry(
+                        httpx.AsyncClient(base_url=replica_url), float('inf'))
+                    if self._enable_latency_check:
+                        tasks.append(
+                            asyncio.create_task(
+                                self.set_replica_latency(replica_url)))
                     # Initialize active requests counter for new replicas
                     self._active_requests[replica_url] = 0
                     if replica_url not in self._available_replicas:
@@ -222,10 +241,11 @@ class ClientPool:
                 client = self._pool.pop(replica_url)
                 if replica_url in self._active_requests:
                     del self._active_requests[replica_url]
-                close_client_tasks.append(client.aclose())
+                if client is not None:
+                    tasks.append(asyncio.create_task(client.client.aclose()))
                 if replica_url in self._available_replicas:
                     self._available_replicas.remove(replica_url)
-        return close_client_tasks
+        return tasks
 
     async def select_replica(self, request: fastapi.Request,
                              **kwargs) -> Optional[str]:
@@ -250,7 +270,17 @@ class ClientPool:
 
     async def get_client(self, url: str) -> Optional[httpx.AsyncClient]:
         async with self._lock:
-            return self._pool.get(url, None)
+            entry = self._pool.get(url, None)
+            if entry is None:
+                return None
+            return entry.client
+
+    async def get_latency(self, url: str) -> Optional[float]:
+        async with self._lock:
+            entry = self._pool.get(url, None)
+            if entry is None:
+                return None
+            return entry.latency
 
     def set_replica_available_no_lock(self, url: str) -> None:
         if url not in self._available_replicas:
@@ -354,7 +384,8 @@ class SkyServeLoadBalancer:
                                                     use_ie_queue_indicator)
         self._lb_pool: ClientPool = ClientPool(meta_load_balancing_policy_name,
                                                max_concurrent_requests,
-                                               use_ie_queue_indicator)
+                                               use_ie_queue_indicator,
+                                               enable_latency_check=True)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._workload_steal_session: Optional[aiohttp.ClientSession] = None
         self._ie_queue_probe_session: Optional[aiohttp.ClientSession] = None
@@ -374,12 +405,13 @@ class SkyServeLoadBalancer:
         self._steal_requests_lock: asyncio.Lock = asyncio.Lock()
         self._latest_req_id: int = 0
         self._use_ie_queue_indicator: bool = use_ie_queue_indicator
-        self._steal_targets_cache: Optional[List[str]] = None
+        # self._steal_targets_cache: Optional[List[str]] = None
         self._self_url_cache: Optional[str] = None
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
         self._is_local_debug_mode = is_local_debug_mode
+        self._steal_targets_cnt: int = 0
 
     async def _lbs_with_steal_requests(self) -> List[str]:
         """Return the LBs that have requests to steal."""
@@ -551,9 +583,13 @@ class SkyServeLoadBalancer:
                 headers=headers.raw,
                 content=await entry.request.body(),
                 timeout=constants.LB_STREAM_TIMEOUT)
+            if not is_from_lb:
+                prefix = 'first-hop-'
+            else:
+                prefix = 'second-hop-'
             extra_header = {
-                'sky-time-arrive': str(entry.time_arrive),
-                'sky-time-scheduled': str(entry.time_scheduled),
+                f'{prefix}sky-time-arrive': str(entry.time_arrive),
+                f'{prefix}sky-time-scheduled': str(entry.time_scheduled),
             }
             if not is_from_lb:
                 replica_id = self._replica2id.get(url, 'N/A')
@@ -574,11 +610,13 @@ class SkyServeLoadBalancer:
 
     async def _steal_targets(self) -> Tuple[List[str], Optional[str]]:
         """Return the target LBs to steal from."""
-        if (self._steal_targets_cache is not None and
-                self._self_url_cache is not None):
-            # TODO(tian): This currently does not support update.
-            # Reset the cache to None if the LB is updated.
-            return self._steal_targets_cache, self._self_url_cache
+        # if (self._steal_targets_cache is not None and
+        #         self._self_url_cache is not None):
+        #     # TODO(tian): This currently does not support update.
+        #     # Reset the cache to None if the LB is updated.
+        #     return self._steal_targets_cache, self._self_url_cache
+        self._steal_targets_cnt += 1
+        st = time.perf_counter()
         steal_targets = []
         self_url = None
         all_lb_urls = self._lb_pool.ready_replicas()
@@ -598,7 +636,7 @@ class SkyServeLoadBalancer:
         if not steal_targets:
             return steal_targets, self_url
         latencies_tasks = [
-            serve_utils.check_lb_latency(lb) for lb in steal_targets
+            self._lb_pool.get_latency(lb) for lb in steal_targets
         ]
         latencies = await asyncio.gather(*latencies_tasks)
         if any(lat is None for lat in latencies):
@@ -609,12 +647,16 @@ class SkyServeLoadBalancer:
         ]
         steal_targets_with_latencies.sort(key=lambda x: x[1])
         steal_targets = [target for target, _ in steal_targets_with_latencies]
-        logger.info('Steal targets with latencies: '
-                    f'{steal_targets_with_latencies}, '
-                    f'Steal targets: {steal_targets}, '
-                    f'Self URL: {self_url}, '
-                    f'External Host: {self._external_host}')
-        self._steal_targets_cache = steal_targets
+        if self._steal_targets_cnt % 1000 == 0:
+            elapsed = time.perf_counter() - st
+            # logger.info(f'[{elapsed:.4f}s] ')
+            logger.info(f'[{elapsed:.4f}s] '
+                        'Steal targets with latencies: '
+                        f'{steal_targets_with_latencies}, '
+                        f'Steal targets: {steal_targets}, '
+                        f'Self URL: {self_url}, '
+                        f'External Host: {self._external_host}')
+        # self._steal_targets_cache = steal_targets
         self._self_url_cache = self_url
         return steal_targets, self_url
 
@@ -1276,8 +1318,11 @@ class SkyServeLoadBalancer:
 
     async def _probe_ie_queue(self) -> None:
         """Probe the inference engine queue."""
+        # Initially, immediately probe the inference engine queue.
+        time_take_this_round = float(_IE_QUEUE_PROBE_INTERVAL)
         while True:
-            await asyncio.sleep(_IE_QUEUE_PROBE_INTERVAL)
+            await asyncio.sleep(
+                max(0, _IE_QUEUE_PROBE_INTERVAL - time_take_this_round))
             time_start = time.perf_counter()
             tasks = []
             for replica in self._replica_pool.ready_replicas():
@@ -1305,9 +1350,10 @@ class SkyServeLoadBalancer:
                                         time_start_set_replica)
             logger.debug(f'Probe time: {time_end_probe - time_start}s, '
                          f'Set replica time: {time_elapsed_set_replica}s.')
+            time_take_this_round = time.perf_counter() - time_start
 
-    async def _probe_lb_status_one_lb(self,
-                                      lb: str) -> Tuple[Optional[bool], str]:
+    async def _probe_lb_status_one_lb(
+            self, lb: str, self_qsize: int) -> Tuple[Optional[bool], str]:
         """Probe the status of one load balancer.
 
         Returns: Whether the LB is available, and the LB URL."""
@@ -1319,7 +1365,8 @@ class SkyServeLoadBalancer:
             async with self._lb_pool_probe_session.get(  # pylint: disable=not-async-context-manager
                     lb + '/conf') as response:
                 conf = await response.json()
-                lb_available = (conf['queue_size'] <= 0 and
+                # if its queue size is less than self's, it's available
+                lb_available = (conf['queue_size'] <= self_qsize and
                                 conf['num_available_replicas'] > 0)
                 return lb_available, lb
         except Exception as e:  # pylint: disable=broad-except
@@ -1330,13 +1377,19 @@ class SkyServeLoadBalancer:
 
     async def _probe_lb_status(self) -> None:
         """Probe the status of the load balancer."""
+        assert self._request_queue is not None
+        # Initially, immediately probe the load balancer status.
+        time_take_this_round = float(_IE_QUEUE_PROBE_INTERVAL)
         while True:
-            await asyncio.sleep(_IE_QUEUE_PROBE_INTERVAL)
+            await asyncio.sleep(
+                max(0, _IE_QUEUE_PROBE_INTERVAL - time_take_this_round))
+            st = time.perf_counter()
             # Use this to refresh the self url
             await self._steal_targets()
+            self_qsize = await self._request_queue.qsize()
             tasks = []
             for lb in self._lb_pool.ready_replicas():
-                tasks.append(self._probe_lb_status_one_lb(lb))
+                tasks.append(self._probe_lb_status_one_lb(lb, self_qsize))
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for lb_available, lb in results:
                 if isinstance(lb_available, Exception):
@@ -1350,9 +1403,8 @@ class SkyServeLoadBalancer:
                         await self._lb_pool.set_replica_unavailable(lb)
                     else:
                         await self._lb_pool.set_replica_available(lb)
-            # logger.info(f'{time.time():.4f} Probe lb one round done. '
-            #             f'{self._self_url_cache} '
-            #             f'{await self._lb_pool.available_replicas()}')
+            time_take_this_round = time.perf_counter() - st
+            logger.info(f'Probe lb one round takes {time_take_this_round:.4f}s')
 
     def run(self):
         # Add health check endpoint first so it takes precedence

@@ -43,7 +43,7 @@ async def call_chat_completion_async(
     messages: utils.OAIChatHistory,
     temperature: float,
     max_tokens: int,
-    uid: int,
+    uid: str,
     stop: Optional[List[str]] = None,
     only_return_new_round: bool = False
 ) -> Union[utils.OAIChatHistory, Exception]:
