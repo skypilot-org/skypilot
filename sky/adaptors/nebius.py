@@ -29,11 +29,6 @@ MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
 
 POLL_INTERVAL = 5
 
-_iam_token = None
-_sdk = None
-_tenant_id = None
-_project_id = None
-
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Nebius AI Cloud.'
                          'Try pip install "skypilot[nebius]"')
 
