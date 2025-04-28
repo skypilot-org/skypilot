@@ -1167,12 +1167,12 @@ if __name__ == '__main__':
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    server_config.init(cmd_args.deploy)
-    num_workers = server_config.get().num_server_workers
+    config = server_config.compute_server_config(cmd_args.deploy)
+    num_workers = config.num_server_workers
 
     sub_procs = []
     try:
-        sub_procs = executor.start()
+        sub_procs = executor.start(config)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.

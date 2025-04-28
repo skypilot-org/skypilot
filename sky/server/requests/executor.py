@@ -70,7 +70,6 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
-
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing.
 
@@ -114,6 +113,7 @@ class RequestQueue:
         """Get the length of the queue."""
         return self.queue.qsize()
 
+queue_backend = server_config.QueueBackend.MULTIPROCESSING
 
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
@@ -213,8 +213,7 @@ class RequestWorker:
 
 @annotations.lru_cache(scope='global', maxsize=None)
 def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
-    return RequestQueue(schedule_type,
-                        backend=server_config.get().queue_backend)
+    return RequestQueue(schedule_type, backend=queue_backend)
 
 
 @contextlib.contextmanager
@@ -404,13 +403,13 @@ def schedule_request(
         enqueue()
 
 
-def start() -> List[multiprocessing.Process]:
+def start(config: server_config.ServerConfig) -> List[multiprocessing.Process]:
     """Start the request workers.
 
     Request workers run in background, schedule the requests and delegate the
     request execution to executor processes.
     """
-    config = server_config.get()
+    global queue_backend
     queue_backend = config.queue_backend
     sub_procs = []
     # Setup the queues.

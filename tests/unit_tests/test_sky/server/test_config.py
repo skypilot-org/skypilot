@@ -9,7 +9,7 @@ from sky.server import config
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
 def test_compute_server_config(cpu_count, mem_size_gb):
     # Test deployment mode
-    c = config._compute_server_config(deploy=True)
+    c = config.compute_server_config(deploy=True)
     assert c.num_server_workers == 4
     assert c.long_worker_config.garanteed_parallelism == 8
     assert c.long_worker_config.burstable_parallelism == 0
@@ -18,7 +18,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
     # Test local mode with normal resources
-    c = config._compute_server_config(deploy=False)
+    c = config.compute_server_config(deploy=False)
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 4
     assert c.long_worker_config.burstable_parallelism == 1024
@@ -31,7 +31,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=1)
 def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
     # Test local mode with low resources
-    c = config._compute_server_config(deploy=False)
+    c = config.compute_server_config(deploy=False)
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 0
     assert c.long_worker_config.burstable_parallelism == 1024
@@ -40,7 +40,7 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
     assert c.queue_backend == config.QueueBackend.LOCAL
 
     # Test deploymen mode with low resources
-    c = config._compute_server_config(deploy=True)
+    c = config.compute_server_config(deploy=True)
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 1
     assert c.long_worker_config.burstable_parallelism == 0

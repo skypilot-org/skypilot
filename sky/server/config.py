@@ -2,8 +2,6 @@
 
 import dataclasses
 import enum
-import threading
-from typing import Optional
 
 from sky import sky_logging
 from sky.server import constants as server_constants
@@ -73,34 +71,7 @@ class ServerConfig:
     queue_backend: QueueBackend
 
 
-_config: Optional[ServerConfig] = None
-_lock = threading.Lock()
-
-
-def get() -> ServerConfig:
-    if _config is None:
-        raise RuntimeError('Server config is not initialized')
-    return _config
-
-
-def init(deploy: bool) -> None:
-    """Initialize the server config.
-
-    Separate the config initialization from get() to make sure the deployment
-    mode is immutable during the lifetime of the API server.
-
-    Args:
-        deploy: whether the API server is in deployment mode. Flase indicates
-            the API server is running in local mode.
-    """
-    global _config
-    with _lock:
-        if _config is not None:
-            raise RuntimeError('Multiple calls to init_server_config')
-        _config = _compute_server_config(deploy)
-
-
-def _compute_server_config(deploy: bool) -> ServerConfig:
+def compute_server_config(deploy: bool) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment
