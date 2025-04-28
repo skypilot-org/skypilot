@@ -1840,6 +1840,7 @@ def api_login(endpoint: Optional[str] = None) -> None:
         dashboard_url = server_common.get_dashboard_url(endpoint)
         dashboard_msg = f'Dashboard: {dashboard_url}'
         click.secho(
-            f'Logged in to SkyPilot API server at {endpoint}.'
-            f' {dashboard_msg}',
+            f'Logged in to SkyPilot API server at: {endpoint}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+            f'{dashboard_msg}',
             fg='green')
