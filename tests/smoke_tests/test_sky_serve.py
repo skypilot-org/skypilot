@@ -319,6 +319,7 @@ def test_skyserve_oci_http():
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_hyperstack  # Hyperstack does not support T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
@@ -874,6 +875,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_hyperstack  # Hyperstack does not support spot instances
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""

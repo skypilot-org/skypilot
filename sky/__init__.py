@@ -144,6 +144,7 @@ Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
+Hyperstack = clouds.Hyperstack
 
 __all__ = [
     '__version__',
@@ -163,6 +164,7 @@ __all__ = [
     'Vsphere',
     'Fluidstack',
     'Nebius',
+    'Hyperstack',
     'Optimizer',
     'OptimizeTarget',
     'backends',
