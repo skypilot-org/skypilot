@@ -68,15 +68,15 @@ def is_high_availability_cluster_by_kubectl(
     `kubectl get deployment`.
     """
     try:
-        deployments = kubernetes.apps_api(context).list_namespaced_deployment(
-            namespace,
-            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
+        deployment_list = kubernetes.apps_api(
+            context).list_namespaced_deployment(
+                namespace,
+                label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
     except kubernetes.api_exception():
         return False
-    # Should not use deployments.items here, because we may utilize this
-    # function to terminate the deployment, especially when it's in abnormal
-    # state and has no ready replicas.
-    return bool(deployments)
+    # It is a high availability cluster if there is at least one deployment
+    # matching the label selector.
+    return bool(deployment_list.items)
 
 
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
