@@ -37,7 +37,7 @@ auth:
 
 available_node_types:
   ray_head_default:
-    resources: { }
+    resources: {}
     node_config:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
@@ -47,11 +47,13 @@ available_node_types:
         runcmd:
           - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
           - systemctl restart sshd
-          {# Two available OS images:
+        {%- endif %}
+
+        {# Two available OS images:
                1. ubuntu22.04-driverless - requires Docker installation
                2. ubuntu22.04-cuda12 - comes with Docker pre-installed
             To optimize deployment speed, Docker is only installed when using ubuntu22.04-driverless #}
-          {%- if image_id == 'ubuntu22.04-driverless' %}
+        {%- if docker_image is not none and image_id == 'ubuntu22.04-driverless' %}
         apt:
           sources:
             docker.list:
@@ -82,7 +84,6 @@ available_node_types:
         system_info:
           default_user:
             groups: [docker]
-          {%- endif %}
         {%- endif %}
         users:
           - name: skypilot:ssh_user

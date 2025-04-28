@@ -219,7 +219,7 @@ class Nebius(clouds.Cloud):
 
         if acc_dict is not None:
             # Nebius cloud's docker runtime information does not contain
-            # 'nvidia-container-runtime', causing no GPU option is added to
+            # 'nvidia-container-runtime', causing no GPU option to be added to
             # the docker run command. We patch this by adding it here.
             resources_vars['docker_run_options'] = ['--gpus all']
 
