@@ -2,46 +2,62 @@ name: nccl-test-efa
 
 resources:
   cloud: kubernetes
-  accelerators: A100:1
-  cpus: 64
+  accelerators: A100:8
+  cpus: 90+
   image_id: docker:public.ecr.aws/hpc-cloud/nccl-tests:latest
 
 num_nodes: 2
 
-envs:
-  PATH: $PATH:/usr/local/cuda-12.2/bin:/opt/amazon/efa/bin:/usr/bin
-  LD_LIBRARY_PATH: /usr/local/cuda-12.2/lib64:/opt/amazon/openmpi/lib:/opt/nccl/build/lib:/opt/amazon/efa/lib:/opt/aws-ofi-nccl/install/lib:/usr/local/nvidia/lib:$LD_LIBRARY_PATH
-  NCCL_HOME: /opt/nccl
-  CUDA_HOME: /usr/local/cuda-12.2
-  NCCL_DEBUG: INFO
-  NCCL_BUFFSIZE: 8388608
-  NCCL_P2P_NET_CHUNKSIZE: 524288
-  NCCL_TUNER_PLUGIN: /opt/aws-ofi-nccl/install/lib/libnccl-ofi-tuner.so
-
 run: |
-  /opt/amazon/openmpi/bin/mpirun \
-    --allow-run-as-root \
-    --tag-output \
-    -np 1 \
-    -N 1 \
-    --bind-to none \
-    -x PATH \
-    -x LD_LIBRARY_PATH \
-    -x NCCL_DEBUG=INFO \
-    -x NCCL_BUFFSIZE \
-    -x NCCL_P2P_NET_CHUNKSIZE \
-    -x NCCL_TUNER_PLUGIN \
-    --mca pml ^cm,ucx \
-    --mca btl tcp,self \
-    --mca btl_tcp_if_exclude lo,docker0,veth_def_agent \
-    /opt/nccl-tests/build/all_reduce_perf \
-    -b 8 \
-    -e 8G \
-    -f 1 \
-    -g 1 \
-    -c 10 \
-    -w 5 \
-    -n 100
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Head node"
+
+    SLOTS=8
+    # Append :${SLOTS} to each ip
+    nodes=""
+    for ip in $SKYPILOT_NODE_IPS; do
+      nodes="${nodes}${ip}:${SLOTS},"
+    done
+    nodes=${nodes::-1}
+    echo "All nodes: ${nodes}"
+
+    # Set environment variables
+    export PATH=$PATH:/usr/local/cuda-12.2/bin:/opt/amazon/efa/bin:/usr/bin
+    export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:/opt/amazon/openmpi/lib:/opt/nccl/build/lib:/opt/amazon/efa/lib:/opt/aws-ofi-nccl/install/lib:/usr/local/nvidia/lib:$LD_LIBRARY_PATH
+    export NCCL_HOME=/opt/nccl
+    export CUDA_HOME=/usr/local/cuda-12.2
+    export NCCL_DEBUG=INFO
+    export NCCL_BUFFSIZE=8388608
+    export NCCL_P2P_NET_CHUNKSIZE=524288
+    export NCCL_TUNER_PLUGIN=/opt/aws-ofi-nccl/install/lib/libnccl-ofi-tuner.so
+
+    /opt/amazon/openmpi/bin/mpirun \
+      --allow-run-as-root \
+      --tag-output \
+      -H $nodes \
+      -np 16 \
+      -N 8 \
+      --bind-to none \
+      -x PATH \
+      -x LD_LIBRARY_PATH \
+      -x NCCL_DEBUG=INFO \
+      -x NCCL_BUFFSIZE \
+      -x NCCL_P2P_NET_CHUNKSIZE \
+      -x NCCL_TUNER_PLUGIN \
+      --mca pml ^cm,ucx \
+      --mca btl tcp,self \
+      --mca btl_tcp_if_exclude lo,docker0,veth_def_agent \
+      /opt/nccl-tests/build/all_reduce_perf \
+      -b 8 \
+      -e 2G \
+      -f 2 \
+      -g 1 \
+      -c 5 \
+      -w 5 \
+      -n 100
+  else
+    echo "worker nodes"
+  fi
 
 config:
   kubernetes:
@@ -50,6 +66,8 @@ config:
         containers:
         - resources:
             limits:
-              vpc.amazonaws.com/efa: 2
+              vpc.amazonaws.com/efa: 4
+              nvidia.com/gpu: 8
             requests:
-              vpc.amazonaws.com/efa: 2
+              vpc.amazonaws.com/efa: 4
+              nvidia.com/gpu: 8
