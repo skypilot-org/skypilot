@@ -259,7 +259,7 @@ def _terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     instances = _filter_instances(cluster_name_on_cloud)
-    exceptions = []
+    ex_map = {}
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
@@ -268,38 +268,34 @@ def _terminate_instances(
             utils.HyperstackClient().delete(inst_id)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Terminating instance {inst_id} failed: {e}.')
-            exceptions.append(e)
+            ex_map[inst_id] = e
 
-    for e in exceptions:
-        if "Please wait until the creation process is finished" not in str(e):
-            # Reason: RuntimeError: Failed to terminate instance 238144: sky.provision.hyperstack.hyperstack_utils.HyperstackAPIError:
-            # VM t-cancel-launch-a-d3-d2-cca4b597-head is currently being created and cannot be deleted yet.
-            # Please wait until the creation process is finished before attempting deletion..
+    for inst_id, ex in ex_map.items():
+        if 'Please wait until the creation process is finished' not in str(ex):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
-                    f'{common_utils.format_exception(e, use_bracket=False)}'
-                ) from e
+                    f'{common_utils.format_exception(ex, use_bracket=False)}'
+                ) from ex
 
-    if len(exceptions) > 0:
+    if len(ex_map) > 0:
+        inst_id, ex = list(ex_map.items())[0]
         if retry_count <= TERMINATE_RETRY_COUNT:
-            logger.debug(
-                f'Waiting to retry ({retry_count}) '
-                f'to terminate instance {inst_id}.'
-            )
+            logger.debug(f'Waiting to retry ({retry_count}) '
+                         f'to terminate instance {inst_id}.')
             time.sleep(TERMINATE_RETRY_INTERVAL)
             _terminate_instances(
                 cluster_name_on_cloud=cluster_name_on_cloud,
                 worker_only=worker_only,
-                retry_count=retry_count+1,
+                retry_count=retry_count + 1,
             )
         else:
             logger.debug(f'Failed to terminate instance {inst_id}')
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
-                    f'{common_utils.format_exception(e, use_bracket=False)}'
-                ) from e
+                    f'{common_utils.format_exception(ex, use_bracket=False)}'
+                ) from ex
 
 
 def terminate_instances(
