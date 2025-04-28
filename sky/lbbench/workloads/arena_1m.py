@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import collections
-import os
 import random
 import time
 from typing import Any, Awaitable, Dict, List
@@ -35,7 +34,7 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
 
 def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
     tic = time.time()
-    chunk_data = datasets.load_dataset(DATASET_NAME, split='train'+'[:50000]')
+    chunk_data = datasets.load_dataset(DATASET_NAME, split='train' + '[:50000]')
     multi_turn_data = []
     for d in chunk_data:
         if d['turn'] > 1:
@@ -51,7 +50,10 @@ def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
     print(f'Got {len(multi_turn_data)} multi-turn conversations '
           f'(took {time.time() - tic:.2f}s)')
     return multi_turn_data
+
+
 _load_dataset(1)
+
 
 async def _multi_turn_conv(duration: int, tic: float, uid: str,
                            conv: Dict[str, Any]) -> List[utils.OAIChatHistory]:

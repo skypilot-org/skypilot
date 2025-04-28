@@ -17,23 +17,28 @@ describes = [
     'sky_push_pull',
     'sky_push_push',
     'sky_pull_pull_rate_limit',
+    # 'sky_pull_pull_small',
+    'sky_pull_pull_small_3',
 ]
 presents = [
     'Baseline',
     'Baseline\\n[Pull]',
-    'Ours\\n[Pull/Stealing+Pull]',
+    'Ours\\n[Pull/Steal+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
     'Ours\\n[Pull/RateLimit+Pull]',
+    # 'Ours\\n[Pull/StealSmall+Pull]',
+    'Ours\\n[Pull/StealSmall3+Pull]',
 ]
 
 enabled_systems = [
-    0,  # sgl router
-    1,  # sgl router enhanced
-    2,  # sky pulling in lb, pulling in replica, but workload stealing
-    3,  # sky pushing in lb, pulling in replica
-    4,  # sky pushing in lb, pushing in replica
-    5,  # sky pulling in lb, pulling in replica, but rate limit
+    # 0,  # sgl router
+    # 1,  # sgl router enhanced
+    # 2,  # sky pulling in lb, pulling in replica, but workload stealing
+    # 3,  # sky pushing in lb, pulling in replica
+    # 4,  # sky pushing in lb, pushing in replica
+    # 5,  # sky pulling in lb, pulling in replica, but rate limit
+    6,  # sky pulling in lb, pulling in replica, but steal small #requests
 ]
 
 describes = [describes[i] for i in enabled_systems]
