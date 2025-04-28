@@ -493,15 +493,15 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     # Determine the job capacity of the workers based on the system resources.
     cpu_count = common_utils.get_cpu_count()
     mem_size_gb = common_utils.get_mem_size_gb()
-    mem_size_gb = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
+    mem_for_workers = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
     # Runs in low resource mode if the available memory is less than
     # server_constants.MIN_AVAIL_MEM_GB.
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
-                                                       mem_size_gb,
+                                                       mem_for_workers,
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
-        mem_size_gb, max_parallel_for_long)
-    if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
+        mem_for_workers, max_parallel_for_long)
+    if not deploy and mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
         # Permanent worker process may have significant memory consumption
         # (~350MB per worker) after running commands like `sky check`, so we
         # don't start any permanent workers in low resource local mode. This
