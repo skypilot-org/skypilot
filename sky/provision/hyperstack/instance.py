@@ -12,6 +12,8 @@ from sky.utils import ux_utils
 from sky.utils.status_lib import ClusterStatus
 
 POLL_INTERVAL = 5
+TERMINATE_RETRY_INTERVAL = 10
+TERMINATE_RETRY_COUNT = 18
 
 logger = sky_logging.init_logger(__name__)
 
@@ -250,14 +252,14 @@ def stop_instances(
         utils.HyperstackClient().stop(inst_id)
 
 
-def terminate_instances(
+def _terminate_instances(
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
+    retry_count: int = 1,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud)
+    exceptions = []
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
@@ -265,11 +267,52 @@ def terminate_instances(
         try:
             utils.HyperstackClient().delete(inst_id)
         except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Terminating instance {inst_id} failed: {e}.')
+            exceptions.append(e)
+
+    for e in exceptions:
+        if "Please wait until the creation process is finished" not in str(e):
+            # Reason: RuntimeError: Failed to terminate instance 238144: sky.provision.hyperstack.hyperstack_utils.HyperstackAPIError:
+            # VM t-cancel-launch-a-d3-d2-cca4b597-head is currently being created and cannot be deleted yet.
+            # Please wait until the creation process is finished before attempting deletion..
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
+
+    if len(exceptions) > 0:
+        if retry_count <= TERMINATE_RETRY_COUNT:
+            logger.debug(
+                f'Waiting to retry ({retry_count}) '
+                f'to terminate instance {inst_id}.'
+            )
+            time.sleep(TERMINATE_RETRY_INTERVAL)
+            _terminate_instances(
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                worker_only=worker_only,
+                retry_count=retry_count+1,
+            )
+        else:
+            logger.debug(f'Failed to terminate instance {inst_id}')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to terminate instance {inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}'
+                ) from e
+
+
+def terminate_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    del provider_config  # unused
+    _terminate_instances(
+        cluster_name_on_cloud=cluster_name_on_cloud,
+        worker_only=worker_only,
+    )
 
 
 def get_cluster_info(
