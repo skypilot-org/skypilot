@@ -3057,3 +3057,34 @@ def _get_kubeconfig_path() -> str:
                          'config file path with $KUBECONFIG. Current '
                          f'path(s) are {kubeconfig_path}.')
     return kubeconfig_path
+
+
+def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str) -> bool:
+    """Strip path information from exec plugin commands in a kubeconfig file.
+    Will create a new kubeconfig file under <output_path> regardless of
+    whether a change has been made
+    Args:
+        kubeconfig_path (str): Path to the input kubeconfig file
+        output_path (str): Path where the potentially modified kubeconfig file
+          will be saved
+    Returns: whether config was updated, for logging purposes
+    """
+    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+
+    updated = False
+    for user in config.get('users', []):
+        exec_info = user.get('user', {}).get('exec', {})
+        current_command = exec_info.get('command', '')
+
+        if current_command:
+            # Strip the path and keep only the executable name
+            executable = os.path.basename(current_command)
+            if executable != current_command:
+                exec_info['command'] = executable
+                updated = True
+
+    with open(output_path, 'w', encoding='utf-8') as file:
+        yaml.safe_dump(config, file)
+
+    return updated
