@@ -50,10 +50,11 @@ Running the following command for 4 times.
 
 - `svc1`: SGLang Router
 - `svc2`: SGLang Router [Pull]
-- `svc3`: LB Pull + Replica Pull
-- `svc4`: LB Push + Replica Pull
-- `svc5`: LB Push + Replica Push
-- `svc6`: LB Pull + Replica Pull, but Pull by rate limiting instead of stealing
+- `svc3`: LB Pull (V1 stealing) + Replica Pull
+- `svc4`: LB Pull (V2 stealing) + Replica Pull
+- `svc5`: LB Push + Replica Pull
+- `svc6`: LB Push + Replica Push
+- `svc7`: LB Pull + Replica Pull, but Pull by selective pushing instead of stealing
 - There is no LB Pull + Replica Push since no request will left in replica. Hence no request left in LB to pull.
 
 You can launch all of them at once by:
