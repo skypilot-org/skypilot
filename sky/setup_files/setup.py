@@ -161,7 +161,7 @@ setuptools.setup(
     author='SkyPilot Team',
     license='Apache 2.0',
     readme='README.md',
-    description='SkyPilot: An intercloud broker for the clouds',
+    description='SkyPilot: Run AI on Any Infra — Unified, Faster, Cheaper.',
     long_description=long_description,
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
