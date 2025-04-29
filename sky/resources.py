@@ -1707,7 +1707,7 @@ class Resources:
             # multiple contexts, we now set the region to the context name.
             # Since we do not have information on which context the cluster
             # was run in, we default it to the current active context.
-            legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
+            legacy_region = 'kubernetes'
             original_cloud = state.get('_cloud', None)
             original_region = state.get('_region', None)
             if (isinstance(original_cloud, clouds.Kubernetes) and
