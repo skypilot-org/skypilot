@@ -387,11 +387,12 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 1
+    _VERSION = 2
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
                  is_spot: bool, location: Optional[spot_placer.Location],
-                 version: int) -> None:
+                 version: int, resources_override: Optional[Dict[str,
+                                                                 Any]]) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
@@ -403,6 +404,7 @@ class ReplicaInfo:
         self.is_spot: bool = is_spot
         self.location: Optional[Dict[str, Optional[str]]] = (
             location.to_pickleable() if location is not None else None)
+        self.resources_override: Optional[Dict[str, Any]] = resources_override
 
     def get_spot_location(self) -> Optional[spot_placer.Location]:
         return spot_placer.Location.from_pickleable(self.location)
@@ -569,6 +571,9 @@ class ReplicaInfo:
         if version < 1:
             self.location = None
 
+        if version < 2:
+            self.resources_override = None
+
         self.__dict__.update(state)
 
 
@@ -650,6 +655,44 @@ class SkyPilotReplicaManager(ReplicaManager):
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
 
+        self._recover_replica_operations()
+
+    def _recover_replica_operations(self):
+        """Let's see are there something to do for ReplicaManager in a
+        recovery run"""
+        assert (not self._launch_process_pool and not self._down_process_pool
+               ), 'We should not have any running processes in a recovery run'
+
+        # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
+        # _launch_replica.
+        # We prioritize PROVISIONING replicas since they were previously
+        # launched but may have been interrupted and need to be restarted.
+        # This is why we process PENDING replicas only after PROVISIONING
+        # replicas.
+        to_up_replicas = serve_state.get_replicas_at_status(
+            self._service_name, serve_state.ReplicaStatus.PROVISIONING)
+        to_up_replicas.extend(
+            serve_state.get_replicas_at_status(
+                self._service_name, serve_state.ReplicaStatus.PENDING))
+
+        for replica_info in to_up_replicas:
+            # It should be robust enough for `execution.launch` to handle cases
+            # where the provisioning is partially done.
+            # So we mock the original request based on all call sites,
+            # including SkyServeController._run_autoscaler.
+            self._launch_replica(
+                replica_info.replica_id,
+                resources_override=replica_info.resources_override)
+
+        for replica_info in serve_state.get_replicas_at_status(
+                self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
+            self._terminate_replica(
+                replica_info.replica_id,
+                sync_down_logs=False,
+                replica_drain_delay_seconds=0,
+                purge=replica_info.status_property.purged,
+                is_scale_down=replica_info.status_property.is_scale_down)
+
     ################################
     # Replica management functions #
     ################################
@@ -705,7 +748,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           location, self.latest_version)
+                           location, self.latest_version, resources_override)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -884,7 +927,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         the fly. If any of them finished, it will update the status of the
         corresponding replica.
         """
-        for replica_id, p in list(self._launch_process_pool.items()):
+        # To avoid `dictionary changed size during iteration` error.
+        launch_process_pool_snapshot = list(self._launch_process_pool.items())
+        for replica_id, p in launch_process_pool_snapshot:
             if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
@@ -943,7 +988,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-        for replica_id, p in list(self._down_process_pool.items()):
+        down_process_pool_snapshot = list(self._down_process_pool.items())
+        for replica_id, p in down_process_pool_snapshot:
             if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')

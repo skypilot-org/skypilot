@@ -70,13 +70,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 f'Cluster {cluster_name_on_cloud} has no head node.')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
                     f'{len(exist_instances)} nodes, no need to start more.')
-        return common.ProvisionRecord(provider_name='runpod',
-                                      cluster_name=cluster_name_on_cloud,
-                                      region=region,
-                                      zone=None,
-                                      head_instance_id=head_instance_id,
-                                      resumed_instance_ids=[],
-                                      created_instance_ids=[])
+        return common.ProvisionRecord(
+            provider_name='runpod',
+            cluster_name=cluster_name_on_cloud,
+            region=region,
+            zone=config.provider_config['availability_zone'],
+            head_instance_id=head_instance_id,
+            resumed_instance_ids=[],
+            created_instance_ids=[])
 
     created_instance_ids = []
     for _ in range(to_start_count):
@@ -87,6 +88,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 node_type=node_type,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
+                zone=config.provider_config['availability_zone'],
                 disk_size=config.node_config['DiskSize'],
                 image_name=config.node_config['ImageId'],
                 ports=config.ports_to_open_on_launch,
@@ -118,13 +120,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
         time.sleep(POLL_INTERVAL)
     assert head_instance_id is not None, 'head_instance_id should not be None'
-    return common.ProvisionRecord(provider_name='runpod',
-                                  cluster_name=cluster_name_on_cloud,
-                                  region=region,
-                                  zone=None,
-                                  head_instance_id=head_instance_id,
-                                  resumed_instance_ids=[],
-                                  created_instance_ids=created_instance_ids)
+    return common.ProvisionRecord(
+        provider_name='runpod',
+        cluster_name=cluster_name_on_cloud,
+        region=region,
+        zone=config.provider_config['availability_zone'],
+        head_instance_id=head_instance_id,
+        resumed_instance_ids=[],
+        created_instance_ids=created_instance_ids)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,

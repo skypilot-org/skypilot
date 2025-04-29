@@ -301,7 +301,7 @@ def validate(
 def dashboard() -> None:
     """Starts the dashboard for SkyPilot."""
     api_server_url = server_common.get_server_url()
-    url = f'{api_server_url}/dashboard'
+    url = server_common.get_dashboard_url(api_server_url)
     logger.info(f'Opening dashboard in browser: {url}')
     webbrowser.open(url)
 
@@ -1725,9 +1725,11 @@ def api_start(
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
-    dashboard_msg = f'Dashboard: {server_common.get_server_url(host)}/dashboard'
+    api_server_url = server_common.get_server_url(host)
+    dashboard_url = server_common.get_dashboard_url(api_server_url)
+    dashboard_msg = f'Dashboard: {dashboard_url}'
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{server_common.get_server_url(host)} {dashboard_msg}\n'
+                f'{api_server_url} {dashboard_msg}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 
@@ -1835,8 +1837,10 @@ def api_login(endpoint: Optional[str] = None) -> None:
             config = skypilot_config.get_user_config()
             config.set_nested(('api_server', 'endpoint'), endpoint)
         common_utils.dump_yaml(str(config_path), dict(config))
-        dashboard_msg = f'Dashboard: {endpoint}/dashboard'
+        dashboard_url = server_common.get_dashboard_url(endpoint)
+        dashboard_msg = f'Dashboard: {dashboard_url}'
         click.secho(
-            f'Logged in to SkyPilot API server at {endpoint}.'
-            f' {dashboard_msg}',
+            f'Logged into SkyPilot API server at: {endpoint}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+            f'{dashboard_msg}',
             fg='green')
