@@ -5,7 +5,7 @@ SkyPilot API Server Helm Chart Values
 
 The SkyPilot API server helm chart provides typical `helm values <https://helm.sh/docs/chart_template_guide/values_files/>`_ as configuration entries. Configuration values can be passed in two ways when installing the chart:
 
-* ``--values`` (or ``-f``): Specify a YAML file with overrides. This can be specified multiple times and the rightmost file will take precedence;
+* ``--values`` (or ``-f``): Specify a YAML file with overrides.
 
   .. code-block:: bash
 
