@@ -141,17 +141,28 @@ def get_instance_status(self, instance_id: str) -> str:
                 'Failed to get instance status.') from e
 
 
-def terminate_instances(self, instance_ids: List[str]) -> None:
-    """Terminate specified instances."""
-    try:
-        for instance_id in instance_ids:
-            client.delete_instance(instance_id)
-    except Exception as e:
-        if hasattr(e, 'detail'):
-            raise exceptions.ResourcesUnavailableError(e.detail) from e
-        raise exceptions.ResourcesUnavailableError(
-            'Failed to terminate instances.') from e
-
+def terminate_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """Terminate specified instances for SimplePod."""
+    del provider_config  # unused
+    instances = _filter_instances(cluster_name_on_cloud, None, head_only=False)
+    print(f'Found {len(instances)} instances to terminate.')
+    for inst_id, inst in instances.items():
+        logger.debug(f'Terminating instance {inst_id}: {inst}')
+        if worker_only and inst['name'].endswith('_head'):
+            continue
+        try:
+            client.delete_instance(inst_id)
+            logger.info(f'Terminated instance {inst_id}')
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to terminate instance {inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}'
+                ) from e
 
 def query_instances(
     cluster_name_on_cloud: str,
