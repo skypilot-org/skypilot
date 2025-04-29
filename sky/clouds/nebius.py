@@ -1,5 +1,4 @@
 """ Nebius Cloud. """
-import logging
 import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
@@ -7,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import clouds
 from sky.adaptors import nebius
 from sky.clouds import service_catalog
+from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -277,16 +277,16 @@ class Nebius(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
+    @annotations.lru_cache(scope='request')
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
-        logging.debug('Nebius cloud check credentials')
         token_cred_msg = (
             f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
             f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX} or generate  ~/.nebius/credentials.json')
+            f'{_INDENT_PREFIX} or generate  ~/.nebius/credentials.json \n')
 
-        tenant_msg = (f'{_INDENT_PREFIX}Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
@@ -303,11 +303,12 @@ class Nebius(clouds.Cloud):
         except nebius.request_error() as e:
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
-                f'{token_cred_msg}'
+                f'{token_cred_msg} \n'
                 f'{tenant_msg}')
         return True, None
 
     @classmethod
+    @annotations.lru_cache(scope='request')
     def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to Nebius Object Storage.
 
