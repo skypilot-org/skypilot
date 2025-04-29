@@ -6,6 +6,6 @@ resources:
   cpus: 2+
   ports: 9001
 
-setup: pip install sglang-router
+setup: pip install sglang-router==0.1.4
 
 run: python -m sglang_router.launch_router --host 0.0.0.0 --port 9001 --worker-urls $WORKER_URLS

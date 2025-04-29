@@ -10,7 +10,7 @@ service:
     # Don't use /v1/chat/completions as that will be
     # queued and it is possible to fail for timeout.
     path: /v1/models
-  replicas: 4
+  replicas: 8
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
