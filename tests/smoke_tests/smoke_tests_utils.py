@@ -1,3 +1,4 @@
+from collections import defaultdict
 import contextlib
 import enum
 import inspect
@@ -378,28 +379,41 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    # Create a temporary config file with API server config only if running with remote server
+    override_sky_config = defaultdict(dict)
+
     if is_remote_server_test():
-        temp_config = tempfile.NamedTemporaryFile(mode='w',
-                                                  suffix='.yaml',
-                                                  delete=False)
+        override_sky_config['api_server'] = {
+            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
+        }
+        test.echo(
+            f'Overriding API server endpoint: {override_sky_config["api_server"]["endpoint"]}'
+        )
+
+    if pytest_controller_cloud():
+        override_sky_config['jobs']['controller']['resources'][
+            'cloud'] = pytest_controller_cloud()
+        test.echo(
+            f'Overriding controller cloud: {override_sky_config["jobs"]["controller"]["resources"]["cloud"]}'
+        )
+
+    temp_config_file: Optional[tempfile.NamedTemporaryFile] = None
+    if override_sky_config:
+        temp_config_file = tempfile.NamedTemporaryFile(mode='w',
+                                                       suffix='.yaml',
+                                                       delete=False)
         if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
             # Read the original config
             with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG],
                       'r') as f:
-                config = yaml.safe_load(f)
+                original_config = yaml.safe_load(f)
         else:
-            config = {}
-        config['api_server'] = {
-            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
-        }
-        test.echo(
-            f'Overriding API server endpoint: {config["api_server"]["endpoint"]}'
-        )
-        yaml.dump(config, temp_config)
-        temp_config.close()
+            original_config = {}
+        original_config.update(override_sky_config)
+        yaml.dump(original_config, temp_config_file)
+        temp_config_file.close()
         # Update the environment variable to use the temporary file
-        env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
+        env_dict[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
 
     for command in test.commands:
         write(f'+ {command}\n')
@@ -452,6 +466,9 @@ def run_one_test(test: Test) -> None:
             shell=True,
             env=env_dict,
         )
+
+    if temp_config_file is not None:
+        os.unlink(temp_config_file.name)
 
     if proc.returncode:
         if log_to_stdout:
@@ -661,6 +678,16 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 def is_remote_server_test() -> bool:
     return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+
+
+def pytest_controller_cloud() -> Optional[str]:
+    return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def override_env_config(config: Dict[str, str]):
+    """Override the environment variable for the test."""
+    for key, value in config.items():
+        os.environ[key] = value
 
 
 def get_api_server_url() -> str:
