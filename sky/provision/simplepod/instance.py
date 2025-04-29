@@ -149,7 +149,6 @@ def terminate_instances(
     """Terminate specified instances for SimplePod."""
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None, head_only=False)
-    print(f'Found {len(instances)} instances to terminate.')
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('_head'):
