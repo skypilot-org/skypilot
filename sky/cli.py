@@ -3466,12 +3466,12 @@ def show_gpus(
                     available_qty,
                 ])
                 gpu = gpu_availability.gpu
-                cap = gpu_availability.capacity
+                capacity = gpu_availability.capacity
                 # we want total, so skip permission denied.
-                avl = max(gpu_availability.available, 0)
-                if cap > 0:
-                    total_gpu_info[gpu][0] += cap
-                    total_gpu_info[gpu][1] += avl
+                available = max(gpu_availability.available, 0)
+                if capacity > 0:
+                    total_gpu_info[gpu][0] += capacity
+                    total_gpu_info[gpu][1] += available
             realtime_gpu_infos.append((ctx, realtime_gpu_table))
 
         if len(realtime_gpu_infos) > 1:

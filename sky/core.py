@@ -1035,7 +1035,7 @@ def realtime_kubernetes_gpu_availability(
             available.keys())), (f'Keys of counts ({list(counts.keys())}), '
                                  f'capacity ({list(capacity.keys())}), '
                                  f'and available ({list(available.keys())}) '
-                                 'must be same.')
+                                 'must be the same.')
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 

@@ -264,7 +264,7 @@ def _list_accelerators(
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
-                    if quantized_availability != 0:
+                    if quantized_availability > 0:
                         # only increment when quantized availability is positive
                         # to avoid assertion errors checking keyset sizes in
                         # core.py _realtime_kubernetes_gpu_availability_single
