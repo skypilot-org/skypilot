@@ -356,6 +356,7 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
             f' --quiet $({query_cmd})')
 
 
+@contextlib.contextmanager
 def override_sky_config(
     test: Test, env_dict: Dict[str, str]
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
