@@ -454,7 +454,7 @@ class Kubernetes(clouds.Cloud):
             self.IMAGE_CPU, clouds='kubernetes')
 
         k8s_acc_label_key = None
-        k8s_acc_label_value = None
+        k8s_acc_label_values = None
         k8s_topology_label_key = None
         k8s_topology_label_value = None
         k8s_resource_key = None
@@ -462,9 +462,9 @@ class Kubernetes(clouds.Cloud):
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
         if acc_count > 0 and acc_type is not None:
-            (k8s_acc_label_key, k8s_acc_label_value, k8s_topology_label_key,
+            (k8s_acc_label_key, k8s_acc_label_values, k8s_topology_label_key,
              k8s_topology_label_value) = (
-                 kubernetes_utils.get_accelerator_label_key_value(
+                 kubernetes_utils.get_accelerator_label_key_values(
                      context, acc_type, acc_count))
             if (k8s_acc_label_key ==
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
@@ -562,7 +562,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
-            'k8s_acc_label_value': k8s_acc_label_value,
+            'k8s_acc_label_values': k8s_acc_label_values,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
