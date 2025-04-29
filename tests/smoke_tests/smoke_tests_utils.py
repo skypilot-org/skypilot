@@ -414,7 +414,7 @@ def override_sky_config(
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
     yield temp_config_file
-    temp_config_file.unlink()
+    os.unlink(temp_config_file.name)
 
 
 def run_one_test(test: Test) -> None:
