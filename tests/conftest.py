@@ -453,5 +453,6 @@ def setup_controller_cloud_env(request):
         return
 
     # Set environment variable to indicate we're using remote server
-    os.environ['PYTEST_SKYPILOT_CONTROLLER_CLOUD'] = request.config.getoption(
-        '--controller-cloud')
+    controller_cloud = request.config.getoption('--controller-cloud')
+    os.environ['PYTEST_SKYPILOT_CONTROLLER_CLOUD'] = controller_cloud
+    yield controller_cloud

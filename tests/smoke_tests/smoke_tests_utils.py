@@ -9,7 +9,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import (Any, cast, Dict, Generator, List, NamedTuple, Optional,
+                    Sequence, Set, Tuple, TypeVar)
 import uuid
 
 import colorama
@@ -356,6 +357,67 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
             f' --quiet $({query_cmd})')
 
 
+@contextlib.contextmanager
+def override_sky_config(
+    test: Test, env_dict: Dict[str, str]
+) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+
+    def deep_update(base_dict: Dict[str, Any],
+                    update_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively update a dictionary with another dictionary.
+        """
+        for key, value in update_dict.items():
+            if isinstance(value, dict) and key in base_dict and isinstance(
+                    base_dict[key], dict):
+                deep_update(base_dict[key], value)
+            else:
+                base_dict[key] = value
+        return base_dict
+
+    override_sky_config_dict = dict()
+    if is_remote_server_test():
+        override_sky_config_dict['api_server'] = {
+            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
+        }
+        test.echo(
+            f'Overriding API server endpoint: {override_sky_config_dict["api_server"]["endpoint"]}'
+        )
+
+    if pytest_controller_cloud():
+        override_sky_config_dict['jobs'] = {
+            'controller': {
+                'resources': {
+                    'cloud': pytest_controller_cloud()
+                }
+            }
+        }
+        test.echo(
+            f'Overriding controller cloud: {override_sky_config_dict["jobs"]["controller"]["resources"]["cloud"]}'
+        )
+
+    if not override_sky_config_dict:
+        yield None
+        return
+
+    temp_config_file = tempfile.NamedTemporaryFile(mode='w',
+                                                   suffix='.yaml',
+                                                   delete=False)
+    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+        # Read the original config
+        with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG], 'r') as f:
+            original_config = yaml.safe_load(f)
+    else:
+        original_config = {}
+    original_config = deep_update(original_config, override_sky_config_dict)
+    yaml.dump(original_config, temp_config_file)
+    temp_config_file.close()
+    # Update the environment variable to use the temporary file
+    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+    yield temp_config_file
+    temp_config_file.unlink()
+
+
 def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
@@ -379,68 +441,33 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    override_sky_config = defaultdict(dict)
-
-    if is_remote_server_test():
-        override_sky_config['api_server'] = {
-            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
-        }
-        test.echo(
-            f'Overriding API server endpoint: {override_sky_config["api_server"]["endpoint"]}'
-        )
-
-    if pytest_controller_cloud():
-        override_sky_config['jobs']['controller']['resources'][
-            'cloud'] = pytest_controller_cloud()
-        test.echo(
-            f'Overriding controller cloud: {override_sky_config["jobs"]["controller"]["resources"]["cloud"]}'
-        )
-
-    temp_config_file: Optional[tempfile.NamedTemporaryFile] = None
-    if override_sky_config:
-        temp_config_file = tempfile.NamedTemporaryFile(mode='w',
-                                                       suffix='.yaml',
-                                                       delete=False)
-        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
-            # Read the original config
-            with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG],
-                      'r') as f:
-                original_config = yaml.safe_load(f)
-        else:
-            original_config = {}
-        original_config.update(override_sky_config)
-        yaml.dump(original_config, temp_config_file)
-        temp_config_file.close()
-        # Update the environment variable to use the temporary file
-        env_dict[
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
-
-    for command in test.commands:
-        write(f'+ {command}\n')
-        flush()
-        proc = subprocess.Popen(
-            command,
-            stdout=subprocess_out,
-            stderr=subprocess.STDOUT,
-            shell=True,
-            executable='/bin/bash',
-            env=env_dict,
-        )
-        try:
-            proc.wait(timeout=test.timeout)
-        except subprocess.TimeoutExpired as e:
+    with override_sky_config(test, env_dict) as temp_config_file:
+        for command in test.commands:
+            write(f'+ {command}\n')
             flush()
-            test.echo(f'Timeout after {test.timeout} seconds.')
-            test.echo(str(e))
-            write(f'Timeout after {test.timeout} seconds.\n')
-            flush()
-            # Kill the current process.
-            proc.terminate()
-            proc.returncode = 1  # None if we don't set it.
-            break
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                executable='/bin/bash',
+                env=env_dict,
+            )
+            try:
+                proc.wait(timeout=test.timeout)
+            except subprocess.TimeoutExpired as e:
+                flush()
+                test.echo(f'Timeout after {test.timeout} seconds.')
+                test.echo(str(e))
+                write(f'Timeout after {test.timeout} seconds.\n')
+                flush()
+                # Kill the current process.
+                proc.terminate()
+                proc.returncode = 1  # None if we don't set it.
+                break
 
-        if proc.returncode:
-            break
+            if proc.returncode:
+                break
 
     style = colorama.Style
     fore = colorama.Fore
