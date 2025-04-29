@@ -10,6 +10,27 @@ provider:
   module: sky.provision.nebius
   region: "{{region}}"
 
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
+{%- endif %}
+
+
 auth:
   ssh_user: ubuntu
   ssh_private_key: {{ssh_private_key}}
@@ -22,6 +43,48 @@ available_node_types:
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
       UserData: |
+        {%- if docker_image is not none %}
+        runcmd:
+          - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
+          - systemctl restart sshd
+        {%- endif %}
+
+        {# Two available OS images:
+               1. ubuntu22.04-driverless - requires Docker installation
+               2. ubuntu22.04-cuda12 - comes with Docker pre-installed
+            To optimize deployment speed, Docker is only installed when using ubuntu22.04-driverless #}
+        {%- if docker_image is not none and image_id == 'ubuntu22.04-driverless' %}
+        apt:
+          sources:
+            docker.list:
+              source: deb [arch=amd64] https://download.docker.com/linux/ubuntu $RELEASE stable
+              keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+        packages:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+
+        # Enable ipv4 forwarding, required on CIS hardened machines
+        write_files:
+          - path: /etc/sysctl.d/enabled_ipv4_forwarding.conf
+            content: |
+              net.ipv4.conf.all.forwarding=1
+
+        # create the docker group
+        groups:
+          - docker
+
+        # Add default auto created user to docker group
+        system_info:
+          default_user:
+            groups: [docker]
+        {%- endif %}
         users:
           - name: skypilot:ssh_user
             shell: /bin/bash
