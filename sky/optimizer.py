@@ -277,6 +277,8 @@ class Optimizer:
                     launchable_resources_list)
             return num_available_reserved_nodes_per_resource
 
+        indent_prefix = ' ' * len('Hint: ')
+
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
@@ -396,9 +398,8 @@ class Optimizer:
                     for resource, hint_list in resource_hints.items()
                     if hint_list
                 ])
-                indent_prefix = ' ' * len('Hint: ')
                 hints_formatted = '\n'.join(
-                    map(lambda r: f'{indent_prefix}{r}', 
+                    map(lambda r: f'{indent_prefix}{r}',
                         hints_concat.split('\n')))
                 resource_hints_string = (
                     f'Hint: Check Per Resource Hint\n{hints_formatted}'
