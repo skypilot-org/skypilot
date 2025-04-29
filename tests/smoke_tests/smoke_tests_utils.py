@@ -356,7 +356,6 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
             f' --quiet $({query_cmd})')
 
 
-@contextlib.contextmanager
 def override_sky_config(
     test: Test, env_dict: Dict[str, str]
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
@@ -399,9 +398,7 @@ def override_sky_config(
         yield None
         return
 
-    temp_config_file = tempfile.NamedTemporaryFile(mode='w',
-                                                   suffix='.yaml',
-                                                   delete=False)
+    temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
     if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
         # Read the original config
         with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG], 'r') as f:
@@ -410,7 +407,7 @@ def override_sky_config(
         original_config = {}
     original_config = deep_update(original_config, override_sky_config_dict)
     yaml.dump(original_config, temp_config_file)
-    temp_config_file.close()
+    temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
     yield temp_config_file
@@ -439,7 +436,7 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict) as temp_config_file:
+    with override_sky_config(test, env_dict):
         for command in test.commands:
             write(f'+ {command}\n')
             flush()
@@ -467,39 +464,37 @@ def run_one_test(test: Test) -> None:
             if proc.returncode:
                 break
 
-    style = colorama.Style
-    fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command}' if proc.returncode else ''
-    msg = (f'{outcome}.'
-           f'{reason}')
-    if log_to_stdout:
-        test.echo(msg)
-    else:
-        msg += f'\nLog: less -r {log_file.name}\n'
-        test.echo(msg)
-        write(msg)
-
-    if (proc.returncode == 0 or
-            pytest.terminate_on_failure) and test.teardown is not None:
-        subprocess_utils.run(
-            test.teardown,
-            stdout=subprocess_out,
-            stderr=subprocess.STDOUT,
-            timeout=10 * 60,  # 10 mins
-            shell=True,
-            env=env_dict,
-        )
-
-    if temp_config_file is not None:
-        os.unlink(temp_config_file.name)
-
-    if proc.returncode:
+        style = colorama.Style
+        fore = colorama.Fore
+        outcome = (
+            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
+            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if proc.returncode else ''
+        msg = (f'{outcome}.'
+               f'{reason}')
         if log_to_stdout:
-            raise Exception(f'test failed')
+            test.echo(msg)
         else:
-            raise Exception(f'test failed: less -r {log_file.name}')
+            msg += f'\nLog: less -r {log_file.name}\n'
+            test.echo(msg)
+            write(msg)
+
+        if (proc.returncode == 0 or
+                pytest.terminate_on_failure) and test.teardown is not None:
+            subprocess_utils.run(
+                test.teardown,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                timeout=10 * 60,  # 10 mins
+                shell=True,
+                env=env_dict,
+            )
+
+        if proc.returncode:
+            if log_to_stdout:
+                raise Exception(f'test failed')
+            else:
+                raise Exception(f'test failed: less -r {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
