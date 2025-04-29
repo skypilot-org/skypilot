@@ -19,12 +19,14 @@ import subprocess
 import tempfile
 from typing import Optional, Tuple
 
+import colorama
 import filelock
 from packaging import version
 
 import sky
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.server import common
 
 logger = sky_logging.init_logger(__name__)
 
@@ -60,6 +62,30 @@ def _get_latest_wheel() -> pathlib.Path:
 
 def _build_sky_wheel() -> pathlib.Path:
     """Build a wheel for SkyPilot and return the path to the wheel."""
+    # Double check that the installed code is actually the same version as the
+    # running code. If not, the wheel we build will not match _WHEEL_PATTERN.
+    # See https://github.com/skypilot-org/skypilot/issues/5311.
+    version_on_disk = common.get_skypilot_version_on_disk()
+    if version_on_disk != sky.__version__:
+        logger.warning(
+            'Wheel build: The installed SkyPilot version is different from the '
+            'running code.\n'
+            f'{colorama.Style.DIM}'
+            f'running version: {sky.__version__}\n'
+            f'installed version: {version_on_disk}\n'
+            f'{colorama.Style.RESET_ALL}'
+            # The following message only applies to local API server. We have no
+            # way to tell from here if this is a remote or local API server. But
+            # we expect this to happen much more commonly to a local API server,
+            # so just print the hint regardless.
+            f'{colorama.Fore.YELLOW}'
+            'Please restart the local API server by running:\n'
+            f'{colorama.Style.BRIGHT}sky api stop; sky api start'
+            f'{colorama.Style.RESET_ALL}')
+        raise RuntimeError('The installed SkyPilot version is different from '
+                           'the running code. Please restart the SkyPilot API '
+                           'server with: sky api stop; sky api start')
+
     with tempfile.TemporaryDirectory() as tmp_dir_str:
         # prepare files
         tmp_dir = pathlib.Path(tmp_dir_str)
@@ -85,6 +111,15 @@ def _build_sky_wheel() -> pathlib.Path:
         for f in setup_files_dir.iterdir():
             if f.is_file() and f.name != 'setup.py':
                 shutil.copy(str(f), str(tmp_dir))
+                if f.name == 'MANIFEST.in':
+                    # Remove the line `sky/dashboard/out`, so we do not
+                    # include the dashboard files in the internal wheel
+                    import fileinput  # pylint: disable=import-outside-toplevel
+                    with fileinput.input(tmp_dir / f.name,
+                                         inplace=True) as file:
+                        for line in file:
+                            if 'sky/dashboard/out' not in line:
+                                print(line, end='')
 
         init_file_path = SKY_PACKAGE_PATH / '__init__.py'
         init_file_content = init_file_path.read_text()
@@ -117,7 +152,7 @@ def _build_sky_wheel() -> pathlib.Path:
             raise RuntimeError(
                 f'Failed to find pip wheel for SkyPilot under {tmp_dir} with '
                 f'glob pattern {_WHEEL_PATTERN!r}. '
-                f'Found: {list(map(str, tmp_dir.glob("*")))}.'
+                f'Found: {list(map(str, tmp_dir.glob("*")))}. '
                 'No wheel file is generated.') from None
 
         # Use a unique temporary dir per wheel hash, because there may be many

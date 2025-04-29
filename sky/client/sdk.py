@@ -18,6 +18,7 @@ import pathlib
 import subprocess
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+import webbrowser
 
 import click
 import colorama
@@ -292,6 +293,17 @@ def validate(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
                 response.json().get('detail'))
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def dashboard() -> None:
+    """Starts the dashboard for SkyPilot."""
+    api_server_url = server_common.get_server_url()
+    url = server_common.get_dashboard_url(api_server_url)
+    logger.info(f'Opening dashboard in browser: {url}')
+    webbrowser.open(url)
 
 
 @usage_lib.entrypoint
@@ -1408,8 +1420,8 @@ def kubernetes_node_info(
         The request ID of the Kubernetes node info request.
 
     Request Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.post(
@@ -1713,8 +1725,11 @@ def api_start(
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
+    api_server_url = server_common.get_server_url(host)
+    dashboard_url = server_common.get_dashboard_url(api_server_url)
+    dashboard_msg = f'Dashboard: {dashboard_url}'
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{server_common.get_server_url(host)}\n'
+                f'{api_server_url} {dashboard_msg}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 
@@ -1815,12 +1830,17 @@ def api_login(endpoint: Optional[str] = None) -> None:
     config_path = pathlib.Path(
         skypilot_config.get_user_config_path()).expanduser()
     with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not skypilot_config.loaded():
+        if not config_path.exists():
             config_path.touch()
             config = {'api_server': {'endpoint': endpoint}}
         else:
-            config = skypilot_config.set_nested(('api_server', 'endpoint'),
-                                                endpoint)
-        common_utils.dump_yaml(str(config_path), config)
-        click.secho(f'Logged in to SkyPilot API server at {endpoint}',
-                    fg='green')
+            config = skypilot_config.get_user_config()
+            config.set_nested(('api_server', 'endpoint'), endpoint)
+        common_utils.dump_yaml(str(config_path), dict(config))
+        dashboard_url = server_common.get_dashboard_url(endpoint)
+        dashboard_msg = f'Dashboard: {dashboard_url}'
+        click.secho(
+            f'Logged into SkyPilot API server at: {endpoint}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+            f'{dashboard_msg}',
+            fg='green')

@@ -194,6 +194,9 @@ def pytest_collection_modifyitems(config, items):
     generic_cloud_keyword = cloud_to_pytest_keyword[generic_cloud]
 
     for item in items:
+        if 'smoke_tests' not in item.location[0]:
+            # Only mark smoke test cases
+            continue
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_marks['slow'])
         if 'local' in item.keywords and not server_common.is_api_server_local():

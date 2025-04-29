@@ -1,11 +1,13 @@
 """Constants for the API servers."""
 
+import os
+
 from sky.skylet import constants
 
 # API server version, whenever there is a change in API server that requires a
 # restart of the local API server or error out when the client does not match
 # the server version.
-API_VERSION = '3'
+API_VERSION = '5'
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -24,3 +26,7 @@ CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
 # Environment variable for a file path to the API cookie file.
 API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'
+
+# The path to the dashboard build output
+DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
+                             'out')

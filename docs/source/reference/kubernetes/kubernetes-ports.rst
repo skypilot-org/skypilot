@@ -57,11 +57,11 @@ Internal load balancers
 
 To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
 
-Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/skyconfig.yaml``):
+Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/config.yaml``):
 
 .. code-block:: yaml
 
-    # ~/.sky/skyconfig.yaml
+    # ~/.sky/config.yaml
     kubernetes:
       custom_metadata:
         annotations:
@@ -114,7 +114,7 @@ To use this mode:
     and the endpoint may not be accessible from outside the cluster.
 
 
-3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/skyconfig.yaml` to use the ingress mode.
+3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config.yaml` to use the ingress mode.
 
 .. code-block:: yaml
 
@@ -124,6 +124,7 @@ To use this mode:
 .. tip::
 
     For RKE2 and K3s, the pre-installed Nginx ingress is not correctly configured by default. Follow the `bare-metal installation instructions <https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters/>`_ to set up the Nginx ingress controller correctly.
+
 
 When using this mode, SkyPilot creates an ingress resource and a ClusterIP service for each port opened. The port can be accessed externally by using the Ingress URL plus a path prefix of the form :code:`/skypilot/{pod_name}/{port}`.
 

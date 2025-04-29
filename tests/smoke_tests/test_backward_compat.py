@@ -146,11 +146,13 @@ class TestBackwardCompatibility:
                 cluster_name=f"{cluster_name}",
                 job_id=2,
                 job_status=[sky.JobStatus.SUCCEEDED],
-                timeout=120)} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
+                timeout=120,
+                all_users=True)} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=f"{cluster_name}",
                 job_id=3,
                 job_status=[sky.JobStatus.SUCCEEDED],
-                timeout=120)}
+                timeout=120,
+                all_users=True)}
             """
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep SUCCEEDED | wc -l | grep 4'
         ]

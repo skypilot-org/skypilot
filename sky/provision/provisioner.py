@@ -149,6 +149,12 @@ def bulk_provision(
             # Skip the teardown if the cloud config is expired and
             # the provisioner should failover to other clouds.
             raise
+        except exceptions.InconsistentHighAvailabilityError:
+            # Skip the teardown if the high availability property in the
+            # user config is inconsistent with the actual cluster.
+            # This error is a user error instead of a provisioning failure.
+            # And there is no possibility to fix it by teardown.
+            raise
         except Exception:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
@@ -670,6 +676,7 @@ def post_provision_runtime_setup(
                 ux_utils.error_message(
                     'Failed to set up SkyPilot runtime on cluster.',
                     provision_logging.config.log_path))
-            logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
+            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
             with ux_utils.print_exception_no_traceback():
                 raise

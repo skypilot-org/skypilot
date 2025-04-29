@@ -117,7 +117,7 @@ RUNPOD_DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_RUNPOD_DOCKER_USERNAME'
 
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
-# `nvidia_gpus.disable_ecc: true` in ~/.sky/skyconfig.yaml.
+# `nvidia_gpus.disable_ecc: true` in ~/.sky/config.yaml.
 # Running this command will reboot the machine, introducing overhead for
 # provisioning the machine.
 # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
@@ -156,9 +156,21 @@ CONDA_INSTALLATION_COMMANDS = (
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
+    # If conda was not installed and the image is a docker image,
+    # we deactivate any active conda environment we set.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "true" ]; then '
+    'conda deactivate;'
+    'fi;'
     '}; '
+    # run this command only if the image is not a docker image assuming
+    # that if a user is using a docker image, they know what they are doing
+    # in terms of conda setup/activation.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
+    'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.
@@ -299,11 +311,6 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
-# The default idle timeout for SkyPilot controllers. This include jobs
-# controller and sky serve controller.
-# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each jobs/
 # serve controller process.
@@ -337,7 +344,7 @@ RCLONE_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
-# The keys that can be overridden in the `~/.sky/skyconfig.yaml` file. The
+# The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
@@ -361,9 +368,19 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
 
+# Constants for path in K8S pod to store persistent setup and run scripts
+# so that we can run them again after the pod restarts.
+# Path within user home. For HA controller, assumes home directory is
+# persistent through PVC. See kubernetes-ray.yml.j2.
+PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/.controller_recovery_setup_commands.sh'
+PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
+
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
 # Path to the generated cluster config yamls and ssh configs.
 SKY_USER_FILE_PATH = '~/.sky/generated'
+
+# Environment variable that is set to 'true' if this is a skypilot server.
+ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'

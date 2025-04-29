@@ -500,7 +500,7 @@ You may want to customize the resources of the SkyServe controller for several r
 3. Changing the maximum number of services that can be run concurrently, which is the minimum number between 4x the vCPUs of the controller and the memory in GiB of the controller. (Default: 16)
 4. Changing the disk_size of the controller to store more logs. (Default: 200GB)
 
-To achieve the above, you can specify custom configs in :code:`~/.sky/skyconfig.yaml` with the following fields:
+To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
 
 .. code-block:: yaml
 
@@ -508,6 +508,22 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/skyconfig.
     # NOTE: these settings only take effect for a new SkyServe controller, not if
     # you have an existing one.
     controller:
+      # Enable high availability mode for the controller (optional).
+      #
+      # When set to true, the controller will be deployed with high availability
+      # capabilities on Kubernetes using Deployments. This allows the controller and load balancer
+      # to automatically recover from failures (e.g., node failures, pod crashes)
+      # and maintain service continuity.
+      #
+      # NOTE: This feature is ONLY supported when Kubernetes cloud is enabled. To enable kubernetes, see :ref:`Kubernetes Setup <kubernetes-setup>`.
+      # The service controller cluster will be scheduled to kubernetes. The k8s deployment needs to be always-on to keep the controller running. If using a local kubernetes deployment (e.g. `sky local up`), keeping the laptop/machines up is required.
+      # When enabled:
+      # - The controller is deployed as a Kubernetes Deployment instead of a Pod
+      # - Automatic pod rescheduling and recovery is handled by Kubernetes
+      #
+      # Default: false.
+      high_availability: true
+
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.

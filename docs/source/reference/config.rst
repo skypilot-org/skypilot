@@ -3,16 +3,23 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/skyconfig.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
-This configuration applies to all new clusters and does not affect existing clusters.
+Configuration sources and overrides
+-----------------------------------
 
-.. tip::
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
-  Some config fields can be overridden on a per-task basis through the ``experimental.config_overrides`` field. See :ref:`here <task-yaml-experimental>` for more details.
+For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
+
+Refer to :ref:`config-sources-and-overrides` for more details.
+
+.. _config-yaml-syntax:
 
 Syntax
 ------
+
+For details about SkyServe controller and its customization, see :ref:`customizing-sky-serve-controller-resources`.
 
 Below is the configuration syntax and some example values. See detailed explanations under each field.
 
@@ -28,12 +35,15 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
-    :ref:`controller <config-yaml-jobs-controller>`:
-      resources:  # same spec as 'resources' in a task YAML
+    controller:
+      :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         cloud: gcp
         region: us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
+      :ref:`autostop <config-yaml-jobs-controller-autostop>`:
+        idle_minutes: 10
+        down: false  # use with caution!
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -176,9 +186,10 @@ Supported bucket types:
     # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-resources:
 
-``jobs.controller``
-~~~~~~~~~~~~~~~~~~~
+``jobs.controller.resources``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure resources for the managed jobs controller.
 
@@ -198,6 +209,37 @@ Example:
         cpus: 4+
         memory: 8x
         disk_size: 50
+
+.. _config-yaml-jobs-controller-autostop:
+
+``jobs.controller.autostop``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
+
+By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically restarted when a new job is launched.
+
+If you want the controller to automatically terminate instead of autostopping, set ``down: true``. Use this with caution: ``down: true`` can leak clusters if SkyPilot crashes and all job logs will be lost when the controller is terminated.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable autostop.
+      autostop: false
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Enable autostop with custom config.
+      autostop:
+        # Default values:
+        idle_minutes: 10  # Set time to idle autostop/autodown.
+        down: false  # Terminate instead of stopping. Caution: setting this to true will cause logs to be lost and could lead to resource leaks if SkyPilot crashes.
+
 
 .. _config-yaml-allowed-clouds:
 
@@ -1005,3 +1047,9 @@ Example:
         us-ashburn-1:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+
+.. toctree::
+   :hidden:
+
+   Configuration Sources <config-sources>

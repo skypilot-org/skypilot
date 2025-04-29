@@ -48,7 +48,7 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
@@ -79,7 +79,7 @@ jobs:
           uv pip install --prerelease=allow "azure-cli>=2.65.0"
           # Install limited dependencies only
           uv pip install -e ".[kubernetes,aws,gcp,azure]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
@@ -110,7 +110,7 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0 moto==5.1.2
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate

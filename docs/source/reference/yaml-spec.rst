@@ -79,6 +79,10 @@ Below is the configuration syntax and some example values.  See details under ea
     python train.py
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
 
+  :ref:`config <yaml-spec-config>`:
+    kubernetes:
+      provision_timeout: 600
+
 Fields
 ----------
 
@@ -862,35 +866,28 @@ OR
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
+.. _yaml-spec-config:
 .. _task-yaml-experimental:
 
-Global config overrides
----------------------------
+``config``
+~~~~~~~~~~
 
-To override the :ref:`global configs <config-yaml>` in ``~/.sky/skyconfig.yaml`` at a task level:
+:ref:`Advanced configuration options <config-client-job-task-yaml>` to apply to the task.
+
+Example:
 
 .. code-block:: yaml
 
-  experimental:
-    # Override the configs in ~/.sky/skyconfig.yaml from a task level.
-    #
-    # The following fields can be overridden. Please refer to docs of Advanced
-    # Configuration for more details of those fields:
-    # https://docs.skypilot.co/en/latest/reference/config.html
-    config_overrides:
-      docker:
-        run_options: ...
-      kubernetes:
-        pod_config: ...
-        provision_timeout: ...
-      gcp:
-        managed_instance_group: ...
-      nvidia_gpus:
-        disable_ecc: ...
-
-.. note::
-
-  Experimental features and APIs may be changed or removed in the future.
+  config:
+    docker:
+      run_options: ...
+    kubernetes:
+      pod_config: ...
+      provision_timeout: ...
+    gcp:
+      managed_instance_group: ...
+    nvidia_gpus:
+      disable_ecc: ...
 
 .. _service-yaml-spec:
 

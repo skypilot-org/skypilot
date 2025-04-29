@@ -382,10 +382,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
             network_mode_str)
     except ValueError as e:
-        # Add message saying "Please check: ~/.sky/skyconfig.yaml" to the error
+        # Add message saying "Please check: ~/.sky/config.yaml" to the error
         # message.
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Please check: ~/.sky/skyconfig.yaml.') \
+            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
                 from None
     _, public_key_path = get_or_generate_keys()
 

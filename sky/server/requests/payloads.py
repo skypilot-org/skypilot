@@ -6,7 +6,6 @@ with the backend functions. The benefit of having the default values in the
 payloads is that a user can find the default values in the Restful API docs.
 """
 import getpass
-import json
 import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -32,12 +31,27 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# These non-skypilot environment variables will be updated from the local
+# environment on each request when running a local API server.
+# We should avoid adding variables here, but we should include credential-
+# related variables.
+EXTERNAL_LOCAL_ENV_VARS = [
+    # Allow overriding the AWS authentication.
+    'AWS_PROFILE',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    # Allow overriding the GCP authentication.
+    'GOOGLE_APPLICATION_CREDENTIALS',
+]
+
 
 @annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
         if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+            env_vars[env_var] = os.environ[env_var]
+        if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
@@ -47,7 +61,7 @@ def request_body_env_vars() -> dict:
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
-    env_vars.pop(skypilot_config.ENV_VAR_USER_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     return env_vars
 
@@ -56,20 +70,9 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
-    # server endpoint on the server side. This avoids the warning below.
+    # server endpoint on the server side. This avoids the warning at
+    # server-side.
     config.pop_nested(('api_server',), default_value=None)
-    ignored_key_values = {}
-    for nested_key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
-        value = config.pop_nested(nested_key, default_value=None)
-        if value is not None:
-            ignored_key_values['.'.join(nested_key)] = value
-    if ignored_key_values:
-        logger.debug(f'The following keys ({json.dumps(ignored_key_values)}) '
-                     'are specified in the client SkyPilot config at '
-                     f'{skypilot_config.loaded_config_path()!r}. '
-                     'This will be ignored. If you want to specify it, '
-                     'please modify it on server side or contact your '
-                     'administrator.')
     return config
 
 
@@ -418,6 +421,15 @@ class ServeLogsBody(RequestBody):
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
+
+
+class ServeDownloadLogsBody(RequestBody):
+    """The request body for the serve download logs endpoint."""
+    service_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    replica_ids: Optional[List[int]] = None
 
 
 class ServeStatusBody(RequestBody):

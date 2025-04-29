@@ -306,7 +306,6 @@ Read the research:
 
    ../reference/api-server/api-server
    ../cloud-setup/cloud-permissions/index
-   ../cloud-setup/cloud-auth
    ../cloud-setup/quota
    Admin Policies <../cloud-setup/policy>
 

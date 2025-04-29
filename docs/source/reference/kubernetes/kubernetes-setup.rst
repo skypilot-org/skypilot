@@ -252,7 +252,7 @@ Set up NFS and other volumes
 
 `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/skyconfig.yaml`.
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
 
 Examples:
 
@@ -272,26 +272,25 @@ Examples:
              echo "Hello, world!" > /mnt/nfs/hello.txt
              ls -la /mnt/nfs
 
-           experimental:
-             config_overrides:
-               kubernetes:
-                 pod_config:
-                   spec:
-                     containers:
-                       - volumeMounts:
-                           - mountPath: /mnt/nfs
-                             name: my-host-nfs
-                     volumes:
-                       - name: my-host-nfs
-                         hostPath:
-                           path: /path/on/host/nfs
-                           type: Directory
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: my-host-nfs
+                   volumes:
+                     - name: my-host-nfs
+                       hostPath:
+                         path: /path/on/host/nfs
+                         type: Directory
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # ~/.sky/skyconfig.yaml
+           # ~/.sky/config.yaml
            kubernetes:
              pod_config:
                spec:
@@ -319,27 +318,26 @@ Examples:
              echo "Hello, world!" > /mnt/nfs/hello.txt
              ls -la /mnt/nfs
 
-           experimental:
-             config_overrides:
-               kubernetes:
-                 pod_config:
-                   spec:
-                     containers:
-                       - volumeMounts:
-                           - mountPath: /mnt/nfs
-                             name: nfs-volume
-                     volumes:
-                       - name: nfs-volume
-                         nfs:
-                           server: nfs.example.com
-                           path: /shared
-                           readOnly: false
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                    containers:
+                      - volumeMounts:
+                          - mountPath: /mnt/nfs
+                            name: nfs-volume
+                    volumes:
+                      - name: nfs-volume
+                        nfs:
+                          server: nfs.example.com
+                          path: /shared
+                          readOnly: false
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # ~/.sky/skyconfig.yaml
+           # ~/.sky/config.yaml
            kubernetes:
              pod_config:
                spec:
@@ -368,26 +366,25 @@ Examples:
              echo "Hello, world!" > /mnt/nvme/hello.txt
              ls -la /mnt/nvme
 
-           experimental:
-             config_overrides:
-               kubernetes:
-                 pod_config:
-                   spec:
-                     containers:
-                       - volumeMounts:
-                           - mountPath: /mnt/nvme
-                             name: nvme
-                     volumes:
-                       - name: nvme
-                         hostPath:
-                           path: /path/on/host/nvme
-                           type: Directory
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                    containers:
+                      - volumeMounts:
+                          - mountPath: /mnt/nvme
+                            name: nvme
+                    volumes:
+                      - name: nvme
+                        hostPath:
+                          path: /path/on/host/nvme
+                          type: Directory
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # ~/.sky/skyconfig.yaml
+           # ~/.sky/config.yaml
            kubernetes:
              pod_config:
                spec:
@@ -471,7 +468,7 @@ Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more deta
 Set up FUSE proxy
 ^^^^^^^^^^^^^^^^^
 
-By default, SkyPilot automatically sets up a FUSE proxy to allow Pods created by SkyPilot to perform FUSE mounts/unmounts operations without root privileges. The proxy requires root privileges and ``SYS_ADMIN`` capabilities, which may require additional security audits. 
+By default, SkyPilot automatically sets up a FUSE proxy to allow Pods created by SkyPilot to perform FUSE mounts/unmounts operations without root privileges. The proxy requires root privileges and ``SYS_ADMIN`` capabilities, which may require additional security audits.
 
 In most clusters, SkyPilot handles setting up the FUSE proxy as a privileged DaemonSet, and **no manual configuration is required by the user**.
 

@@ -112,14 +112,39 @@ def _recursive_update(
         disallowed_override_keys: Optional[List[Tuple[str,
                                                       ...]]] = None) -> Config:
     """Recursively updates base configuration with override configuration"""
+
+    def _update_k8s_config(
+        base_config: Config,
+        override_config: Dict[str, Any],
+        allowed_override_keys: Optional[List[Tuple[str, ...]]] = None,
+        disallowed_override_keys: Optional[List[Tuple[str,
+                                                      ...]]] = None) -> Config:
+        """Updates the top-level k8s config with the override config."""
+        for key, value in override_config.items():
+            (next_allowed_override_keys, next_disallowed_override_keys
+            ) = _check_allowed_and_disallowed_override_keys(
+                key, allowed_override_keys, disallowed_override_keys)
+            if key in ['custom_metadata', 'pod_config'] and key in base_config:
+                merge_k8s_configs(base_config[key], value,
+                                  next_allowed_override_keys,
+                                  next_disallowed_override_keys)
+            elif (isinstance(value, dict) and key in base_config and
+                  isinstance(base_config[key], dict)):
+                _recursive_update(base_config[key], value,
+                                  next_allowed_override_keys,
+                                  next_disallowed_override_keys)
+            else:
+                base_config[key] = value
+        return base_config
+
     for key, value in override_config.items():
         (next_allowed_override_keys, next_disallowed_override_keys
         ) = _check_allowed_and_disallowed_override_keys(
             key, allowed_override_keys, disallowed_override_keys)
         if key == 'kubernetes' and key in base_config:
-            merge_k8s_configs(base_config[key], value,
-                              next_allowed_override_keys,
-                              next_disallowed_override_keys)
+            _update_k8s_config(base_config[key], value,
+                               next_allowed_override_keys,
+                               next_disallowed_override_keys)
         elif (isinstance(value, dict) and key in base_config and
               isinstance(base_config[key], dict)):
             _recursive_update(base_config[key], value,
@@ -146,7 +171,6 @@ def _get_nested(configs: Optional[Dict[str, Any]],
             curr = value
         else:
             return default_value
-    logger.debug(f'Config: {".".join(keys)} -> {curr}')
     return curr
 
 
@@ -185,19 +209,19 @@ def merge_k8s_configs(
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
-            elif key in ['volumes', 'volumeMounts']:
-                # If the key is 'volumes' or 'volumeMounts', we search for
-                # item with the same name and merge it.
-                for new_volume in value:
-                    new_volume_name = new_volume.get('name')
-                    if new_volume_name is not None:
-                        destination_volume = next(
+            elif key in ['volumes', 'volumeMounts', 'initContainers']:
+                # If the key is 'volumes', 'volumeMounts', or 'initContainers',
+                # we search for item with the same name and merge it.
+                for override_item in value:
+                    override_item_name = override_item.get('name')
+                    if override_item_name is not None:
+                        existing_base_item = next(
                             (v for v in base_config[key]
-                             if v.get('name') == new_volume_name), None)
-                        if destination_volume is not None:
-                            merge_k8s_configs(destination_volume, new_volume)
+                             if v.get('name') == override_item_name), None)
+                        if existing_base_item is not None:
+                            merge_k8s_configs(existing_base_item, override_item)
                         else:
-                            base_config[key].append(new_volume)
+                            base_config[key].append(override_item)
             else:
                 base_config[key].extend(value)
         else:

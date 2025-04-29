@@ -1,17 +1,19 @@
 import contextlib
 import enum
 import inspect
+import json
 import os
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 import uuid
 
 import colorama
 import pytest
+import requests
 from smoke_tests.docker import docker_utils
 import yaml
 
@@ -20,6 +22,9 @@ from sky import serve
 from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
+from sky.server import common as server_common
+from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -207,13 +212,19 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTA
 
 
 def get_cmd_wait_until_job_status_contains_matching_job_id(
-        cluster_name: str, job_id: str, job_status: List[sky.JobStatus],
-        timeout: int):
-    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+        cluster_name: str,
+        job_id: str,
+        job_status: List[sky.JobStatus],
+        timeout: int,
+        all_users: bool = False):
+    cmd = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
         cluster_name=cluster_name,
         job_id=job_id,
         job_status=_statuses_to_str(job_status),
         timeout=timeout)
+    if all_users:
+        cmd = cmd.replace('sky queue ', 'sky queue -u ')
+    return cmd
 
 
 def get_cmd_wait_until_job_status_contains_without_matching_job(
@@ -329,10 +340,14 @@ def is_eks_cluster() -> bool:
     return result.returncode == 0
 
 
-def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+    return common_utils.make_cluster_name_on_cloud(
         cluster_name, sky.GCP.max_cluster_name_length())
+
+
+def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+    name_on_cloud = get_replica_cluster_name_on_gcp(name, replica_id)
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name:{name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
@@ -348,7 +363,7 @@ def run_one_test(test: Test) -> None:
         write = test.echo
         flush = lambda: None
         subprocess_out = sys.stderr
-        test.echo(f'Test started. Log to stdout')
+        test.echo('Test started. Log to stdout')
     else:
         log_file = tempfile.NamedTemporaryFile('a',
                                                prefix=f'{test.name}-',
@@ -364,7 +379,7 @@ def run_one_test(test: Test) -> None:
         env_dict.update(test.env)
 
     # Create a temporary config file with API server config only if running with remote server
-    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+    if is_remote_server_test():
         temp_config = tempfile.NamedTemporaryFile(mode='w',
                                                   suffix='.yaml',
                                                   delete=False)
@@ -455,7 +470,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
-    # Filter the regions with proxy command in ~/.sky/skyconfig.yaml.
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
         region for region in candidate_regions
@@ -483,7 +498,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
 
-    # Filter the regions with proxy command in ~/.sky/skyconfig.yaml.
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
         region for region in candidate_regions
@@ -642,3 +657,59 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
     finally:
         for file in files:
             os.unlink(file)
+
+
+def is_remote_server_test() -> bool:
+    return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+
+
+def get_api_server_url() -> str:
+    """Get the API server URL in the test environment."""
+    if is_remote_server_test():
+        return docker_utils.get_api_server_endpoint_inside_docker()
+    return server_common.get_server_url()
+
+
+def get_dashboard_cluster_status_request_id() -> str:
+    """Get the status of the cluster from the dashboard."""
+    body = payloads.StatusBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_dashboard_jobs_queue_request_id() -> str:
+    """Get the jobs queue from the dashboard."""
+    body = payloads.JobsQueueBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_response_from_request_id(request_id: str) -> Any:
+    """Waits for and gets the result of a request.
+
+    Args:
+        request_id: The request ID of the request to get.
+
+    Returns:
+        The ``Request Returns`` of the specified request. See the documentation
+        of the specific requests above for more details.
+
+    Raises:
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
+    """
+    response = requests.get(
+        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+        timeout=15)
+    request_task = None
+    if response.status_code == 200:
+        request_task = requests_lib.Request.decode(
+            requests_lib.RequestPayload(**response.json()))
+        return request_task.get_return_value()
+    raise RuntimeError(f'Failed to get request {request_id}: '
+                       f'{response.status_code} {response.text}')

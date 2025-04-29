@@ -9,7 +9,7 @@ History:
    file path resolution (by os.path.expanduser) when construct the file
    mounts. This bug will cause the created workder nodes located in different
    compartment and VCN than the header node if user specifies compartment_id
-   in the sky config file, because the ~/.sky/skyconfig.yaml is not
+   in the sky config file, because the ~/.sky/config.yaml is not
    sync-ed to the remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
@@ -69,19 +69,22 @@ class OCI(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        features = {
+        unsupported_features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.DOCKER_IMAGE:
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
-            features[clouds.CloudImplementationFeatures.STOP] = (
+            unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
                 f'Stopping spot instances is currently not supported on '
                 f'{cls._REPR}.')
-        return features
+        return unsupported_features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

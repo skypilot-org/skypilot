@@ -1,13 +1,11 @@
 name: Release Build
 
 on:
-  schedule:
-    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
   workflow_dispatch:
     inputs:
       release_version:
         description: 'Release version (e.g., 0.9.0)'
-        required: false
+        required: true
         type: string
 
 jobs:
@@ -15,75 +13,208 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_branch: ${{ steps.commit_changes.outputs.test_branch }}
-      smoke_test_build_number: ${{ steps.extract_smoke_test.outputs.smoke_test_build_number }}
-      quicktest_core_build_number: ${{ steps.extract_quicktest.outputs.quicktest_core_build_number }}
-      release_test_build_number: ${{ steps.extract_release_test.outputs.release_test_build_number }}
-      release_version: ${{ steps.determine_version.outputs.release_version }}
+      smoke_tests_json: ${{ steps.trigger_smoke_tests.outputs.json }}
+      quicktest_json: ${{ steps.trigger_quicktest_core.outputs.json }}
+      release_test_json: ${{ steps.trigger_release_tests.outputs.json }}
+      manual_created_release_branch: ${{ steps.validate_input_version.outputs.manual_created_release_branch }}
+      pypi_base_branch: ${{ steps.verify_version.outputs.pypi_base_branch }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip'
 
-      # Find the latest release branch to use as base branch for tests
-      - name: Find latest release branch
-        id: find_release_branch
+      - name: Validate Input Version and Branch
+        id: validate_input_version
         run: |
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          echo "Using manually specified version: ${RELEASE_VERSION}"
+          MANUAL_CREATED_RELEASE_BRANCH="releases/${RELEASE_VERSION}"
+          echo "Expected manual created release branch: ${MANUAL_CREATED_RELEASE_BRANCH}"
+
+          # Fetch all remote heads and tags
           git fetch --all --tags
-          LATEST_RELEASE=$(git branch -r | grep 'origin/releases/' | sort -V | tail -n1 | sed 's/origin\///')
-          echo "Latest release branch: ${LATEST_RELEASE}"
-          echo "base_branch=${LATEST_RELEASE}" >> $GITHUB_OUTPUT
 
-      # Determine release version based on trigger type
-      - name: Determine release version
-        id: determine_version
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
-            # Manual trigger with input version provided
-            RELEASE_VERSION="${{ github.event.inputs.release_version }}"
-            echo "Using manually specified version: ${RELEASE_VERSION}"
+          # Check if the release branch exists remotely
+          if ! git ls-remote --heads origin ${MANUAL_CREATED_RELEASE_BRANCH} | grep -q refs/heads/${MANUAL_CREATED_RELEASE_BRANCH}; then
+            echo "Error: Manual release branch ${MANUAL_CREATED_RELEASE_BRANCH} does not exist remotely."
+            exit 1
           else
-            # Scheduled trigger or manual trigger without version - extract version from latest release and increment patch
-            LATEST_VERSION=$(echo "${{ steps.find_release_branch.outputs.base_branch }}" | sed 's/releases\///')
-            # Split version into parts
-            MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
-            MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
-            PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
-            # Increment patch version
-            NEW_PATCH=$((PATCH + 1))
-            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-            echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
+            echo "Found manual created release branch ${MANUAL_CREATED_RELEASE_BRANCH} remotely."
           fi
-          echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+          echo "manual_created_release_branch=${MANUAL_CREATED_RELEASE_BRANCH}" >> $GITHUB_OUTPUT
+
+      - name: Verify release version > latest PyPI version
+        id: verify_version
+        run: |
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          echo "Validated release version: ${RELEASE_VERSION}"
+
+          # Get the latest version from PyPI using JSON API
+          LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+          echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
+
+          # Determine the base branch for PyPI version
+          PYPI_BASE_BRANCH="releases/${LATEST_PYPI_VERSION}"
+          echo "pypi_base_branch=${PYPI_BASE_BRANCH}" >> $GITHUB_OUTPUT
+          echo "Determined PyPI base branch for comparison: ${PYPI_BASE_BRANCH}"
+
+          # Output the latest PyPI version for subsequent steps
+          echo "latest_pypi_version=${LATEST_PYPI_VERSION}" >> $GITHUB_OUTPUT
+
+          # Parse latest PyPI version
+          PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
+          PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+          PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
+
+          # Calculate expected next versions
+          NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
+          NEXT_MINOR_VERSION="${PYPI_MAJOR}.$((PYPI_MINOR + 1)).0"
+
+          echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
+          echo "Expected next minor version: ${NEXT_MINOR_VERSION}"
+
+          # Check if the determined release version is one of the expected next versions
+          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ] || [ "${RELEASE_VERSION}" = "${NEXT_MINOR_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is a valid next version."
+          else
+            echo "Error: Determined release version ${RELEASE_VERSION} must be either the next patch version (${NEXT_PATCH_VERSION}) or the next minor version (${NEXT_MINOR_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
+            exit 1
+          fi
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: '3.10'
+
+      - name: Verify API Version Compatibility
+        id: verify_api_version
+        run: |
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          LATEST_PYPI_VERSION="${{ steps.verify_version.outputs.latest_pypi_version }}"
+          MANUAL_CREATED_RELEASE_BRANCH="${{ steps.validate_input_version.outputs.manual_created_release_branch }}"
+
+          # Checkout the manual created release branch to read the correct API version
+          echo "Checking out ${MANUAL_CREATED_RELEASE_BRANCH} to verify API version..."
+          git checkout ${MANUAL_CREATED_RELEASE_BRANCH}
+
+          echo "Reading current API version from the current checkout..."
+          # Extract current API version from the current checked-out state
+          CURRENT_API_VERSION=$(grep "^API_VERSION = " sky/server/constants.py | sed "s/API_VERSION = '\\(.*\\)'/\\1/")
+          echo "Current API version (from checkout): ${CURRENT_API_VERSION}"
+
+          # Create and activate uv virtual environment
+          echo "Creating uv virtual environment..."
+          uv venv --seed ~/pypi-check-env
+          echo "Activating virtual environment..."
+          source ~/pypi-check-env/bin/activate
+
+          echo "Installing skypilot==${LATEST_PYPI_VERSION} from PyPI using uv..."
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
+          uv pip install skypilot==${LATEST_PYPI_VERSION}
+
+          echo "Extracting API version from installed PyPI package..."
+          # Store current directory and change to a temporary one to avoid importing local sky package
+          ORIGINAL_DIR=$(pwd)
+          TEMP_DIR=$(mktemp -d)
+          cd "${TEMP_DIR}"
+          echo "Changed directory to ${TEMP_DIR} to ensure correct package import."
+
+          # Python command now runs within the activated venv and outside the project directory
+          PYPI_API_VERSION=$(python -c "import sky.server.constants; print(sky.server.constants.API_VERSION)")
+
+          # Change back to original directory and clean up temp dir
+          cd "${ORIGINAL_DIR}"
+          rm -rf "${TEMP_DIR}"
+          echo "Restored original directory: ${ORIGINAL_DIR}"
+
+          # Deactivate environment
+          deactivate
+
+          if [[ -z "${PYPI_API_VERSION}" ]]; then
+            echo "Error: Could not fetch API_VERSION from the installed PyPI package. Python command likely failed."
+            exit 1
+          fi
+          echo "Latest PyPI API version: ${PYPI_API_VERSION}"
+
+          # Assert current API version >= PyPI API version
+          if [[ "${CURRENT_API_VERSION}" -lt "${PYPI_API_VERSION}" ]]; then
+            echo "Error: Current API version (${CURRENT_API_VERSION}) is less than the latest PyPI API version (${PYPI_API_VERSION})."
+            exit 1
+          fi
+          echo "Assertion passed: Current API version (${CURRENT_API_VERSION}) >= PyPI API version (${PYPI_API_VERSION})."
+
+          # If API version changed, ensure it's not just a patch release
+          if [[ "${CURRENT_API_VERSION}" -gt "${PYPI_API_VERSION}" ]]; then
+            echo "API version has increased from ${PYPI_API_VERSION} to ${CURRENT_API_VERSION}."
+
+            # Parse versions
+            REL_MAJOR=$(echo $RELEASE_VERSION | cut -d. -f1)
+            REL_MINOR=$(echo $RELEASE_VERSION | cut -d. -f2)
+
+            PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
+            PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+
+            IS_MINOR_OR_MAJOR_UPGRADE=false
+            if [[ "${REL_MAJOR}" -gt "${PYPI_MAJOR}" ]]; then
+              IS_MINOR_OR_MAJOR_UPGRADE=true
+            elif [[ "${REL_MAJOR}" -eq "${PYPI_MAJOR}" && "${REL_MINOR}" -gt "${PYPI_MINOR}" ]]; then
+              IS_MINOR_OR_MAJOR_UPGRADE=true
+            fi
+
+            if [[ "${IS_MINOR_OR_MAJOR_UPGRADE}" == "false" ]]; then
+              echo "Error: API version changed (${PYPI_API_VERSION} -> ${CURRENT_API_VERSION}), but the release (${RELEASE_VERSION}) is only a patch upgrade from the latest PyPI version (${LATEST_PYPI_VERSION}). API version changes require a minor or major version bump."
+              exit 1
+            else
+              echo "API version change is accompanied by a minor or major version bump (${LATEST_PYPI_VERSION} -> ${RELEASE_VERSION}). Proceeding."
+            fi
+          else
+            echo "API version has not changed (${CURRENT_API_VERSION}). Proceeding."
+          fi
 
       - name: Set release version and commit changes
         id: commit_changes
         run: |
-          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          MANUAL_CREATED_RELEASE_BRANCH="${{ steps.validate_input_version.outputs.manual_created_release_branch }}"
 
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Make version changes
-          sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          # Checkout the base release branch
+          echo "Checking out manual created release branch ${MANUAL_CREATED_RELEASE_BRANCH}..."
+          git checkout ${MANUAL_CREATED_RELEASE_BRANCH}
 
-          # Commit the changes
+          # Make version changes
+          echo "Updating __version__ in sky/__init__.py and Dockerfile to ${RELEASE_VERSION}..."
+          sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/skypilot-nightly\[all\]/skypilot[all]==${RELEASE_VERSION}/g" Dockerfile
+
+          # Create the test branch from the *current* state (base branch with version bump)
+          TEST_BRANCH="test_releases/${RELEASE_VERSION}"
+          echo "Creating test branch ${TEST_BRANCH}..."
+          git checkout -b ${TEST_BRANCH}
+
+          # Commit the version change on the new test branch
           git add sky/__init__.py
+          git add Dockerfile
           git commit -m "Release ${RELEASE_VERSION}"
 
-          # Get the new commit SHA
+          # Get the new commit SHA from the test branch
           NEW_COMMIT_SHA=$(git rev-parse HEAD)
           echo "new_commit_sha=${NEW_COMMIT_SHA}" >> $GITHUB_OUTPUT
-          echo "New commit SHA: ${NEW_COMMIT_SHA}"
+          echo "New commit SHA on ${TEST_BRANCH}: ${NEW_COMMIT_SHA}"
 
-          # Create and push the branch
-          TEST_BRANCH="test_releases/${RELEASE_VERSION}"
-          git checkout -b ${TEST_BRANCH}
+          # Push the new test branch
+          echo "Pushing ${TEST_BRANCH}..."
           git push -f origin ${TEST_BRANCH}
           echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
 
@@ -96,15 +227,8 @@ jobs:
           pipeline: "skypilot-1/full-smoke-tests-run"
           branch: "${{ steps.commit_changes.outputs.test_branch }}"
           commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          message: "Release ${{ github.event.inputs.release_version }}"
           ignore_pipeline_branch_filter: true
-
-      # Extract build number from response JSON
-      - name: Extract smoke tests build number
-        id: extract_smoke_test
-        run: |
-          build_number=$(echo '${{ steps.trigger_smoke_tests.outputs.json }}' | jq -r '.number')
-          echo "smoke_test_build_number=$build_number" >> $GITHUB_OUTPUT
 
       # Trigger Buildkite quicktest-core
       - name: Trigger Quicktest Core
@@ -115,16 +239,9 @@ jobs:
           pipeline: "skypilot-1/quicktest-core"
           branch: "${{ steps.commit_changes.outputs.test_branch }}"
           commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          message: "Release ${{ github.event.inputs.release_version }}"
           ignore_pipeline_branch_filter: true
-          build_env_vars: '{"ARGS": "--base-branch ${{ steps.find_release_branch.outputs.base_branch }}"}'
-
-      # Extract build number from response JSON
-      - name: Extract quicktest core build number
-        id: extract_quicktest
-        run: |
-          build_number=$(echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq -r '.number')
-          echo "quicktest_core_build_number=$build_number" >> $GITHUB_OUTPUT
+          build_env_vars: '{"ARGS": "--base-branch ${{ steps.verify_version.outputs.pypi_base_branch }}"}'
 
       # Trigger Buildkite release tests
       - name: Trigger Release Tests
@@ -135,42 +252,54 @@ jobs:
           pipeline: "skypilot-1/release"
           branch: "${{ steps.commit_changes.outputs.test_branch }}"
           commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          message: "Release ${{ github.event.inputs.release_version }}"
           ignore_pipeline_branch_filter: true
 
-      # Extract build number from response JSON
-      - name: Extract release tests build number
-        id: extract_release_test
-        run: |
-          build_number=$(echo '${{ steps.trigger_release_tests.outputs.json }}' | jq -r '.number')
-          echo "release_test_build_number=$build_number" >> $GITHUB_OUTPUT
+  # Call extract-buildkite workflow for each job
+  extract-smoke-tests:
+    needs: release-build
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.release-build.outputs.smoke_tests_json }}
+
+  extract-quicktest:
+    needs: release-build
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.release-build.outputs.quicktest_json }}
+
+  extract-release-test:
+    needs: release-build
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.release-build.outputs.release_test_json }}
 
   wait-for-smoke-tests:
-    needs: release-build
+    needs: [release-build, extract-smoke-tests]
     uses: ./.github/workflows/wait-for-buildkite.yml
     with:
       organization: "skypilot-1"
       pipeline: "full-smoke-tests-run"
-      build_number: ${{ needs.release-build.outputs.smoke_test_build_number }}
-      timeout_minutes: 180
+      build_number: ${{ needs.extract-smoke-tests.outputs.build_number }}
+      timeout_minutes: 240
       fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   wait-for-quicktest-core:
-    needs: release-build
+    needs: [release-build, extract-quicktest]
     uses: ./.github/workflows/wait-for-buildkite.yml
     with:
       organization: "skypilot-1"
       pipeline: "quicktest-core"
-      build_number: ${{ needs.release-build.outputs.quicktest_core_build_number }}
+      build_number: ${{ needs.extract-quicktest.outputs.build_number }}
       timeout_minutes: 180
       fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   create-pr:
-    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core]
+    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test, extract-smoke-tests, extract-quicktest]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -182,24 +311,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
-          RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
-          SMOKE_TEST_BUILD: ${{ needs.release-build.outputs.smoke_test_build_number }}
-          QUICKTEST_BUILD: ${{ needs.release-build.outputs.quicktest_core_build_number }}
-          RELEASE_TEST_BUILD: ${{ needs.release-build.outputs.release_test_build_number }}
+          RELEASE_VERSION: ${{ github.event.inputs.release_version }}
+          MANUAL_CREATED_RELEASE_BRANCH: ${{ needs.release-build.outputs.manual_created_release_branch }}
+          SMOKE_TEST_BUILD: ${{ needs.extract-smoke-tests.outputs.build_number }}
+          QUICKTEST_BUILD: ${{ needs.extract-quicktest.outputs.build_number }}
+          RELEASE_TEST_BUILD: ${{ needs.extract-release-test.outputs.build_number }}
         run: |
-          RELEASE_BRANCH="releases/${RELEASE_VERSION}"
 
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-
-          # Check if the release branch already exists remotely
-          if ! git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
-            echo "Release branch ${RELEASE_BRANCH} does not exist, creating it..."
-            # Create the release branch from the current commit
-            git checkout -b ${RELEASE_BRANCH}
-            git push origin ${RELEASE_BRANCH}
-          fi
 
           # Create PR with buildkite links
           PR_BODY="Release ${RELEASE_VERSION}
@@ -211,6 +332,8 @@ jobs:
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
 
-          gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
+          echo "Creating PR from ${TEST_BRANCH} to ${MANUAL_CREATED_RELEASE_BRANCH}"
+
+          gh pr create --base ${MANUAL_CREATED_RELEASE_BRANCH} --head ${TEST_BRANCH} \
             --title "Release ${RELEASE_VERSION}" \
             --body "${PR_BODY}"

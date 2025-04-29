@@ -35,6 +35,21 @@ jobs:
         with:
           ref: ${{ github.base_ref }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+          cache-dependency-path: 'sky/dashboard/package-lock.json'
+      - name: Install dashboard dependencies
+        run: |
+          cd sky/dashboard
+          npm ci
+      - name: Build dashboard
+        run: |
+          cd sky/dashboard
+          npm run build
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -64,21 +79,19 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-
       - name: Validate published package
         run: |
           # Wait a moment for package to be available
           sleep 30
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+          pip install fastapi
           # Install skypilot from Test PyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
           # Verify installation
           sky -v
           sky -c
+          sky check
+          sky show-gpus
           # Verify version
           EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
@@ -88,6 +101,12 @@ jobs:
             exit 1
           fi
           echo "Version verified successfully!"
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
 
   trigger-docker-build:
     needs: [extract-version, publish-to-pypi]
@@ -120,13 +139,4 @@ jobs:
             git push origin --delete ${TEST_BRANCH}
           else
             echo "Test branch ${TEST_BRANCH} does not exist, skipping"
-          fi
-
-          # Check if release branch exists and delete it
-          RELEASE_BRANCH="releases/${VERSION}"
-          if git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
-            echo "Deleting release branch: ${RELEASE_BRANCH}"
-            git push origin --delete ${RELEASE_BRANCH}
-          else
-            echo "Release branch ${RELEASE_BRANCH} does not exist, skipping"
           fi

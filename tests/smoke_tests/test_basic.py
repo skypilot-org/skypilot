@@ -23,6 +23,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -167,7 +168,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.aws
 def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
     name = smoke_tests_utils.get_cluster_name()
-    tmp_config_path = tmp_path / 'skyconfig.yaml'
+    tmp_config_path = tmp_path / 'sky.yaml'
     test = smoke_tests_utils.Test(
         'test_launch_fast_with_cluster_changes',
         [
@@ -396,6 +397,17 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
         dummy_task = sky.Task()
         job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
         assert job_id_dummy is None
+        # Check the cluster status from the dashboard
+        cluster_exist = False
+        status_request_id = (
+            smoke_tests_utils.get_dashboard_cluster_status_request_id())
+        status_response = (
+            smoke_tests_utils.get_response_from_request_id(status_request_id))
+        for cluster in status_response:
+            if cluster['name'] == name:
+                cluster_exist = True
+                break
+        assert cluster_exist
     finally:
         sky.get(sky.down(name))
 
@@ -438,6 +450,17 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
         job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
         assert handle is not None
+        # Check the job status from the dashboard
+        queue_request_id = (
+            smoke_tests_utils.get_dashboard_jobs_queue_request_id())
+        queue_response = (
+            smoke_tests_utils.get_response_from_request_id(queue_request_id))
+        job_exist = False
+        for job in queue_response:
+            if job['job_id'] == job_id:
+                job_exist = True
+                break
+        assert job_exist
         try:
             with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
                 sky.jobs.tail_logs(job_id=job_id, output_stream=f)

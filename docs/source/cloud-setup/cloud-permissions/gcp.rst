@@ -1,8 +1,48 @@
-.. _cloud-permissions-gcp:
-
 GCP
 =============
 
+.. note::
+
+    By default, SkyPilot will pick up the credentials you have set up. For most cases, the :ref:`installation instructions <installation-gcp>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
+
+
+.. _gcp-service-account:
+
+Service account
+---------------
+
+`GCP service accounts
+<https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
+
+.. tip::
+    A service account on your local machine can avoid the periodic
+    ``google.auth.exceptions.RefreshError: Reauthentication is needed. Please
+    run `gcloud auth application-default login` to reauthenticate.`` error. A
+    service account is long-lived as it does not have an expiry time.
+
+Set up a service account as follows:
+
+1. Follow the :ref:`instructions <gcp-service-account-creation>` to create a service account with the appropriate roles/permissions.
+2. In the "Service Accounts" tab in the `IAM & Admin console
+   <https://console.cloud.google.com/iam-admin/iam>`__, click on the service
+   account to go to its detailed page. Click on the **KEYS** tab, then click on
+   **ADD KEY** to add a JSON key.  The key will be downloaded automatically.
+3. Set the environment variable ``GOOGLE_APPLICATION_CREDENTIALS`` to the path of the key file, and configure the gcloud CLI tool:
+
+   .. code-block:: console
+
+       $ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+       $ gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+       $ gcloud config set project your-project-id
+
+   You may want to add the export statement in your profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that it is set automatically in all new terminal sessions.
+
+
+
+.. _cloud-permissions-gcp:
+
+Setting permissions
+-------------------
 
 Generally, the administrator can choose among three "levels" of permissions, from the most permissive and least setup effort, to the least permissive and more setup effort:
 
@@ -10,10 +50,11 @@ Generally, the administrator can choose among three "levels" of permissions, fro
 * :ref:`Medium <gcp-medium-permissions>`: easy setup, with a medium set of permissions
 * :ref:`Minimal <gcp-minimal-permissions>`: more setup, with the minimal set of permissions
 
+
 .. _gcp-medium-permissions:
 
 Medium permissions
------------------------
+~~~~~~~~~~~~~~~~~~
 
 The easiest way to grant permissions to a user access your GCP project without the ``Owner`` role is to add the following roles to the user principals:
 
@@ -42,12 +83,9 @@ You can grant those accesses via GCP's `IAM & Admin console <https://console.clo
 .. _gcp-minimal-permissions:
 
 Minimal permissions
------------------------
+~~~~~~~~~~~~~~~~~~~
 
 The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions for some GCP services to the user.  If you would like to grant finer-grained and more minimal permissions to your users in your organization / project, you can create a custom role by following the steps below:
-
-User
-~~~~~~~~~~~~
 
 1. Go to GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
@@ -95,7 +133,7 @@ User
 
 .. note::
 
-    For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/skyconfig.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
+    For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/config.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
 
 .. note::
 
@@ -151,7 +189,7 @@ User
     compute.images.get
     compute.images.useReadOnly
 
-9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/skyconfig.yaml <config-yaml>`, you can additionally add the following permissions:
+9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
 
 .. code-block:: text
 
@@ -178,8 +216,8 @@ User
 
 .. _gcp-service-account-creation:
 
-Service account
-~~~~~~~~~~~~~~~~~~~
+Service account for SkyPilot system
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. note::
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
@@ -270,7 +308,7 @@ By default, SkyPilot uses the following behavior to get a VPC to use for all GCP
   automatically starts with one subnet per region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
-file ``~/.sky/skyconfig.yaml`` to specify the VPC name in the ``gcp.vpc_name`` field:
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``gcp.vpc_name`` field:
 
 .. code-block:: yaml
 
@@ -289,7 +327,7 @@ The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-fir
 Using internal IPs
 -----------------------
 For security reason, users may only want to use internal IPs for SkyPilot instances.
-To do so, you can use SkyPilot's global config file ``~/.sky/skyconfig.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
+To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
 
 .. code-block:: yaml
 
