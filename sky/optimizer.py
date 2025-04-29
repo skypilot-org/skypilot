@@ -277,6 +277,8 @@ class Optimizer:
                     launchable_resources_list)
             return num_available_reserved_nodes_per_resource
 
+        indent_prefix = ' ' * len('Hint: ')
+
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
@@ -290,11 +292,11 @@ class Optimizer:
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources, cloud_candidates, fuzzy_candidates = (
-                    _fill_in_launchable_resources(
-                        task=node,
-                        blocked_resources=blocked_resources,
-                        quiet=quiet))
+                (launchable_resources, cloud_candidates, fuzzy_candidates,
+                 resource_hints) = (_fill_in_launchable_resources(
+                     task=node,
+                     blocked_resources=blocked_resources,
+                     quiet=quiet))
                 node_to_candidate_map[node] = cloud_candidates
                 # Has to call the printing after the launchable resources are
                 # computed, because the missing fields of the resources are
@@ -390,6 +392,18 @@ class Optimizer:
                 node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
                                                  r.repr_with_region_zone
                                                  for r in node.resources)
+                hints_concat = '\n'.join([
+                    f'{bold}Resource: {repr(resource)}{reset}\n' +
+                    '\n'.join(hint_list)
+                    for resource, hint_list in resource_hints.items()
+                    if hint_list
+                ])
+                hints_formatted = '\n'.join(
+                    map(lambda r: f'{indent_prefix}{r}',
+                        hints_concat.split('\n')))
+                resource_hints_string = (
+                    f'Hint: Check Per Resource Hint\n{hints_formatted}'
+                    if hints_formatted else '')
                 error_msg = (
                     f'{source_hint.capitalize()} does not contain any '
                     f'instances satisfying the request: '
@@ -398,8 +412,9 @@ class Optimizer:
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky show-gpus{reset} '
                     'to list available accelerators.\n'
-                    f'      {bold}sky check{reset} to check the enabled '
-                    'clouds.')
+                    f'{indent_prefix}{bold}sky check{reset} to check the '
+                    'enabled clouds.\n'
+                    f'{resource_hints_string}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(error_msg)
         return node_to_cost_map, node_to_candidate_map
@@ -1047,7 +1062,7 @@ class Optimizer:
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
-                    launchable_resources_map, _, _ = (
+                    launchable_resources_map, _, _, _ = (
                         _fill_in_launchable_resources(
                             task=local_task,
                             blocked_resources=blocked_resources,
@@ -1213,7 +1228,8 @@ def _fill_in_launchable_resources(
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates, List[str]]:
+           _PerCloudCandidates, List[str], Dict[resources_lib.Resources,
+                                                List[str]]]:
     """Fills in the launchable resources for the task.
 
     Returns:
@@ -1222,6 +1238,8 @@ def _fill_in_launchable_resources(
           Resources,
         Dict mapping Cloud to a list of feasible Resources (for printing),
         Sorted list of fuzzy candidates (alternative GPU names).
+        Dict mapping requested Resources and a list of hints for why the
+          resource is unavailable if so.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
@@ -1235,6 +1253,8 @@ def _fill_in_launchable_resources(
     all_fuzzy_candidates = set()
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(
         List[resources_lib.Resources])
+    resource_hints: Dict[resources_lib.Resources,
+                         List[str]] = collections.defaultdict(list)
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
@@ -1259,6 +1279,7 @@ def _fill_in_launchable_resources(
         for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
+                resource_hints[resources].append(feasible_resources.hint)
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
@@ -1301,8 +1322,11 @@ def _fill_in_launchable_resources(
                                     'to allow for larger instances.'
                                     f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
-                    logger.info(f'{repr(cloud)}: {hint}')
+                    logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                f'{repr(cloud)}: {hint}'
+                                f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    return launchable, cloud_candidates, list(sorted(all_fuzzy_candidates))
+    return launchable, cloud_candidates, list(
+        sorted(all_fuzzy_candidates)), resource_hints
