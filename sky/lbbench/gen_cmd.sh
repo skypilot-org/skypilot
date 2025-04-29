@@ -1,2 +1,2 @@
-python3 -m sky.lbbench.launch_lb --service-names a31 a32
-python3 -m sky.lbbench.gen_cmd --service-names a38 --exp-name arena_syn_mrc_new_client_50_50_50_c2000_u150_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 50","ap-northeast-1":"--num-users 50","eu-central-1":"--num-users 50"}'
+python3 -m sky.lbbench.launch_lb --service-names a71 a72
+python3 -m sky.lbbench.gen_cmd --service-names a71 a72 a73 a74 a75 a76 a77 --exp-name arena_syn_mrc_50_50_50_trial_2_c2000_u210_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 50","ap-northeast-1":"--num-users 50","eu-central-1":"--num-users 50"}'

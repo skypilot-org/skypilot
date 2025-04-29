@@ -40,6 +40,7 @@ _DO_PUSHING_ACROSS_LB = env_options.Options.DO_PUSHING_ACROSS_LB.get()
 # Not that kind of similar to pulling.
 _LB_PUSHING_ENABLE_LB = env_options.Options.LB_PUSHING_ENABLE_LB.get()
 _DO_PUSHING_TO_REPLICA = env_options.Options.DO_PUSHING_TO_REPLICA.get()
+_USE_V2_STEALING = env_options.Options.USE_V2_STEALING.get()
 
 
 @dataclasses.dataclass
@@ -125,6 +126,13 @@ class QueueWithLock(Generic[T]):
                 if not item.request.headers.get(_IS_FROM_LB_HEADER, False):
                     self._actual_size += 1
             self._queue.append(item)
+
+    async def put_in_head(self, item: T) -> None:
+        async with self._lock:
+            if isinstance(item, RequestEntry):
+                if not item.request.headers.get(_IS_FROM_LB_HEADER, False):
+                    self._actual_size += 1
+            self._queue.insert(0, item)
 
     async def get(self, index: int = 0) -> T:
         async with self._lock:
@@ -413,13 +421,13 @@ class SkyServeLoadBalancer:
         self._is_local_debug_mode = is_local_debug_mode
         self._steal_targets_cnt: int = 0
 
-    async def _lbs_with_steal_requests(self) -> List[str]:
-        """Return the LBs that have requests to steal."""
-        async with self._steal_requests_lock:
-            return [
-                lb for lb, num_steals in self._lb_to_steal_requests.items()
-                if num_steals
-            ]
+    # async def _lbs_with_steal_requests(self) -> List[str]:
+    #     """Return the LBs that have requests to steal."""
+    #     async with self._steal_requests_lock:
+    #         return [
+    #             lb for lb, num_steals in self._lb_to_steal_requests.items()
+    #             if num_steals
+    #         ]
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -675,35 +683,10 @@ class SkyServeLoadBalancer:
                     #             f'{await self._request_queue.qsize()}')
 
                     # Peek at the first item in the queue without removing it
-                    entry: RequestQueueEntry = await self._request_queue.peek()
-
-                    # Barrier Entry
-                    # if isinstance(entry, StealBarrierEntry):
-                    #     await self._request_queue.get_and_remove()
-                    #     lb_url = entry
-                    #     logger.info(
-                    #         f'Processing barrier for lb {lb_url}. '
-                    #         f'Current steal requests: '
-                    #         f'{self._lb_to_steal_requests} (to be popped).')
-                    #     async with self._steal_requests_lock:
-                    #         if lb_url in self._lb_to_steal_requests:
-                    #             if self._lb_to_steal_requests[lb_url]:
-                    #                 self._lb_to_steal_requests[lb_url].pop(0)
-                    #             if not self._lb_to_steal_requests[lb_url]:
-                    #                 await self._lb_pool.set_replica_unavailable(
-                    #                     lb_url)
-                    #                 logger.info(
-                    #                     f'{lb_url} has no steal '
-                    #                     'requests. Set it to unavailable.')
-                    #             # elif self._lb_to_steal_requests[lb_url][0] > 0:
-                    #             else:
-                    #                 await self._lb_pool.set_replica_available(
-                    #                     lb_url)
-                    #                 logger.info(f'{lb_url} has steal requests. '
-                    #                             'Set it to available.')
-                    #     continue
-
+                    entry: RequestQueueEntry = await self._request_queue.get_and_remove(
+                    )
                     assert isinstance(entry, RequestEntry)
+
                     if (_LB_PUSHING_ENABLE_LB and _DO_PUSHING_ACROSS_LB and
                             not entry.request.headers.get(
                                 _IS_FROM_LB_HEADER, False)):
@@ -713,7 +696,6 @@ class SkyServeLoadBalancer:
                                 entry.request)
                         except starlette_requests.ClientDisconnect as e:
                             # Client disconnected. Skip this request.
-                            await self._request_queue.get_and_remove()
                             entry.set_failed_on(e)
                             continue
 
@@ -722,7 +704,6 @@ class SkyServeLoadBalancer:
                         if ready_lb_url is not None:
                             # Process the request if a LB is available
                             # Now we can safely remove it from the queue
-                            await self._request_queue.get_and_remove()
                             try:
                                 logger.info(
                                     f'Processing queued request {entry.request.url} '
@@ -744,7 +725,6 @@ class SkyServeLoadBalancer:
                     # in other LB region, we should let them steal instead of
                     # returning 503.
                     if await self._replica_pool.empty():
-                        await self._request_queue.get_and_remove()
                         exception = fastapi.HTTPException(
                             # 503 means that the server is currently
                             # unable to handle the incoming requests.
@@ -756,58 +736,6 @@ class SkyServeLoadBalancer:
                         entry.request_event.set()
                         continue
 
-                    # Let other LBs steal requests from this LB.
-                    # lbs = await self._lbs_with_steal_requests()
-                    # if not lbs:
-                    #     continue
-                    # TODO(tian): Maybe we can select from the local region LB and
-                    # the remote region LB. Not necessarily to let them steal - some
-                    # requests with high match rate might worth to wait for a while.
-                    # And for low match rate, we can let them steal.
-                    # TODO(tian): Disable local region when there is any LB trying
-                    # to steal.
-                    # lb_available_replicas = await self._lb_pool.available_replicas()
-                    # if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
-                    #     # It is a request from LB. Skip routing to another LB to
-                    #     # avoid bouncing back and forth.
-                    #     lb = None
-                    # else:
-                    #     logger.info('LB available replicas: '
-                    #                 f'{lb_available_replicas}')
-                    #     lb = await self._lb_pool.select_replica(
-                    #         entry.request,
-                    #         disabled_url_in_low_match_rate=self._url,
-                    #         cache_threshold=cache_threshold)
-                    # # If the selected LB is not the same as the current LB, then
-                    # # we route it to another LB.
-                    # if lb is not None and lb != self._url:
-                    #     await self._request_queue.get_and_remove()
-                    #     try:
-                    #         logger.info(
-                    #             f'Processing queued request {entry.request.url} '
-                    #             f'from User to LB {lb}.')
-                    #         await self._handle_requests(lb, entry, is_from_lb=True)
-                    #         async with self._steal_requests_lock:
-                    #             if not self._lb_to_steal_requests[lb]:
-                    #                 logger.error(f'{lb} has no steal entries. '
-                    #                              'Skip decreasing size.')
-                    #                 continue
-                    #             self._lb_to_steal_requests[lb][0] -= 1
-                    #             logger.info(f'{lb} steals one '
-                    #                         'request. Current steal requests: '
-                    #                         f'{self._lb_to_steal_requests}')
-                    #             # if self._lb_to_steal_requests[lb][0] <= 0:
-                    #             #     await self._lb_pool.set_replica_unavailable(lb)
-                    #             #     logger.info(f'{lb} has no steal requests. '
-                    #             #                 'Set it to unavailable.')
-                    #     except Exception as e:  # pylint: disable=broad-except
-                    #         logger.error(f'Error when processing queued request '
-                    #                      f'to LB {lb}: '
-                    #                      f'{common_utils.format_exception(e)}\n'
-                    #                      f'  Traceback: {traceback.format_exc()}')
-                    #         entry.set_failed_on(e)
-                    #     continue
-
                     # Either because of there is no LBs stealing requests, or
                     # because the match rate is high so the local region is
                     # selected, we attempt to find an available replica here.
@@ -816,14 +744,12 @@ class SkyServeLoadBalancer:
                             entry.request)
                     except starlette_requests.ClientDisconnect as e:
                         # Client disconnected. Skip this request.
-                        await self._request_queue.get_and_remove()
                         entry.set_failed_on(e)
                         continue
 
                     if ready_replica_url is not None:
                         # Process the request if a replica is available
                         # Now we can safely remove it from the queue
-                        await self._request_queue.get_and_remove()
                         try:
                             logger.info(
                                 f'Processing queued request {entry.request.url} '
@@ -859,7 +785,6 @@ class SkyServeLoadBalancer:
                             entry.request)
                     except starlette_requests.ClientDisconnect as e:
                         # Client disconnected. Skip this request.
-                        await self._request_queue.get_and_remove()
                         entry.set_failed_on(e)
                         continue
 
@@ -867,7 +792,6 @@ class SkyServeLoadBalancer:
                     if ready_lb_url is not None and ready_lb_url != self._url:
                         # Process the request if a LB is available
                         # Now we can safely remove it from the queue
-                        await self._request_queue.get_and_remove()
                         try:
                             logger.info(
                                 f'Processing queued request {entry.request.url} '
@@ -884,6 +808,9 @@ class SkyServeLoadBalancer:
                             # Set exception to propagate to the waiting handler
                             entry.set_failed_on(e)
                         continue
+
+                    # Put it back if not successfully scheduled.
+                    await self._request_queue.put_in_head(entry)
 
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error(f'Error in queue processor: '
@@ -1092,9 +1019,12 @@ class SkyServeLoadBalancer:
                 # replica manager yet. We wait until it is ready.
                 if not steal_targets or self._url is None:
                     continue
-                # await self._request_stealing_v1_avg(steal_targets, self_qsize)
-                await self._request_stealing_v2_small(steal_targets,
-                                                      num_available_replicas)
+                if _USE_V2_STEALING:
+                    await self._request_stealing_v2_small(
+                        steal_targets, num_available_replicas)
+                else:
+                    await self._request_stealing_v1_avg(steal_targets,
+                                                        self_qsize)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in request stealing loop: '
                              f'{common_utils.format_exception(e)}\n'

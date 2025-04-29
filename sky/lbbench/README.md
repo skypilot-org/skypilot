@@ -62,9 +62,10 @@ You can launch all of them at once by:
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc1 --env HF_TOKEN
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc2 --env HF_TOKEN
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc3 --env HF_TOKEN
-sky serve up examples/serve/external-lb/llm.yaml -y -n svc4 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true
-sky serve up examples/serve/external-lb/llm.yaml -y -n svc5 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env DO_PUSHING_TO_REPLICA=true
-sky serve up examples/serve/external-lb/llm.yaml -y -n svc6 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env LB_PUSHING_ENABLE_LB=false
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc4 --env HF_TOKEN --env USE_V2_STEALING=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc5 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc6 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env DO_PUSHING_TO_REPLICA=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc7 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env LB_PUSHING_ENABLE_LB=false
 ```
 
 Here is a easy-to-use script:

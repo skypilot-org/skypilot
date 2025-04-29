@@ -223,7 +223,9 @@ def up(
         # from task envs.
         keys = [
             env_options.Options.DO_PUSHING_ACROSS_LB.env_key,
+            env_options.Options.LB_PUSHING_ENABLE_LB.env_key,
             env_options.Options.DO_PUSHING_TO_REPLICA.env_key,
+            env_options.Options.USE_V2_STEALING.env_key,
         ]
         assert isinstance(vars_to_fill['controller_envs'], dict)
         for key in keys:

@@ -29,7 +29,7 @@ def _prepare_sgl_cmd(st: Dict[str, Any]) -> str:
     for r in st['replica_info']:
         worker_urls.append(r['endpoint'])
     worker_urls_str = shlex.quote(' '.join(worker_urls))
-    return (f'sky launch -c {utils.sgl_cluster} -d '
+    return (f'sky launch -c {utils.sgl_cluster} -d --fast '
             '-y examples/serve/external-lb/router.yaml '
             f'--env WORKER_URLS={worker_urls_str}')
 
