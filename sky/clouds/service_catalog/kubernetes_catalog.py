@@ -261,16 +261,16 @@ def _list_accelerators(
 
                 accelerators_available = accelerator_count - allocated_qty
 
-                # Initialize the entry if it doesn't exist yet
-                if accelerator_name not in total_accelerators_available:
-                    total_accelerators_available[accelerator_name] = 0
-
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
-                    total_accelerators_available[accelerator_name] = (
-                        total_accelerators_available.get(accelerator_name, 0) +
-                        quantized_availability)
+                    if quantized_availability > 0:
+                        # only increment when quantized availability is positive
+                        # to avoid assertion errors checking keyset sizes in
+                        # core.py _realtime_kubernetes_gpu_availability_single
+                        total_accelerators_available[accelerator_name] = (
+                            total_accelerators_available.get(
+                                accelerator_name, 0) + quantized_availability)
 
     result = []
 

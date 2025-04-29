@@ -340,10 +340,14 @@ def is_eks_cluster() -> bool:
     return result.returncode == 0
 
 
-def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+    return common_utils.make_cluster_name_on_cloud(
         cluster_name, sky.GCP.max_cluster_name_length())
+
+
+def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+    name_on_cloud = get_replica_cluster_name_on_gcp(name, replica_id)
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name:{name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
@@ -359,7 +363,7 @@ def run_one_test(test: Test) -> None:
         write = test.echo
         flush = lambda: None
         subprocess_out = sys.stderr
-        test.echo(f'Test started. Log to stdout')
+        test.echo('Test started. Log to stdout')
     else:
         log_file = tempfile.NamedTemporaryFile('a',
                                                prefix=f'{test.name}-',
