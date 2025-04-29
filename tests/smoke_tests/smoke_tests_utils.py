@@ -1,4 +1,3 @@
-from collections import defaultdict
 import contextlib
 import enum
 import inspect
@@ -9,8 +8,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import (Any, cast, Dict, Generator, List, NamedTuple, Optional,
-                    Sequence, Set, Tuple, TypeVar)
+from typing import (Any, Dict, Generator, List, NamedTuple, Optional, Sequence,
+                    Set, Tuple)
 import uuid
 
 import colorama
