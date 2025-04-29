@@ -317,7 +317,6 @@ Read the research:
    Task YAML <../reference/yaml-spec>
    CLI <../reference/cli>
    ../reference/api
-   Helm Chart <../reference/helm-values-spec>
    ../reference/config
    ../developers/index
 
