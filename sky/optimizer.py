@@ -396,10 +396,12 @@ class Optimizer:
                     for resource, hint_list in resource_hints.items()
                     if hint_list
                 ])
+                indent_prefix = ' ' * len('Hint: ')
                 hints_formatted = '\n'.join(
-                    map(lambda r: f'        {r}', hints_concat.split('\n')))
+                    map(lambda r: f'{indent_prefix}{r}', 
+                        hints_concat.split('\n')))
                 resource_hints_string = (
-                    f'Hint 2: Check Per Resource Hint\n{hints_formatted}'
+                    f'Hint: Check Per Resource Hint\n{hints_formatted}'
                     if hints_formatted else '')
                 error_msg = (
                     f'{source_hint.capitalize()} does not contain any '
@@ -407,10 +409,11 @@ class Optimizer:
                     f'{node_resources_reprs}.'
                     f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
-                    f'Hint 1: {bold}sky show-gpus{reset} '
+                    f'Hint: {bold}sky show-gpus{reset} '
                     'to list available accelerators.\n'
-                    f'        {bold}sky check{reset} to check the enabled '
-                    f'clouds.\n{resource_hints_string}')
+                    f'{indent_prefix}{bold}sky check{reset} to check the '
+                    'enabled clouds.\n'
+                    f'{resource_hints_string}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(error_msg)
         return node_to_cost_map, node_to_candidate_map
@@ -1234,6 +1237,8 @@ def _fill_in_launchable_resources(
           Resources,
         Dict mapping Cloud to a list of feasible Resources (for printing),
         Sorted list of fuzzy candidates (alternative GPU names).
+        Dict mapping requested Resources and a list of hints for why the
+          resource is unavailable if so.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
