@@ -3474,6 +3474,8 @@ def show_gpus(
                     total_gpu_info[gpu][1] += available
             realtime_gpu_infos.append((ctx, realtime_gpu_table))
 
+        # display an aggregated table for all contexts
+        # if there are more than one contexts with GPUs
         if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'TOTAL_GPUS', free_header])
