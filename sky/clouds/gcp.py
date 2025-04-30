@@ -1017,28 +1017,31 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def check_disk_tier(
-            cls, instance_type: Optional[str],
-            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
-        if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
-            return True, ''
-        # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
-        # instance types. For a3 instances, we map the ULTRA tier to
-        # hyperdisk-balanced. For all other instance types, we failover to
-        # lower tiers. Reference:
-        # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
-        series = instance_type.split('-')[0]
-        if series in ['m2', 'm3', 'n2', 'a3']:
-            if series == 'n2':
-                num_cpus = int(instance_type.split('-')[2])
-                if num_cpus < 64:
-                    return False, ('n2 series with less than 64 vCPUs are '
-                                   'not supported with pd-extreme.')
-            return True, ''
-        return False, (f'{series} series is not supported with pd-extreme '
-                       'or hyperdisk-balanced. Only m2, m3 series and n2 '
-                       'series with 64 or more vCPUs are supported with '
-                       'pd-extreme. Also, only a3 is supported with '
-                       'hyperdisk-balanced.')
+        cls,
+        instance_type: Optional[str],  # pylint: disable=unused-argument
+        disk_tier: Optional[resources_utils.DiskTier]  # pylint: disable=unused-argument
+    ) -> Tuple[bool, str]:
+        return True, ''
+        # if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
+        #     return True, ''
+        # # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
+        # # instance types. For a3 instances, we map the ULTRA tier to
+        # # hyperdisk-balanced. For all other instance types, we failover to
+        # # lower tiers. Reference:
+        # # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
+        # series = instance_type.split('-')[0]
+        # if series in ['m2', 'm3', 'n2', 'a3']:
+        #     if series == 'n2':
+        #         num_cpus = int(instance_type.split('-')[2])
+        #         if num_cpus < 64:
+        #             return False, ('n2 series with less than 64 vCPUs are '
+        #                            'not supported with pd-extreme.')
+        #     return True, ''
+        # return False, (f'{series} series is not supported with pd-extreme '
+        #                'or hyperdisk-balanced. Only m2, m3 series and n2 '
+        #                'series with 64 or more vCPUs are supported with '
+        #                'pd-extreme. Also, only a3 is supported with '
+        #                'hyperdisk-balanced.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
@@ -1051,7 +1054,17 @@ class GCP(clouds.Cloud):
     @classmethod
     def _get_disk_type(cls, instance_type: Optional[str],
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
+
+        def _propagate_disk_type(lowest: Optional[str] = None,
+                                 highest: Optional[str] = None) -> None:
+            if lowest is not None:
+                tier2name[resources_utils.DiskTier.LOW] = lowest
+            if highest is not None:
+                tier2name[resources_utils.DiskTier.ULTRA] = highest
+
         tier = cls._translate_disk_tier(disk_tier)
+
+        # Define the default mapping from disk tiers to disk types.
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
@@ -1062,9 +1075,26 @@ class GCP(clouds.Cloud):
         # Remap series-specific disk types
         series = instance_type.split('-')[0]  # type: ignore
         if series == 'a3':
-            tier2name[resources_utils.DiskTier.LOW] = tier2name[
-                resources_utils.DiskTier.MEDIUM]
+            # a3 doesn't support pd-standard, so use pd-balanced for LOW.
+            _propagate_disk_type(
+                lowest=tier2name[resources_utils.DiskTier.MEDIUM])
             tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+        elif series == 'n2':
+            num_cpus = int(instance_type.split('-')[2])  # type: ignore
+            if num_cpus < 64:
+                # pd-extreme isn't supported, so use pd-ssd for ULTRA.
+                _propagate_disk_type(
+                    highest=tier2name[resources_utils.DiskTier.HIGH])
+        elif series in ['n1', 'a2']:
+            # pd-extreme isn't supported, so use pd-ssd for ULTRA.
+            _propagate_disk_type(
+                highest=tier2name[resources_utils.DiskTier.HIGH])
+        elif series == 'g2':
+            # g2 doesn't support pd-standard and pd-extreme, so use pd-balanced for LOW
+            # and pd-ssd to ULTRA.
+            _propagate_disk_type(
+                lowest=tier2name[resources_utils.DiskTier.MEDIUM],
+                highest=tier2name[resources_utils.DiskTier.HIGH])
 
         return tier2name[tier]
 
