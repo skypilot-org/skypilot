@@ -15,7 +15,7 @@ run: |
   if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
     echo "Head node"
 
-    # NP should be number of GPUs per node times number of nodes
+    # Total number of processes, NP should be the total number of GPUs in the cluster
     NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
 
     # Append :${SKYPILOT_NUM_GPUS_PER_NODE} to each IP as slots

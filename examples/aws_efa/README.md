@@ -71,88 +71,24 @@ This section is important for EFA integration:
 The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
 
-TODO(Hailong): We need to have a table here
+Check the following table for the GPU and EFA count mapping for AWS `p4` and `p5` instance types:
 
-Update the EFA number in the `nccl_efa.yaml` for your instance type.
+| Instance Type | GPU Type | #EFA |
+|---------------|----------|------|
+| p4d.24xlarge  | A100:8   | 4    |
+| p4de.24xlarge | A100:8   | 4    |
+| p5.48xlarge   | H100:8   | 32   |
+| p5e.48xlarge  | H200:8   | 32   |
+| p5en.48xlarge | H200:8   | 16   |
+
+
+Update the EFA number in the [nccl_efa.yaml](nccl_efa.yaml) for your instance type.
 
 ## Running NCCL test with EFA using SkyPilot
 
-```yaml
-name: nccl-test-efa
+Check the [nccl_efa.yaml](nccl_efa.yaml) for the complete SkyPilot cluster yaml cofnigurations.
 
-resources:
-  cloud: kubernetes
-  accelerators: A100:8
-  cpus: 90+
-  image_id: docker:public.ecr.aws/hpc-cloud/nccl-tests:latest
-
-num_nodes: 2
-
-envs:
-  USE_EFA: "true"
-
-run: |
-  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
-    echo "Head node"
-
-    # NP should be number of GPUs per node times number of nodes
-    NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
-
-    # Append :${SKYPILOT_NUM_GPUS_PER_NODE} to each IP as slots
-    nodes=""
-    for ip in $SKYPILOT_NODE_IPS; do
-      nodes="${nodes}${ip}:${SKYPILOT_NUM_GPUS_PER_NODE},"
-    done
-    nodes=${nodes::-1}
-    echo "All nodes: ${nodes}"
-
-    # Set environment variables
-    export PATH=$PATH:/usr/local/cuda-12.2/bin:/opt/amazon/efa/bin:/usr/bin
-    export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:/opt/amazon/openmpi/lib:/opt/nccl/build/lib:/opt/amazon/efa/lib:/opt/aws-ofi-nccl/install/lib:/usr/local/nvidia/lib:$LD_LIBRARY_PATH
-    export NCCL_HOME=/opt/nccl
-    export CUDA_HOME=/usr/local/cuda-12.2
-    export NCCL_DEBUG=INFO
-    export NCCL_BUFFSIZE=8388608
-    export NCCL_P2P_NET_CHUNKSIZE=524288
-    export NCCL_TUNER_PLUGIN=/opt/aws-ofi-nccl/install/lib/libnccl-ofi-tuner.so
-
-    if [ "${USE_EFA}" == "true" ]; then
-      export FI_PROVIDER="efa"
-    else
-      export FI_PROVIDER=""
-    fi
-
-    /opt/amazon/openmpi/bin/mpirun \
-      --allow-run-as-root \
-      --tag-output \
-      -H $nodes \
-      -np $NP \
-      -N $SKYPILOT_NUM_GPUS_PER_NODE \
-      --bind-to none \
-      -x FI_PROVIDER \
-      -x PATH \
-      -x LD_LIBRARY_PATH \
-      -x NCCL_DEBUG=INFO \
-      -x NCCL_BUFFSIZE \
-      -x NCCL_P2P_NET_CHUNKSIZE \
-      -x NCCL_TUNER_PLUGIN \
-      --mca pml ^cm,ucx \
-      --mca btl tcp,self \
-      --mca btl_tcp_if_exclude lo,docker0,veth_def_agent \
-      /opt/nccl-tests/build/all_reduce_perf \
-      -b 8 \
-      -e 2G \
-      -f 2 \
-      -g 1 \
-      -c 5 \
-      -w 5 \
-      -n 100
-  else
-    echo "Worker nodes"
-  fi
-```
-
-The image_id provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
+The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
 To run the NCCL test with EFA support:
 
