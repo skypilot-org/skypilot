@@ -35,7 +35,7 @@ def _get_git_commit():
 
 
 __commit__ = _get_git_commit()
-__version__ = '0.9.1'
+__version__ = '0.9.2'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 
