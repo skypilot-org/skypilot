@@ -116,7 +116,7 @@ To verify that the API server is working, run ``sky api info``:
    Upgrading API Server <api-server-upgrade>
    Performance Best Practices <api-server-tunning>
    Troubleshooting <api-server-troubleshooting>
-   Reference <helm-values-spec>
+   Helm Chart Reference <helm-values-spec>
 
 By default, each user connected to the API server will only see their own resources.
 
