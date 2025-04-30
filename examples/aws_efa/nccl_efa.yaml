@@ -79,7 +79,5 @@ config:
         - resources:
             limits:
               vpc.amazonaws.com/efa: 4
-              nvidia.com/gpu: 8
             requests:
               vpc.amazonaws.com/efa: 4
-              nvidia.com/gpu: 8

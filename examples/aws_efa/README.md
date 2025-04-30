@@ -45,9 +45,7 @@ This section is important for EFA integration:
 - `config.kubernetes.pod_config`: Provides Kubernetes-specific pod configuration
 - `spec.containers[0].resources`: Defines resource requirements
   - `limits.vpc.amazonaws.com/efa: 4`: Limits the Pod to use 4 EFA devices
-  - `limits.nvidia.com/gpu: 8`: Limits the Pod to use 8 GPUs
   - `requests.vpc.amazonaws.com/efa: 4`: Requests 4 EFA devices for the Pod
-  - `requests.nvidia.com/gpu: 8`: Requests 8 GPUs for the Pod
 
 
 The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
