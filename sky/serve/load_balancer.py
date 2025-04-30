@@ -27,6 +27,7 @@ from sky.utils import env_options
 logger = sky_logging.init_logger(__name__)
 
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
+_QUEUE_SIZE_HEADER = 'X-Sky-Serve-Queue-Size'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
 _IE_QUEUE_PROBE_INTERVAL = 0.1
 _STEAL_TRIGGER_THRESHOLD = 10
@@ -420,6 +421,7 @@ class SkyServeLoadBalancer:
         self._lb2region: Dict[str, str] = {}
         self._is_local_debug_mode = is_local_debug_mode
         self._steal_targets_cnt: int = 0
+        self._lb_to_queue_size: Dict[str, int] = {}
 
     # async def _lbs_with_steal_requests(self) -> List[str]:
     #     """Return the LBs that have requests to steal."""
@@ -585,6 +587,7 @@ class SkyServeLoadBalancer:
                 # If it is not from LB, then the following request will be sent
                 # out from LB. So we add the header to indicate it.
                 headers[_IS_FROM_LB_HEADER] = 'true'
+                headers[_QUEUE_SIZE_HEADER] = str(self._lb_to_queue_size.get(url, -1))
             proxy_request = client.build_request(
                 entry.request.method,
                 worker_url,
@@ -778,6 +781,12 @@ class SkyServeLoadBalancer:
                     # from users and one for requests from other LBs.
                     if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
                         continue
+                    
+                    logger.info(
+                        f"self._url: {self._url}, Queue Size: {entry.request.headers.get(_QUEUE_SIZE_HEADER, 0)}, "
+                        f"self actual queue size: {await self._request_queue.actual_size()}"
+                    )
+                    
                     # If enabled and when local replica all unavailable,
                     # try push it to other LBs.
                     try:
@@ -822,7 +831,7 @@ class SkyServeLoadBalancer:
         """Queue the request for processing by the queue processor."""
         assert self._request_queue is not None
         self._request_aggregator.add(request)
-        logger.info(f'Received request {request.url}.')
+        logger.info(f'Received request {request.url}, my url {self._url}.')
 
         try:
             # Create future and event in the current event loop context
@@ -866,10 +875,12 @@ class SkyServeLoadBalancer:
     async def _configuration(self) -> fastapi.responses.Response:
         """Return the configuration of the load balancer."""
         assert self._request_queue is not None
+        queue_size = await self._request_queue.qsize()
+        logger.info(f"Check LB configuration: {self._url}, queue_size: {queue_size}")
         return fastapi.responses.JSONResponse(
             status_code=200,
             content={
-                'queue_size': await self._request_queue.qsize(),
+                'queue_size': queue_size,
                 'queue_size_actual': await self._request_queue.actual_size(),
                 'replica_queue': await self._replica_pool.active_requests(),
                 'num_replicas': len(self._replica_pool.ready_replicas()),
@@ -1253,6 +1264,8 @@ class SkyServeLoadBalancer:
                 # if its queue size is less than self's, it's available
                 lb_available = (conf['queue_size'] <= self_qsize and
                                 conf['num_available_replicas'] > 0)
+                logger.info(f"{lb} queue size: {conf['queue_size']}, self_qsize: {self_qsize}")
+                self._lb_to_queue_size[lb] = conf['queue_size']
                 return lb_available, lb
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error probing load balancer status of {lb}: '
