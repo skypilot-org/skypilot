@@ -661,7 +661,7 @@ available_node_types:
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
             {% endif %}
-      
+
       {% if high_availability %}
       pvc_spec:
         apiVersion: v1
@@ -747,6 +747,7 @@ available_node_types:
                       mountPath: /mnt/home # Temporary mount point for initialization
               # should be replaced by pod spec
       {% endif %}
+
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
@@ -799,6 +800,7 @@ setup_commands:
     # must and see if there's a workaround to grant minimum permission.
     sudo chmod 777 /tmp/tpu_logs;
     {% endif %}
+    {{ ssh_max_sessions_config }}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {

@@ -280,6 +280,24 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# SSH configuration to allow more concurrent sessions and connections.
+# Default MaxSessions is 10.
+# Default MaxStartups is 10:30:60, meaning:
+#   - Up to 10 unauthenticated connections are allowed without restriction.
+#   - From 11 to 60 connections, 30% are randomly dropped.
+#   - Above 60 connections, all are dropped.
+# These defaults are too low for submitting many parallel jobs (e.g., 150),
+# which can easily exceed the limits and cause connection failures.
+# The new values (MaxSessions 200, MaxStartups 150:30:200) increase these
+# limits significantly.
+# TODO(zeping): Bake this configuration in SkyPilot default images.
+SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
+    'sudo bash -c \''
+    'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
+    'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
+    '(systemctl reload sshd || service ssh reload); '
+    '\'')
+
 # Internal: Env var indicating the system is running with a remote API server.
 # It is used for internal purposes, including the jobs controller to mark
 # clusters as launched with a remote API server.

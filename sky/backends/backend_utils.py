@@ -798,6 +798,8 @@ def write_cluster_config(
                 'sky_ray_yaml_local_path': tmp_yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
+                'ssh_max_sessions_config':
+                    constants.SET_SSH_MAX_SESSIONS_CONFIG_CMD,
                 # Authentication (optional).
                 **auth_config,
 
