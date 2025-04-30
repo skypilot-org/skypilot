@@ -8,11 +8,9 @@ from sky.utils import ux_utils
 
 NEBIUS_TENANT_ID_FILENAME = 'NEBIUS_TENANT_ID.txt'
 NEBIUS_IAM_TOKEN_FILENAME = 'NEBIUS_IAM_TOKEN.txt'
-NEBIUS_PROJECT_ID_FILENAME = 'NEBIUS_PROJECT_ID.txt'
 NEBIUS_CREDENTIALS_FILENAME = 'credentials.json'
 NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
 NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
-NEBIUS_PROJECT_ID_PATH = '~/.nebius/' + NEBIUS_PROJECT_ID_FILENAME
 NEBIUS_CREDENTIALS_PATH = '~/.nebius/' + NEBIUS_CREDENTIALS_FILENAME
 
 DEFAULT_REGION = 'eu-north1'
@@ -90,16 +88,6 @@ def get_iam_token():
 def is_token_or_cred_file_exist():
     return (os.path.exists(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH)) or
             os.path.exists(os.path.expanduser(NEBIUS_CREDENTIALS_PATH)))
-
-
-@annotations.lru_cache(scope='request')
-def get_project_id():
-    try:
-        with open(os.path.expanduser(NEBIUS_PROJECT_ID_PATH),
-                  encoding='utf-8') as file:
-            return file.read().strip()
-    except FileNotFoundError:
-        return None
 
 
 @annotations.lru_cache(scope='request')

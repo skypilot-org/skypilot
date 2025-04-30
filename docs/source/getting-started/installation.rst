@@ -549,11 +549,15 @@ If you have one tenant you can run:
 
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
+You can specify a preferable project ID and fabric in `~/.sky/config.yaml`
 
-.. code-block:: shell
+.. code-block:: yaml
 
-  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
+  # ~/.sky/config.yaml
+  nebius:
+      eu-north1:
+        project_id: project-e00xxxxxxxxxxxx
+        fabric: fabric-2
 
 To use *Service Account* authentication, follow these steps:
 

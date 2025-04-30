@@ -17,7 +17,6 @@ _CREDENTIAL_FILES = [
     # credential files for Nebius
     nebius.NEBIUS_TENANT_ID_FILENAME,
     nebius.NEBIUS_IAM_TOKEN_FILENAME,
-    nebius.NEBIUS_PROJECT_ID_FILENAME,
     nebius.NEBIUS_CREDENTIALS_FILENAME
 ]
 

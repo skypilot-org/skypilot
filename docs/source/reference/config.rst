@@ -122,6 +122,13 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`us-ashburn-1 <config-yaml-oci>`:
       vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+  :ref:`nebius <config-yaml-nebius>`:
+    :ref:`eu-north1 <config-yaml-nebius>`:
+      project_id: project-e00xxxxxxxxxxx
+      fabric: fabric-3
+    :ref:`eu-west1 <config-yaml-nebius>`:
+      project_id: project-e01xxxxxxxxxxx
+      fabric: fabric-5
 
 Fields
 ----------
@@ -1048,6 +1055,38 @@ Example:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
+.. _config-yaml-nebius:
+
+``nebius``
+~~~~~~~~~~
+
+Advanced Nebius configuration (optional).
+
+``project_id``
+    Identifier for the Nebius project (optional)
+    Default: Uses first available project if not specified
+``fabric``
+    GPU cluster configuration identifier (optional)
+    Optional: GPU cluster disabled if not specified
+
+
+The configuration can be specified in region-specific sections.
+
+Example:
+
+.. code-block:: yaml
+    nebius:
+        # Region-specific configuration
+        eu-north1:
+            # Project identifier for this region
+            # Optional: Uses first available project if not specified
+            project_id: project-e00......
+            # GPU cluster fabric identifier
+            # Optional: GPU cluster disabled if not specified
+            fabric: fabric-3
+        eu-west1:
+            project_id: project-e01...
+            fabric: fabric-5
 
 .. toctree::
    :hidden:
