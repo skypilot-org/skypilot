@@ -207,9 +207,11 @@ gcpCredentials:
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
 
-# Populate RunPod credentials from a secret `runpod-credentials` with key `api_key`
+# Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:
   enabled: false
+  # Name of the secret containing the RunPod credentials. Only used if enabled is true.
+  runpodSecretName: runpod-credentials
 
 # Set securityContext for the api pod
 podSecurityContext: {}

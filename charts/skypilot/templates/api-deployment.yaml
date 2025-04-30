@@ -207,7 +207,7 @@ spec:
         - name: RUNPOD_API_KEY
           valueFrom:
             secretKeyRef:
-              name: runpod-credentials
+              name: {{ .Values.runpodCredentials.runpodSecretName }}
               key: api_key
         volumeMounts:
         - name: runpod-config
