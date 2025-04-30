@@ -702,7 +702,7 @@ def test_optimize_disk_tier(enable_all_clouds):
     def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
         task = sky.Task()
         task.set_resources(r)
-        _, per_cloud_candidates, _ = optimizer._fill_in_launchable_resources(
+        _, per_cloud_candidates, _, _ = optimizer._fill_in_launchable_resources(
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
 

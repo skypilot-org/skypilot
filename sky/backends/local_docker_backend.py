@@ -276,7 +276,6 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  detach_run: bool,
                  dryrun: bool = False) -> None:
         """ Launches the container."""
-
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '
                                       'LocalDockerBackend.')
@@ -364,7 +363,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                 if k.startswith(_DOCKER_LABEL_PREFIX):
                     # Remove 'skymeta_' from key
                     metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
-            self.images[c.name] = [c.image, metadata]
+            self.images[c.name] = (c.image, metadata)
             self.containers[c.name] = c
 
     def _execute_task_one_node(self, handle: LocalDockerResourceHandle,

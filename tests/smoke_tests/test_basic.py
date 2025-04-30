@@ -33,7 +33,6 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
-from sky.clouds import Lambda
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils

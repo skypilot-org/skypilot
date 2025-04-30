@@ -140,6 +140,12 @@ def pytest_addoption(parser):
         default='master',
         help='Base branch to test backward compatibility against',
     )
+    parser.addoption(
+        '--controller-cloud',
+        type=str,
+        default=None,
+        help='Controller cloud to use for tests',
+    )
 
 
 def pytest_configure(config):
@@ -437,3 +443,16 @@ def setup_docker_container(request):
         # Release the lock and close the file
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_controller_cloud_env(request):
+    """Setup controller cloud environment variable if --controller-cloud is specified."""
+    if not request.config.getoption('--controller-cloud'):
+        yield
+        return
+
+    # Set environment variable to indicate we're using remote server
+    controller_cloud = request.config.getoption('--controller-cloud')
+    os.environ['PYTEST_SKYPILOT_CONTROLLER_CLOUD'] = controller_cloud
+    yield controller_cloud

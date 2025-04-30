@@ -142,7 +142,7 @@ available_node_types:
             {%- endfor %}
       # Use IDMSv2
       MetadataOptions:
-        HttpTokens: required 
+        HttpTokens: required
 
 head_node_type: ray.head.default
 
@@ -192,6 +192,7 @@ setup_commands:
     {%- if remote_identity != 'LOCAL_CREDENTIALS' %}
     rm ~/.aws/credentials || true;
     {%- endif %}
+    {{ ssh_max_sessions_config }}
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.

@@ -114,6 +114,8 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument('--base-branch')
 
+    parser.add_argument('--controller-cloud')
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -142,6 +144,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--remote-server')
     if parsed_args.base_branch:
         extra_args.append(f'--base-branch {parsed_args.base_branch}')
+    if parsed_args.controller_cloud:
+        extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -368,17 +372,18 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str],
               type=str,
               help='Args to pass to pytest, e.g., --managed-jobs --aws')
 def main(args):
-    test_files = os.listdir('tests/smoke_tests')
+    test_files = []
+    for root, _, files in os.walk('tests/smoke_tests'):
+        for file in files:
+            if file.endswith('.py') and file.startswith('test_'):
+                test_files.append(os.path.join(root, file))
     release_files = []
     quick_tests_core_files = []
     for test_file in test_files:
-        if not test_file.startswith('test_'):
-            continue
-        test_file_path = os.path.join('tests/smoke_tests', test_file)
         if "test_quick_tests_core" in test_file or "test_backward_compat" in test_file:
-            quick_tests_core_files.append(test_file_path)
+            quick_tests_core_files.append(test_file)
         else:
-            release_files.append(test_file_path)
+            release_files.append(test_file)
 
     args = args or os.getenv('ARGS', '')
     print(f'args: {args}')
