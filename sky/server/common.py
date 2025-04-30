@@ -7,11 +7,13 @@ from http.cookiejar import MozillaCookieJar
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
 import typing
 from typing import Any, Dict, Optional
+from urllib import parse
 import uuid
 
 import colorama
@@ -64,11 +66,14 @@ _VERSION_INFO = (
     'client version: v{client_version} (API version: v{client_api_version})\n'
     'server version: v{server_version} (API version: v{server_api_version})'
     f'{colorama.Style.RESET_ALL}')
+_LOCAL_API_SERVER_RESTART_HINT = (
+    f'{colorama.Fore.YELLOW}Please restart the SkyPilot API server with:\n'
+    f'{colorama.Style.BRIGHT}sky api stop; sky api start'
+    f'{colorama.Style.RESET_ALL}')
 _LOCAL_SERVER_VERSION_MISMATCH_WARNING = (
     f'{colorama.Fore.YELLOW}Client and local API server version mismatch:\n'
     '{version_info}\n'
-    f'{colorama.Fore.YELLOW}Please restart the SkyPilot API server with:\n'
-    'sky api stop; sky api start'
+    f'{_LOCAL_API_SERVER_RESTART_HINT}'
     f'{colorama.Style.RESET_ALL}')
 _CLIENT_TOO_OLD_WARNING = (
     f'{colorama.Fore.YELLOW}Your SkyPilot client is too old:\n'
@@ -83,6 +88,17 @@ _REMOTE_SERVER_TOO_OLD_WARNING = (
     'remote API server or downgrade your local client with:\n'
     '{command}\n'
     f'{colorama.Style.RESET_ALL}')
+_SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
+    f'{colorama.Fore.YELLOW}SkyPilot API server version does not match the '
+    'installation on disk:\n'
+    f'{colorama.Style.RESET_ALL}'
+    f'{colorama.Style.DIM}'
+    'running API server version: {server_version}\n'
+    'installed API server version: {version_on_disk}\n'
+    f'{colorama.Style.RESET_ALL}'
+    f'{colorama.Fore.YELLOW}This can happen if you upgraded SkyPilot without '
+    'restarting the API server.'
+    f'{colorama.Style.RESET_ALL}')
 # Parse local API version eargly to catch version format errors.
 _LOCAL_API_VERSION: int = int(server_constants.API_VERSION)
 # SkyPilot dev version.
@@ -92,6 +108,8 @@ RequestId = str
 ApiVersion = Optional[str]
 
 logger = sky_logging.init_logger(__name__)
+
+hinted_for_server_install_version_mismatch = False
 
 
 class ApiServerStatus(enum.Enum):
@@ -105,6 +123,7 @@ class ApiServerInfo:
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None
+    version_on_disk: Optional[str] = None
     commit: Optional[str] = None
 
 
@@ -130,6 +149,23 @@ def get_server_url(host: Optional[str] = None) -> str:
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
     return url.rstrip('/')
+
+
+@annotations.lru_cache(scope='global')
+def get_dashboard_url(server_url: str) -> str:
+    # The server_url may include username or password with the
+    # format of https://username:password@example.com:8080/path
+    # We need to remove the username and password and only
+    # return `https://example.com:8080/path`
+    parsed = parse.urlparse(server_url)
+    # Reconstruct the URL without credentials but keeping the scheme
+    dashboard_url = f'{parsed.scheme}://{parsed.hostname}'
+    if parsed.port:
+        dashboard_url = f'{dashboard_url}:{parsed.port}'
+    if parsed.path:
+        dashboard_url = f'{dashboard_url}{parsed.path}'
+    dashboard_url = dashboard_url.rstrip('/')
+    return f'{dashboard_url}/dashboard'
 
 
 @annotations.lru_cache(scope='global')
@@ -165,10 +201,12 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                     result = response.json()
                     api_version = result.get('api_version')
                     version = result.get('version')
+                    version_on_disk = result.get('version_on_disk')
                     commit = result.get('commit')
                     server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
                                                 api_version=api_version,
                                                 version=version,
+                                                version_on_disk=version_on_disk,
                                                 commit=commit)
                     if api_version is None or version is None or commit is None:
                         logger.warning(f'API server response missing '
@@ -294,8 +332,9 @@ def _start_api_server(deploy: bool = False,
             else:
                 break
 
-        dashboard_msg = (f'Dashboard: {get_server_url(host)}/dashboard')
-        api_server_info = get_api_server_status(get_server_url(host))
+        server_url = get_server_url(host)
+        dashboard_msg = ''
+        api_server_info = get_api_server_status(server_url)
         if api_server_info.version == _DEV_VERSION:
             dashboard_msg += (
                 f'\n{colorama.Style.RESET_ALL}{ux_utils.INDENT_SYMBOL}'
@@ -303,11 +342,16 @@ def _start_api_server(deploy: bool = False,
             if not os.path.isdir(server_constants.DASHBOARD_DIR):
                 dashboard_msg += (
                     'Dashboard is not built, '
-                    'to build: npm --prefix sky/dashboard run build')
+                    'to build: npm --prefix sky/dashboard install '
+                    '&& npm --prefix sky/dashboard run build\n')
             else:
                 dashboard_msg += (
                     'Dashboard may be stale when installed from source, '
-                    'to rebuild: npm --prefix sky/dashboard run build')
+                    'to rebuild: npm --prefix sky/dashboard install '
+                    '&& npm --prefix sky/dashboard run build\n')
+            dashboard_msg += (
+                f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                f'Dashboard: {get_dashboard_url(server_url)}')
             dashboard_msg += f'{colorama.Style.RESET_ALL}'
         logger.info(
             ux_utils.finishing_message(
@@ -362,9 +406,34 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ApiServerConnectionError(endpoint)
 
+    # If the user ran pip upgrade, but the server wasn't restarted, warn them.
+    # We check this using the info from /api/health, rather than in the
+    # executor, because the executor could be started after the main server
+    # process, picking up the new code, even though the main server process is
+    # still running the old code.
+    # Note that this code is running on the client side, so calling
+    # get_skypilot_version_on_disk() from here is not correct.
+
+    # Only show this hint once per process.
+    global hinted_for_server_install_version_mismatch
+
+    if (api_server_info.version_on_disk is not None and
+            api_server_info.version != api_server_info.version_on_disk and
+            not hinted_for_server_install_version_mismatch):
+
+        logger.warning(
+            _SERVER_INSTALL_VERSION_MISMATCH_WARNING.format(
+                server_version=api_server_info.version,
+                version_on_disk=api_server_info.version_on_disk))
+        if is_api_server_local():
+            logger.warning(_LOCAL_API_SERVER_RESTART_HINT)
+
+        hinted_for_server_install_version_mismatch = True
+
 
 def _get_version_info_hint(server_info: ApiServerInfo) -> str:
     assert server_info.version is not None, 'Server version is None'
+    # version_on_disk may be None if the server is older
     assert server_info.commit is not None, 'Server commit is None'
     sv = server_info.version
     cv = sky.__version__
@@ -391,6 +460,21 @@ def _install_server_version_command(server_info: ApiServerInfo) -> str:
     else:
         # Stable version.
         return f'pip install -U "skypilot=={server_info.version}"'
+
+
+# Keep in sync with sky/setup_files/setup.py find_version()
+def get_skypilot_version_on_disk() -> str:
+    """Get the version of the SkyPilot code on disk."""
+    current_file_path = pathlib.Path(__file__)
+    assert str(current_file_path).endswith(
+        'server/common.py'), current_file_path
+    sky_root = current_file_path.parent.parent
+    with open(sky_root / '__init__.py', 'r', encoding='utf-8') as fp:
+        version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
+                                  fp.read(), re.M)
+        if version_match:
+            return version_match.group(1)
+        raise RuntimeError('Unable to find version string.')
 
 
 def check_server_healthy_or_start_fn(deploy: bool = False,

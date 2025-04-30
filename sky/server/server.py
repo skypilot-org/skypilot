@@ -35,6 +35,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
+from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
@@ -287,8 +288,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # these into a single call or have a TTL cache for (task, admin_policy)
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
-    try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+
+    def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -296,14 +297,17 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # server thread.
         dag, _ = admin_policy_utils.apply(
             dag, request_options=validate_body.request_options)
-        for task in dag.tasks:
-            # Will validate workdir and file_mounts in the backend, as those
-            # need to be validated after the files are uploaded to the SkyPilot
-            # API server with `upload_mounts_to_api_server`.
-            task.validate_name()
-            task.validate_run()
-            for r in task.resources:
-                r.validate()
+        # Skip validating workdir and file_mounts, as those need to be
+        # validated after the files are uploaded to the SkyPilot API server
+        # with `upload_mounts_to_api_server`.
+        dag.validate(skip_file_mounts=True, skip_workdir=True)
+
+    try:
+        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        loop = asyncio.get_running_loop()
+        # Apply admin policy and validate DAG is blocking, run it in a separate
+        # thread executor to avoid blocking the uvicorn event loop.
+        await loop.run_in_executor(None, validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
@@ -1015,14 +1019,17 @@ async def health() -> Dict[str, str]:
         A dictionary with the following keys:
         - status: str; The status of the API server.
         - api_version: str; The API version of the API server.
-        - commit: str; The commit hash of SkyPilot used for API server.
         - version: str; The version of SkyPilot used for API server.
+        - version_on_disk: str; The version of the SkyPilot installation on
+          disk, which can be used to warn about restarting the API server
+        - commit: str; The commit hash of SkyPilot used for API server.
     """
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
-        'commit': sky.__commit__,
         'version': sky.__version__,
+        'version_on_disk': common.get_skypilot_version_on_disk(),
+        'commit': sky.__commit__,
     }
 
 
@@ -1160,13 +1167,12 @@ if __name__ == '__main__':
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    num_workers = 1
-    if cmd_args.deploy:
-        num_workers = common_utils.get_cpu_count()
+    config = server_config.compute_server_config(cmd_args.deploy)
+    num_workers = config.num_server_workers
 
     sub_procs = []
     try:
-        sub_procs = executor.start(deploy=cmd_args.deploy)
+        sub_procs = executor.start(config)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.

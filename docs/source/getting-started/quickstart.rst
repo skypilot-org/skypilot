@@ -132,6 +132,38 @@ This may show multiple clusters, if you have created several:
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
+Access the dashboard
+====================
+
+SkyPilot offers a dashboard for all clusters and jobs launched with SkyPilot. To open the dashboard, run :code:`sky dashboard`, which will automatically opens a browser tab for the dashboard.
+
+.. dropdown:: Start dashboard when installing SkyPilot from source
+
+    If you install SkyPilot from source, before starting the API server:
+
+    * Run the following commands to generate the dashboard build:
+
+    .. code-block:: console
+
+      # Install all dependencies
+      $ npm --prefix sky/dashboard install
+      # Build
+      $ npm --prefix sky/dashboard run build
+
+    * Start the dashboard with :code:`sky dashboard`.
+
+The clusters page example:
+
+.. image:: ../images/dashboard-clusters.png
+  :width: 800
+  :alt: Clusters dashboard
+
+The managed jobs page example:
+
+.. image:: ../images/dashboard-managed-jobs.png
+  :width: 800
+  :alt: Managed jobs dashboard
+
 .. _ssh:
 
 SSH into clusters

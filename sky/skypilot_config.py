@@ -1,6 +1,6 @@
 """Immutable user configurations (EXPERIMENTAL).
 
-On module import, we attempt to parse the config located at _USER_CONFIG_PATH
+On module import, we attempt to parse the config located at _GLOBAL_CONFIG_PATH
 (default: ~/.sky/config.yaml). Caller can then use
 
   >> skypilot_config.loaded()
@@ -50,13 +50,11 @@ then:
 """
 import contextlib
 import copy
+import json
 import os
-import pprint
 import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
-
-from omegaconf import OmegaConf
 
 from sky import exceptions
 from sky import sky_logging
@@ -80,8 +78,8 @@ logger = sky_logging.init_logger(__name__)
 #     path as the config file. Do not use any other config files.
 #     This behavior is subject to change and should not be relied on by users.
 # Else,
-# (1) If env var {ENV_VAR_USER_CONFIG} exists, use its path as the user
-#     config file. Else, use the default path {_USER_CONFIG_PATH}.
+# (1) If env var {ENV_VAR_GLOBAL_CONFIG} exists, use its path as the user
+#     config file. Else, use the default path {_GLOBAL_CONFIG_PATH}.
 # (2) If env var {ENV_VAR_PROJECT_CONFIG} exists, use its path as the project
 #     config file. Else, use the default path {_PROJECT_CONFIG_PATH}.
 # (3) Override any config keys in (1) with the ones in (2).
@@ -97,20 +95,15 @@ logger = sky_logging.init_logger(__name__)
 # use the same config file.
 ENV_VAR_SKYPILOT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}CONFIG'
 
-# (Used by users) Environment variables for setting non-default user and
-# project config files on clients.
-ENV_VAR_USER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}USER_CONFIG'
+# Environment variables for setting non-default server and user
+# config files.
+ENV_VAR_GLOBAL_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}GLOBAL_CONFIG'
+# Environment variables for setting non-default project config files.
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
-# (Used by server) Environment variable for setting the server config file.
-ENV_VAR_SERVER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}SERVER_CONFIG'
-
 # Path to the client config files.
-_USER_CONFIG_PATH = '~/.sky/config.yaml'
+_GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
-
-# Path to the server config file.
-_SERVER_CONFIG_PATH = _USER_CONFIG_PATH
 
 # The loaded config.
 _dict = config_utils.Config()
@@ -121,24 +114,24 @@ _reload_config_lock = threading.Lock()
 
 def get_user_config_path() -> str:
     """Returns the path to the user config file."""
-    return _USER_CONFIG_PATH
+    return _GLOBAL_CONFIG_PATH
 
 
 def get_user_config() -> config_utils.Config:
     """Returns the user config."""
     # find the user config file
-    user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
+    user_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
     if user_config_path:
         logger.debug('using user config file specified by '
-                     f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
+                     f'{ENV_VAR_GLOBAL_CONFIG}: {user_config_path}')
         user_config_path = os.path.expanduser(user_config_path)
         if not os.path.exists(user_config_path):
             with ux_utils.print_exception_no_traceback():
                 raise FileNotFoundError(
                     'Config file specified by env var '
-                    f'{ENV_VAR_USER_CONFIG} ({user_config_path!r}) '
+                    f'{ENV_VAR_GLOBAL_CONFIG} ({user_config_path!r}) '
                     'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_USER_CONFIG}')
+                    f'env var: unset {ENV_VAR_GLOBAL_CONFIG}')
     else:
         user_config_path = get_user_config_path()
         logger.debug(f'using default user config file: {user_config_path}')
@@ -146,7 +139,7 @@ def get_user_config() -> config_utils.Config:
 
     # load the user config file
     if os.path.exists(user_config_path):
-        user_config = _parse_config_file(user_config_path)
+        user_config = parse_config_file(user_config_path)
         _validate_config(user_config, user_config_path)
     else:
         user_config = config_utils.Config()
@@ -175,7 +168,7 @@ def _get_project_config() -> config_utils.Config:
 
     # load the project config file
     if os.path.exists(project_config_path):
-        project_config = _parse_config_file(project_config_path)
+        project_config = parse_config_file(project_config_path)
         _validate_config(project_config, project_config_path)
     else:
         project_config = config_utils.Config()
@@ -185,26 +178,26 @@ def _get_project_config() -> config_utils.Config:
 def get_server_config() -> config_utils.Config:
     """Returns the server config."""
     # find the server config file
-    server_config_path = _get_config_file_path(ENV_VAR_SERVER_CONFIG)
+    server_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
     if server_config_path:
         logger.debug('using server config file specified by '
-                     f'{ENV_VAR_SERVER_CONFIG}: {server_config_path}')
+                     f'{ENV_VAR_GLOBAL_CONFIG}: {server_config_path}')
         server_config_path = os.path.expanduser(server_config_path)
         if not os.path.exists(server_config_path):
             with ux_utils.print_exception_no_traceback():
                 raise FileNotFoundError(
                     'Config file specified by env var '
-                    f'{ENV_VAR_SERVER_CONFIG} ({server_config_path!r}) '
+                    f'{ENV_VAR_GLOBAL_CONFIG} ({server_config_path!r}) '
                     'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_SERVER_CONFIG}')
+                    f'env var: unset {ENV_VAR_GLOBAL_CONFIG}')
     else:
-        server_config_path = _SERVER_CONFIG_PATH
+        server_config_path = _GLOBAL_CONFIG_PATH
         logger.debug(f'using default server config file: {server_config_path}')
         server_config_path = os.path.expanduser(server_config_path)
 
     # load the server config file
     if os.path.exists(server_config_path):
-        server_config = _parse_config_file(server_config_path)
+        server_config = parse_config_file(server_config_path)
         _validate_config(server_config, server_config_path)
     else:
         server_config = config_utils.Config()
@@ -309,19 +302,45 @@ def _reload_config() -> None:
         _reload_config_as_client()
 
 
-def _parse_config_file(config_path: str) -> config_utils.Config:
+def parse_config_file(config_path: str) -> config_utils.Config:
     config = config_utils.Config()
     try:
         config_dict = common_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
-        logger.debug(
-            f'Config loaded from {config_path}:\n{pprint.pformat(config)}')
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'Config loaded from {config_path}:\n'
+                         f'{common_utils.dump_yaml_str(dict(config))}')
     except yaml.YAMLError as e:
         logger.error(f'Error in loading config file ({config_path}):', e)
     if config:
         _validate_config(config, config_path)
 
     logger.debug(f'Config syntax check passed for path: {config_path}')
+    return config
+
+
+def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
+    """Parse a comma-separated list of key-value pairs into a dictionary.
+
+    Args:
+        dotlist: A comma-separated list of key-value pairs.
+
+    Returns:
+        A config_utils.Config object with the parsed key-value pairs.
+    """
+    config: config_utils.Config = config_utils.Config()
+    for arg in dotlist:
+        try:
+            key, value = arg.split('=', 1)
+        except ValueError as e:
+            raise ValueError(f'Invalid config override: {arg}. '
+                             'Please use the format: key=value') from e
+        if len(key) == 0 or len(value) == 0:
+            raise ValueError(f'Invalid config override: {arg}. '
+                             'Please use the format: key=value')
+        value = yaml.safe_load(value)
+        nested_keys = tuple(key.split('.'))
+        config.set_nested(nested_keys, value)
     return config
 
 
@@ -340,7 +359,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _dict = _parse_config_file(config_path)
+    _dict = parse_config_file(config_path)
     _loaded_config_path = config_path
 
 
@@ -359,7 +378,10 @@ def _reload_config_as_server() -> None:
     for override in overrides:
         overlaid_server_config = overlay_skypilot_config(
             original_config=overlaid_server_config, override_configs=override)
-    logger.debug(f'final server config: {overlaid_server_config}')
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(
+            f'server config: \n'
+            f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
     _dict = overlaid_server_config
 
 
@@ -381,7 +403,10 @@ def _reload_config_as_client() -> None:
     for override in overrides:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    logger.debug(f'final client config: {overlaid_client_config}')
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(
+            f'client config (before task and CLI overrides): \n'
+            f'{common_utils.dump_yaml_str(dict(overlaid_client_config))}')
     _dict = overlaid_client_config
 
 
@@ -414,10 +439,26 @@ def override_skypilot_config(
         yield
         return
     original_config = _dict
+    override_configs = config_utils.Config(override_configs)
+    disallowed_diff_keys = []
+    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        value = override_configs.pop_nested(key, default_value=None)
+        if (value is not None and
+                value != original_config.get_nested(key, default_value=None)):
+            disallowed_diff_keys.append('.'.join(key))
+    # Only warn if there is a diff in disallowed override keys, as the client
+    # use the same config file when connecting to a local server.
+    if disallowed_diff_keys:
+        logger.warning(
+            f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
+            'different values in the client SkyPilot config with the server '
+            'and will be ignored. Remove these keys to disable this warning. '
+            'If you want to specify it, please modify it on server side or '
+            'contact your administrator.')
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
-        override_configs=override_configs,
+        override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     try:
@@ -439,14 +480,14 @@ def override_skypilot_config(
                 '=== SkyPilot config on API server ===\n'
                 f'{common_utils.dump_yaml_str(dict(original_config))}\n'
                 '=== Your local SkyPilot config ===\n'
-                f'{common_utils.dump_yaml_str(override_configs)}\n'
+                f'{common_utils.dump_yaml_str(dict(override_configs))}\n'
                 f'Details: {e}') from e
     finally:
         _dict = original_config
         _config_overridden = False
 
 
-def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     """Composes the skypilot CLI config.
     CLI config can either be:
     - A path to a config file
@@ -457,18 +498,17 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
         return config_utils.Config()
 
     config_source = 'CLI'
-    maybe_config_path = os.path.expanduser(cli_config)
     try:
+        maybe_config_path = os.path.expanduser(cli_config[0])
         if os.path.isfile(maybe_config_path):
+            if len(cli_config) != 1:
+                raise ValueError(
+                    'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
-            parsed_config = OmegaConf.to_object(
-                OmegaConf.load(maybe_config_path))
+            parsed_config = parse_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
-            variables: List[str] = []
-            variables = cli_config.split(',')
-            parsed_config = OmegaConf.to_object(
-                OmegaConf.from_dotlist(variables))
+            parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
@@ -479,7 +519,7 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     return parsed_config
 
 
-def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     """Applies the CLI provided config.
     SAFETY:
     This function directly modifies the global _dict variable.
@@ -491,7 +531,9 @@ def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
     """
     global _dict
     parsed_config = _compose_cli_config(cli_config)
-    logger.debug(f'applying following CLI overrides: {parsed_config}')
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'applying following CLI overrides: \n'
+                     f'{common_utils.dump_yaml_str(dict(parsed_config))}')
     _dict = overlay_skypilot_config(original_config=_dict,
                                     override_configs=parsed_config)
     return parsed_config

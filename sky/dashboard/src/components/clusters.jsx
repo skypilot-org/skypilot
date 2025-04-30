@@ -29,6 +29,7 @@ import {
   VSCodeInstructionsModal,
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { useMobile } from '@/hooks/useMobile';
 
 export function Clusters() {
   const [loading, setLoading] = useState(false);
@@ -36,6 +37,7 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
+  const isMobile = useMobile();
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
@@ -47,7 +49,10 @@ export function Clusters() {
     <Layout highlighted="clusters">
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
-          <Link href="/clusters" className="text-sky-blue leading-none">
+          <Link
+            href="/clusters"
+            className="text-sky-blue hover:underline leading-none"
+          >
             Sky Clusters
           </Link>
         </div>
@@ -65,7 +70,7 @@ export function Clusters() {
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            <span>Refresh</span>
+            {!isMobile && <span>Refresh</span>}
           </Button>
         </div>
       </div>
@@ -430,6 +435,7 @@ export function Status2Actions({
   onOpenVSCodeModal,
 }) {
   const actions = enabledActions(status);
+  const isMobile = useMobile();
 
   const handleActionClick = (actionName) => {
     switch (actionName) {
@@ -476,7 +482,7 @@ export function Status2Actions({
                   className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                 >
                   {actionIcon}
-                  {label && <span className="ml-1.5">{label}</span>}
+                  {!isMobile && <span className="ml-1.5">{label}</span>}
                 </button>
               </Tooltip>
             );
@@ -492,7 +498,7 @@ export function Status2Actions({
                 title={actionName}
               >
                 {actionIcon}
-                {label && <span className="ml-1.5">{label}</span>}
+                {!isMobile && <span className="ml-1.5">{label}</span>}
               </span>
             </Tooltip>
           );

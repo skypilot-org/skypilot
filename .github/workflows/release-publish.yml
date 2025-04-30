@@ -9,6 +9,7 @@ on:
 jobs:
   extract-version:
     runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'test_releases/')
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
     steps:
@@ -27,7 +28,7 @@ jobs:
 
   publish-to-pypi:
     needs: extract-version
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -79,21 +80,19 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-
       - name: Validate published package
         run: |
           # Wait a moment for package to be available
           sleep 30
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+          pip install fastapi
           # Install skypilot from Test PyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
           # Verify installation
           sky -v
           sky -c
+          sky check
+          sky show-gpus
           # Verify version
           EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
@@ -104,6 +103,12 @@ jobs:
           fi
           echo "Version verified successfully!"
 
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
   trigger-docker-build:
     needs: [extract-version, publish-to-pypi]
     uses: ./.github/workflows/docker-build.yaml
@@ -113,7 +118,7 @@ jobs:
 
   cleanup-branches:
     needs: extract-version
-    if: github.event.pull_request.merged == false
+    if: github.event.pull_request.merged == false && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -135,13 +140,4 @@ jobs:
             git push origin --delete ${TEST_BRANCH}
           else
             echo "Test branch ${TEST_BRANCH} does not exist, skipping"
-          fi
-
-          # Check if release branch exists and delete it
-          RELEASE_BRANCH="releases/${VERSION}"
-          if git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
-            echo "Deleting release branch: ${RELEASE_BRANCH}"
-            git push origin --delete ${RELEASE_BRANCH}
-          else
-            echo "Release branch ${RELEASE_BRANCH} does not exist, skipping"
           fi

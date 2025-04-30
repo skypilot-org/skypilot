@@ -38,8 +38,8 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import boto3  # type: ignore
     from google.cloud import storage  # type: ignore
+    import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1363,7 +1363,7 @@ class S3Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'boto3.client.Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         # TODO(romilb): This is purely a stopgap fix for
         #  https://github.com/skypilot-org/skypilot/issues/3405
@@ -3295,7 +3295,7 @@ class R2Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'boto3.client.Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
@@ -3472,13 +3472,18 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.R2_CREDENTIALS_PATH} '
-                            'aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {base_dir_path} '
-                            f's3://{self.name}{sub_path} '
-                            f'--endpoint {endpoint_url} '
-                            f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                'aws s3 sync --no-follow-symlinks --exclude="*" '
+                f'{includes} {base_dir_path} '
+                f's3://{self.name}{sub_path} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -3491,13 +3496,18 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.R2_CREDENTIALS_PATH} '
-                            f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
-                            f's3://{self.name}{sub_path}/{dest_dir_name} '
-                            f'--endpoint {endpoint_url} '
-                            f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                f'aws s3 sync --no-follow-symlinks {excludes} '
+                f'{src_dir_path} '
+                f's3://{self.name}{sub_path}/{dest_dir_name} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
@@ -4690,7 +4700,7 @@ class NebiusStore(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'boto3.client.Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)

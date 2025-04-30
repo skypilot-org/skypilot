@@ -23,11 +23,13 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import collections
 import copy
 import datetime
 import functools
 import getpass
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
@@ -161,7 +163,7 @@ def _get_cluster_records_and_set_ssh_config(
                 '-o StrictHostKeyChecking=no '
                 '-o UserKnownHostsFile=/dev/null '
                 '-o IdentitiesOnly=yes '
-                '-W %h:%p '
+                '-W \'[%h]:%p\' '
                 f'{handle.ssh_user}@127.0.0.1 '
                 '-o ProxyCommand='
                 # TODO(zhwu): write the template to a temp file, don't use
@@ -301,13 +303,9 @@ def config_option(expose_value: bool):
         try:
             if len(value) == 0:
                 return None
-            elif len(value) > 1:
-                raise ValueError('argument specified multiple times. '
-                                 'To specify multiple configs, use '
-                                 '--config nested.key1=val1,another.key2=val2')
             else:
                 # Apply the config overrides to the skypilot config.
-                return skypilot_config.apply_cli_config(value[0])
+                return skypilot_config.apply_cli_config(value)
         except ValueError as e:
             raise click.BadParameter(f'{str(e)}') from e
 
@@ -3416,7 +3414,7 @@ def show_gpus(
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
-    def _get_kubernetes_realtime_gpu_table(
+    def _get_kubernetes_realtime_gpu_tables(
             context: Optional[str] = None,
             name_filter: Optional[str] = None,
             quantity_filter: Optional[int] = None):
@@ -3426,15 +3424,14 @@ def show_gpus(
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
-        realtime_gpu_table = log_utils.create_table(
-            ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-        realtime_gpu_availability_list = sdk.stream_and_get(
+
+        realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_kubernetes_gpu_availability(
                 context=context,
                 name_filter=name_filter,
                 quantity_filter=quantity_filter))
-        if not realtime_gpu_availability_list:
-            err_msg = 'No GPUs found in Kubernetes cluster. '
+        if not realtime_gpu_availability_lists:
+            err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check '
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
@@ -3442,26 +3439,52 @@ def show_gpus(
                     gpu_info_msg += (' with requested quantity'
                                      f' {quantity_filter}')
                 err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in Kubernetes cluster. ')
+                           'in any allowed Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
-        for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
-            gpu_availability = models.RealtimeGpuAvailability(
-                *realtime_gpu_availability)
-            available_qty = (gpu_availability.available
-                             if gpu_availability.available != -1 else
-                             no_permissions_str)
-            realtime_gpu_table.add_row([
-                gpu_availability.gpu,
-                _list_to_str(gpu_availability.counts),
-                gpu_availability.capacity,
-                available_qty,
-            ])
-        return realtime_gpu_table
+        realtime_gpu_infos = []
+        total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
+            lambda: [0, 0])
+
+        for (ctx, availability_list) in realtime_gpu_availability_lists:
+            realtime_gpu_table = log_utils.create_table(
+                ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+            for realtime_gpu_availability in sorted(availability_list):
+                gpu_availability = models.RealtimeGpuAvailability(
+                    *realtime_gpu_availability)
+                available_qty = (gpu_availability.available
+                                 if gpu_availability.available != -1 else
+                                 no_permissions_str)
+                realtime_gpu_table.add_row([
+                    gpu_availability.gpu,
+                    _list_to_str(gpu_availability.counts),
+                    gpu_availability.capacity,
+                    available_qty,
+                ])
+                gpu = gpu_availability.gpu
+                capacity = gpu_availability.capacity
+                # we want total, so skip permission denied.
+                available = max(gpu_availability.available, 0)
+                if capacity > 0:
+                    total_gpu_info[gpu][0] += capacity
+                    total_gpu_info[gpu][1] += available
+            realtime_gpu_infos.append((ctx, realtime_gpu_table))
+
+        # display an aggregated table for all contexts
+        # if there are more than one contexts with GPUs
+        if len(realtime_gpu_infos) > 1:
+            total_realtime_gpu_table = log_utils.create_table(
+                ['GPU', 'TOTAL_GPUS', free_header])
+            for gpu, stats in total_gpu_info.items():
+                total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
+        else:
+            total_realtime_gpu_table = None
+
+        return realtime_gpu_infos, total_realtime_gpu_table
 
     def _format_kubernetes_node_info(context: Optional[str]):
         node_table = log_utils.create_table(
@@ -3482,7 +3505,7 @@ def show_gpus(
             'Kubernetes per node accelerator availability ')
         if nodes_info.hint:
             k8s_per_node_acc_message += nodes_info.hint
-        return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+        return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
                 f'{k8s_per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
@@ -3519,8 +3542,7 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
-                        context)
+                    k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3528,13 +3550,24 @@ def show_gpus(
                     k8s_messages += str(e)
                 else:
                     print_section_titles = True
-                    context_str = f'(Context: {context})' if context else ''
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs {context_str}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_realtime_table.get_string()
-                    yield '\n\n'
-                    yield _format_kubernetes_node_info(context)
+
+                    # print total table
+                    if total_table is not None:
+                        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                               'Total Kubernetes GPUs'
+                               f'{colorama.Style.RESET_ALL}\n')
+                        yield from total_table.get_string()
+                        yield '\n-----\n\n'
+
+                    # print individual infos.
+                    for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+                        context_str = f'(Context: {ctx})' if ctx else ''
+                        yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                               f'Kubernetes GPUs {context_str}'
+                               f'{colorama.Style.RESET_ALL}\n')
+                        yield from k8s_realtime_table.get_string()
+                        yield '\n\n'
+                        yield _format_kubernetes_node_info(ctx) + '\n-----\n\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3623,13 +3656,29 @@ def show_gpus(
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
-            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
-                k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
-                    name_filter=name, quantity_filter=quantity)
-                yield from k8s_realtime_table.get_string()
+                k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(  # pylint: disable=line-too-long
+                    context=region,
+                    name_filter=name,
+                    quantity_filter=quantity)
+
+                # print total table
+                if total_table is not None:
+                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                           'Total Kubernetes GPUs'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    yield from total_table.get_string()
+                    yield '\n-----\n\n'
+
+                # print individual tables
+                for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+                    context_str = f'(Context: {ctx})' if ctx else ''
+                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Kubernetes GPUs {context_str}'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    yield from k8s_realtime_table.get_string()
+                    yield '\n\n'
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
@@ -4274,6 +4323,14 @@ def jobs_dashboard():
     managed_jobs.dashboard()
 
 
+@cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
+@usage_lib.entrypoint
+def dashboard() -> None:
+    """Starts the dashboard for skypilot."""
+    sdk.dashboard()
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
     """SkyServe CLI (multi-region, multi-cloud serving)."""
@@ -4867,8 +4924,14 @@ def serve_down(
               default=False,
               required=False,
               help='Show the load balancer logs of this service.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down logs to the local machine. Can be combined with '
+              '--controller, --load-balancer, or a replica ID to narrow scope.')
 @click.argument('service_name', required=True, type=str)
-@click.argument('replica_id', required=False, type=int)
+@click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
@@ -4877,9 +4940,13 @@ def serve_logs(
     follow: bool,
     controller: bool,
     load_balancer: bool,
-    replica_id: Optional[int],
+    replica_ids: Tuple[int, ...],
+    sync_down: bool,
 ):
-    """Tail the log of a service.
+    """Tail or sync down logs of a service.
+
+    Logs can be tailed from one target (controller, load balancer, or a single
+    replica) or synced down from multiple targets simultaneously.
 
     Example:
 
@@ -4893,27 +4960,89 @@ def serve_logs(
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
+        \b
+        # Sync down all logs of the service (controller, LB, all replicas)
+        sky serve logs [SERVICE_NAME] --sync-down
+        \b
+        # Sync down controller logs and logs for replicas 1 and 3
+        sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
-    have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
-    if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
-        raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified.')
+    chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
-        target_component = serve_lib.ServiceComponent.CONTROLLER
-    elif load_balancer:
-        target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    else:
-        # Already checked that num_flags == 1.
-        assert replica_id is not None
-        target_component = serve_lib.ServiceComponent.REPLICA
+        chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
+    if load_balancer:
+        chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
+    # replica_ids contains the specific replica IDs provided by the user.
+    # If it's not empty, it implies the user wants replica logs.
+    if replica_ids:
+        chosen_components.add(serve_lib.ServiceComponent.REPLICA)
+
+    if sync_down:
+        # For sync-down, multiple targets are allowed.
+        # If no specific components/replicas are mentioned, sync all.
+        # Note: Multiple replicas or targets can only be specified when
+        # using --sync-down.
+        targets_to_sync = list(chosen_components)
+        if not targets_to_sync and not replica_ids:
+            # Default to all components if nothing specific is requested
+            targets_to_sync = [
+                serve_lib.ServiceComponent.CONTROLLER,
+                serve_lib.ServiceComponent.LOAD_BALANCER,
+                serve_lib.ServiceComponent.REPLICA,
+            ]
+
+        timestamp = sky_logging.get_run_timestamp()
+        log_dir = (pathlib.Path(constants.SKY_LOGS_DIRECTORY) / 'service' /
+                   f'{service_name}_{timestamp}').expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        with rich_utils.client_status(
+                ux_utils.spinner_message('Downloading service logs...')):
+            serve_lib.sync_down_logs(service_name,
+                                     local_dir=str(log_dir),
+                                     targets=targets_to_sync,
+                                     replica_ids=list(replica_ids))
+        style = colorama.Style
+        fore = colorama.Fore
+        logger.info(f'{fore.CYAN}Service {service_name} logs: '
+                    f'{log_dir}{style.RESET_ALL}')
+        return
+
+    # Tailing requires exactly one target.
+    num_targets = len(chosen_components)
+    # If REPLICA component is chosen, len(replica_ids) must be 1 for tailing.
+    if serve_lib.ServiceComponent.REPLICA in chosen_components:
+        if len(replica_ids) != 1:
+            raise click.UsageError(
+                'Can only tail logs from a single replica at a time. '
+                'Provide exactly one REPLICA_ID or use --sync-down '
+                'to download logs from multiple replicas.')
+        # If replica is chosen and len is 1, num_targets effectively counts it.
+        # We need to ensure no other component (controller/LB) is selected.
+        if num_targets > 1:
+            raise click.UsageError(
+                'Can only tail logs from one target at a time (controller, '
+                'load balancer, or a single replica). Use --sync-down '
+                'to download logs from multiple sources.')
+    elif num_targets == 0:
+        raise click.UsageError(
+            'Specify a target to tail: --controller, --load-balancer, or '
+            'a REPLICA_ID.')
+    elif num_targets > 1:
+        raise click.UsageError(
+            'Can only tail logs from one target at a time. Use --sync-down '
+            'to download logs from multiple sources.')
+
+    # At this point, we have exactly one target for tailing.
+    assert len(chosen_components) == 1
+    assert len(replica_ids) in [0, 1]
+    target_component = chosen_components.pop()
+    target_replica_id: Optional[int] = replica_ids[0] if replica_ids else None
+
     try:
         serve_lib.tail_logs(service_name,
                             target=target_component,
-                            replica_id=replica_id,
+                            replica_id=target_replica_id,
                             follow=follow)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
@@ -5833,11 +5962,13 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
                f'commit: {api_server_info["commit"]}, '
                f'version: {api_server_info["version"]}\n'
-               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user_name} ({user_hash})')
+               f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
 
 
 def main():

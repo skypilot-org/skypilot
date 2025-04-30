@@ -306,7 +306,7 @@ class Task:
         self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
-        self.best_resources = None
+        self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
         self.file_mounts_mapping = file_mounts_mapping
@@ -315,12 +315,20 @@ class Task:
         if dag is not None:
             dag.add(self)
 
-    def validate(self, workdir_only: bool = False):
-        """Validate all fields of the task."""
+    def validate(self,
+                 skip_file_mounts: bool = False,
+                 skip_workdir: bool = False):
+        """Validate all fields of the task.
+
+        Args:
+            skip_file_mounts: Whether to skip validating file mounts.
+            skip_workdir: Whether to skip validating workdir.
+        """
         self.validate_name()
         self.validate_run()
-        self.expand_and_validate_workdir()
-        if not workdir_only:
+        if not skip_workdir:
+            self.expand_and_validate_workdir()
+        if not skip_file_mounts:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()

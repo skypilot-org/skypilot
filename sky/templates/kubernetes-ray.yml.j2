@@ -258,7 +258,7 @@ available_node_types:
         # service is required.
         labels:
             parent: skypilot
-            # component will be set for the head node pod to be the same as the head node service selector above if a 
+            # component will be set for the head node pod to be the same as the head node service selector above if a
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
@@ -267,24 +267,37 @@ available_node_types:
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
+            {% if high_availability %}
+            app: {{cluster_name_on_cloud}}
+            {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
-        restartPolicy: Never
+        restartPolicy: {{ "Always" if high_availability else "Never" }}
 
         # Add node selector if GPU/TPUs are requested:
-        {% if (k8s_acc_label_key is not none and k8s_acc_label_value is not none) or (k8s_spot_label_key is not none) %}
+        {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) %}
         nodeSelector:
-            {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
-            {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
-            {% endif %}
             {% if k8s_topology_label_key is not none and k8s_topology_label_value is not none %}
             {{k8s_topology_label_key}}: {{k8s_topology_label_value}}
             {% endif %}
             {% if k8s_spot_label_key is not none %}
             {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
             {% endif %}
+        {% endif %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: {{k8s_acc_label_key}}
+                  operator: In
+                  values:
+                  {% for label_value in k8s_acc_label_values %}
+                  - {{label_value}}
+                  {% endfor %}
         {% endif %}
 
         {% if k8s_spot_label_key is not none %}
@@ -311,6 +324,11 @@ available_node_types:
             path: {{k8s_fusermount_shared_dir}}
             type: DirectoryOrCreate
         {% endif %}
+        {% if high_availability %}
+        - name: {{k8s_high_availability_deployment_volume_mount_name}}
+          persistentVolumeClaim:
+            claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -331,15 +349,15 @@ available_node_types:
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
-          args: 
+          args:
             - |
               # For backwards compatibility, we put a marker file in the pod
-              # to indicate that the pod is running with the changes introduced 
+              # to indicate that the pod is running with the changes introduced
               # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
               # TODO: Remove this marker file and it's usage in setup_commands
               # after v0.10.0 release.
               touch /tmp/skypilot_is_nimbus
-              
+
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -382,7 +400,7 @@ available_node_types:
                 fi;
                 # SSH and other packages are not necessary, so we disable set -e
                 set +e
-                
+
                 if [ ! -z "$MISSING_PACKAGES" ]; then
                   # Install missing packages individually to avoid failure installation breaks the whole install process,
                   # e.g. fuse3 is not available on some distributions.
@@ -435,7 +453,7 @@ available_node_types:
                     $(prefix_cmd) rm -f /bin/fusermount-wrapper
                     $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
                 fi
-                {% endif %}            
+                {% endif %}
 
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
@@ -470,6 +488,7 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
+
                 VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -565,7 +584,7 @@ available_node_types:
                       # File is already being monitored
                       continue
                     fi
-                    
+
                     # Monitor the new file
                     monitor_file $file &
                     already_monitored="${already_monitored} ${file}"
@@ -573,6 +592,28 @@ available_node_types:
                   sleep 0.1
                 done
               }
+
+              {% if high_availability %}
+              mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
+              if [ -f {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready ]; then
+                # ! Keep this aligned with `CloudVmRayBackend._setup()`
+                # Suppose all `task.setup` are the same for skyserve controller task.
+                # So be careful for compatibility issue once you change it.
+                chmod +x {{k8s_high_availability_deployment_setup_script_path}}
+                /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && {{k8s_high_availability_deployment_setup_script_path}} > /tmp/controller_recovery_setup_commands.log 2>&1"
+                echo "=== Controller setup commands completed for recovery ==="
+
+                for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
+                  # ! Keep this aligned with `CloudVmRayBackend._execute()`
+                  chmod +x $file
+                  /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
+                  echo "=== Controller task run for service (file: $file) completed for recovery ==="
+                done
+              fi
+
+              touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
+              {% endif %}
+
               trap : TERM INT; log_tail || sleep infinity & wait
 
           ports:
@@ -593,6 +634,10 @@ available_node_types:
           # /tmp which cause slowdowns if is not a shared memory volume.
           - mountPath: /dev/shm
             name: dshm
+          {% if high_availability %}
+          - name: {{k8s_high_availability_deployment_volume_mount_name}}
+            mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
+          {% endif %}
           {% if k8s_fuse_device_required %}
           - name: fusermount-shared-dir
             mountPath: {{k8s_fusermount_shared_dir}}
@@ -616,7 +661,93 @@ available_node_types:
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
             {% endif %}
-            
+
+      {% if high_availability %}
+      pvc_spec:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
+          namespace: {{k8s_namespace}}
+        spec:
+          accessModes:
+            - ReadWriteOnce # Our controller pod is singleton
+          {% if k8s_high_availability_storage_class_name is not none %}
+          storageClassName: {{k8s_high_availability_storage_class_name}}
+          {% endif %}
+          resources:
+            requests:
+              storage: {{disk_size}}Gi
+
+      deployment_spec:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: {{cluster_name_on_cloud}}-deployment
+          namespace: {{k8s_namespace}}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: {{cluster_name_on_cloud}}
+          template:
+            # The only difference between the pod spec and this section is the initContainers
+            metadata:
+              # should be replaced by pod metadata
+            spec:
+              securityContext:
+                fsGroup: 1000
+              # To prevent the home dir provided by the docker image from being overriden by pvc mounting,
+              # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
+              initContainers:
+                - name: init-copy-home
+                  image: {{image_id}}
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      # Define path for the marker file created by the main container upon successful startup.
+                      # This file persists in the PVC across Pod restarts.
+                      MARKER_FILE="/mnt/home/k8s_container_ready"
+                      SOURCE_PATH="{{k8s_high_availability_deployment_volume_mount_path}}"
+                      DEST_PATH="/mnt/home"
+
+                      # We only need to copy the initial home directory contents from the image
+                      # the *first* time a Pod uses a *new* PVC.
+                      # On subsequent Pod starts (e.g., after a crash or update), the PVC
+                      # already contains the necessary data (and potentially user modifications).
+                      # The presence of MARKER_FILE (created by the main container in a previous
+                      # successful run) indicates the PVC is already initialized. Checking for
+                      # it prevents unnecessary and time-consuming rsync operations on every restart.
+                      if [ ! -f "$MARKER_FILE" ]; then
+                        echo "Marker '$MARKER_FILE' not found. PVC likely needs initialization."
+                        echo "Copying initial home directory from image ($SOURCE_PATH/) to PVC ($DEST_PATH)..."
+
+                        # Use rsync with -rl (recursive, links) instead of -a (archive).
+                        # This avoids preserving times (-t) and permissions (-p) implied by -a,
+                        # which caused 'Operation not permitted' errors on the PVC root directory (/mnt/home).
+                        # Owner/group preservation (-o, -g) is also skipped (default for -rl), ensuring
+                        # files are owned by the container's user/group.
+                        rsync -rl "$SOURCE_PATH/" "$DEST_PATH"
+
+                        # Check if rsync failed
+                        if [ $? -ne 0 ]; then
+                           echo "ERROR: rsync failed during home directory initialization." >&2
+                           exit 1 # Exit initContainer with error if copy fails
+                        fi
+                        echo "Home directory initialization copy complete."
+                      else
+                        # If marker exists, skip the copy
+                        echo "Marker '$MARKER_FILE' found. Skipping initial home directory copy."
+                      fi
+                      echo "Current contents of $DEST_PATH:"
+                      ls -la "$DEST_PATH"
+                  volumeMounts:
+                    # Mount the persistent volume claim into the initContainer
+                    - name: {{k8s_high_availability_deployment_volume_mount_name}}
+                      mountPath: /mnt/home # Temporary mount point for initialization
+              # should be replaced by pod spec
+      {% endif %}
+
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
@@ -636,7 +767,7 @@ setup_commands:
     echo "=== Logs for asynchronous ray and skypilot installation ===";
     if [ -f /tmp/skypilot_is_nimbus ]; then
       echo "=== Logs for asynchronous ray and skypilot installation ===";
-      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log || 
+      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log ||
       { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
       [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
     fi
@@ -666,9 +797,10 @@ setup_commands:
     # properly written.
     # TODO(Doyoung): Investigate to see why TPU workload fails to run without
     # execution permission, such as granting 766 to log file. Check if it's a
-    # must and see if there's a workaround to grant minimum permission. 
+    # must and see if there's a workaround to grant minimum permission.
     sudo chmod 777 /tmp/tpu_logs;
     {% endif %}
+    {{ ssh_max_sessions_config }}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {

@@ -1,3 +1,4 @@
+import os
 import pathlib
 import subprocess
 from typing import Sequence
@@ -146,11 +147,13 @@ class TestBackwardCompatibility:
                 cluster_name=f"{cluster_name}",
                 job_id=2,
                 job_status=[sky.JobStatus.SUCCEEDED],
-                timeout=120)} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
+                timeout=120,
+                all_users=True)} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=f"{cluster_name}",
                 job_id=3,
                 job_status=[sky.JobStatus.SUCCEEDED],
-                timeout=120)}
+                timeout=120,
+                all_users=True)}
             """
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep SUCCEEDED | wc -l | grep 4'
         ]
@@ -373,4 +376,30 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
+    def test_sdk_compatibility(self, generic_cloud: str):
+        """Test SDK compatibility across versions"""
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        job_name = f"{cluster_name}-job"
+        sdk_utils_file = os.path.join(os.path.dirname(__file__),
+                                      'sdk_backward_compat_utils.py')
+        cmd_to_sdk_file = f'python {sdk_utils_file}'
+        commands = [
+            # cluster test
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{cmd_to_sdk_file} launch-cluster --cloud {generic_cloud} --cluster-name {cluster_name} --command "echo hello world; sleep 60"',
+            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
+            f'{cmd_to_sdk_file} get-cluster-status --cluster-name {cluster_name} | grep "\'name\': \'{cluster_name}\'"',
+            f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} queue --cluster-name {cluster_name} | grep "\'job_id\': 1"',
+            f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} cluster-logs --cluster-name {cluster_name} --job-id 1 | grep "hello world"',
+            # # managed job test
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{cmd_to_sdk_file} launch-managed-job --job-name {job_name} --cloud {generic_cloud} --command "echo hello world; sleep 60"',
+            f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} managed-job-logs --job-name {job_name} | grep "hello world"',
+            f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} managed-job-queue | grep "{job_name}"',
+            # ensure job success, through cli not through sdk
+            f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
+        ]
+        teardown = f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} down --cluster-name {cluster_name}'
         self.run_compatibility_test(cluster_name, commands, teardown)
