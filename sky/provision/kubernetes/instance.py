@@ -17,6 +17,7 @@ from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -837,26 +838,31 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # are not available, we still want to be able to schedule worker
             # pods on larger nodes which may be able to fit multiple SkyPilot
             # "nodes".
-            pod_spec_copy['spec']['affinity'] = {
-                'podAntiAffinity': {
-                    # Set as a soft constraint
-                    'preferredDuringSchedulingIgnoredDuringExecution': [{
-                        # Max weight to avoid scheduling on the
-                        # same physical node unless necessary.
-                        'weight': 100,
-                        'podAffinityTerm': {
-                            'labelSelector': {
-                                'matchExpressions': [{
-                                    'key': TAG_SKYPILOT_CLUSTER_NAME,
-                                    'operator': 'In',
-                                    'values': [cluster_name_on_cloud]
-                                }]
-                            },
-                            'topologyKey': 'kubernetes.io/hostname'
-                        }
-                    }]
+            pod_spec_config = config_utils.Config(pod_spec_copy['spec'].get(
+                'affinity', {}))
+            existing_rules = pod_spec_config.get_nested(
+                ('podAntiAffinity',
+                 'preferredDuringSchedulingIgnoredDuringExecution'), [])
+            existing_rules.append({
+                # Max weight to avoid scheduling on the
+                # same physical node unless necessary.
+                'weight': 100,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': TAG_SKYPILOT_CLUSTER_NAME,
+                            'operator': 'In',
+                            'values': [cluster_name_on_cloud]
+                        }]
+                    },
+                    'topologyKey': 'kubernetes.io/hostname'
                 }
-            }
+            })
+            pod_spec_config.set_nested(
+                ('podAntiAffinity',
+                 'preferredDuringSchedulingIgnoredDuringExecution'),
+                existing_rules)
+            pod_spec_copy['spec']['affinity'] = pod_spec_config
 
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU

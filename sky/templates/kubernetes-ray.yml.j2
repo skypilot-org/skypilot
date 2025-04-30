@@ -270,6 +270,9 @@ available_node_types:
             {% if high_availability %}
             app: {{cluster_name_on_cloud}}
             {% endif %}
+            {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
+            skypilot-binpack: "gpu"
+            {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
@@ -298,8 +301,18 @@ available_node_types:
                   {% for label_value in k8s_acc_label_values %}
                   - {{label_value}}
                   {% endfor %}
+          podAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 1
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: "skypilot-binpack"
+                        operator: In
+                        values:
+                          - "gpu"
+                  topologyKey: kubernetes.io/hostname
         {% endif %}
-
         {% if k8s_spot_label_key is not none %}
         tolerations:
           - key: {{k8s_spot_label_key}}
