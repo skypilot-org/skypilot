@@ -1130,23 +1130,35 @@ async def serve_dashboard(full_path: str):
 
     Returns:
         FileResponse for static files or index.html for client-side routing.
-    """
-    # Try to serve the file directly e.g. /skypilot.svg,
-    # /favicon.ico, and static files in /_next/static
-    file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
-    if os.path.isfile(file_path):
-        return fastapi.responses.FileResponse(file_path)
 
-    # Fallback to index.html for client-side routing
-    # e.g. /clusters, /jobs
-    index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
+    Raises:
+        HTTPException: If the path is invalid or file not found.
+    """
+    # Normalize the path and ensure it doesn't escape the dashboard directory
     try:
-        with open(index_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return fastapi.responses.HTMLResponse(content=content)
+        # Resolve to absolute path, resolving any '..' or '.'
+        file_path = os.path.abspath(os.path.join(server_constants.DASHBOARD_DIR, full_path))
+        # Check if the resolved path is still under DASHBOARD_DIR
+        if not file_path.startswith(os.path.abspath(server_constants.DASHBOARD_DIR)):
+            logger.warning(f'Attempted path traversal detected: {full_path}')
+            raise fastapi.HTTPException(status_code=403, detail="Access denied")
+
+        logger.info(f'Serving dashboard file: {file_path}')
+        if os.path.isfile(file_path):
+            return fastapi.responses.FileResponse(file_path)
+
+        # Fallback to index.html for client-side routing
+        index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return fastapi.responses.HTMLResponse(content=content)
+        except Exception as e:
+            logger.error(f'Error serving dashboard: {e}')
+            raise fastapi.HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        logger.error(f'Error serving dashboard: {e}')
-        raise fastapi.HTTPException(status_code=500, detail=str(e))
+        logger.error(f'Error processing path: {e}')
+        raise fastapi.HTTPException(status_code=400, detail="Invalid path")
 
 
 # Redirect the root path to dashboard

@@ -94,7 +94,7 @@ jobs:
           sky show-gpus
           sky dashboard
           # Verify dashboard endpoint is accessible
-          curl -f http://127.0.0.1:46580/dashboard/ > /dev/null 2>&1 || echo "Dashboard endpoint is not accessible" && exit 1
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || echo "Dashboard endpoint is not accessible" && exit 1
           # Verify version
           EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
