@@ -22,6 +22,8 @@ hyperpod-i-099e2a84aba621d52   ml.g5.8xlarge   1     1
 ...
 ```
 
+Confirm that GPUs are ready with `sky show-gpus --cloud k8s`, if it shows `No GPUs found` in the current cluster, refer to [checking GPU support](https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-troubleshooting.html#checking-gpu-support) to troubleshoot.
+
 ### Turn on EFA in SkyPilot YAML
 This example demonstrates how to configure SkyPilot to use EFA for NCCL performance testing on AWS. Let's break down the `nccl_efa.yaml` file component by component:
 
@@ -34,10 +36,8 @@ config:
         - resources:
             limits:
               vpc.amazonaws.com/efa: 4
-              nvidia.com/gpu: 8
             requests:
               vpc.amazonaws.com/efa: 4
-              nvidia.com/gpu: 8
 ```
 
 This section is important for EFA integration:
@@ -221,4 +221,4 @@ The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw non-EFA (GB/s)`
 | 512 KB – 16 MB | EFA gradually pulls ahead, hitting ~3–6 × by a few MB. |
 | ≥ 32 MB       | The fabric really kicks in: ≥ 8 x at 32 MB, climbing to ~18 x for 1–2 GB messages. Non-EFA tops out around 4 GB/s, while EFA pushes ≈ 77 GB/s. |
 
-From the above results and brief summary, we can see that EFA provides much higher throughput than the TCP transport traditionally used in cloud-based HPC (High Performance Computing) systems. It enhances the performance of inter-instance communication that is critical for scaling AI/ML and HPC applications.
+From the above results and brief summary, we can see that EFA provides much higher throughput than the TCP transport traditionally used in cloud-based HPC (High Performance Computing) systems for large, bandwidth-bound collectives. It enhances the performance of inter-instance communication that is critical for scaling AI/ML and HPC applications.
