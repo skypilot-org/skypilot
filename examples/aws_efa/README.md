@@ -2,7 +2,7 @@
 
 ## What is AWS EFA?
 
-Elastic Fabric Adapter (EFA) is a network interface for Amazon EC2 instances that enables high-performance computing and machine learning applications to scale efficiently in the cloud. EFA provides lower latency, higher throughput, and OS-bypass capabilities that are critical for communication-intensive workloads such as distributed training.
+Elastic Fabric Adapter (EFA) is a network interface for Amazon EC2 instances that enables users to run applications requiring high levels of inter-node communications at scale on AWS. Its custom-built operating system bypass hardware interface enhances the performance of inter-instance communications, which is critical to scaling these applications.
 
 
 ## Setting up EFA on EKS
@@ -15,14 +15,13 @@ kubectl get nodes "-o=custom-columns=NAME:.metadata.name,INSTANCETYPE:.metadata.
 ```
 You can expect a sample output like:
 ```
-NAME                           INSTANCETYPE    GPU   EFA
-hyperpod-i-055aeff9546187dee   ml.g5.8xlarge   1     1
-hyperpod-i-09662f64f615c96f5   ml.g5.8xlarge   1     1
-hyperpod-i-099e2a84aba621d52   ml.g5.8xlarge   1     1
+NAME                           INSTANCETYPE      GPU   EFA
+hyperpod-i-0beea7c849d1dc614   ml.p4d.24xlarge   8     4
+hyperpod-i-0da69b9076c7ff6a4   ml.p4d.24xlarge   8     4
 ...
 ```
 
-Confirm that GPUs are ready with `sky show-gpus --cloud k8s`, if it shows `No GPUs found` in the current cluster, refer to [checking GPU support](https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-troubleshooting.html#checking-gpu-support) to troubleshoot.
+Confirm that GPUs are ready for SkyPilot with `sky show-gpus --cloud k8s`, if it shows `No GPUs found` in the current cluster, refer to [setup GPU support](https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html#kubernetes-setup-gpusupport) to setup GPU support.
 
 ### Turn on EFA in SkyPilot YAML
 This example demonstrates how to configure SkyPilot to use EFA for NCCL performance testing on AWS. Let's break down the `nccl_efa.yaml` file component by component:
@@ -51,9 +50,7 @@ This section is important for EFA integration:
 The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
 
-To see how many GPUs are available for each instance types, see [EC2 Instance Types](https://aws.amazon.com/cn/ec2/instance-types/) and select Accelerated Computing.
-
-Update the EFA and GPU number in the `nccl_efa.yaml` for your instance type.
+Update the EFA number in the `nccl_efa.yaml` for your instance type.
 
 ## Running NCCL test with EFA using SkyPilot
 
@@ -132,12 +129,7 @@ run: |
   fi
 ```
 
-The image_id provides the environment setup for NCCL (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter):
-
-- [NCCL](https://developer.nvidia.com/nccl) is NVIDIA's library for multi-GPU and multi-node collective communication operations
-- [EFA](https://aws.amazon.com/hpc/efa/) is AWS's network interface for high-performance computing applications
-- [CUDA](https://developer.nvidia.com/cuda-toolkit) is NVIDIA's parallel computing platform and programming model for GPUs
-
+The image_id provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
 To run the NCCL test with EFA support:
 
@@ -147,7 +139,7 @@ sky launch -c efa examples/aws_efa/nccl_efa.yaml
 
 SkyPilot will:
 1. Schedule the task on a Kubernetes cluster with EFA-enabled nodes
-2. Launch containers with the required EFA devices
+2. Launch Pods with the required EFA devices
 3. Execute the NCCL performance test with EFA networking
 4. Output performance metrics showing the benefits of EFA for distributed training
 
@@ -177,11 +169,11 @@ sky launch -c efa examples/aws_efa/nccl_efa.yaml
 
 ## Test results
 
-Below is a side-by-side view of the effective bus bandwidth (out-of-place busbw) that NCCL reports for the same HyperPod cluster (`2 * p4d.24xlarge`) run with AWS EFA enabled vs. disabled.
+Below is a side-by-side view of the effective bus bandwidth (out-of-place busbw) that NCCL test reports for the same HyperPod cluster (`2 * p4d.24xlarge`) run with AWS EFA enabled vs. disabled.
 
-The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw non-EFA (GB/s)`.
+The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`.
 
-| Message Size | busbw EFA (GB/s) | busbw non-EFA (GB/s) | Speed-up |
+| Message Size | busbw EFA (GB/s) | busbw Non-EFA (GB/s) | Speed-up |
 |--------------|-------------|-------------|---------------|
 | 8 B          | 0           | 0           | -             |
 | 16 B         | 0           | 0           | -             |
