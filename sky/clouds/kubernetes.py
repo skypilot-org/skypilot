@@ -476,7 +476,8 @@ class Kubernetes(clouds.Cloud):
         else:
             avoid_label_keys = kubernetes_utils.get_accelerator_label_keys(
                 context)
-
+            if len(avoid_label_keys) == 0:
+                avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None)
 
         remote_identity = skypilot_config.get_nested(
