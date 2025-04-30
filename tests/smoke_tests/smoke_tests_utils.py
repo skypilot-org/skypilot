@@ -360,39 +360,20 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 def override_sky_config(
     test: Test, env_dict: Dict[str, str]
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
-
-    def deep_update(base_dict: Dict[str, Any],
-                    update_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Recursively update a dictionary with another dictionary.
-        """
-        for key, value in update_dict.items():
-            if isinstance(value, dict) and key in base_dict and isinstance(
-                    base_dict[key], dict):
-                deep_update(base_dict[key], value)
-            else:
-                base_dict[key] = value
-        return base_dict
-
-    override_sky_config_dict = dict()
+    override_sky_config_dict = skypilot_config.config_utils.Config()
     if is_remote_server_test():
-        override_sky_config_dict['api_server'] = {
-            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
-        }
+        override_sky_config_dict.set_nested(
+            ('api_server', 'endpoint'),
+            docker_utils.get_api_server_endpoint_inside_docker())
         test.echo(
-            f'Overriding API server endpoint: {override_sky_config_dict["api_server"]["endpoint"]}'
+            f'Overriding API server endpoint: {override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
-
     if pytest_controller_cloud():
-        override_sky_config_dict['jobs'] = {
-            'controller': {
-                'resources': {
-                    'cloud': pytest_controller_cloud()
-                }
-            }
-        }
+        override_sky_config_dict.set_nested(
+            ('jobs', 'controller', 'resources', 'cloud'),
+            pytest_controller_cloud())
         test.echo(
-            f'Overriding controller cloud: {override_sky_config_dict["jobs"]["controller"]["resources"]["cloud"]}'
+            f'Overriding controller cloud: {override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
 
     if not override_sky_config_dict:
@@ -402,12 +383,13 @@ def override_sky_config(
     temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
     if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
         # Read the original config
-        with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG], 'r') as f:
-            original_config = yaml.safe_load(f)
+        original_config = skypilot_config.parse_config_file(
+            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
     else:
-        original_config = {}
-    original_config = deep_update(original_config, override_sky_config_dict)
-    yaml.dump(original_config, temp_config_file)
+        original_config = skypilot_config.config_utils.Config()
+    overlay_config = skypilot_config.overlay_skypilot_config(
+        original_config, override_sky_config_dict)
+    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
