@@ -538,7 +538,7 @@ available_node_types:
                     { echo 52; exit 52; };
                   fi;
                 fi;
-                printenv | while IFS='=' read -r key value; do echo "export $key=\"$value\""; done > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
                 ) > /tmp/${STEPS[2]}.log 2>&1 || {
                   echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
                   cat /tmp/${STEPS[2]}.log

@@ -18,10 +18,9 @@ logger = sky_logging.init_logger(__name__)
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-    '~/container_env_var.sh && '
-    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
-)
+    'export -p > ~/container_env_var.sh && '
+    '$(prefix_cmd) '
+    'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
 
 # Docker daemon may not be ready when the machine is firstly started. The error
 # message starts with the following string. We should wait for a while and retry
