@@ -35,6 +35,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
+from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
@@ -1170,13 +1171,12 @@ if __name__ == '__main__':
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    num_workers = 1
-    if cmd_args.deploy:
-        num_workers = common_utils.get_cpu_count()
+    config = server_config.compute_server_config(cmd_args.deploy)
+    num_workers = config.num_server_workers
 
     sub_procs = []
     try:
-        sub_procs = executor.start(deploy=cmd_args.deploy)
+        sub_procs = executor.start(config)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.

@@ -183,6 +183,11 @@ def run_with_log(
     # stdout and stderr.
     stdout_arg = stderr_arg = None
     ctx = context.get()
+    # Currently, process_stream can only run in main thread, we do not
+    # enable async context for requests that require process_stream
+    # TODO(aylei): refine process_stream to support async context.
+    assert not process_stream or ctx is None, (
+        'process_stream should be False when ctx is not None')
     if process_stream or ctx is not None:
         # Capture stdout/stderr of the subprocess if:
         # 1. Post-processing is needed (process_stream=True)

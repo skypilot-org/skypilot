@@ -759,6 +759,9 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                    },
                     'autostop': autostop_schema,
                 }
             },
@@ -919,6 +922,16 @@ def get_config_schema():
                         type.value
                         for type in kubernetes_enums.KubernetesAutoscalerType
                     ]
+                },
+                'high_availability': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'storage_class_name': {
+                            'type': 'string',
+                        }
+                    }
                 },
             }
         },

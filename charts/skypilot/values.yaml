@@ -44,13 +44,10 @@ apiService:
     requests:
       cpu: "4"
       memory: "8Gi"
-      # Additional resource types like ephemeral-storage can be specified here
-  # TODO: Setting limits causes issues with the API server. For now we advise
-  # not to set limits.
-  # limits:
-  #  cpu: "4"
-  #  memory: "8Gi"
-
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+  
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
@@ -209,6 +206,10 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+
+# Populate RunPod credentials from a secret `runpod-credentials` with key `api_key`
+runpodCredentials:
+  enabled: false
 
 # Set securityContext for the api pod
 podSecurityContext: {}

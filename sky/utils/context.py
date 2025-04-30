@@ -5,6 +5,7 @@ import contextvars
 import os
 import pathlib
 import sys
+import typing
 from typing import Dict, Optional, TextIO
 
 
@@ -113,6 +114,23 @@ def get() -> Optional[Context]:
     polling the cancellation event if it is not.
     """
     return _CONTEXT.get()
+
+
+@typing.overload
+def getenv(env_var: str, default: str) -> str:
+    ...
+
+
+@typing.overload
+def getenv(env_var: str, default: None = None) -> Optional[str]:
+    ...
+
+
+def getenv(env_var: str, default: Optional[str] = None) -> Optional[str]:
+    ctx = get()
+    if ctx is not None:
+        return ctx.getenv(env_var, default)
+    return os.getenv(env_var, default)
 
 
 def initialize():
