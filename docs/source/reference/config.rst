@@ -1065,6 +1065,7 @@ Advanced Nebius configuration (optional).
 ``project_id``
     Identifier for the Nebius project (optional)
     Default: Uses first available project if not specified
+
 ``fabric``
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
@@ -1075,6 +1076,7 @@ The configuration can be specified in region-specific sections.
 Example:
 
 .. code-block:: yaml
+
     nebius:
         # Region-specific configuration
         eu-north1:
