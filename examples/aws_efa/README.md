@@ -71,7 +71,7 @@ This section is important for EFA integration:
 The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
 
-Check the following table for the GPU and EFA count mapping for AWS `p4` and `p5` instance types:
+Check the following table for the GPU and EFA count mapping for AWS instance types:
 
 | Instance Type | GPU Type | #EFA |
 |---------------|----------|------|
@@ -80,9 +80,28 @@ Check the following table for the GPU and EFA count mapping for AWS `p4` and `p5
 | p5.48xlarge   | H100:8   | 32   |
 | p5e.48xlarge  | H200:8   | 32   |
 | p5en.48xlarge | H200:8   | 16   |
+| g5.8xlarge    | A10G:1   | 1    |
+| g5.12xlarge   | A10G:4   | 1    |
+| g5.16xlarge   | A10G:1   | 1    |
+| g5.24xlarge   | A10G:4   | 1    |
+| g5.48xlarge   | A10G:8   | 1    |
+| g4dn.8xlarge  | T4:1     | 1    |
+| g4dn.12xlarge | T4:4     | 1    |
+| g4dn.16xlarge | T4:1     | 1    |
+| g4dn.metal    | T4:8     | 1    |
+| g6.8xlarge    | L4:1     | 1    |
+| g6.12xlarge   | L4:4     | 1    |
+| g6.16xlarge   | L4:1     | 1    |
+| g6.24xlarge   | L4:4     | 1    |
+| g6.48xlarge   | L4:8     | 1    |
+| g6e.8xlarge   | L40S:1   | 1    |
+| g6e.12xlarge  | L40S:4   | 1    |
+| g6e.16xlarge  | L40S:1   | 1    |
+| g6e.24xlarge  | L40S:4   | 2    |
+| g6e.48xlarge  | L40S:8   | 4    |
 
 
-Update the EFA number in the [nccl_efa.yaml](nccl_efa.yaml) for your instance type.
+Update the EFA number in the [nccl_efa.yaml](nccl_efa.yaml) for the GPUs you used.
 
 ## Running NCCL test with EFA using SkyPilot
 
