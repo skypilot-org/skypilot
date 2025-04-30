@@ -1,13 +1,31 @@
-# Using AWS Elastic Fabric Adapter (EFA) with SkyPilot
+# Using AWS Elastic Fabric Adapter (EFA) on HyperPod/EKS with SkyPilot
 
-## What is AWS EFA?
-
-Elastic Fabric Adapter (EFA) is a network interface for Amazon EC2 instances that enables users to run applications requiring high levels of inter-node communications at scale on AWS. Its custom-built operating system bypass hardware interface enhances the performance of inter-instance communications, which is critical to scaling these applications.
+Elastic Fabric Adapter (EFA) is an AWS alternative to Nvidia infiniband that enables high levels of inter-node communications. It is specifically useful for distributed AI training and inference, which requires high network bandwidth across nodes.
 
 
-## Setting up EFA on EKS
-For complete details on setting up EFA with Amazon EKS, refer to the [official AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-efa.html).
+## TL;DR: enable EFA with SkyPilot
 
+You can enable EFA on AWS HyperPod/EKS clusters with an simple additional setting in your SkyPilot YAML:
+
+```yaml
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - resources:
+            limits:
+              vpc.amazonaws.com/efa: 4
+            requests:
+              vpc.amazonaws.com/efa: 4
+```
+
+
+
+## Enable EFA with HyperPod/EKS
+
+* On HyperPod (backed by EKS), EFA is enabled by default, and you don't need to do anything.
+* On EKS, you may need to enable EFA with the [official AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-efa.html).
 
 To check if EFA is enabled, run:
 ```
@@ -21,10 +39,13 @@ hyperpod-i-0da69b9076c7ff6a4   ml.p4d.24xlarge   8     4
 ...
 ```
 
-Confirm that GPUs are ready for SkyPilot with `sky show-gpus --cloud k8s`, if it shows `No GPUs found` in the current cluster, refer to [setup GPU support](https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html#kubernetes-setup-gpusupport) to setup GPU support.
+## Access HyperPod and run distributed job with SkyPilot
 
-### Turn on EFA in SkyPilot YAML
-This example demonstrates how to configure SkyPilot to use EFA for NCCL performance testing on AWS. Let's break down the `nccl_efa.yaml` file component by component:
+To accesss HyperPod and run distributed job with SkyPilot, see the SkyPilot [HyperPod example](../hyperpod-eks/).
+
+### Adding EFA configurations in SkyPilot YAML
+
+To enable EFA in SkyPilot YAML, you can specify the following section in the SkyPilot YAML:
 
 ```yaml
 config:
@@ -49,6 +70,8 @@ This section is important for EFA integration:
 
 The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
+
+TODO(Hailong): We need to have a table here
 
 Update the EFA number in the `nccl_efa.yaml` for your instance type.
 
@@ -134,42 +157,24 @@ The image_id provides the environment setup for [NCCL](https://developer.nvidia.
 To run the NCCL test with EFA support:
 
 ```bash
-sky launch -c efa examples/aws_efa/nccl_efa.yaml
+sky launch -c efa nccl_efa.yaml
 ```
 
 SkyPilot will:
-1. Schedule the task on a Kubernetes cluster with EFA-enabled nodes
+1. Schedule the job on a Kubernetes cluster with EFA-enabled nodes
 2. Launch Pods with the required EFA devices
 3. Execute the NCCL performance test with EFA networking
 4. Output performance metrics showing the benefits of EFA for distributed training
 
+> [!NOTE]
+> We can turn off EFA with `nccl_efa.yaml` by passing an env:
+> ```bash
+> sky launch -c efa --env USE_EFA=false nccl_efa.yaml
+> ```
 
-To verify that EFA is successfully enabled, you can ssh to the head node with `ssh efa` and run:
-```
-$ fi_info -p efa -t FI_EP_RDM
-provider: efa
-    fabric: efa
-    domain: rdmap16s27-rdm
-    version: 122.0
-    type: FI_EP_RDM
-    protocol: FI_PROTO_EFA
-provider: efa
-    fabric: efa
-    domain: rdmap32s27-rdm
-    version: 122.0
-    type: FI_EP_RDM
-    protocol: FI_PROTO_EFA
-...
-```
+### Benchmark results
 
-To run the NCCL test without EFA support, set `envs.USE_EFA: "false"` in `nccl_efa.yaml` and run:
-```bash
-sky launch -c efa examples/aws_efa/nccl_efa.yaml
-```
-
-## Test results
-
-Below is a side-by-side view of the effective bus bandwidth (out-of-place busbw) that NCCL test reports for the same HyperPod cluster (`2 * p4d.24xlarge`) run with AWS EFA enabled vs. disabled.
+We compare the performance with and without EFA using NCCL test reports on the same HyperPod cluster (2x p4d.24xlarge, i.e. 2xA100:8).
 
 The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`.
 
@@ -213,4 +218,4 @@ The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`
 | 512 KB – 16 MB | EFA gradually pulls ahead, hitting ~3–6 × by a few MB. |
 | ≥ 32 MB       | The fabric really kicks in: ≥ 8 x at 32 MB, climbing to ~18 x for 1–2 GB messages. Non-EFA tops out around 4 GB/s, while EFA pushes ≈ 77 GB/s. |
 
-From the above results and brief summary, we can see that EFA provides much higher throughput than the TCP transport traditionally used in cloud-based HPC (High Performance Computing) systems for large, bandwidth-bound collectives. It enhances the performance of inter-instance communication that is critical for scaling AI/ML and HPC applications.
+EFA provides much higher throughput than the traditional TCP transport. Enabling EFA could enhance the performance of inter-instance communication significantly, which could speedup distributed AI training and inference.
