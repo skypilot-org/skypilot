@@ -1084,6 +1084,16 @@ def check_instance_fits(context: Optional[str],
         return fits, reason
 
 
+def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
+    """Returns the label keys that should be avoided for scheduling
+    CPU-only tasks.
+    """
+    label_formatter, _ = detect_gpu_label_formatter(context)
+    if label_formatter is None:
+        return []
+    return label_formatter.get_label_keys()
+
+
 def get_accelerator_label_key_values(
     context: Optional[str],
     acc_type: str,
