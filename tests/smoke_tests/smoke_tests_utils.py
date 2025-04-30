@@ -372,6 +372,9 @@ def override_sky_config(
         override_sky_config_dict.set_nested(
             ('jobs', 'controller', 'resources', 'cloud'),
             pytest_controller_cloud())
+        override_sky_config_dict.set_nested(
+            ('serve', 'controller', 'resources', 'cloud'),
+            pytest_controller_cloud())
         test.echo(
             f'Overriding controller cloud: {override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
