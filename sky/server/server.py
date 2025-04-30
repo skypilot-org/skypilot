@@ -1192,11 +1192,8 @@ async def serve_skypilot_svg():
 
 
 @app.get('/dashboard/{full_path:path}')
-async def serve_dashboard(full_path: str):
+async def serve_dashboard():
     """Serves the Next.js dashboard application.
-
-    Args:
-        full_path: The path requested by the client.
 
     Returns:
         FileResponse for static files or index.html for client-side routing.
