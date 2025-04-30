@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import sys
@@ -18,6 +19,7 @@ import zipfile
 
 import aiofiles
 import fastapi
+from fastapi import staticfiles
 from fastapi.middleware import cors
 import starlette.middleware.base
 
@@ -163,8 +165,53 @@ class InternalDashboardPrefixMiddleware(
         return await call_next(request)
 
 
+def is_browser_request(request: fastapi.Request) -> bool:
+    """Checks if a request is made by a browser like user agent."""
+    return request.headers['User-Agent'].startswith('Mozilla')
+
+
+class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
+                                  ):
+    """Middleware to add cache control headers to static files."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/_next'):
+            response = await call_next(request)
+            response.headers['Cache-Control'] = 'max-age=86400'
+            return response
+        return await call_next(request)
+
+
+class BrowserNoPostPutMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to prevent POST and PUT requests from browsers."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/') and is_browser_request(
+                request) and request.method in ['POST', 'PUT']:
+            raise fastapi.HTTPException(status_code=405,
+                                        detail='Method not allowed')
+        return await call_next(request)
+
+
+class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to check the path of requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/'):
+            # If the requested path is not relative to the expected directory,
+            # then the user is attempting path traversal, so deny the request.
+            parent = pathlib.Path('/dashboard')
+            request_path = pathlib.Path(posixpath.normpath(request.url.path))
+            if not _is_relative_to(request_path, parent):
+                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(PathCleanMiddleware)
+app.add_middleware(BrowserNoPostPutMiddleware)
+app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -177,6 +224,16 @@ app.add_middleware(
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+# Serve static files from the dashboard directory
+if os.path.exists(server_constants.DASHBOARD_DIR):
+    app.mount('/dashboard/_next',
+              staticfiles.StaticFiles(
+                  directory=f'{server_constants.DASHBOARD_DIR}/_next'),
+              name='dashboard')
+else:
+    logger.warning(
+        f'Dashboard directory {server_constants.DASHBOARD_DIR} does not exist.'
+        f' Skipping dashboard static files mount.')
 
 
 @app.post('/check')
@@ -1121,6 +1178,18 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
+@app.get('/dashboard/favicon.ico')
+async def serve_favicon():
+    return fastapi.responses.FileResponse(
+        os.path.join(server_constants.DASHBOARD_DIR, 'favicon.ico'))
+
+
+@app.get('/dashboard/skypilot.svg')
+async def serve_skypilot_svg():
+    return fastapi.responses.FileResponse(
+        os.path.join(server_constants.DASHBOARD_DIR, 'skypilot.svg'))
+
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.
@@ -1134,31 +1203,16 @@ async def serve_dashboard(full_path: str):
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
-    # Normalize the path and ensure it doesn't escape the dashboard directory
+    # Serve index.html for client-side routing
+    # e.g. /clusters, /jobs
+    index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
-        # Resolve to absolute path, resolving any '..' or '.'
-        file_path = os.path.abspath(os.path.join(server_constants.DASHBOARD_DIR, full_path))
-        # Check if the resolved path is still under DASHBOARD_DIR
-        if not file_path.startswith(os.path.abspath(server_constants.DASHBOARD_DIR)):
-            logger.warning(f'Attempted path traversal detected: {full_path}')
-            raise fastapi.HTTPException(status_code=403, detail="Access denied")
-
-        logger.info(f'Serving dashboard file: {file_path}')
-        if os.path.isfile(file_path):
-            return fastapi.responses.FileResponse(file_path)
-
-        # Fallback to index.html for client-side routing
-        index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
-        try:
-            with open(index_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            return fastapi.responses.HTMLResponse(content=content)
-        except Exception as e:
-            logger.error(f'Error serving dashboard: {e}')
-            raise fastapi.HTTPException(status_code=500, detail=str(e))
+        with open(index_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return fastapi.responses.HTMLResponse(content=content)
     except Exception as e:
-        logger.error(f'Error processing path: {e}')
-        raise fastapi.HTTPException(status_code=400, detail="Invalid path")
+        logger.error(f'Error serving dashboard: {e}')
+        raise fastapi.HTTPException(status_code=500, detail=str(e))
 
 
 # Redirect the root path to dashboard
