@@ -533,7 +533,11 @@ class Kubernetes(clouds.Cloud):
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
-        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        if (skypilot_config.get_nested(('kubernetes', 'remote_identity'), None)
+                != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+            k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        else:
+            k8s_env_vars = {}
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
