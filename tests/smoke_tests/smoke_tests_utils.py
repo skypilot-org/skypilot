@@ -8,7 +8,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import (Any, Dict, Generator, List, NamedTuple, Optional, Sequence,
+                    Set, Tuple)
 import uuid
 
 import colorama
@@ -355,6 +356,50 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
             f' --quiet $({query_cmd})')
 
 
+@contextlib.contextmanager
+def override_sky_config(
+    test: Test, env_dict: Dict[str, str]
+) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+    override_sky_config_dict = skypilot_config.config_utils.Config()
+    if is_remote_server_test():
+        endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+        override_sky_config_dict.set_nested(('api_server', 'endpoint'),
+                                            endpoint)
+        test.echo(
+            f'Overriding API server endpoint: '
+            f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
+        )
+    if pytest_controller_cloud():
+        cloud = pytest_controller_cloud()
+        override_sky_config_dict.set_nested(
+            ('jobs', 'controller', 'resources', 'cloud'), cloud)
+        override_sky_config_dict.set_nested(
+            ('serve', 'controller', 'resources', 'cloud'), cloud)
+        test.echo(
+            f'Overriding controller cloud: '
+            f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
+        )
+
+    if not override_sky_config_dict:
+        yield None
+        return
+
+    temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
+    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+        # Read the original config
+        original_config = skypilot_config.parse_config_file(
+            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+    else:
+        original_config = skypilot_config.config_utils.Config()
+    overlay_config = skypilot_config.overlay_skypilot_config(
+        original_config, override_sky_config_dict)
+    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
+    temp_config_file.flush()
+    # Update the environment variable to use the temporary file
+    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+    yield temp_config_file
+
+
 def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
@@ -378,86 +423,65 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    # Create a temporary config file with API server config only if running with remote server
-    if is_remote_server_test():
-        temp_config = tempfile.NamedTemporaryFile(mode='w',
-                                                  suffix='.yaml',
-                                                  delete=False)
-        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
-            # Read the original config
-            with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG],
-                      'r') as f:
-                config = yaml.safe_load(f)
-        else:
-            config = {}
-        config['api_server'] = {
-            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
-        }
-        test.echo(
-            f'Overriding API server endpoint: {config["api_server"]["endpoint"]}'
-        )
-        yaml.dump(config, temp_config)
-        temp_config.close()
-        # Update the environment variable to use the temporary file
-        env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
+    with override_sky_config(test, env_dict):
+        for command in test.commands:
+            write(f'+ {command}\n')
+            flush()
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                executable='/bin/bash',
+                env=env_dict,
+            )
+            try:
+                proc.wait(timeout=test.timeout)
+            except subprocess.TimeoutExpired as e:
+                flush()
+                test.echo(f'Timeout after {test.timeout} seconds.')
+                test.echo(str(e))
+                write(f'Timeout after {test.timeout} seconds.\n')
+                flush()
+                # Kill the current process.
+                proc.terminate()
+                proc.returncode = 1  # None if we don't set it.
+                break
 
-    for command in test.commands:
-        write(f'+ {command}\n')
-        flush()
-        proc = subprocess.Popen(
-            command,
-            stdout=subprocess_out,
-            stderr=subprocess.STDOUT,
-            shell=True,
-            executable='/bin/bash',
-            env=env_dict,
-        )
-        try:
-            proc.wait(timeout=test.timeout)
-        except subprocess.TimeoutExpired as e:
-            flush()
-            test.echo(f'Timeout after {test.timeout} seconds.')
-            test.echo(str(e))
-            write(f'Timeout after {test.timeout} seconds.\n')
-            flush()
-            # Kill the current process.
-            proc.terminate()
-            proc.returncode = 1  # None if we don't set it.
-            break
+            if proc.returncode:
+                break
+
+        style = colorama.Style
+        fore = colorama.Fore
+        outcome = (
+            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
+            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if proc.returncode else ''
+        msg = (f'{outcome}.'
+               f'{reason}')
+        if log_to_stdout:
+            test.echo(msg)
+        else:
+            msg += f'\nLog: less -r {log_file.name}\n'
+            test.echo(msg)
+            write(msg)
+
+        if (proc.returncode == 0 or
+                pytest.terminate_on_failure) and test.teardown is not None:
+            subprocess_utils.run(
+                test.teardown,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                timeout=10 * 60,  # 10 mins
+                shell=True,
+                env=env_dict,
+            )
 
         if proc.returncode:
-            break
-
-    style = colorama.Style
-    fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command}' if proc.returncode else ''
-    msg = (f'{outcome}.'
-           f'{reason}')
-    if log_to_stdout:
-        test.echo(msg)
-    else:
-        msg += f'\nLog: less -r {log_file.name}\n'
-        test.echo(msg)
-        write(msg)
-
-    if (proc.returncode == 0 or
-            pytest.terminate_on_failure) and test.teardown is not None:
-        subprocess_utils.run(
-            test.teardown,
-            stdout=subprocess_out,
-            stderr=subprocess.STDOUT,
-            timeout=10 * 60,  # 10 mins
-            shell=True,
-            env=env_dict,
-        )
-
-    if proc.returncode:
-        if log_to_stdout:
-            raise Exception(f'test failed')
-        else:
-            raise Exception(f'test failed: less -r {log_file.name}')
+            if log_to_stdout:
+                raise Exception(f'test failed')
+            else:
+                raise Exception(f'test failed: less -r {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
@@ -661,6 +685,16 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
 
 def is_remote_server_test() -> bool:
     return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+
+
+def pytest_controller_cloud() -> Optional[str]:
+    return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def override_env_config(config: Dict[str, str]):
+    """Override the environment variable for the test."""
+    for key, value in config.items():
+        os.environ[key] = value
 
 
 def get_api_server_url() -> str:
