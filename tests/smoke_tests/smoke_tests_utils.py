@@ -362,21 +362,22 @@ def override_sky_config(
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     override_sky_config_dict = skypilot_config.config_utils.Config()
     if is_remote_server_test():
-        override_sky_config_dict.set_nested(
-            ('api_server', 'endpoint'),
-            docker_utils.get_api_server_endpoint_inside_docker())
+        endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+        override_sky_config_dict.set_nested(('api_server', 'endpoint'),
+                                            endpoint)
         test.echo(
-            f'Overriding API server endpoint: {override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
+            f'Overriding API server endpoint: '
+            f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
     if pytest_controller_cloud():
+        cloud = pytest_controller_cloud()
         override_sky_config_dict.set_nested(
-            ('jobs', 'controller', 'resources', 'cloud'),
-            pytest_controller_cloud())
+            ('jobs', 'controller', 'resources', 'cloud'), cloud)
         override_sky_config_dict.set_nested(
-            ('serve', 'controller', 'resources', 'cloud'),
-            pytest_controller_cloud())
+            ('serve', 'controller', 'resources', 'cloud'), cloud)
         test.echo(
-            f'Overriding controller cloud: {override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
+            f'Overriding controller cloud: '
+            f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
 
     if not override_sky_config_dict:
