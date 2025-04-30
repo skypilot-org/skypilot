@@ -9,6 +9,7 @@ on:
 jobs:
   extract-version:
     runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'test_releases/')
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
     steps:
@@ -27,7 +28,7 @@ jobs:
 
   publish-to-pypi:
     needs: extract-version
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -117,7 +118,7 @@ jobs:
 
   cleanup-branches:
     needs: extract-version
-    if: github.event.pull_request.merged == false
+    if: github.event.pull_request.merged == false && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

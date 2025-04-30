@@ -418,13 +418,16 @@ class Cloud:
         try:
             self.check_features_are_supported(resources,
                                               resources_required_features)
-        except exceptions.NotSupportedError:
+        except exceptions.NotSupportedError as e:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
             # are not considered.
+            # UPDATE(kyuds): passing in NotSupportedError reason string
+            # to hint for issue #5344. Did not remove above comment as
+            # reason is not displayed when other resources are valid.
             return resources_utils.FeasibleResources(resources_list=[],
                                                      fuzzy_candidate_list=[],
-                                                     hint=None)
+                                                     hint=str(e))
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(

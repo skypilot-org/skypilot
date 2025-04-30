@@ -56,8 +56,6 @@ import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from omegaconf import OmegaConf
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -321,6 +319,31 @@ def _parse_config_file(config_path: str) -> config_utils.Config:
     return config
 
 
+def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
+    """Parse a comma-separated list of key-value pairs into a dictionary.
+
+    Args:
+        dotlist: A comma-separated list of key-value pairs.
+
+    Returns:
+        A config_utils.Config object with the parsed key-value pairs.
+    """
+    config: config_utils.Config = config_utils.Config()
+    for arg in dotlist:
+        try:
+            key, value = arg.split('=', 1)
+        except ValueError as e:
+            raise ValueError(f'Invalid config override: {arg}. '
+                             'Please use the format: key=value') from e
+        if len(key) == 0 or len(value) == 0:
+            raise ValueError(f'Invalid config override: {arg}. '
+                             'Please use the format: key=value')
+        value = yaml.safe_load(value)
+        nested_keys = tuple(key.split('.'))
+        config.set_nested(nested_keys, value)
+    return config
+
+
 def _reload_config_from_internal_file(internal_config_path: str) -> None:
     global _dict, _loaded_config_path
     # Reset the global variables, to avoid using stale values.
@@ -483,11 +506,9 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
                     'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
-            parsed_config = OmegaConf.to_object(
-                OmegaConf.load(maybe_config_path))
+            parsed_config = _parse_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
-            parsed_config = OmegaConf.to_object(
-                OmegaConf.from_dotlist(cli_config))
+            parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
