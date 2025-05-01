@@ -422,7 +422,8 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                                 'managed_job_event',
                                 f'jobs-callback-{job_id}-{task_id}.log')
         env_vars = task.envs.copy() if task.envs else {}
-        env_vars.update(dict(
+        env_vars.update(
+            dict(
                 SKYPILOT_TASK_ID=str(
                     task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
                 SKYPILOT_TASK_IDS=str(
@@ -433,12 +434,10 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                 CLUSTER_NAME=cluster_name or '',
                 TASK_NAME=task.name or '',
                 # TODO(MaoZiming): Future event type Job or Spot.
-                EVENT_TYPE='Spot')
-        )
-        result = log_lib.run_bash_command_with_log(
-            bash_command=event_callback,
-            log_path=log_path,
-            env_vars=env_vars)
+                EVENT_TYPE='Spot'))
+        result = log_lib.run_bash_command_with_log(bash_command=event_callback,
+                                                   log_path=log_path,
+                                                   env_vars=env_vars)
         logger.info(
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
