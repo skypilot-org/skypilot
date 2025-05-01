@@ -1017,28 +1017,11 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def check_disk_tier(
-            cls, instance_type: Optional[str],
-            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
-        if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
-            return True, ''
-        # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
-        # instance types. For a3 instances, we map the ULTRA tier to
-        # hyperdisk-balanced. For all other instance types, we failover to
-        # lower tiers. Reference:
-        # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
-        series = instance_type.split('-')[0]
-        if series in ['m2', 'm3', 'n2', 'a3']:
-            if series == 'n2':
-                num_cpus = int(instance_type.split('-')[2])
-                if num_cpus < 64:
-                    return False, ('n2 series with less than 64 vCPUs are '
-                                   'not supported with pd-extreme.')
-            return True, ''
-        return False, (f'{series} series is not supported with pd-extreme '
-                       'or hyperdisk-balanced. Only m2, m3 series and n2 '
-                       'series with 64 or more vCPUs are supported with '
-                       'pd-extreme. Also, only a3 is supported with '
-                       'hyperdisk-balanced.')
+        cls,
+        instance_type: Optional[str],  # pylint: disable=unused-argument
+        disk_tier: Optional[resources_utils.DiskTier]  # pylint: disable=unused-argument
+    ) -> Tuple[bool, str]:
+        return True, ''
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
@@ -1051,7 +1034,17 @@ class GCP(clouds.Cloud):
     @classmethod
     def _get_disk_type(cls, instance_type: Optional[str],
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
+
+        def _propagate_disk_type(lowest: Optional[str] = None,
+                                 highest: Optional[str] = None) -> None:
+            if lowest is not None:
+                tier2name[resources_utils.DiskTier.LOW] = lowest
+            if highest is not None:
+                tier2name[resources_utils.DiskTier.ULTRA] = highest
+
         tier = cls._translate_disk_tier(disk_tier)
+
+        # Define the default mapping from disk tiers to disk types.
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
@@ -1059,11 +1052,30 @@ class GCP(clouds.Cloud):
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
 
-        # Remap series-specific disk types
+        # Remap series-specific disk types.
+        # Reference: https://github.com/skypilot-org/skypilot/issues/4705
         series = instance_type.split('-')[0]  # type: ignore
-        if series == 'a3':
-            tier2name[resources_utils.DiskTier.LOW] = tier2name[
-                resources_utils.DiskTier.MEDIUM]
+
+        # General handling of unsupported disk types
+        if series in ['n1', 'a2', 'g2']:
+            # These series don't support pd-extreme, use pd-ssd for ULTRA.
+            _propagate_disk_type(
+                highest=tier2name[resources_utils.DiskTier.HIGH])
+        if series in ['a3', 'g2']:
+            # These series don't support pd-standard, use pd-balanced for LOW.
+            _propagate_disk_type(
+                lowest=tier2name[resources_utils.DiskTier.MEDIUM])
+
+        # Series specific handling
+        if series == 'n2':
+            num_cpus = int(instance_type.split('-')[2])  # type: ignore
+            if num_cpus < 64:
+                # n2 series with less than 64 vCPUs doesn't support pd-extreme, use pd-ssd for ULTRA.
+                _propagate_disk_type(
+                    highest=tier2name[resources_utils.DiskTier.HIGH])
+        elif series == 'a3':
+            # LOW disk tier is already handled in general case, so in this branch
+            # only the hyperdisk tier is addressed.
             tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
 
         return tier2name[tier]
