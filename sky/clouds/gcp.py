@@ -1053,6 +1053,7 @@ class GCP(clouds.Cloud):
         }
 
         # Remap series-specific disk types.
+        # Reference: https://github.com/skypilot-org/skypilot/issues/4705
         series = instance_type.split('-')[0]  # type: ignore
 
         # General handling of unsupported disk types
