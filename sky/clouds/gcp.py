@@ -1075,7 +1075,7 @@ class GCP(clouds.Cloud):
                     highest=tier2name[resources_utils.DiskTier.HIGH])
         elif series == 'a3':
             # LOW disk tier is already handled in general case, so in this branch
-            # only the hyperdisk tier is addressed
+            # only the hyperdisk tier is addressed.
             tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
 
         return tier2name[tier]
