@@ -31,22 +31,67 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
         'seed': args.seed,
     }
 
+def _filter_conv_by_region(conv: Dict[str, Any], region: str) -> bool:
+    state = conv['state']
+    country = conv['country']
+    
+    if region == 'None' or region not in ['us-east-2', 'ap-northeast-1', 'eu-central-1']: 
+        return True
 
-def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
+    if region == 'us-east-2':
+        # List 20 US East states
+        if state in ['Virginia', 'North Carolina', 'South Carolina',
+                        'Georgia', 'Florida', 'Tennessee', 'Kentucky',
+                        'West Virginia', 'Maryland', 'Delaware',
+                        'Pennsylvania', 'Ohio', 'Indiana', 'Illinois',
+                        'Michigan', 'Wisconsin', 'Missouri', 'Iowa',
+                        'Minnesota', 'Arkansas']:
+            return True
+        # Actually just route neighboring countries to US East
+        if country in ['Canada', 'United States']:
+            return True
+        
+    elif region == 'ap-northeast-1':
+        # List 20 AP countries:
+        if country in ['Japan', 'South Korea', 'China', 'Pakistan'
+                        'Singapore', 'Thailand', 'Malaysia', 'Philippines',
+                        'Vietnam', 'Indonesia', 'India', 'Bangladesh',
+                        'Sri Lanka', 'Nepal', 'Pakistan', 'Mongolia',
+                        'Brunei', 'Cambodia', 'Laos', 'Myanmar', 'Russia']:
+            return True
+    elif region == 'eu-central-1':
+        # List 20 Europe countries
+        if country in ['United Kingdom', 'Ireland', 'Spain', 'Italy',
+                        'Portugal', 'Greece', 'Sweden', 'Norway',
+                        'Finland', 'Denmark', 'Czech Republic',
+                        'Poland', 'Hungary', 'Slovakia', 'Slovenia',
+                        'Croatia', 'Romania', 'Bulgaria', 'Estonia',
+                        'Latvia', 'New Zealand', 'France', 'Romania', 'Norway']:
+            return True
+        
+    # print(f"Conversation with state {state} and country {country} does not match region {region}.")
+    return False
+
+def _load_dataset(num_conv: int, region: str) -> List[Dict[str, Any]]:
     tic = time.time()
     chunk_data = datasets.load_dataset(DATASET_NAME, split='train[:100000]')
     multi_turn_data = []
     for d in chunk_data:
         # At least 2 full turns: user + assistant + user + assistant (len >= 4)
         if d['turn'] >= 2 and isinstance(d['conversation'], list) and len(d['conversation']) >= 4:
-            multi_turn_data.append({
+            conv = {
                 'turn': d['turn'],
                 'timestamp': d['timestamp'],
                 'conv': d['conversation'],
-                'user': d.get('hashed_ip', 'unknown')
-            })
+                'user': d.get('hashed_ip', 'unknown'),
+                'state': d['state'],
+                'country': d['country'],
+            }
+            if not _filter_conv_by_region(conv, region):
+                continue
+            multi_turn_data.append(conv)
     print(f'Got {len(multi_turn_data)} multi-turn conversations (took {time.time() - tic:.2f}s)')
-    random.shuffle(multi_turn_data)
+    # random.shuffle(multi_turn_data)
     return multi_turn_data[:num_conv]
 
 
@@ -59,16 +104,10 @@ async def _multi_turn_conv(duration: int, tic: float, uid: str,
         elapsed = time.time() - tic
         if elapsed >= duration:
             break
-
-        if i >= len(conv_msgs) or conv_msgs[i]['role'] != 'user':
-            continue
         history.append({
             'role': 'user',
             'content': conv_msgs[i]['content']
         })
-
-        if i + 1 >= len(conv_msgs) or conv_msgs[i + 1]['role'] != 'assistant':
-            continue
         result = await oai.call_chat_completion_async(
             history,
             temperature=0.0,
@@ -85,35 +124,38 @@ async def _multi_turn_conv(duration: int, tic: float, uid: str,
 
 async def _user_task(duration: int, tic: float, uid: int, max_uid: int,
                      convs: List[Dict[str, Any]],
-                     real_uid: str) -> List[utils.OAIChatHistory]:
+                     real_uid: str,
+                     region: str) -> List[utils.OAIChatHistory]:
     uid_repr = f'{uid:<{len(str(max_uid))}}'
-    rp(f'User {uid_repr}: {len(convs)} conversations in total.')
+    print(f'User {uid_repr}: {len(convs)} conversations in total.')
     results = []
 
     for i, conv in enumerate(convs):
         elapsed = time.time() - tic
         if elapsed >= duration:
             break
+        # We already filtered the conversations by region in _load_dataset
+        assert _filter_conv_by_region(conv, region)
         coro = _multi_turn_conv(duration, tic, real_uid, conv)
         try:
             result = await coro
             results.extend(result)
-            if len(convs) <= 10 or (i + 1) % (len(convs) // 10) == 0 or i + 1 == len(convs):
-                rp(f'User {uid_repr}: ({i+1}/{len(convs)}) conversations completed. '
-                   f'Elapsed: {time.time() - tic:.2f}s')
+            print(f'User {uid_repr}: ({i+1}/{len(convs)}) conversations completed. '
+                f'Elapsed: {time.time() - tic:.2f}s')
         except asyncio.TimeoutError:
-            rp(f'User {uid_repr}: Conversation {i+1} timed out after {duration}s')
+            print(f'User {uid_repr}: Conversation {i+1} timed out after {duration}s')
             break
     return results
 
 
 async def _user_task_loop(duration: int, uid: int, max_uid: int,
                           convs: List[Dict[str, Any]],
-                          real_uid: str) -> List[utils.OAIChatHistory]:
+                          real_uid: str,
+                          region: str) -> List[utils.OAIChatHistory]:
     tic = time.time()
     results = []
     while True:
-        results_one_round = await _user_task(duration, tic, uid, max_uid, convs, real_uid)
+        results_one_round = await _user_task(duration, tic, uid, max_uid, convs, real_uid, region)
         results.extend(results_one_round)
         if time.time() - tic > duration:
             break
@@ -125,8 +167,8 @@ def launch_user_tasks(
         num_users: int) -> List[Awaitable[List[utils.OAIChatHistory]]]:
     with rich_utils.client_status(
             ux_utils.spinner_message(f'[bold cyan]Loading dataset {DATASET_NAME}[/]')) as spinner:
-        random.seed(args.seed)
-        convs = _load_dataset(args.num_conv)
+        # random.seed(args.seed, args.region)
+        convs = _load_dataset(args.num_conv, args.region)
         spinner.update('[bold cyan]Grouping conversations[/]')
         user_to_convs: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
         for conv in convs:
@@ -145,6 +187,6 @@ def launch_user_tasks(
             continue
         user_convs.sort(key=lambda conv: conv['timestamp'])
         tasks.append(
-            _user_task_loop(args.duration, uid, len(groups), user_convs, str(args.seed))
+            _user_task_loop(args.duration, uid, len(groups), user_convs, str(args.seed), args.region)
         )
     return tasks

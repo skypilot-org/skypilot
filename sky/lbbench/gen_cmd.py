@@ -32,13 +32,14 @@ presents = [
 ]
 
 enabled_systems = [
-    0,  # sgl router
-    1,  # sgl router enhanced
-    2,  # sky pulling in lb, pulling in replica, but workload stealing
-    3,  # sky pulling in lb, pulling in replica, but steal small #requests
+    # 0,  # sgl router
+    # 1,  # sgl router enhanced
+    # 2,  # sky pulling in lb, pulling in replica, but workload stealing
+    # 3,  # sky pulling in lb, pulling in replica, but steal small #requests
     # 4,  # sky pushing in lb, pulling in replica
     # 5,  # sky pushing in lb, pushing in replica
     # 6,  # sky pulling in lb, pulling in replica, but rate limit
+    6
 ]
 
 describes = [describes[i] for i in enabled_systems]
@@ -136,7 +137,7 @@ def main():
         scps.append(f'mkdir -p {output_local}/metric/{en}')
         for r in regions:
             cluster = _region_cluster_name(r)
-            region_cmd = f'{cmd} --seed {r}'
+            region_cmd = f'{cmd} --region {r} --seed {r} '
             if isinstance(regions, dict):
                 region_cmd += f' {regions[r]}'
             # TODO(tian): Instead of --fast, how about sky launch once
