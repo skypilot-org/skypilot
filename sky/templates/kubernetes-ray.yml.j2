@@ -270,6 +270,9 @@ available_node_types:
             {% if high_availability %}
             app: {{cluster_name_on_cloud}}
             {% endif %}
+            {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
+            skypilot-binpack: "gpu"
+            {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
@@ -286,9 +289,10 @@ available_node_types:
             {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
             {% endif %}
         {% endif %}
-        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
         affinity:
           nodeAffinity:
+            {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
             requiredDuringSchedulingIgnoredDuringExecution:
               nodeSelectorTerms:
               - matchExpressions:
@@ -298,8 +302,31 @@ available_node_types:
                   {% for label_value in k8s_acc_label_values %}
                   - {{label_value}}
                   {% endfor %}
+            {% endif %}
+            {% if avoid_label_keys is not none %}
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                {% for avoid_label_key in avoid_label_keys %}
+                - key: {{avoid_label_key}}
+                  operator: DoesNotExist
+                {% endfor %}
+            {% endif %}
+          {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
+          podAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 1
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: "skypilot-binpack"
+                        operator: In
+                        values:
+                          - "gpu"
+                  topologyKey: kubernetes.io/hostname
+          {% endif %}
         {% endif %}
-
         {% if k8s_spot_label_key is not none %}
         tolerations:
           - key: {{k8s_spot_label_key}}
@@ -538,7 +565,7 @@ available_node_types:
                     { echo 52; exit 52; };
                   fi;
                 fi;
-                printenv | while IFS='=' read -r key value; do echo "export $key=\"$value\""; done > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
                 ) > /tmp/${STEPS[2]}.log 2>&1 || {
                   echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
                   cat /tmp/${STEPS[2]}.log

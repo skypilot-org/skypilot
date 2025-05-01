@@ -304,6 +304,9 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
         f'$(prefix_cmd) echo "{public_key}" >> ~/.ssh/authorized_keys; '
         '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
         '$(prefix_cmd) service ssh restart; '
+        '$(prefix_cmd) export -p > ~/container_env_var.sh && '
+        '$(prefix_cmd) '
+        'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh; '
         '[ $(id -u) -eq 0 ] && echo alias sudo="" >> ~/.bashrc;sleep infinity')
     # Use base64 to deal with the tricky quoting issues caused by runpod API.
     encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
