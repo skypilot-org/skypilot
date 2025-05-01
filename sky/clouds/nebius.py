@@ -344,8 +344,9 @@ class Nebius(clouds.Cloud):
             f'~/.nebius/{filename}': f'~/.nebius/{filename}'
             for filename in _CREDENTIAL_FILES
         }
-        credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
-        credential_file_mounts['~/.aws/config'] = '~/.aws/config'
+        if nebius_profile_in_aws_cred_and_config():
+            credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
+            credential_file_mounts['~/.aws/config'] = '~/.aws/config'
         return credential_file_mounts
 
     @classmethod
