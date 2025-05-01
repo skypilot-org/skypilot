@@ -133,6 +133,29 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
 
+def normalize_tpu_accelerator_name(accelerator: str) -> str:
+    """Normalize TPU names to the k8s-compatible name if needed.
+
+    Examples:
+    - tpu-v6e-8 -> tpu-v6e-slice
+    - tpu-v5p-16 -> tpu-v5p-slice
+    - tpu-v5litepod-4 -> tpu-v5-lite-podslice
+    """
+    # Simple patterns for known GCP-style names
+    gcp_to_k8s_patterns = [
+        (r'^tpu-v6e-\d+$', 'tpu-v6e-slice'),
+        (r'^tpu-v5p-\d+$', 'tpu-v5p-slice'),
+        (r'^tpu-v5litepod-\d+$', 'tpu-v5-lite-podslice'),
+        (r'^tpu-v5lite-\d+$', 'tpu-v5-lite-device'),
+        (r'^tpu-v4-\d+$', 'tpu-v4-podslice'),
+    ]
+    for pattern, replacement in gcp_to_k8s_patterns:
+        if re.match(pattern, accelerator):
+            return replacement
+    return accelerator
+
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -2911,6 +2934,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 def is_tpu_on_gke(accelerator: str) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
+    normalized = normalize_tpu_accelerator_name(accelerator)
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
