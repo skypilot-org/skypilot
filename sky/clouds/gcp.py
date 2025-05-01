@@ -1052,29 +1052,30 @@ class GCP(clouds.Cloud):
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
 
-        # Remap series-specific disk types
+        # Remap series-specific disk types.
         series = instance_type.split('-')[0]  # type: ignore
-        if series == 'a3':
-            # a3 doesn't support pd-standard, so use pd-balanced for LOW.
+
+        # General handling of unsupported disk types
+        if series in ['n1', 'a2', 'g2']:
+            # These series don't support pd-extreme, use pd-ssd for ULTRA.
+            _propagate_disk_type(
+                highest=tier2name[resources_utils.DiskTier.HIGH])
+        if series in ['a3', 'g2']:
+            # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
-        elif series == 'n2':
+
+        # Series specific handling
+        if series == 'n2':
             num_cpus = int(instance_type.split('-')[2])  # type: ignore
             if num_cpus < 64:
-                # pd-extreme isn't supported, so use pd-ssd for ULTRA.
+                # n2 series with less than 64 vCPUs doesn't support pd-extreme, use pd-ssd for ULTRA.
                 _propagate_disk_type(
                     highest=tier2name[resources_utils.DiskTier.HIGH])
-        elif series in ['n1', 'a2']:
-            # pd-extreme isn't supported, so use pd-ssd for ULTRA.
-            _propagate_disk_type(
-                highest=tier2name[resources_utils.DiskTier.HIGH])
-        elif series == 'g2':
-            # g2 doesn't support pd-standard and pd-extreme, so use pd-balanced for LOW
-            # and pd-ssd to ULTRA.
-            _propagate_disk_type(
-                lowest=tier2name[resources_utils.DiskTier.MEDIUM],
-                highest=tier2name[resources_utils.DiskTier.HIGH])
+        elif series == 'a3':
+            # LOW disk tier is already handled in general case, so in this branch
+            # only the hyperdisk tier is addressed
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
 
         return tier2name[tier]
 
