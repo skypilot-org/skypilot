@@ -1022,26 +1022,6 @@ class GCP(clouds.Cloud):
         disk_tier: Optional[resources_utils.DiskTier]  # pylint: disable=unused-argument
     ) -> Tuple[bool, str]:
         return True, ''
-        # if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
-        #     return True, ''
-        # # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
-        # # instance types. For a3 instances, we map the ULTRA tier to
-        # # hyperdisk-balanced. For all other instance types, we failover to
-        # # lower tiers. Reference:
-        # # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
-        # series = instance_type.split('-')[0]
-        # if series in ['m2', 'm3', 'n2', 'a3']:
-        #     if series == 'n2':
-        #         num_cpus = int(instance_type.split('-')[2])
-        #         if num_cpus < 64:
-        #             return False, ('n2 series with less than 64 vCPUs are '
-        #                            'not supported with pd-extreme.')
-        #     return True, ''
-        # return False, (f'{series} series is not supported with pd-extreme '
-        #                'or hyperdisk-balanced. Only m2, m3 series and n2 '
-        #                'series with 64 or more vCPUs are supported with '
-        #                'pd-extreme. Also, only a3 is supported with '
-        #                'hyperdisk-balanced.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
