@@ -40,8 +40,11 @@ EXTERNAL_LOCAL_ENV_VARS = [
     'AWS_PROFILE',
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
     # Allow overriding the GCP authentication.
     'GOOGLE_APPLICATION_CREDENTIALS',
+    # Allow overriding the kubeconfig.
+    'KUBECONFIG',
 ]
 
 
