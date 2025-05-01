@@ -741,7 +741,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
-                # H100 should not in the current context
+                # H100 should not be in the current context
                 f'! sky show-gpus --cloud kubernetes --region {context} | grep H100',
                 # H100 should be displayed as long as it is available in one of the contexts
                 'sky show-gpus --cloud kubernetes | grep H100',
