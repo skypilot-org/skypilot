@@ -15,3 +15,4 @@ Training
    Training on TPUs <tpu.md>
    Unsloth <unsloth.md>
    Vertex AI <https://medium.com/google-cloud/streamline-ai-ml-model-development-on-gke-with-skypilot-and-vertex-ai-workbench-453729a8897c>
+   EFA <aws_efa.md>
