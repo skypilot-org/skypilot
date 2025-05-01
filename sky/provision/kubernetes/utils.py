@@ -980,8 +980,12 @@ def check_instance_fits(context: Optional[str],
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
-            if (node_cpus >= candidate_instance_type.cpus and
-                    node_memory_gb >= candidate_instance_type.memory):
+            # We don't consider nodes that have exactly the same amount of
+            # CPU or memory as the candidate instance type.
+            # This is to account for the fact that each node always has some
+            # amount kube-system pods running on it and consuming resources.
+            if (node_cpus > candidate_instance_type.cpus and
+                    node_memory_gb > candidate_instance_type.memory):
                 return True, None
         return False, (
             'Maximum resources found on a single node: '
