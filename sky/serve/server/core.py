@@ -300,7 +300,13 @@ def up(
             assert task.service is not None
             protocol = ('http'
                         if task.service.tls_credential is None else 'https')
-            endpoint = f'{protocol}://{socket_endpoint}'
+            endpoint = backend_utils.get_endpoints(
+                controller_handle.cluster_name,
+                lb_port,
+                protocol=protocol,
+                skip_status_check=True).get(lb_port)
+            assert endpoint is not None, (
+                'Did not get endpoint for controller.')
 
         logger.info(
             f'{fore.CYAN}Service name: '
@@ -710,17 +716,17 @@ def status(
     for service_record in service_records:
         service_record['endpoint'] = None
         if service_record['load_balancer_port'] is not None:
+            protocol = ('https' if service_record['tls_encrypted'] else 'http')
             try:
                 endpoint = backend_utils.get_endpoints(
                     cluster=common.SKY_SERVE_CONTROLLER_NAME,
-                    port=service_record['load_balancer_port']).get(
-                        service_record['load_balancer_port'], None)
+                    port=service_record['load_balancer_port'],
+                    protocol=protocol).get(service_record['load_balancer_port'],
+                                           None)
             except exceptions.ClusterNotUpError:
                 pass
             else:
-                protocol = ('https'
-                            if service_record['tls_encrypted'] else 'http')
-                service_record['endpoint'] = f'{protocol}://{endpoint}'
+                service_record['endpoint'] = endpoint
 
     return service_records
 
