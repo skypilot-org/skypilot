@@ -5,7 +5,7 @@ import collections
 import re
 import subprocess
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 from sky import check as sky_check
 from sky import clouds
@@ -65,33 +65,38 @@ def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
 
 
 # Renamed from _list_accelerator_realtime for clarity
-def list_accelerator_realtime_slurm(
+def list_accelerators_realtime(
+    gpus_only: bool = True,
     name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
-    partition_filter: Optional[str] = None,
     case_sensitive: bool = True,
-) -> List[Dict[str, Any]]:
+    all_regions: bool = False,
+    require_price: bool = False,
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str, int]]:
     """Fetches real-time accelerator information from the Slurm cluster.
 
     Uses `sinfo` and `scontrol show node` commands. Handles GRES format like
-    'gpu:<count>' or 'gpu:<type>:<count>'. GPU type determination relies on
-    GRES configuration visibility via these commands.
+    'gpu:<count>' or 'gpu:<type>:<count>'.
 
     Args:
+        gpus_only: If True, only return GPU accelerators.
         name_filter: Regex filter for accelerator names (e.g., 'V100', 'gpu').
+        region_filter: Optional filter for Slurm partitions.
         quantity_filter: Minimum number of accelerators required per node.
-        partition_filter: Optional filter for Slurm partitions.
         case_sensitive: Whether name_filter is case-sensitive.
+        all_regions: Unused in Slurm context.
+        require_price: Unused in Slurm context.
 
     Returns:
-        List of dictionaries, each representing GPU info for a node.
-
-    Raises:
-        exceptions.NotSupportedError: If Slurm commands are not found or Slurm
-            cloud is not enabled/configured.
-        RuntimeError: If Slurm commands fail unexpectedly.
-        ValueError: If parsing Slurm output fails or no matching GPUs found.
+        A tuple of three dictionaries:
+        - qtys_map: Maps GPU type to set of InstanceTypeInfo objects for unique counts found per node.
+        - total_capacity: Maps GPU type to total count across all nodes.
+        - total_available: Maps GPU type to total free count across all nodes.
     """
+    # Use region_filter as partition_filter for Slurm
+    partition_filter = region_filter
+
     # 1. Check Slurm availability (Optional but recommended)
     # ... (keep the TODO or implement check)
     logger.debug('Querying Slurm for GPU availability using sinfo/scontrol...')
@@ -125,7 +130,7 @@ def list_accelerator_realtime_slurm(
 
     if not sinfo_output:
         logger.warning('`sinfo -N` returned no output. No nodes found?')
-        return []
+        return {}, {}, {}
 
     # 3. Parse `sinfo` output and potentially call `scontrol`
     slurm_nodes_info = []
@@ -146,6 +151,7 @@ def list_accelerator_realtime_slurm(
         cpu_alloc_str = parts[4] if len(parts) > 4 else '0/0/0/0'
         mem_mb_str = parts[5] if len(parts) > 5 else '0'
 
+        # Skip node if already processed (can happen with multi-partition nodes in sinfo output)
         if node_name in unique_nodes_processed:
             continue
 
@@ -186,9 +192,11 @@ def list_accelerator_realtime_slurm(
         # --- Get Allocated GPUs and potentially refine GPU type using `scontrol show node` ---
         allocated_gpus = 0
         node_details = {}
+        refined_gpu_type = determined_gpu_type # Start with type from sinfo
         try:
             scontrol_cmd = ['scontrol', 'show', 'node', node_name]
-            scontrol_proc = subprocess.run(scontrol_cmd, check=True, capture_output=True, text=True, timeout=10)
+            # Increased timeout slightly for scontrol
+            scontrol_proc = subprocess.run(scontrol_cmd, check=True, capture_output=True, text=True, timeout=15)
             node_details = _parse_scontrol_node_output(scontrol_proc.stdout)
 
             # Refine GPU type if scontrol provides more specific GRES info
@@ -196,13 +204,13 @@ def list_accelerator_realtime_slurm(
             scontrol_gres_match = gres_gpu_pattern.search(scontrol_gres)
             if scontrol_gres_match and scontrol_gres_match.group(3):
                 # Found type like 'gpu:v100:4' in scontrol, prefer this type
-                determined_gpu_type = scontrol_gres_match.group(3)
+                refined_gpu_type = scontrol_gres_match.group(3)
                 logger.debug(f'Refined GPU type for {node_name} to '
-                             f'{determined_gpu_type} from scontrol.')
+                             f'{refined_gpu_type} from scontrol.')
                 # Re-apply name filter if type was refined
-                if name_filter and not re.match(name_filter, determined_gpu_type, flags=regex_flags):
+                if name_filter and not re.match(name_filter, refined_gpu_type, flags=regex_flags):
                      logger.debug(f'Node {node_name} skipped after refining type to '
-                                  f'{determined_gpu_type} due to name filter.')
+                                  f'{refined_gpu_type} due to name filter.')
                      continue # Skip node if refined type doesn't match filter
 
             # Find allocated GPUs
@@ -217,41 +225,60 @@ def list_accelerator_realtime_slurm(
                 used_match = gres_used_count_pattern.search(gres_used)
                 if used_match:
                     allocated_gpus = int(used_match.group(1))
+                else:
+                     # Fallback if neither AllocTRES nor GresUsed provides GPU count
+                     logger.debug(f'Could not determine allocated GPUs for {node_name} from '
+                                  f'AllocTRES or GresUsed. Assuming 0 allocated if node is idle/mix.')
+                     allocated_gpus = 0
+
 
         except FileNotFoundError:
-            logger.warning('`scontrol` command not found. Cannot determine allocated GPUs.')
+            logger.warning('`scontrol` command not found. Cannot determine allocated GPUs precisely. Assuming 0 if node is idle/mix.')
+            allocated_gpus = 0 # Assume none allocated if we can't check
         except subprocess.TimeoutExpired:
-             logger.warning(f'`scontrol show node {node_name}` timed out.')
+             logger.warning(f'`scontrol show node {node_name}` timed out. Cannot determine allocated GPUs precisely. Assuming 0 if node is idle/mix.')
+             allocated_gpus = 0 # Assume none allocated if we can't check
         except subprocess.CalledProcessError as e:
+            # Log warning but potentially continue, assuming 0 allocated if node is idle/mix
             logger.warning(f'Failed `scontrol show node {node_name}` (code {e.returncode}). '
-                           f'Stderr: {e.stderr.strip()}')
-            if state not in ('idle', 'mix', 'unk'): allocated_gpus = total_gpus # Fallback
+                           f'Stderr: {e.stderr.strip()}. Assuming 0 allocated GPUs if node is idle/mix.')
+            allocated_gpus = 0
+        except Exception as e: # Catch broader exceptions during scontrol processing
+             logger.error(f'Unexpected error processing scontrol output for {node_name}: {e}')
+             # Depending on severity, might want to skip node or assume 0 allocated
+             allocated_gpus = 0
+
 
         # --- Calculate Free GPUs ---
         free_gpus = 0
-        if state in ('idle', 'mix', 'unk'):
+        # Consider node state for free GPU calculation
+        # Nodes fully allocated, drained, down, etc., have 0 free GPUs regardless of calculation
+        if state in ('idle', 'mix', 'unk'): # Only these states can have free GPUs
+             # Ensure allocated doesn't exceed total (can happen with stale info or complex configs)
              allocated_gpus = min(allocated_gpus, total_gpus)
              free_gpus = total_gpus - allocated_gpus
-             free_gpus = max(0, free_gpus)
+             free_gpus = max(0, free_gpus) # Ensure non-negative
+        # For other states (alloc, drain, down, maint, etc.), free_gpus remains 0
 
         # --- Extract CPU/Memory info ---
         vcpu_total = 0
         try:
+            # Example %C format: Allocated/Idle/Other/Total (e.g., 10/2/0/12)
             vcpu_total = int(cpu_alloc_str.split('/')[-1])
         except (IndexError, ValueError):
-            logger.debug(f'Could not parse total CPUs from {cpu_alloc_str!r}')
+            logger.debug(f'Could not parse total CPUs from {cpu_alloc_str!r} for node {node_name}')
         mem_gb = 0.0
         try:
             mem_gb = float(mem_mb_str) / 1024.0
         except ValueError:
-             logger.debug(f'Could not parse memory from {mem_mb_str!r}')
+             logger.debug(f'Could not parse memory from {mem_mb_str!r} for node {node_name}')
 
         # Append node info
         slurm_nodes_info.append({
             'node_name': node_name,
             'partition': partition,
             'node_state': state,
-            'gpu_type': determined_gpu_type, # Use the determined type
+            'gpu_type': refined_gpu_type, # Use the potentially refined type
             'total_gpus': total_gpus,
             'free_gpus': free_gpus,
             'vcpu_count': vcpu_total,
@@ -259,11 +286,10 @@ def list_accelerator_realtime_slurm(
         })
         unique_nodes_processed.add(node_name)
 
-    # 4. Final check and return
-    err_msg = '' # Define err_msg before the conditional check
+    # 4. Check if any nodes were found after filtering
     if not slurm_nodes_info:
         # Customize error message based on filters
-        err_msg = 'No matching GPUs found in the Slurm cluster'
+        err_msg = 'No matching GPU nodes found in the Slurm cluster'
         filters_applied = []
         if name_filter:
             filters_applied.append(f'name={name_filter!r}')
@@ -275,12 +301,54 @@ def list_accelerator_realtime_slurm(
             err_msg += f' with filters ({", ".join(filters_applied)})'
         err_msg += '.'
         # Example: err_msg += '\\nCheck Slurm configuration (`sky check`) and node states (`sinfo`).'
+        logger.error(err_msg) # Log as error as it indicates no usable resources found
         raise ValueError(err_msg)
 
-    # Sort results for consistency (optional)
-    slurm_nodes_info.sort(key=lambda x: (x.get('partition', ''), x.get('node_name', '')))
+    # 5. Aggregate results into the required format
+    qtys_map: Dict[str, Set[common.InstanceTypeInfo]] = collections.defaultdict(set)
+    total_capacity: Dict[str, int] = collections.defaultdict(int)
+    total_available: Dict[str, int] = collections.defaultdict(int)
 
-    return slurm_nodes_info
+    for node_info in slurm_nodes_info:
+        gpu_type = node_info['gpu_type']
+        node_total_gpus = node_info['total_gpus']
+        node_free_gpus = node_info['free_gpus']
+        partition = node_info['partition']
+
+        # Create InstanceTypeInfo for this configuration
+        if node_total_gpus > 0:  # Only add counts > 0
+            instance_info = common.InstanceTypeInfo(
+                instance_type=None,  # Slurm doesn't have instance types
+                accelerator_name=gpu_type,
+                accelerator_count=node_total_gpus,
+                cpu_count=node_info['vcpu_count'],
+                memory=node_info['memory_gb'],
+                price=0.0,  # Slurm doesn't have price info
+                region=partition,  # Use partition as region
+                cloud='slurm',  # Specify cloud as 'slurm'
+                device_memory=0.0,  # We don't have GPU memory info from Slurm
+                spot_price=0.0,  # Slurm doesn't have spot pricing
+            )
+            qtys_map[gpu_type].add(instance_info)
+
+        # Map of GPU type -> total count across all matched nodes
+        total_capacity[gpu_type] += node_total_gpus
+
+        # Map of GPU type -> total *free* count across all matched nodes
+        total_available[gpu_type] += node_free_gpus
+
+    # Convert sets of InstanceTypeInfo to sorted lists
+    final_qtys_map = {
+        gpu: sorted(list(instances), key=lambda x: x.accelerator_count)
+        for gpu, instances in qtys_map.items()
+    }
+
+    logger.debug(f'Aggregated Slurm GPU Info: '
+                 f'qtys={final_qtys_map}, '
+                 f'capacity={dict(total_capacity)}, '
+                 f'available={dict(total_available)}')
+
+    return final_qtys_map, dict(total_capacity), dict(total_available)
 
 
 # --- Implementations for other catalog functions (mostly stubs for Slurm) ---
@@ -311,10 +379,11 @@ def list_accelerators(
 
     try:
         # Use the function with actual command logic now
-        slurm_gpu_info_list = list_accelerator_realtime_slurm(
+        slurm_gpu_info_list = list_accelerators_realtime(
+            gpus_only=gpus_only,
             name_filter=name_filter,
+            region_filter=partition_filter,
             quantity_filter=quantity_filter,
-            partition_filter=partition_filter,
             case_sensitive=case_sensitive
         )
     except ValueError as e:
@@ -365,7 +434,6 @@ def list_accelerators(
                         price=0.0,
                         spot_price=0.0,
                         region=partition, # Use partition as region
-                        zone=None # No zone concept in Slurm
                     )
                     unique_configs[key] = info
                     results[gpu_type].append(info) # Append to list for the GPU type

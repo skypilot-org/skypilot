@@ -515,29 +515,9 @@ class UploadZipFileResponse(pydantic.BaseModel):
     status: str
     missing_chunks: Optional[List[str]] = None
 
-class RealtimeGpuAvailabilityRequestBody(RequestBody):
-    """Request body for getting real-time GPU availability."""
-    context: Optional[str] = None
-    name_filter: Optional[str] = None
-    quantity_filter: Optional[int] = None
-
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):
     """Request body for getting Slurm real-time GPU availability."""
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
 
-
-class KubernetesNodeInfoRequestBody(RequestBody):
-    """Request body for getting Kubernetes nodes info."""
-    context: Optional[str] = None
-
-
-class SlurmGpuAvailabilityRequestBody(RequestBody):
-    """Request body for getting Slurm real-time GPU availability."""
-    name_filter: Optional[str] = None
-    quantity_filter: Optional[int] = None
-
-
-class KubernetesNodeInfoRequestBody(RequestBody):
-    # ... existing code ... 

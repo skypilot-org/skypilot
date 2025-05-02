@@ -3421,7 +3421,6 @@ def show_gpus(
     )
     # Slurm specific bools
     cloud_is_slurm = isinstance(cloud_obj, clouds.Slurm)
-    # TODO: Check Slurm enablement similarly if needed
     slurm_is_enabled = clouds.cloud_in_iterable(
         clouds.Slurm(),
         enabled_clouds,
@@ -3530,6 +3529,8 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _output() -> Generator[str, None, None]:
+        k8s_messages = '' # Initialize here
+        slurm_messages = '' # Initialize here too
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
         tpu_table = log_utils.create_table(
@@ -3549,8 +3550,8 @@ def show_gpus(
                 if c not in ['kubernetes', 'slurm'] # Exclude k8s and slurm
             ]
 
-        k8s_messages = ''
-        slurm_messages = '' # For Slurm specific messages/notes
+        # k8s_messages = '' # <- Remove from here
+        # slurm_messages = '' # <- Remove from here
 
         if accelerator_str is None:
             # Collect k8s related messages in k8s_messages and print them at end
@@ -3602,34 +3603,77 @@ def show_gpus(
                 return
 
             # --- Slurm Section ---
-            if slurm_is_enabled and (cloud_name is None or cloud_is_slurm):
-                try:
-                    slurm_gpu_table = _get_slurm_realtime_gpu_tables()
-                except ValueError as e:
-                    if not cloud_is_slurm:
-                        slurm_messages += 'Note: '
-                    slurm_messages += str(e)
-                else:
-                    print_section_titles = True
-                    yield (f'{colorama.Fore.MAGENTA}{colorama.Style.BRIGHT}' # Different color for Slurm
-                           f'Slurm GPUs'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from slurm_gpu_table.get_string()
-                    yield '\n-----\n\n'
-                # Add any Slurm-specific notes if needed
-                # slurm_messages += '\nNote about Slurm GPU reporting...'
+            # Use region filter as partition filter for Slurm
+            partition_filter = region
 
-            if cloud_is_kubernetes:
-                # ... (existing kubernetes return logic) ...
-                return
+            if slurm_is_enabled and (cloud_name is None or cloud_is_slurm):
+                # Don't try to list Slurm accelerators if only a specific non-Slurm cloud was requested
+                if cloud_name is not None and not cloud_is_slurm:
+                     pass # Skip Slurm section
+                else:
+                    try:
+                        # Parse accelerator string for Slurm filtering
+                        slurm_name_filter = None
+                        slurm_quantity_filter = None
+                        if accelerator_str:
+                            # Reuse parsing logic from later in the function if needed
+                            accel_parts = accelerator_str.split(':')
+                            slurm_name_filter = accel_parts[0]
+                            if len(accel_parts) == 2:
+                                try:
+                                    slurm_quantity_filter = int(accel_parts[1])
+                                    if slurm_quantity_filter <= 0: raise ValueError
+                                except ValueError:
+                                    raise click.UsageError(f'Invalid quantity in {accelerator_str!r}')
+                            elif len(accel_parts) > 2:
+                                 raise click.UsageError(f'Invalid format {accelerator_str!r}')
+
+                        # Call the SDK function to get Slurm GPU info
+                        slurm_nodes_info = sdk.stream_and_get(
+                            sdk.slurm_gpu_availability(
+                                name_filter=slurm_name_filter,
+                                quantity_filter=slurm_quantity_filter,
+                                partition_filter=partition_filter
+                                # Pass other necessary args like env_vars if needed by SDK
+                            )
+                        )
+                        slurm_gpu_table = _format_slurm_gpu_table(
+                            slurm_nodes_info, slurm_name_filter, slurm_quantity_filter
+                        )
+                        if slurm_gpu_table:
+                            print_section_titles = True
+                            yield (f'{colorama.Fore.MAGENTA}{colorama.Style.BRIGHT}' # Different color for Slurm
+                                   f'Slurm GPUs'
+                                   f'{colorama.Style.RESET_ALL}\n')
+                            yield from slurm_gpu_table.get_string()
+                            yield '\n-----\n\n'
+                        # else: table is None if no nodes found, error handled below
+
+                    except ValueError as e: # Catches case where SDK/core raises "No GPUs found"
+                        if not cloud_is_slurm:
+                            slurm_messages += 'Note: '
+                        slurm_messages += str(e)
+                    except exceptions.NotSupportedError as e:
+                        if not cloud_is_slurm:
+                            slurm_messages += 'Note: '
+                        slurm_messages += f'Slurm check failed: {e}'
+                    except RuntimeError as e:
+                         if not cloud_is_slurm:
+                             slurm_messages += 'Note: '
+                         slurm_messages += f'Error querying Slurm: {e}'
+                    # Add any Slurm-specific notes if needed
+                    # slurm_messages += '\nNote about Slurm GPU reporting...'
+
             if cloud_is_slurm:
                  # Do not show other clouds if --cloud slurm is specified
                 if not slurm_is_enabled:
                      yield ('Slurm is not enabled. To fix, run: '
                            'sky check slurm ') # Assuming 'sky check slurm' exists
-                yield slurm_messages
-                return
-
+                if not print_section_titles and slurm_messages: # Check if table was printed
+                     # If only messages, print them
+                     yield slurm_messages
+                # If table was printed, messages will be added later or were already part of exception message
+                return # Exit after handling Slurm
 
             # For show_all, show the k8s/slurm message at the start since output is
             # long and the user may not scroll to the end.
@@ -3859,6 +3903,15 @@ def show_gpus(
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
+        # Append Kubernetes and Slurm notes at the end if multiple clouds were checked
+        if cloud_name is None: # Only append notes if checking all clouds
+            if k8s_messages or slurm_messages:
+                yield '\n'
+                if k8s_messages:
+                    yield k8s_messages + '\n'
+                if slurm_messages:
+                    yield slurm_messages
+
     outputs = _output()
     if show_all:
         click.echo_via_pager(outputs)
@@ -3867,46 +3920,136 @@ def show_gpus(
             click.echo(out, nl=False)
         click.echo()
 
-    # Placeholder for Slurm GPU info fetching
-    def _get_slurm_realtime_gpu_tables(
+    # --- New function to format Slurm table ---
+    def _format_slurm_gpu_table(
+            nodes_gpu_info: List[Dict[str, Any]],
             name_filter: Optional[str] = None,
             quantity_filter: Optional[int] = None):
-        """Fetches and formats Slurm real-time GPU availability."""
-        # This function will need to call an SDK function like
-        # sdk.slurm_realtime_gpu_availability() which should return
-        # structured data about GPUs on Slurm nodes.
-        # For now, returning dummy data structure.
-        # Replace with actual SDK call and data handling.
-        # Example structure might involve grouping by GPU type or node.
-        click.secho('Fetching Slurm GPU info (placeholder)...', fg='yellow')
-        # Example: Assume SDK returns a list of node info dicts
-        # nodes_gpu_info = sdk.stream_and_get(
-        #     sdk.slurm_realtime_gpu_availability(
-        #         name_filter=name_filter,
-        #         quantity_filter=quantity_filter
-        #     )
-        # )
-        # if not nodes_gpu_info:
-        #     raise ValueError('No GPUs found in the Slurm cluster.')
+        """Formats Slurm real-time GPU availability into a table."""
+        if not nodes_gpu_info:
+             # This case should ideally be caught by the SDK/core function
+             # raising ValueError, but handle defensively.
+             return None
 
-        # Format the data into a table or multiple tables
-        # Example table structure:
+        # Dynamically determine the maximum length for node names and partitions
+        # to avoid overly wide tables for short names.
+        max_node_len = max(len(n['node_name']) for n in nodes_gpu_info) if nodes_gpu_info else 10
+        max_part_len = max(len(n['partition']) for n in nodes_gpu_info) if nodes_gpu_info else 10
+        # Set a reasonable max limit to prevent excessive width
+        max_node_len = min(max_node_len, 30)
+        max_part_len = min(max_part_len, 20)
+
         slurm_gpu_table = log_utils.create_table(
-            ['NODE', 'PARTITION', 'NODE_STATE', 'GPU_TYPE', 'TOTAL_GPUS', 'FREE_GPUS'])
-        # Populate table based on nodes_gpu_info
-        # slurm_gpu_table.add_row(['node1', 'gpu-part', 'IDLE', 'V100', 8, 8])
-        # slurm_gpu_table.add_row(['node2', 'gpu-part', 'ALLOCATED', 'A100', 4, 0])
+            [f'NODE(max:{max_node_len})', f'PARTITION(max:{max_part_len})',
+             'NODE_STATE', 'GPU_TYPE', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        # For now, return an empty table as a placeholder
+        for node_info in nodes_gpu_info:
+             # Apply filters again here if the backend didn't filter completely,
+             # or just rely on backend filtering.
+             # Example re-filtering (usually done in backend/SDK):
+             # if name_filter and not re.match(...): continue
+             # if quantity_filter and node_info['free_gpus'] < quantity_filter: continue
+
+             slurm_gpu_table.add_row([
+                 common_utils.truncate_long_string(node_info['node_name'], max_node_len),
+                 common_utils.truncate_long_string(node_info['partition'], max_part_len),
+                 node_info['node_state'],
+                 node_info['gpu_type'],
+                 str(node_info['total_gpus']),
+                 str(node_info['free_gpus'])
+             ])
         return slurm_gpu_table
+    # --- End of new function ---
 
 
-    # Placeholder for Slurm node info formatting (if needed separately)
-    # def _format_slurm_node_info():
-    #     """Formats detailed Slurm node information."""
-    #     # Similar to _format_kubernetes_node_info, potentially calling
-    #     # sdk.slurm_node_info() if more details are needed per node.
-    #     pass
+    # --- Slurm Section ---
+    # Use region filter as partition filter for Slurm
+    partition_filter = region
+
+    if slurm_is_enabled and (cloud_name is None or cloud_is_slurm):
+        # Don't try to list Slurm accelerators if only a specific non-Slurm cloud was requested
+        if cloud_name is not None and not cloud_is_slurm:
+             pass # Skip Slurm section
+        else:
+            try:
+                # Parse accelerator string for Slurm filtering
+                slurm_name_filter = None
+                slurm_quantity_filter = None
+                if accelerator_str:
+                    # Reuse parsing logic from later in the function if needed
+                    accel_parts = accelerator_str.split(':')
+                    slurm_name_filter = accel_parts[0]
+                    if len(accel_parts) == 2:
+                        try:
+                            slurm_quantity_filter = int(accel_parts[1])
+                            if slurm_quantity_filter <= 0: raise ValueError
+                        except ValueError as e:
+                            raise click.UsageError(f'Invalid quantity in {accelerator_str!r}') from e
+                    elif len(accel_parts) > 2:
+                         raise click.UsageError(f'Invalid format {accelerator_str!r}')
+
+                # Call the SDK function to get Slurm GPU info
+                slurm_nodes_info = sdk.stream_and_get(
+                    sdk.slurm_gpu_availability(
+                        name_filter=slurm_name_filter,
+                        quantity_filter=slurm_quantity_filter,
+                        partition_filter=partition_filter
+                        # Pass other necessary args like env_vars if needed by SDK
+                    )
+                )
+                slurm_gpu_table = _format_slurm_gpu_table(
+                    slurm_nodes_info, slurm_name_filter, slurm_quantity_filter
+                )
+                if slurm_gpu_table:
+                    print_section_titles = True
+                    yield (f'{colorama.Fore.MAGENTA}{colorama.Style.BRIGHT}' # Different color for Slurm
+                           f'Slurm GPUs'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    yield from slurm_gpu_table.get_string()
+                    yield '\n-----\n\n'
+                # else: table is None if no nodes found, error handled below
+
+            except ValueError as e: # Catches case where SDK/core raises "No GPUs found"
+                if not cloud_is_slurm:
+                    slurm_messages += 'Note: '
+                slurm_messages += str(e)
+            except exceptions.NotSupportedError as e:
+                if not cloud_is_slurm:
+                    slurm_messages += 'Note: '
+                slurm_messages += f'Slurm check failed: {e}'
+            except RuntimeError as e:
+                 if not cloud_is_slurm:
+                     slurm_messages += 'Note: '
+                 slurm_messages += f'Error querying Slurm: {e}'
+            # Add any Slurm-specific notes if needed
+            # slurm_messages += '\nNote about Slurm GPU reporting...'
+
+    if cloud_is_slurm:
+         # Do not show other clouds if --cloud slurm is specified
+        if not slurm_is_enabled:
+             yield ('Slurm is not enabled. To fix, run: '
+                   'sky check slurm ') # Assuming 'sky check slurm' exists
+        if not print_section_titles and slurm_messages: # Check if table was printed
+             # If only messages, print them
+             yield slurm_messages
+        # If table was printed, messages will be added later or were already part of exception message
+        return # Exit after handling Slurm
+
+    # ... (keep existing logic for cloud GPUs, common GPUs, TPUs, etc.) ...
+
+    # Append Kubernetes and Slurm notes at the end if multiple clouds were checked
+    if cloud_name is None: # Only append notes if checking all clouds
+        if k8s_messages or slurm_messages:
+            yield '\n'
+            if k8s_messages:
+                yield k8s_messages + '\n'
+            if slurm_messages:
+                yield slurm_messages
+
+    # ... (rest of the function, including pager logic) ...
+
+    # Remove the old placeholder function definition
+    # del _get_slurm_realtime_gpu_tables
 
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
