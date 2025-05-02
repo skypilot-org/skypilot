@@ -3514,6 +3514,7 @@ def show_gpus(
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
 
+        # Fetch partition-grouped availability (total capacity/free)
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_slurm_gpu_availability(
                 name_filter=name_filter,
@@ -3532,6 +3533,14 @@ def show_gpus(
                              ' run: sky show-gpus --cloud slurm ')
             raise ValueError(err_msg + debug_msg)
 
+        # Fetch detailed per-node info (including free gpus per node)
+        try:
+            all_nodes_info = sdk.stream_and_get(sdk.slurm_node_info())
+        except (RuntimeError, exceptions.NotSupportedError) as e:
+            logger.warning(f'Could not retrieve detailed Slurm node info: {e}. '
+                           'REQUESTABLE_QTY_PER_NODE might be inaccurate.')
+            all_nodes_info = []
+
         realtime_gpu_infos = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
@@ -3539,35 +3548,52 @@ def show_gpus(
         for (partition, availability_list) in realtime_gpu_availability_lists:
             realtime_gpu_table = log_utils.create_table(
                 ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+            
+            # Filter nodes belonging to the current partition
+            partition_nodes = [
+                node for node in all_nodes_info 
+                if node.get('partition') == partition
+            ]
+
             for realtime_gpu_availability in sorted(availability_list):
                 gpu_availability = models.RealtimeGpuAvailability(
                     *realtime_gpu_availability)
-                # Generate sequence of requestable quantities (1 to max)
-                max_per_node = max(gpu_availability.counts) if gpu_availability.counts else 0
-                requestable_quantities = list(range(1, max_per_node + 1))
+                
+                # Find max free GPUs on any single node in this partition for this GPU type
+                max_free_gpus_on_node = 0
+                for node in partition_nodes:
+                    if node.get('gpu_type') == gpu_availability.gpu:
+                        max_free_gpus_on_node = max(max_free_gpus_on_node, node.get('free_gpus', 0))
+                
+                # Generate requestable quantities based on max *free* GPUs on a node
+                requestable_quantities = list(range(1, max_free_gpus_on_node + 1)) if max_free_gpus_on_node > 0 else ['-']
+                
                 realtime_gpu_table.add_row([
                     gpu_availability.gpu,
                     _list_to_str(requestable_quantities),
-                    gpu_availability.capacity,
-                    gpu_availability.available,
+                    gpu_availability.capacity, # Total capacity across partition
+                    gpu_availability.available, # Total available across partition
                 ])
+                
+                # Aggregate total capacity/available across all partitions
                 gpu = gpu_availability.gpu
                 capacity = gpu_availability.capacity
                 available = gpu_availability.available
                 if capacity > 0:
                     total_gpu_info[gpu][0] += capacity
                     total_gpu_info[gpu][1] += available
+            
             realtime_gpu_infos.append((partition, realtime_gpu_table))
 
         # display an aggregated table for all partitions
         # if there are more than one partitions with GPUs
+        total_realtime_gpu_table = None
         if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'TOTAL_GPUS', free_header])
-            for gpu, stats in total_gpu_info.items():
+            # Use the aggregated total_gpu_info dictionary
+            for gpu, stats in sorted(total_gpu_info.items()):
                 total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
-        else:
-            total_realtime_gpu_table = None
 
         return realtime_gpu_infos, total_realtime_gpu_table
 
