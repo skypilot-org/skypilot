@@ -1084,6 +1084,83 @@ def realtime_kubernetes_gpu_availability(
     return availability_lists
 
 
+def slurm_gpu_availability(name_filter: Optional[str] = None,
+                           quantity_filter: Optional[int] = None,
+                           env_vars: Optional[Dict[str, str]] = None,
+                           **kwargs) -> List[Dict[str, Any]]:
+    """Gets Slurm real-time GPU availability.
+
+    This function calls the Slurm backend to fetch GPU info.
+
+    Args:
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+        env_vars: Environment variables (may be needed for backend).
+        kwargs: Additional keyword arguments.
+
+    Returns:
+        A list of dictionaries, each representing a node's GPU info.
+        Example structure:
+        [{
+            'node_name': 'slurm-node-1',
+            'partition': 'gpu_partition',
+            'node_state': 'IDLE',
+            'gpu_type': 'V100',
+            'total_gpus': 8,
+            'free_gpus': 8
+        }, ...]
+
+    Raises:
+        ValueError: If Slurm is not configured or no matching GPUs are found.
+        exceptions.NotSupportedError: If Slurm is not enabled or configured.
+    """
+    del kwargs # Currently unused, keep env_vars potentially for backend
+
+    # Optional: Check if Slurm is enabled first
+    # enabled = global_user_state.get_enabled_clouds(
+    #     capability=sky_cloud.CloudCapability.COMPUTE)
+    # if not clouds.Slurm() in enabled:
+    #    raise exceptions.NotSupportedError(
+    #       "Slurm is not enabled. Run 'sky check' to enable it.")
+
+    try:
+        # Assume this function queries the Slurm backend.
+        # It should return data in the specified List[Dict[str, Any]] format.
+        # Filters are applied within this call.
+        slurm_nodes_info = service_catalog.list_accelerator_realtime(
+            name_filter=name_filter,
+            quantity_filter=quantity_filter,
+            clouds='slurm'
+        )
+    except exceptions.NotSupportedError as e:
+         # Handle cases where Slurm backend might not be configured properly
+         logger.error(f'Failed to query Slurm GPU availability: {e}')
+         raise
+    except Exception as e:
+         # Catch other potential errors during Slurm query
+         logger.error(f'Error querying Slurm GPU availability: {common_utils.format_exception(e, use_bracket=True)}')
+         # Re-raise as ValueError or a more specific SkyPilot exception if desired
+         raise ValueError(f'Error querying Slurm GPU availability: {e}') from e
+
+    if not slurm_nodes_info:
+        # Customize error message based on filters
+        err_msg = 'No GPUs found in the Slurm cluster.'
+        if name_filter is not None:
+            gpu_info_msg = f' GPU {name_filter!r}'
+            if quantity_filter is not None:
+                gpu_info_msg += f' with requested quantity {quantity_filter}'
+            err_msg = f'Resource{gpu_info_msg} not found in the Slurm cluster.'
+        # TODO: Add specific Slurm debug/help messages if available
+        # Example: err_msg += '\nCheck Slurm configuration (`sky check`) and node states (`sinfo`).'
+        raise ValueError(err_msg)
+
+    # Data should already be in the desired format: List[Dict[str, Any]]
+    # Optional: Sort the results for consistent output
+    slurm_nodes_info.sort(key=lambda x: (x.get('partition', ''), x.get('node_name', '')))
+
+    return slurm_nodes_info
+
+
 # =================
 # = Local Cluster =
 # =================

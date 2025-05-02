@@ -1151,6 +1151,21 @@ async def serve_static_or_dashboard(full_path: str):
         raise fastapi.HTTPException(status_code=500, detail=str(e))
 
 
+@app.post('/slurm_gpu_availability')
+async def slurm_gpu_availability(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='slurm_gpu_availability',
+        request_body=slurm_gpu_availability_body,
+        func=core.slurm_gpu_availability, # Need to implement this in core.py
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 if __name__ == '__main__':
     import uvicorn
 

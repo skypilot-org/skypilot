@@ -1844,3 +1844,32 @@ def api_login(endpoint: Optional[str] = None) -> None:
             f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
             f'{dashboard_msg}',
             fg='green')
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def realtime_slurm_gpu_availability(
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None) -> server_common.RequestId:
+    """Gets the real-time Slurm GPU availability.
+
+    Args:
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+
+    Returns:
+        The request ID of the Slurm GPU availability request.
+    """
+    # Assuming SlurmGpuAvailabilityRequestBody exists and is imported
+    body = payloads.SlurmGpuAvailabilityRequestBody(
+        name_filter=name_filter,
+        quantity_filter=quantity_filter,
+    )
+    body_json = json.loads(body.model_dump_json())
+
+    response = requests.post(
+        f'{server_common.get_server_url()}/slurm_gpu_availability', # New endpoint
+        json=body_json,
+        cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
