@@ -1869,7 +1869,27 @@ def realtime_slurm_gpu_availability(
     body_json = json.loads(body.model_dump_json())
 
     response = requests.post(
-        f'{server_common.get_server_url()}/slurm_gpu_availability', # New endpoint
+        f'{server_common.get_server_url()}/slurm_gpu_availability',
         json=body_json,
+        cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def slurm_node_info() -> server_common.RequestId:
+    """Gets the resource information for all nodes in the Slurm cluster.
+
+    Returns:
+        The request ID of the Slurm node info request.
+
+    Request Returns:
+        List[Dict[str, Any]]: A list of dictionaries, each containing info
+            for a single Slurm node (node_name, partition, node_state,
+            gpu_type, total_gpus, free_gpus, vcpu_count, memory_gb).
+    """
+    response = requests.get(
+        f'{server_common.get_server_url()}/slurm_node_info',
         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)

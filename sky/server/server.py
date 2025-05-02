@@ -51,6 +51,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.provision.slurm import slurm_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -1122,7 +1123,35 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
+@app.post('/slurm_gpu_availability')
+async def slurm_gpu_availability(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='slurm_gpu_availability',
+        request_body=slurm_gpu_availability_body,
+        func=slurm_utils.slurm_gpu_availability,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.get('/slurm_node_info')
+async def slurm_node_info(request: fastapi.Request) -> None:
+    """Gets detailed information for each node in the Slurm cluster."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='slurm_node_info',
+        request_body=payloads.RequestBody(),
+        func=slurm_utils.slurm_node_info,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
 # Add a route to serve static files
+# IMPORTANT: This route must be the last route in the file to avoid
+# short-circuiting other GET requests.
 @app.get('/{full_path:path}')
 async def serve_static_or_dashboard(full_path: str):
     """Serves static files for any unmatched routes.
@@ -1151,20 +1180,16 @@ async def serve_static_or_dashboard(full_path: str):
         raise fastapi.HTTPException(status_code=500, detail=str(e))
 
 
-@app.post('/slurm_gpu_availability')
-async def slurm_gpu_availability(
-    request: fastapi.Request,
-    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
-) -> None:
-    """Gets real-time Slurm GPU availability."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='slurm_gpu_availability',
-        request_body=slurm_gpu_availability_body,
-        func=core.slurm_gpu_availability, # Need to implement this in core.py
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
+# @app.get('/status_kubernetes')
+# async def status_kubernetes(request: fastapi.Request) -> None:
+#     """Gets Kubernetes status."""
+#     executor.schedule_request(
+#         request_id=request.state.request_id,
+#         request_name='status_kubernetes',
+#         request_body=payloads.RequestBody(),
+#         func=core.status_kubernetes,
+#         schedule_type=requests_lib.ScheduleType.SHORT,
+#     )
 
 if __name__ == '__main__':
     import uvicorn

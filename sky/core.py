@@ -38,6 +38,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.provision.slurm import slurm_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -1217,6 +1218,21 @@ def slurm_gpu_availability(name_filter: Optional[str] = None,
          raise ValueError("No GPUs found after processing Slurm cluster data.")
 
     return result_list
+
+
+def slurm_node_info() -> List[Dict[str, Any]]:
+    """Gets detailed information for each node in the Slurm cluster.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries, each containing node info.
+    """
+    try:
+        node_list = service_catalog.get_slurm_node_info_list()
+    except (RuntimeError, exceptions.NotSupportedError) as e:
+        logger.warning(f'Could not retrieve Slurm node info: {e}')
+        # Return empty list or re-raise depending on desired behavior
+        return []
+    return node_list
 
 
 # =================

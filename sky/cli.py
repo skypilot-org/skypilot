@@ -3595,6 +3595,32 @@ def show_gpus(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
+    def _format_slurm_node_info():
+        node_table = log_utils.create_table([
+            'NODE_NAME', 'PARTITION', 'STATE', 'GPU_NAME',
+            'TOTAL_GPUS', 'FREE_GPUS'
+        ])
+
+        nodes_info = sdk.stream_and_get(sdk.slurm_node_info())
+
+        for node_info in nodes_info:
+            node_table.add_row([
+                node_info.get('node_name'),
+                node_info.get('partition', '-'),
+                node_info.get('node_state'),
+                node_info.get('gpu_type', '-'),
+                node_info.get('total_gpus', 0),
+                node_info.get('free_gpus', 0),
+            ])
+
+        slurm_per_node_msg = 'Slurm per node accelerator availability'
+        # Optional: Add hint message if needed, similar to k8s
+
+        return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
+                f'{slurm_per_node_msg}'
+                f'{colorama.Style.RESET_ALL}\n'
+                f'{node_table.get_string()}')
+
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
@@ -3697,6 +3723,8 @@ def show_gpus(
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from slurm_realtime_table.get_string()
                         yield '\n\n'
+                        # Add the per-node table here
+                        yield _format_slurm_node_info() + '\n-----\n\n'
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
                 if not slurm_is_enabled:
@@ -3853,6 +3881,8 @@ def show_gpus(
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from slurm_realtime_table.get_string()
                     yield '\n\n'
+                    # Add the per-node table here
+                    yield _format_slurm_node_info() + '\n-----\n\n'
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources A10G not found ...")
