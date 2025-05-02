@@ -5,6 +5,7 @@ import collections
 import copy
 import dataclasses
 import logging
+import os
 import time
 import traceback
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar, Union
@@ -587,7 +588,8 @@ class SkyServeLoadBalancer:
                 # If it is not from LB, then the following request will be sent
                 # out from LB. So we add the header to indicate it.
                 headers[_IS_FROM_LB_HEADER] = 'true'
-                headers[_QUEUE_SIZE_HEADER] = str(self._lb_to_queue_size.get(url, -1))
+                headers[_QUEUE_SIZE_HEADER] = str(
+                    self._lb_to_queue_size.get(url, -1))
             proxy_request = client.build_request(
                 entry.request.method,
                 worker_url,
@@ -781,12 +783,12 @@ class SkyServeLoadBalancer:
                     # from users and one for requests from other LBs.
                     if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
                         continue
-                    
+
                     logger.info(
                         f"self._url: {self._url}, Queue Size: {entry.request.headers.get(_QUEUE_SIZE_HEADER, 0)}, "
                         f"self actual queue size: {await self._request_queue.actual_size()}"
                     )
-                    
+
                     # If enabled and when local replica all unavailable,
                     # try push it to other LBs.
                     try:
@@ -876,7 +878,8 @@ class SkyServeLoadBalancer:
         """Return the configuration of the load balancer."""
         assert self._request_queue is not None
         queue_size = await self._request_queue.qsize()
-        logger.info(f"Check LB configuration: {self._url}, queue_size: {queue_size}")
+        logger.info(
+            f"Check LB configuration: {self._url}, queue_size: {queue_size}")
         return fastapi.responses.JSONResponse(
             status_code=200,
             content={
@@ -1264,7 +1267,9 @@ class SkyServeLoadBalancer:
                 # if its queue size is less than self's, it's available
                 lb_available = (conf['queue_size'] <= self_qsize and
                                 conf['num_available_replicas'] > 0)
-                logger.info(f"{lb} queue size: {conf['queue_size']}, self_qsize: {self_qsize}")
+                logger.info(
+                    f"{lb} queue size: {conf['queue_size']}, self_qsize: {self_qsize}"
+                )
                 self._lb_to_queue_size[lb] = conf['queue_size']
                 return lb_available, lb
         except Exception as e:  # pylint: disable=broad-except
@@ -1399,10 +1404,14 @@ class SkyServeLoadBalancer:
         logger.info('SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}')
         logger.info('Started lb in version lock-queue-fixed-queue-size.')
-        logger.info(f'===============System Config===============\n'
-                    f'Do pushing across LBs: {_DO_PUSHING_ACROSS_LB}, '
-                    f'Do pushing to replicas: {_DO_PUSHING_TO_REPLICA}, '
-                    f'Load balancing across LBs: {_LB_PUSHING_ENABLE_LB}')
+        logger.info(
+            f'===============System Config===============\n'
+            f'_DO_PUSHING_ACROSS_LB: [{_DO_PUSHING_ACROSS_LB}], '
+            f'[{os.getenv(env_options.Options.DO_PUSHING_ACROSS_LB.env_key)}], '
+            f'_DO_PUSHING_TO_REPLICA: {_DO_PUSHING_TO_REPLICA}, '
+            f'[{os.getenv(env_options.Options.DO_PUSHING_TO_REPLICA.env_key)}], '
+            f'_LB_PUSHING_ENABLE_LB: {_LB_PUSHING_ENABLE_LB}, '
+            f'[{os.getenv(env_options.Options.LB_PUSHING_ENABLE_LB.env_key)}]')
         uvicorn.run(self._app,
                     host='0.0.0.0',
                     port=self._load_balancer_port,

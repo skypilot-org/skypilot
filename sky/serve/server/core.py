@@ -222,14 +222,16 @@ def up(
         # TODO(tian): Hack. This is for let the external LB inherit this option
         # from task envs.
         keys = [
-            env_options.Options.DO_PUSHING_ACROSS_LB.env_key,
-            env_options.Options.LB_PUSHING_ENABLE_LB.env_key,
-            env_options.Options.DO_PUSHING_TO_REPLICA.env_key,
-            env_options.Options.USE_V2_STEALING.env_key,
+            env_options.Options.DO_PUSHING_ACROSS_LB,
+            env_options.Options.LB_PUSHING_ENABLE_LB,
+            env_options.Options.DO_PUSHING_TO_REPLICA,
+            env_options.Options.USE_V2_STEALING,
         ]
         assert isinstance(vars_to_fill['controller_envs'], dict)
+        # print('task.envs', task.envs)
         for key in keys:
-            vars_to_fill['controller_envs'][key] = task.envs.get(key, 'False')
+            vars_to_fill['controller_envs'][key.env_key] = task.envs.get(
+                key.env_key, str(key.default))
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                    vars_to_fill,
                                    output_path=controller_file.name)

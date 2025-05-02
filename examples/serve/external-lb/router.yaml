@@ -3,6 +3,7 @@ envs:
 
 resources:
   cloud: aws
+  region: us-east-2
   cpus: 2+
   ports: 9001
 

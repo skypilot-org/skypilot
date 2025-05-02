@@ -32,14 +32,13 @@ presents = [
 ]
 
 enabled_systems = [
-    # 0,  # sgl router
-    # 1,  # sgl router enhanced
-    # 2,  # sky pulling in lb, pulling in replica, but workload stealing
-    # 3,  # sky pulling in lb, pulling in replica, but steal small #requests
-    # 4,  # sky pushing in lb, pulling in replica
-    # 5,  # sky pushing in lb, pushing in replica
-    # 6,  # sky pulling in lb, pulling in replica, but rate limit
-    6
+    0,  # sgl router
+    1,  # sgl router enhanced
+    2,  # sky pulling in lb, pulling in replica, but workload stealing
+    3,  # sky pulling in lb, pulling in replica, but steal small #requests
+    4,  # sky pushing in lb, pulling in replica
+    5,  # sky pushing in lb, pushing in replica
+    6,  # sky pulling in lb, pulling in replica, but rate limit
 ]
 
 describes = [describes[i] for i in enabled_systems]
