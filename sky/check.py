@@ -186,7 +186,8 @@ def check_capabilities(
         if not quiet:
             enabled_clouds_str = '\n  ' + '\n  '.join([
                 _format_enabled_cloud(cloud, capabilities)
-                for cloud, capabilities in enabled_clouds.items()
+                for cloud, capabilities in sorted(enabled_clouds.items(),
+                                                  key=lambda item: item[0])
             ])
             echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
                  f'Enabled clouds {PARTY_POPPER_EMOJI}'
