@@ -38,10 +38,10 @@ def get_project_by_region(region: str) -> str:
         parent_id=nebius.get_tenant_id())).wait()
 
     #  Check is there project if in config
-    preferable_project_id = skypilot_config.get_nested(
-        ('nebius', region, 'project_id'), None)
-    if preferable_project_id is not None:
-        return preferable_project_id
+    project_id = skypilot_config.get_nested(('nebius', region, 'project_id'),
+                                            None)
+    if project_id is not None:
+        return project_id
     for project in projects.items:
         if project.status.region == region:
             return project.metadata.id

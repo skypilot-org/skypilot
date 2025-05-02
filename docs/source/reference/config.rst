@@ -1071,7 +1071,7 @@ Advanced Nebius configuration (optional).
     Optional: GPU cluster disabled if not specified
 
 
-The configuration can be specified in region-specific sections.
+The configuration must be specified in region-specific sections.
 
 Example:
 
