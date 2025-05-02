@@ -3,7 +3,8 @@ resources:
   cpus: 4+
   disk_size: 50
   # Uncomment the next line to request GPUs
-  accelerators: V100:4  # Can be changed as needed (e.g., A100, T4, etc.)
+  # accelerators: V100:4  # Can be changed as needed (e.g., A100, T4, etc.)
+  accelerators: A10G:4  # Can be changed as needed (e.g., A100, T4, etc.)
 
 num_nodes: 2  # Can be adjusted based on your needs
 

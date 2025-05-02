@@ -12,7 +12,7 @@ This directory contains configuration files to deploy a Slurm cluster on cloud r
 Deploy the Slurm cluster with NFS in a single step:
 
 ```bash
-sky launch -c slurm-cluster examples/slurm_cloud_deploy/deploy.yaml
+sky launch -c slurm examples/slurm_cloud_deploy/deploy.yaml
 ```
 
 This creates a complete cluster with:
@@ -29,7 +29,7 @@ This creates a complete cluster with:
 After the cluster is deployed with Slurm and NFS, add users with:
 
 ```bash
-sky exec slurm-cluster examples/slurm_cloud_deploy/add-users.yaml
+sky exec slurm examples/slurm_cloud_deploy/add-users.yaml
 ```
 
 This script is fully idempotent, so it's safe to run multiple times:
@@ -51,10 +51,22 @@ You can add more users at any time by running the `add-users.yaml` script again 
 You can specify which users to create or update by modifying the `USERS` environment variable:
 
 ```bash
-sky launch --fast -c slurm-cluster examples/slurm_cloud_deploy/add-users.yaml --env USERS="carol dave eve"
+sky launch --fast -c slurm examples/slurm_cloud_deploy/add-users.yaml --env USERS="carol dave eve"
 ```
 
 By default, the script will create users "alice" and "bob" if no USERS variable is specified. You can call the script multiple times to add more users.
+
+**Accessing the cluster as a user:**
+
+1. Download the ssh key for a specific user from the cluster:
+```bash
+SLURM_USERNAME=alice
+rsync -avz --rsync-path="sudo rsync" slurm:/mnt/$SLURM_USERNAME/.ssh/id_rsa ~/.ssh/slurm-$SLURM_USERNAME
+```
+2. SSH into the cluster as the user:
+```bash
+ssh -i ~/.ssh/slurm-$SLURM_USERNAME $SLURM_USERNAME@slurm
+```
 
 ## Using the Cluster
 
@@ -100,16 +112,16 @@ git clone https://github.com/skypilot-org/skypilot.git
 cd skypilot/examples/slurm_cloud_deploy
 
 # Launch the cluster with 2 nodes by default
-sky launch -c slurm-cluster --workdir . deploy.yaml
+sky launch -c slurm --workdir . deploy.yaml
 
 # Add default users (alice and bob)
-sky launch --fast -c slurm-cluster add-users.yaml
+sky launch --fast -c slurm add-users.yaml
 
 # Add more users later (won't affect existing users)
-sky launch --fast -c slurm-cluster add-users.yaml --env USERS="dave eve"
+sky launch --fast -c slurm add-users.yaml --env USERS="dave eve"
 
 # Connect to the cluster
-ssh slurm-cluster
+ssh slurm
 
 # Create and submit a test job
 cat > ~/test_job.sh << EOF
