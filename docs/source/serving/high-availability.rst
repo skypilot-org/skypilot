@@ -94,16 +94,20 @@ This example demonstrates the automatic recovery capability of the HA controller
 
         .. code-block:: yaml
 
-            # http_service.yaml
+            # examples/serve/http_server/task.yaml
             service:
-              readiness_probe: /
-              replicas: 1
+              readiness_probe:
+                path: /health
+                initial_delay_seconds: 20
+              replicas: 2
 
             resources:
               ports: 8080
-              cpus: 1
+              cpus: 2+
 
-            run: python3 -m http.server 8080 --bind 0.0.0.0
+            workdir: examples/serve/http_server
+
+            run: python3 server.py
 
     * **SkyPilot Config (``~/.sky/config.yaml``):** Ensure HA is enabled.
 
@@ -120,7 +124,7 @@ This example demonstrates the automatic recovery capability of the HA controller
 
     .. code-block:: bash
 
-        sky serve up -n my-http-service http_service.yaml
+        sky serve up -n my-http-service examples/serve/http_server/task.yaml
 
 3.  **Wait and Verify the Service:** Wait until the service status becomes `READY`.
 
