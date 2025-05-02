@@ -11,10 +11,10 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.clouds import service_catalog
-from sky.clouds.utils import scp_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.provision.scp import utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -56,13 +56,14 @@ class SCP(clouds.Cloud):
             (f'Spot instances are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            (f'Opening ports is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             (f'High availability controllers are not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
+
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -239,7 +240,7 @@ class SCP(clouds.Cloud):
         if acc is not None:
             assert len(acc) == 1, acc
             image_id = service_catalog.get_image_id_from_tag(
-                'skypilot:gpu-ubuntu-1804', region_name, clouds='scp')
+                'skypilot:gpu-ubuntu-2204', region_name, clouds='scp')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -318,9 +319,9 @@ class SCP(clouds.Cloud):
         """Checks if the user has access credentials to
         SCP's compute service."""
         try:
-            scp_utils.SCPClient().list_instances()
-        except (AssertionError, KeyError, scp_utils.SCPClientError,
-                scp_utils.SCPCreationFailError):
+            utils.SCPClient().get_instances()
+        except (AssertionError, KeyError, utils.SCPClientError,
+                utils.SCPCreationFailError):
             return False, (
                 'Failed to access SCP with credentials. '
                 'To configure credentials, see: '
@@ -367,25 +368,5 @@ class SCP(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         del tag_filters, region, zone, kwargs  # Unused.
-
-        # TODO: Multi-node is not supported yet.
-
-        status_map = {
-            'CREATING': status_lib.ClusterStatus.INIT,
-            'EDITING': status_lib.ClusterStatus.INIT,
-            'RUNNING': status_lib.ClusterStatus.UP,
-            'STARTING': status_lib.ClusterStatus.INIT,
-            'RESTARTING': status_lib.ClusterStatus.INIT,
-            'STOPPING': status_lib.ClusterStatus.STOPPED,
-            'STOPPED': status_lib.ClusterStatus.STOPPED,
-            'TERMINATING': None,
-            'TERMINATED': None,
-        }
-        status_list = []
-        vms = scp_utils.SCPClient().list_instances()
-        for node in vms:
-            if node['virtualServerName'] == name:
-                node_status = status_map[node['virtualServerState']]
-                if node_status is not None:
-                    status_list.append(node_status)
-        return status_list
+        # TODO: deprecate this method
+        assert False, 'This code path should not be used.'
