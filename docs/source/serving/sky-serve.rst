@@ -495,7 +495,7 @@ High Availability Controller
 
 SkyServe also supports a High Availability Controller mode when running on Kubernetes. This ensures your services remain available even if the controller pod fails or is rescheduled. The controller state is preserved using persistent volumes, allowing seamless recovery with minimal disruption to your running services.
 
-For more details on setting up and configuring High Availability, see :ref:`High Availability SkyServe Controller <sky-serve-high-availability>`.
+For more details on setting up and configuring High Availability, see :ref:`High Availability Controller <skyserve-high-availability-controller>`.
 
 .. _customizing-sky-serve-controller-resources:
 
