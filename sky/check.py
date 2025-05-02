@@ -1,4 +1,6 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import collections
+import itertools
 import os
 import traceback
 from types import ModuleType
@@ -39,29 +41,19 @@ def check_capabilities(
     enabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
     disabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
 
-    def check_one_cloud(
-        cloud_tuple: Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
-        capabilities: Optional[List[sky_cloud.CloudCapability]]
-    ) -> List[Tuple[sky_cloud.CloudCapability, bool, Optional[str]]]:
-        cloud_repr, cloud = cloud_tuple
-        assert capabilities is not None
-        # cloud_capabilities is a list of (capability, ok, reason)
-        # where ok is True if the cloud credentials are valid for the capability
-        cloud_capabilities: List[Tuple[sky_cloud.CloudCapability, bool,
-                                       Optional[str]]] = []
-        for capability in capabilities:
-            with rich_utils.safe_status(f'Checking {cloud_repr}...'):
-                try:
-                    ok, reason = cloud.check_credentials(capability)
-                except exceptions.NotSupportedError:
-                    continue
-                except Exception:  # pylint: disable=broad-except
-                    # Catch all exceptions to prevent a single cloud
-                    # from blocking the check for other clouds.
-                    ok, reason = False, traceback.format_exc()
-            cloud_capabilities.append(
-                (capability, ok, reason.strip() if reason else None))
-        return cloud_capabilities
+    def check_one_cloud_one_capability(
+        payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
+                       sky_cloud.CloudCapability]
+    ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[str]]]:
+        cloud_tuple, capability = payload
+        _, cloud = cloud_tuple
+        try:
+            ok, reason = cloud.check_credentials(capability)
+        except exceptions.NotSupportedError:
+            return None
+        except Exception:  # pylint: disable=broad-except
+            ok, reason = False, traceback.format_exc()
+        return capability, ok, reason.strip() if reason else None
 
     def get_cloud_tuple(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
@@ -96,23 +88,35 @@ def check_capabilities(
         c for c in get_all_clouds() if c not in config_allowed_cloud_names
     ]
     # Check only the clouds which are allowed in the config.
-    clouds_to_check = sorted(
-        [c for c in clouds_to_check if c[0] in config_allowed_cloud_names])
+    clouds_to_check = [
+        c for c in clouds_to_check if c[0] in config_allowed_cloud_names
+    ]
 
     echo(f'Allowed clouds: {", ".join(config_allowed_cloud_names)}')
+    combinations = list(itertools.product(clouds_to_check, capabilities))
     with rich_utils.safe_status('Checking Cloud(s)...'):
         check_results = subprocess_utils.run_in_parallel(
-            lambda cloud_tuple: check_one_cloud(cloud_tuple, capabilities),
-            clouds_to_check)
+            check_one_cloud_one_capability, combinations)
 
-    for cloud_tuple, check_result in zip(clouds_to_check, check_results):
+    check_results_dict: Dict[
+        Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
+        List[Tuple[sky_cloud.CloudCapability, bool,
+                   Optional[str]]]] = collections.defaultdict(list)
+    for combination, check_result in zip(combinations, check_results):
+        if check_result is None:
+            continue
+        capability, ok, _ = check_result
+        cloud_tuple, _ = combination
         cloud_repr = cloud_tuple[0]
-        for capability, ok, _ in check_result:
-            if ok:
-                enabled_clouds.setdefault(cloud_repr, []).append(capability)
-            else:
-                disabled_clouds.setdefault(cloud_repr, []).append(capability)
-        _print_checked_cloud(echo, verbose, cloud_tuple, check_result)
+        if ok:
+            enabled_clouds.setdefault(cloud_repr, []).append(capability)
+        else:
+            disabled_clouds.setdefault(cloud_repr, []).append(capability)
+        check_results_dict[cloud_tuple].append(check_result)
+
+    for cloud_tuple, check_result_list in sorted(check_results_dict.items(),
+                                                 key=lambda item: item[0][0]):
+        _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list)
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
