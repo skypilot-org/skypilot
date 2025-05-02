@@ -100,8 +100,7 @@ def check_capabilities(
         [c for c in clouds_to_check if c[0] in config_allowed_cloud_names])
 
     echo(f'Allowed clouds: {", ".join(config_allowed_cloud_names)}')
-    with rich_utils.safe_status(
-            f'Checking Cloud(s)...'):
+    with rich_utils.safe_status('Checking Cloud(s)...'):
         check_results = subprocess_utils.run_in_parallel(
             lambda cloud_tuple: check_one_cloud(cloud_tuple, capabilities),
             clouds_to_check)
