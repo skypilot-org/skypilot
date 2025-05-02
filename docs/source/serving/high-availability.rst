@@ -19,7 +19,7 @@ Benefits of HA controller:
 Prerequisites
 -------------
 * **Kubernetes Cluster:** High Availability mode is **currently only supported when using Kubernetes** as the cloud provider for the SkyServe controller. You must have a Kubernetes cluster configured for SkyPilot. See :ref:`Kubernetes Setup <kubernetes-setup>` for details.
-* **Persistent Kubernetes:** The underlying Kubernetes cluster (control plane and nodes) must be running persistently. If using a local Kubernetes deployment (e.g., Minikube, Kind via `sky local up`), the machine hosting the cluster must remain online.
+* **Persistent Kubernetes:** The underlying Kubernetes cluster (control plane and nodes) must be running persistently. If using a local Kubernetes deployment (e.g., Minikube, Kind via ``sky local up``), the machine hosting the cluster must remain online.
 
 .. note::
     Currently, HA mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development.
@@ -57,6 +57,7 @@ When ``high_availability: true`` is set, SkyPilot modifies how the SkyServe cont
 2.  **Persistent Volume Claim (PVC):** Controller state, including the service database (SQLite), logs, and potentially other runtime information, needs to persist across pod restarts. SkyPilot automatically creates a `PersistentVolumeClaim (PVC) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims>`_ for the controller. This PVC is mounted into the controller pod (typically at ``/home/sky``, which includes ``~/.sky/``). The size of the PVC is determined by the ``disk_size`` specified in the controller's ``resources`` configuration (or the default if not specified).
 3.  **Restart Policy:** The controller pod within the Deployment is configured with ``restartPolicy: Always``.
 4.  **Persistent Scripts & Recovery:** Setup commands and task ``run`` commands (like the one starting the Python service controller/load balancer) need to be re-executed reliably after a pod restart.
+    
     * SkyPilot saves the final setup and run scripts to the persistent volume *before* executing them (in ``~/.sky/.controller_recovery_setup_commands.sh`` and ``~/.sky/.controller_recovery_task_run/`` respectively).
     * A marker file (``/home/sky/k8s_container_ready``) is created on the PVC after the first successful startup.
     * When a controller pod starts, it checks for this marker file. If the file exists (indicating a restart), the pod re-runs the saved setup and run scripts from the PVC to bring the controller and load balancer back online and recover the state of ongoing replica operations (provisioning, termination).
@@ -65,18 +66,22 @@ Configuration details
 ---------------------
 Besides the main ``serve.controller.high_availability: true`` flag, you can customize HA behavior further:
 
-* **Controller Resources (``serve.controller.resources``):** As usual, you can specify ``cloud`` (must be Kubernetes), ``region``, ``cpus``, etc. The ``disk_size`` here directly determines the size of the PersistentVolumeClaim created for the HA controller.
-* **Kubernetes Storage Class (``kubernetes.high_availability.storage_class_name`` - Optional):** If your Kubernetes cluster has specific storage classes defined (e.g., for different performance tiers like SSD vs HDD, or specific features like backup), you can specify which one to use for the controller's PVC. This is configured under the ``kubernetes`` section in ``config.yaml``:
+.. raw:: html
 
-    .. code-block:: yaml
+   <ul>
+   <li><strong>Controller Resources (<code>serve.controller.resources</code>):</strong> As usual, you can specify <code>cloud</code> (must be Kubernetes), <code>region</code>, <code>cpus</code>, etc. The <code>disk_size</code> here directly determines the size of the PersistentVolumeClaim created for the HA controller.</li>
+   <li><strong>Kubernetes Storage Class (<code>kubernetes.high_availability.storage_class_name</code> - Optional):</strong> If your Kubernetes cluster has specific storage classes defined (e.g., for different performance tiers like SSD vs HDD, or specific features like backup), you can specify which one to use for the controller's PVC. This is configured under the <code>kubernetes</code> section in <code>config.yaml</code>:</li>
+   </ul>
 
-        kubernetes:
-          # ... other kubernetes settings ...
-          high_availability:
-            # Optional: Specify the StorageClass name for the controller's PVC
-            storage_class_name: <your-storage-class-name> # e.g., premium-ssd
+.. code-block:: yaml
 
-    **Purpose:** Different storage classes offer varying performance (IOPS, throughput), features (snapshots, backups), and costs. If your cluster provides multiple options and you have specific requirements for the controller's storage (e.g., needing faster disk I/O or a particular backup strategy), you can specify a storage class. If omitted, the default storage class configured in your Kubernetes cluster will be used.
+    kubernetes:
+      # ... other kubernetes settings ...
+      high_availability:
+        # Optional: Specify the StorageClass name for the controller's PVC
+        storage_class_name: <your-storage-class-name> # e.g., premium-ssd
+
+**Purpose:** Different storage classes offer varying performance (IOPS, throughput), features (snapshots, backups), and costs. If your cluster provides multiple options and you have specific requirements for the controller's storage (e.g., needing faster disk I/O or a particular backup strategy), you can specify a storage class. If omitted, the default storage class configured in your Kubernetes cluster will be used.
 
 Important considerations
 ------------------------
@@ -90,35 +95,44 @@ Recovery example
 This example demonstrates the automatic recovery capability of the HA controller:
 
 1.  **Prepare Configuration Files:**
-    * **Service Definition (e.g., ``http_service.yaml``):** Use a simple HTTP service.
 
-        .. code-block:: yaml
+    .. raw:: html
 
-            # examples/serve/http_server/task.yaml
-            service:
-              readiness_probe:
-                path: /health
-                initial_delay_seconds: 20
-              replicas: 2
+       <ul>
+       <li><strong>Service Definition (e.g., <code>examples/serve/http_server/task.yaml</code>):</strong> Use a simple HTTP service.</li>
+       </ul>
 
+    .. code-block:: yaml
+
+        # examples/serve/http_server/task.yaml
+        service:
+          readiness_probe:
+            path: /health
+            initial_delay_seconds: 20
+          replicas: 2
+
+        resources:
+          ports: 8080
+          cpus: 2+
+
+        workdir: examples/serve/http_server
+
+        run: python3 server.py
+
+    .. raw:: html
+
+       <ul>
+       <li><strong>SkyPilot Config (<code>~/.sky/config.yaml</code>):</strong> Ensure HA is enabled.</li>
+       </ul>
+
+    .. code-block:: yaml
+
+        # ~/.sky/config.yaml
+        serve:
+          controller:
             resources:
-              ports: 8080
-              cpus: 2+
-
-            workdir: examples/serve/http_server
-
-            run: python3 server.py
-
-    * **SkyPilot Config (``~/.sky/config.yaml``):** Ensure HA is enabled.
-
-        .. code-block:: yaml
-
-            # ~/.sky/config.yaml
-            serve:
-              controller:
-                resources:
-                  cloud: kubernetes
-                high_availability: true
+              cloud: kubernetes
+            high_availability: true
 
 2.  **Launch the Service:**
 
@@ -126,7 +140,7 @@ This example demonstrates the automatic recovery capability of the HA controller
 
         sky serve up -n my-http-service examples/serve/http_server/task.yaml
 
-3.  **Wait and Verify the Service:** Wait until the service status becomes `READY`.
+3.  **Wait and Verify the Service:** Wait until the service status becomes ``READY``.
 
     .. code-block:: bash
 
@@ -142,21 +156,22 @@ This example demonstrates the automatic recovery capability of the HA controller
         # Should see the default HTML output from http.server
 
 4.  **Simulate Controller Failure (Manually Delete Pod):**
-    * Find the name of the controller pod. Controller pods typically contain "sky-serve-controller" and have the label `skypilot-head-node=1`.
+    
+    * Find the name of the controller pod. Controller pods typically contain "sky-serve-controller" and have the label ``skypilot-head-node=1``.
 
-        .. code-block:: bash
+    .. code-block:: bash
 
-            kubectl get pods -l skypilot-head-node=1
-            # Copy the controller pod name (e.g., sky-serve-controller-deployment-xxxxx-yyyyy)
+        kubectl get pods -l skypilot-head-node=1
+        # Copy the controller pod name (e.g., sky-serve-controller-deployment-xxxxx-yyyyy)
 
-            CONTROLLER_POD=<paste_controller_pod_name_here>
+        CONTROLLER_POD=<paste_controller_pod_name_here>
 
     * Delete the controller pod.
 
-        .. code-block:: bash
+      .. code-block:: bash
 
-            echo "Deleting controller pod: $CONTROLLER_POD"
-            kubectl delete pod $CONTROLLER_POD
+          echo "Deleting controller pod: $CONTROLLER_POD"
+          kubectl delete pod $CONTROLLER_POD
 
 5.  **Observe Recovery:** The Kubernetes Deployment will detect the missing pod and automatically create a new one to replace it.
 
