@@ -164,10 +164,19 @@ class Controllers(enum.Enum):
         if name is None:
             return None
         controller = None
-        if name == common.SKY_SERVE_CONTROLLER_PREFIX:
+        # The controller name is always the same. However, on the client-side,
+        # we may not know the exact name, because we are missing the server-side
+        # common.SERVER_ID. So, we will assume anything that matches the prefix
+        # is a controller.
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
             controller = cls.SKY_SERVE_CONTROLLER
-        elif name == common.JOB_CONTROLLER_PREFIX:
+        elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
+        if controller is not None and name != controller.value.cluster_name:
+            # The client-side cluster_name is not accurate. Assume that `name`
+            # is the actual cluster name, so need to set the controller's
+            # cluster name to the input name.
+            controller.value.cluster_name = name
         return controller
 
     @classmethod
