@@ -16,6 +16,7 @@ from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
 from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
@@ -39,8 +40,9 @@ def check_capabilities(
     disabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
 
     def check_one_cloud(
-            cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
-                                          ModuleType]]) -> None:
+        cloud_tuple: Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
+        capabilities: Optional[List[sky_cloud.CloudCapability]]
+    ) -> List[Tuple[sky_cloud.CloudCapability, bool, Optional[str]]]:
         cloud_repr, cloud = cloud_tuple
         assert capabilities is not None
         # cloud_capabilities is a list of (capability, ok, reason)
@@ -59,11 +61,7 @@ def check_capabilities(
                     ok, reason = False, traceback.format_exc()
             cloud_capabilities.append(
                 (capability, ok, reason.strip() if reason else None))
-            if ok:
-                enabled_clouds.setdefault(cloud_repr, []).append(capability)
-            else:
-                disabled_clouds.setdefault(cloud_repr, []).append(capability)
-        _print_checked_cloud(echo, verbose, cloud_tuple, cloud_capabilities)
+        return cloud_capabilities
 
     def get_cloud_tuple(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
@@ -88,22 +86,34 @@ def check_capabilities(
 
     # Use allowed_clouds from config if it exists, otherwise check all clouds.
     # Also validate names with get_cloud_tuple.
-    config_allowed_cloud_names = [
+    config_allowed_cloud_names = sorted([
         get_cloud_tuple(c)[0] for c in skypilot_config.get_nested((
             'allowed_clouds',), get_all_clouds())
-    ]
+    ])
     # Use disallowed_cloud_names for logging the clouds that will be disabled
     # because they are not included in allowed_clouds in config.yaml.
     disallowed_cloud_names = [
         c for c in get_all_clouds() if c not in config_allowed_cloud_names
     ]
     # Check only the clouds which are allowed in the config.
-    clouds_to_check = [
-        c for c in clouds_to_check if c[0] in config_allowed_cloud_names
-    ]
+    clouds_to_check = sorted(
+        [c for c in clouds_to_check if c[0] in config_allowed_cloud_names])
 
-    for cloud_tuple in sorted(clouds_to_check):
-        check_one_cloud(cloud_tuple)
+    echo(f'Allowed clouds: {", ".join(config_allowed_cloud_names)}')
+    with rich_utils.safe_status(
+            f'Checking Cloud(s)...'):
+        check_results = subprocess_utils.run_in_parallel(
+            lambda cloud_tuple: check_one_cloud(cloud_tuple, capabilities),
+            clouds_to_check)
+
+    for cloud_tuple, check_result in zip(clouds_to_check, check_results):
+        cloud_repr = cloud_tuple[0]
+        for capability, ok, _ in check_result:
+            if ok:
+                enabled_clouds.setdefault(cloud_repr, []).append(capability)
+            else:
+                disabled_clouds.setdefault(cloud_repr, []).append(capability)
+        _print_checked_cloud(echo, verbose, cloud_tuple, check_result)
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
