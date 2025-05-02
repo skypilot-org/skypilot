@@ -545,7 +545,7 @@ Nebius
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
 
-**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius:>`.
+**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
 
 Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
