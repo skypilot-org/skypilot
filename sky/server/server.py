@@ -166,11 +166,6 @@ class InternalDashboardPrefixMiddleware(
         return await call_next(request)
 
 
-def is_browser_request(request: fastapi.Request) -> bool:
-    """Checks if a request is made by a browser like user agent."""
-    return request.headers['User-Agent'].startswith('Mozilla')
-
-
 class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
                                   ):
     """Middleware to add cache control headers to static files."""
@@ -180,17 +175,6 @@ class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
             response = await call_next(request)
             response.headers['Cache-Control'] = 'max-age=86400'
             return response
-        return await call_next(request)
-
-
-class BrowserNoPostPutMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to prevent POST and PUT requests from browsers."""
-
-    async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/dashboard/') and is_browser_request(
-                request) and request.method in ['POST', 'PUT']:
-            raise fastapi.HTTPException(status_code=405,
-                                        detail='Method not allowed')
         return await call_next(request)
 
 
@@ -211,7 +195,6 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
-app.add_middleware(BrowserNoPostPutMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
@@ -226,15 +209,15 @@ app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 # Serve static files from the dashboard directory
-if os.path.exists(server_constants.DASHBOARD_DIR):
-    app.mount('/dashboard/_next',
-              staticfiles.StaticFiles(
-                  directory=f'{server_constants.DASHBOARD_DIR}/_next'),
-              name='dashboard')
-else:
+if not os.path.exists(f'{server_constants.DASHBOARD_DIR}/_next'):
     logger.warning(
-        f'Dashboard directory {server_constants.DASHBOARD_DIR} does not exist.'
-        f' Skipping dashboard static files mount.')
+        f'Dashboard directory {server_constants.DASHBOARD_DIR}/_next does '
+        f'not exist. Create it for the dashboard static files mount.')
+    os.makedirs(f'{server_constants.DASHBOARD_DIR}/_next', exist_ok=True)
+app.mount('/dashboard/_next',
+          staticfiles.StaticFiles(
+              directory=f'{server_constants.DASHBOARD_DIR}/_next'),
+          name='dashboard')
 
 
 @app.post('/check')
