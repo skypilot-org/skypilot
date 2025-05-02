@@ -106,11 +106,9 @@ def list_accelerators_realtime(
         'sinfo',
         '-N',  # Node-oriented format
         '-h',  # No header
-        # Format: NodeName Partition State Gres(raw) CPUAlloc MemAlloc
-        # %N: NodeName, %P: Partition, %T: StateCompact, %G: Gres(raw), %C: CPUAlloc/Tot, %m: MemSize(MB)
-        # Using Gres (raw) %G as it's more likely to contain GPU count directly
-        # Using StateCompact %T (e.g., idle, alloc, mix, drain, down)
-        '-o', '%N %P %T %G %C %m'
+        # Format: NodeName State Gres
+        # %N: NodeName, %t: State, %G: Gres
+        '-o', '%N %t %G'
     ]
     try:
         sinfo_proc = subprocess.run(sinfo_cmd,
@@ -137,24 +135,40 @@ def list_accelerators_realtime(
     # Updated Regex: Matches 'gpu:<count>' or 'gpu:<type>:<count>'
     # Extracts 'gpu' (group 1), optional type (group 3), count (group 4)
     gres_gpu_pattern = re.compile(r'((gpu)(?::([^:]+))?:(\d+))')
-    # Regex for parsing allocated count from GresUsed='gpu:<count>(...)'
-    gres_used_count_pattern = re.compile(r'gpu:(\d+)')
 
     unique_nodes_processed = set()
 
+    # Get partition info for each node
+    partition_cmd = ['sinfo', '-N', '-h', '-o', '%N %P']
+    try:
+        partition_proc = subprocess.run(partition_cmd,
+                                      check=True,
+                                      capture_output=True,
+                                      text=True,
+                                      timeout=20)
+        partition_output = partition_proc.stdout.strip()
+        node_to_partition = {}
+        for line in partition_output.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                node_name, partition = parts[0], parts[1]
+                node_to_partition[node_name] = partition
+    except Exception as e:
+        logger.warning(f'Failed to get partition info: {e}')
+        node_to_partition = {}
+
     for line in sinfo_output.splitlines():
         parts = line.split()
-        if len(parts) < 4:
+        if len(parts) < 3:
              logger.debug(f'Skipping malformed sinfo line: {line}')
              continue
-        node_name, partition, state, gres_str = parts[0], parts[1], parts[2], parts[3]
-        cpu_alloc_str = parts[4] if len(parts) > 4 else '0/0/0/0'
-        mem_mb_str = parts[5] if len(parts) > 5 else '0'
+        node_name, state, gres_str = parts[0], parts[1], parts[2]
 
         # Skip node if already processed (can happen with multi-partition nodes in sinfo output)
         if node_name in unique_nodes_processed:
             continue
 
+        partition = node_to_partition.get(node_name, '')
         if partition_filter and partition != partition_filter:
             continue
 
@@ -163,11 +177,6 @@ def list_accelerators_realtime(
             continue # No 'gpu:...' pattern found in GRES
 
         # Determine GPU type and count from sinfo GRES match
-        # group 1: full match (e.g., gpu:v100:4 or gpu:4)
-        # group 2: gres name ('gpu')
-        # group 3: optional type ('v100' or None)
-        # group 4: count ('4')
-        gres_name = gres_match.group(2) # Should be 'gpu'
         gpu_type_from_sinfo = gres_match.group(3) # Might be None
         try:
             total_gpus = int(gres_match.group(4))
@@ -176,109 +185,87 @@ def list_accelerators_realtime(
                            f'for node {node_name}. Skipping node.')
             continue
 
-        # Use GRES name 'gpu' as default type if specific type is absent in sinfo
-        determined_gpu_type = gpu_type_from_sinfo if gpu_type_from_sinfo else gres_name
+        # Get allocated GPUs based on node state
+        # State codes: https://slurm.schedmd.com/sinfo.html#SECTION_NODE-STATE-CODES
+        allocated_gpus = 0
+        if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv', 'comp'):
+            # For states where resources might be used, query squeue for jobs on this specific node
+            try:
+                squeue_cmd = ['squeue', '-w', node_name, '-h', '-o', '%b'] # Get GRES request (%b)
+                squeue_proc = subprocess.run(squeue_cmd,
+                                           check=True,
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=20)
+                squeue_output = squeue_proc.stdout.strip()
+                
+                node_allocated_gpus = 0
+                if squeue_output:
+                    # Regex to find gpu count in gres string like 'gpu:2', 'gpu:a10g:2', etc.
+                    # It accounts for potential type specification.
+                    job_gres_pattern = re.compile(r'gpu(?::[^:]+)*:(\d+)')
+                    for line in squeue_output.splitlines():
+                        gres_match = job_gres_pattern.search(line)
+                        if gres_match:
+                            node_allocated_gpus += int(gres_match.group(1))
+                    allocated_gpus = node_allocated_gpus
+                    logger.debug(f'Node {node_name} ({state}): Found {allocated_gpus} allocated GPUs via squeue.')
+                else:
+                    logger.debug(f'Node {node_name} ({state}): No jobs found via squeue, assuming 0 allocated GPUs.')
+                    allocated_gpus = 0
 
-        # Apply name filter (matching against the determined type)
-        # This allows filtering by 'gpu' or a specific type like 'V100' if available
+            except Exception as e:
+                logger.warning(f'Failed to get job allocation for node {node_name} via squeue: {e}')
+                # Fallback: If squeue fails, conservatively assume allocation based on state
+                if state == 'alloc':
+                    allocated_gpus = total_gpus
+                elif state == 'mix':
+                     allocated_gpus = total_gpus // 2 # Best guess for mix
+                else: # drain, drained, comp, resv - often means unavailable
+                     allocated_gpus = total_gpus
+        
+        elif state == 'idle':
+            allocated_gpus = 0
+        # For states like down, maint, etc., free_gpus will be handled later
+
+        # Use GRES name 'gpu' as default type if specific type is absent in sinfo
+        determined_gpu_type = gpu_type_from_sinfo if gpu_type_from_sinfo else 'gpu'
+
+        # Apply name filter
         regex_flags = 0 if case_sensitive else re.IGNORECASE
         if name_filter and not re.match(name_filter, determined_gpu_type, flags=regex_flags):
             continue
 
-        # Apply quantity filter (total GPUs on node)
+        # Apply quantity filter
         if quantity_filter and total_gpus < quantity_filter:
             continue
 
-        # --- Get Allocated GPUs and potentially refine GPU type using `scontrol show node` ---
-        allocated_gpus = 0
-        node_details = {}
-        refined_gpu_type = determined_gpu_type # Start with type from sinfo
+        # Calculate free GPUs
+        free_gpus = total_gpus - allocated_gpus if state not in ('down', 'drain', 'drng', 'maint') else 0
+        free_gpus = max(0, free_gpus)  # Ensure non-negative
+
+        # Get CPU and memory info
         try:
             scontrol_cmd = ['scontrol', 'show', 'node', node_name]
-            # Increased timeout slightly for scontrol
-            scontrol_proc = subprocess.run(scontrol_cmd, check=True, capture_output=True, text=True, timeout=15)
-            node_details = _parse_scontrol_node_output(scontrol_proc.stdout)
-
-            # Refine GPU type if scontrol provides more specific GRES info
-            scontrol_gres = node_details.get('Gres', '')
-            scontrol_gres_match = gres_gpu_pattern.search(scontrol_gres)
-            if scontrol_gres_match and scontrol_gres_match.group(3):
-                # Found type like 'gpu:v100:4' in scontrol, prefer this type
-                refined_gpu_type = scontrol_gres_match.group(3)
-                logger.debug(f'Refined GPU type for {node_name} to '
-                             f'{refined_gpu_type} from scontrol.')
-                # Re-apply name filter if type was refined
-                if name_filter and not re.match(name_filter, refined_gpu_type, flags=regex_flags):
-                     logger.debug(f'Node {node_name} skipped after refining type to '
-                                  f'{refined_gpu_type} due to name filter.')
-                     continue # Skip node if refined type doesn't match filter
-
-            # Find allocated GPUs
-            alloc_tres = node_details.get('AllocTRES', '')
-            gres_used = node_details.get('GresUsed', '')
-
-            alloc_match = re.search(r'gres/gpu=(\d+)', alloc_tres)
-            if alloc_match:
-                allocated_gpus = int(alloc_match.group(1))
-            else:
-                # Try parsing GresUsed with the updated regex
-                used_match = gres_used_count_pattern.search(gres_used)
-                if used_match:
-                    allocated_gpus = int(used_match.group(1))
-                else:
-                     # Fallback if neither AllocTRES nor GresUsed provides GPU count
-                     logger.debug(f'Could not determine allocated GPUs for {node_name} from '
-                                  f'AllocTRES or GresUsed. Assuming 0 allocated if node is idle/mix.')
-                     allocated_gpus = 0
-
-
-        except FileNotFoundError:
-            logger.warning('`scontrol` command not found. Cannot determine allocated GPUs precisely. Assuming 0 if node is idle/mix.')
-            allocated_gpus = 0 # Assume none allocated if we can't check
-        except subprocess.TimeoutExpired:
-             logger.warning(f'`scontrol show node {node_name}` timed out. Cannot determine allocated GPUs precisely. Assuming 0 if node is idle/mix.')
-             allocated_gpus = 0 # Assume none allocated if we can't check
-        except subprocess.CalledProcessError as e:
-            # Log warning but potentially continue, assuming 0 allocated if node is idle/mix
-            logger.warning(f'Failed `scontrol show node {node_name}` (code {e.returncode}). '
-                           f'Stderr: {e.stderr.strip()}. Assuming 0 allocated GPUs if node is idle/mix.')
-            allocated_gpus = 0
-        except Exception as e: # Catch broader exceptions during scontrol processing
-             logger.error(f'Unexpected error processing scontrol output for {node_name}: {e}')
-             # Depending on severity, might want to skip node or assume 0 allocated
-             allocated_gpus = 0
-
-
-        # --- Calculate Free GPUs ---
-        free_gpus = 0
-        # Consider node state for free GPU calculation
-        # Nodes fully allocated, drained, down, etc., have 0 free GPUs regardless of calculation
-        if state in ('idle', 'mix', 'unk'): # Only these states can have free GPUs
-             # Ensure allocated doesn't exceed total (can happen with stale info or complex configs)
-             allocated_gpus = min(allocated_gpus, total_gpus)
-             free_gpus = total_gpus - allocated_gpus
-             free_gpus = max(0, free_gpus) # Ensure non-negative
-        # For other states (alloc, drain, down, maint, etc.), free_gpus remains 0
-
-        # --- Extract CPU/Memory info ---
-        vcpu_total = 0
-        try:
-            # Example %C format: Allocated/Idle/Other/Total (e.g., 10/2/0/12)
-            vcpu_total = int(cpu_alloc_str.split('/')[-1])
-        except (IndexError, ValueError):
-            logger.debug(f'Could not parse total CPUs from {cpu_alloc_str!r} for node {node_name}')
-        mem_gb = 0.0
-        try:
-            mem_gb = float(mem_mb_str) / 1024.0
-        except ValueError:
-             logger.debug(f'Could not parse memory from {mem_mb_str!r} for node {node_name}')
+            scontrol_proc = subprocess.run(scontrol_cmd,
+                                         check=True,
+                                         capture_output=True,
+                                         text=True,
+                                         timeout=20)
+            node_info = _parse_scontrol_node_output(scontrol_proc.stdout)
+            vcpu_total = int(node_info.get('CPUTot', '0'))
+            mem_gb = float(node_info.get('RealMemory', '0')) / 1024.0
+        except Exception as e:
+            logger.warning(f'Failed to get CPU/memory info for {node_name}: {e}')
+            vcpu_total = 0
+            mem_gb = 0.0
 
         # Append node info
         slurm_nodes_info.append({
             'node_name': node_name,
             'partition': partition,
             'node_state': state,
-            'gpu_type': refined_gpu_type, # Use the potentially refined type
+            'gpu_type': determined_gpu_type,
             'total_gpus': total_gpus,
             'free_gpus': free_gpus,
             'vcpu_count': vcpu_total,
