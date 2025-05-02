@@ -47,7 +47,7 @@ To enable High Availability for the SkyServe controller, set the ``high_availabi
         high_availability: true
 
 .. note::
-    Enabling or disabling ``high_availability`` only affects **new** SkyServe controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first terminate all services and then tear down the existing controller using ``sky down --purge <controller_name>``. See `Important considerations`_ below.
+    Enabling or disabling ``high_availability`` only affects **new** SkyServe controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first terminate all services and then tear down the existing controller using ``sky down <controller_name>``. See `Important considerations`_ below.
 
 How it works
 ------------
