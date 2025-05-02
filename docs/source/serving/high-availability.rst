@@ -87,58 +87,71 @@ Important considerations
 ------------------------
 * **Currently Kubernetes Only:** This feature relies entirely on Kubernetes mechanisms (Deployments, PVCs) and is only available when the controller's specified ``cloud`` is ``kubernetes``. Support for other clouds (AWS, GCP, Azure VMs) is under development.
 * **Persistent K8s Required:** The HA mechanism depends on the Kubernetes cluster itself being available. Ensure your K8s control plane and nodes are stable.
-* **No Effect on Existing Controllers:** Setting ``high_availability: true`` in ``config.yaml`` will **not** convert an existing non-HA controller (running or stopped) to HA mode, nor will setting it to ``false`` convert an existing HA controller to non-HA. You must tear down the existing controller first (``sky down --purge sky-serve-controller`` after terminating all services) for the new setting to apply when the controller is next launched.
-* **Inconsistent State Error:** If you attempt to launch a service (``sky serve up``) and the ``high_availability`` setting in your ``config.yaml`` *conflicts* with the actual state of the existing SkyServe controller cluster on Kubernetes (e.g., you enabled HA in config, but the controller exists as a non-HA Pod, or vice-versa), SkyPilot will raise an ``InconsistentHighAvailabilityError``. To resolve this, terminate all services, tear down the controller (``sky down --purge sky-serve-controller``), and then run ``sky serve up`` again with the desired consistent configuration.
+* **No Effect on Existing Controllers:** Setting ``high_availability: true`` in ``config.yaml`` will **not** convert an existing non-HA controller (running or stopped) to HA mode, nor will setting it to ``false`` convert an existing HA controller to non-HA. You must tear down the existing controller first (``sky down <sky-serve-controller-name>`` after terminating all services) for the new setting to apply when the controller is next launched.
+* **Inconsistent State Error:** If you attempt to launch a service (``sky serve up``) and the ``high_availability`` setting in your ``config.yaml`` *conflicts* with the actual state of the existing SkyServe controller cluster on Kubernetes (e.g., you enabled HA in config, but the controller exists as a non-HA Pod, or vice-versa), SkyPilot will raise an ``InconsistentHighAvailabilityError``. To resolve this, terminate all services, tear down the controller (``sky down <sky-serve-controller-name>``), and then run ``sky serve up`` again with the desired consistent configuration.
 
 Recovery example
 ----------------
 This example demonstrates the automatic recovery capability of the HA controller:
 
+**0. Preparatory Steps (Ensure Clean State & Correct Config):**
+
+* **Terminate Existing Controller (if any):**
+    * First, ensure **no services are running**. Terminate them with ``sky serve down <service_name>`` or ``sky serve down --all``.
+    * Find the controller name:
+
+      .. code-block:: bash
+
+          sky status | grep sky-serve-controller
+
+    * Terminate and purge the controller (replace ``<sky-serve-controller-name>`` with the name you found above):
+
+      .. code-block:: bash
+
+          sky down <sky-serve-controller-name>
+
+* **Set Configuration:** First, ensure your ``~/.sky/config.yaml`` enables HA mode as shown in the `How to enable HA mode`_ section.
+
+  .. code-block:: yaml
+      :caption: ~/.sky/config.yaml (relevant part)
+
+      serve:
+        controller:
+          resources:
+            cloud: kubernetes
+          high_availability: true
+
+* **Prepare Service Definition:**
+
+  .. code-block:: bash
+
+      sky api stop
+
 1.  **Prepare Configuration Files:**
 
-    .. raw:: html
+* **Service Definition (e.g., ``http_service.yaml``):** Use a simple HTTP service.
 
-       <ul>
-       <li><strong>Service Definition (e.g., <code>examples/serve/http_server/task.yaml</code>):</strong> Use a simple HTTP service.</li>
-       </ul>
+  .. code-block:: yaml
+    :caption: http_service.yaml
 
-    .. code-block:: yaml
+    service:
+      readiness_probe: / # Default path for http.server
+      replicas: 1
 
-        # examples/serve/http_server/task.yaml
-        service:
-          readiness_probe:
-            path: /health
-            initial_delay_seconds: 20
-          replicas: 2
+    resources:
+      ports: 8080
+      cpus: 1 # Minimal resources
 
-        resources:
-          ports: 8080
-          cpus: 2+
+    run: python3 -m http.server 8080 --bind 0.0.0.0
 
-        workdir: examples/serve/http_server
-
-        run: python3 server.py
-
-    .. raw:: html
-
-       <ul>
-       <li><strong>SkyPilot Config (<code>~/.sky/config.yaml</code>):</strong> Ensure HA is enabled.</li>
-       </ul>
-
-    .. code-block:: yaml
-
-        # ~/.sky/config.yaml
-        serve:
-          controller:
-            resources:
-              cloud: kubernetes
-            high_availability: true
+  You can also use the ``http_server.yaml`` from the `examples/serve/http_server/task.yaml <https://github.com/skypilot-ai/skypilot/blob/main/examples/serve/http_server/task.yaml>`_ file.
 
 2.  **Launch the Service:**
 
     .. code-block:: bash
 
-        sky serve up -n my-http-service examples/serve/http_server/task.yaml
+        sky serve up -n my-http-service http_service.yaml
+        # This will launch the new HA controller based on your config.
 
 3.  **Wait and Verify the Service:** Wait until the service status becomes ``READY``.
 
@@ -151,7 +164,7 @@ This example demonstrates the automatic recovery capability of the HA controller
         ENDPOINT=$(sky serve status my-http-service --endpoint)
         echo "Service endpoint: $ENDPOINT"
 
-        # Verify the service is responding correctly
+        # Verify the service is rnvesponding correctly
         curl $ENDPOINT
         # Should see the default HTML output from http.server
 
@@ -161,7 +174,7 @@ This example demonstrates the automatic recovery capability of the HA controller
 
     .. code-block:: bash
 
-        kubectl get pods -l skypilot-head-node=1
+        kubectl get pods -l skypilot-head-node=1 | grep sky-serve-controller
         # Copy the controller pod name (e.g., sky-serve-controller-deployment-xxxxx-yyyyy)
 
         CONTROLLER_POD=<paste_controller_pod_name_here>
