@@ -4,8 +4,8 @@ import typing
 from typing import List, Optional, Union
 
 import click
-import requests
 
+from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -15,8 +15,12 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
+    import requests
+
     import sky
     from sky.serve import serve_utils
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 
 @usage_lib.entrypoint
@@ -70,6 +74,7 @@ def up(
         f'{server_common.get_server_url()}/serve/up',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -128,6 +133,7 @@ def update(
         f'{server_common.get_server_url()}/serve/update',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -169,6 +175,7 @@ def down(
         f'{server_common.get_server_url()}/serve/down',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -203,6 +210,7 @@ def terminate_replica(service_name: str, replica_id: int,
         f'{server_common.get_server_url()}/serve/terminate-replica',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -275,6 +283,7 @@ def status(
         f'{server_common.get_server_url()}/serve/status',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -361,6 +370,68 @@ def tail_logs(service_name: str,
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
         stream=True,
+        cookies=server_common.get_api_cookie_jar(),
     )
     request_id = server_common.get_request_id(response)
     sdk.stream_response(request_id, response, output_stream)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def sync_down_logs(service_name: str,
+                   local_dir: str,
+                   *,
+                   targets: Optional[Union[
+                       str, 'serve_utils.ServiceComponent',
+                       List[Union[str,
+                                  'serve_utils.ServiceComponent']]]] = None,
+                   replica_ids: Optional[List[int]] = None) -> None:
+    """Sync down logs from the service components to a local directory.
+
+    This function syncs logs from the specified service components (controller,
+    load balancer, replicas) via the API server to a specified local directory.
+
+    Args:
+        service_name: The name of the service to download logs from.
+        targets: Which component(s) to download logs for. If None or empty,
+            means download all logs (controller, load-balancer, all replicas).
+            Can be a string (e.g. "controller"), or a `ServiceComponent` object,
+            or a list of them for multiple components. Currently accepted
+            values:
+                - "controller"/ServiceComponent.CONTROLLER
+                - "load_balancer"/ServiceComponent.LOAD_BALANCER
+                - "replica"/ServiceComponent.REPLICA
+        replica_ids: The list of replica IDs to download logs from, specified
+            when target includes `ServiceComponent.REPLICA`. If target includes
+            `ServiceComponent.REPLICA` but this is None/empty, logs for all
+            replicas will be downloaded.
+        local_dir: Local directory to sync down logs to. Defaults to
+            `~/sky_logs`.
+
+    Raises:
+        RuntimeError: If fails to gather logs or fails to rsync from the
+          controller.
+        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        ValueError: Arguments not valid.
+    """
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
+    body = payloads.ServeDownloadLogsBody(
+        service_name=service_name,
+        # No need to set here, since the server will override it
+        # to a directory on the API server.
+        local_dir=local_dir,
+        targets=targets,
+        replica_ids=replica_ids,
+    )
+    response = requests.post(
+        f'{server_common.get_server_url()}/serve/sync-down-logs',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None),
+    )
+    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
+
+    # Download from API server paths to the client's local_dir
+    client_common.download_logs_from_api_server([remote_dir], remote_dir,
+                                                local_dir)

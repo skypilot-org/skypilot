@@ -14,6 +14,7 @@ Local API server (individual users)
 For an individual user, SkyPilot can be used as a normal command line
 tool. Whenever a SkyPilot command is run and an API server is not detected, SkyPilot will automatically start
 a SkyPilot API server running locally in the background. No user action is needed.
+And you can access the dashboard at `http://127.0.0.1:46580/dashboard` by default.
 
 .. image:: ../../images/client-server/local.png
     :alt: SkyPilot API server local mode
@@ -28,10 +29,11 @@ For multi-user teams, SkyPilot can be deployed as a remote
 service. Multiple users in an organization can share the same
 SkyPilot API server. The benefits include:
 
-- **Deploy once and use anywhere**: Deploy a SkyPilot API server in Kubernetes or on a cloud VM and access it anywhere.
-- **Resource sharing in a team**: Team members can share resources with each other.
-- **Easy onboarding for new members**: Users can run SkyPilot commands without setting up local cloud credentials.
-- **Global view and control**: Admins obtain a single pane of glass for the entire team's compute resources---across clusters and regions.
+- **Deploy once & onboard seamlessly**: Set up one SkyPilot API server (in the cloud or on Kubernetes), and team members can onboard with a single endpoint.
+- **Multi-tenancy**: Share clusters, jobs, and services securely among teammates.
+- **Unified view and management**: Get a single view of all running clusters and jobs across the organization and all infra you have.
+- **Fault-tolerant and cloud-native**: SkyPilot API server deployment is cloud-native and fully fault-tolerant, eliminating the risk of workload loss.
+- **Integrate with workflow orchestrators**: Schedule workflows with orchestrators (like Airflow or Temporal), and let SkyPilot manage your diverse infrastructure.
 
 .. image:: ../../images/client-server/remote.png
     :alt: SkyPilot API server remote mode
@@ -89,7 +91,7 @@ To verify that the API server is working, run ``sky api info``:
 .. code-block:: console
 
     $ sky api info
-    Using SkyPilot API server: http://127.0.0.1:46580
+    Using SkyPilot API server: http://127.0.0.1:46580 Dashboard: http://127.0.0.1:46580/dashboard
     ├── Status: healthy, commit: xxxxx, version: 1.0.0-dev0
     └── User: skypilot-user (xxxxxx)
 
@@ -102,7 +104,7 @@ To verify that the API server is working, run ``sky api info``:
 
         $ export SKYPILOT_API_SERVER_ENDPOINT=http://skypilot:password@myendpoint.com:30050
         $ sky api info
-        Using SkyPilot API server: http://myendpoint.com:30050
+        Using SkyPilot API server: http://myendpoint.com:30050 Dashboard: http://myendpoint.com:30050/dashboard
         ├── Status: healthy, commit: xxxxx, version: 1.0.0-dev0
         └── User: skypilot-user (xxxxxx)
 
@@ -111,3 +113,30 @@ To verify that the API server is working, run ``sky api info``:
    :hidden:
 
    Deploying API Server <api-server-admin-deploy>
+   Upgrading API Server <api-server-upgrade>
+   Performance Best Practices <api-server-tunning>
+   Troubleshooting <api-server-troubleshooting>
+
+By default, each user connected to the API server will only see their own resources.
+
+
+To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
+
+.. code-block:: console
+    :emphasize-lines: 5,7,14
+
+    $ sky status -u
+    Clusters
+    NAME                          USER        LAUNCHED      RESOURCES                         STATUS   AUTOSTOP  COMMAND
+    my-cluster-2                  my-user     2 hrs ago     1x GCP(n2-standard-8)             STOPPED  -         sky launch task-2.yaml
+    other-cluster                 other-user  1 week ago    1x AWS(m6i.16xlarge)              UP       -         sky launch --cloud aws...
+    my-cluster-1                  my-user     2 months ago  1x AWS(m6i.4xlarge)               STOPPED  -         sky launch task-1.yaml
+    sky-jobs-controller-7c3d4ff7  root        2 days ago    1x AWS(r6i.xlarge, disk_size=50)  STOPPED  10m       sky jobs launch --env PART...
+
+    $ sky jobs queue -u
+    Fetching managed job statuses...
+    Managed jobs
+    ID  TASK  NAME       USER        RESOURCES  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+    3   -     job-2      my-user     1x[CPU:2]  2 days ago  2m 10s         1m 14s        0            CANCELLED
+    2   -     other-job  other-user  1x[CPU:2]  2 days ago  11m 54s        10m 52s       0            CANCELLED
+    1   -     job-1      my-use      1x[CPU:2]  5 days ago  1m 7s          3s            0            SUCCEEDED

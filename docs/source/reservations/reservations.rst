@@ -63,7 +63,7 @@ For more details of the fields, see :ref:`config-yaml`.
 Utilizing reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
-By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
+By specifying the configuration above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
 
 Specifically, SkyPilot's behavior is as follows:
 
@@ -152,16 +152,15 @@ SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_
 
 See :ref:`config-yaml` for more details.
 
-In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <task-yaml-experimental>`):
+In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <config-client-job-task-yaml>`):
 
 .. code-block:: yaml
 
-    experimental:
-      config_overrides:
-        gcp:
-          managed_instance_group:
-            run_duration: 3600
-            provision_timeout: 900
+    config:
+      gcp:
+        managed_instance_group:
+          run_duration: 3600
+          provision_timeout: 900
 
     resources:
       cloud: gcp
@@ -180,14 +179,13 @@ To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS con
 
 .. code-block:: yaml
 
-    experimental:
-      config_overrides:
-        kubernetes:
-          pod_config:
-            metadata:
-              annotations:
-                provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
-          provision_timeout: 900
+    config:
+      kubernetes:
+        pod_config:
+          metadata:
+            annotations:
+              provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
+        provision_timeout: 900
 
     resources:
       cloud: kubernetes

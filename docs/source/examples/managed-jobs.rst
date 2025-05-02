@@ -288,29 +288,24 @@ will be spot instances. If spot instances are not available, SkyPilot will fall 
 Checkpointing and recovery
 --------------------------
 
-To recover quickly, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints). Any data on disk that is not stored inside a cloud bucket will be lost during the recovery process.
+To recover quickly from spot instance preemptions, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints). Any data on disk that is not stored inside a cloud bucket will be lost during the recovery process.
 
-Below is an example of mounting a bucket to :code:`/checkpoint`.
+Below is an example of mounting a bucket to :code:`/checkpoint`:
 
 .. code-block:: yaml
 
   file_mounts:
     /checkpoint:
       name: # NOTE: Fill in your bucket name
-      mode: MOUNT
+      mode: MOUNT_CACHED # or MOUNT
 
-The :code:`MOUNT` mode in :ref:`SkyPilot bucket mounting <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
+To learn more about the different modes, see :ref:`SkyPilot bucket mounting <sky-storage>` and :ref:`high-performance training <training-guide>`.
 
-To implement checkpointing in your application code:
+Real-world examples
+~~~~~~~~~~~~~~~~~~~
 
-1. Periodically save checkpoints containing the current program state during execution.
-2. When starting/restarting, check if any checkpoints are present, and load the latest checkpoint.
+See the :ref:`Model training guide <training-guide>` for more training examples and best practices.
 
-Both features are included in most model training libraries, such as `PyTorch <https://pytorch.org/docs/stable/checkpoint.html>`__, `TensorFlow <https://www.tensorflow.org/guide/checkpoint>`__, and `Hugging Face <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`__.
-
-To see checkpointing in action, see the :ref:`BERT end-to-end example below <bert>`.
-
-For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
 
 .. _failure-recovery:
@@ -356,110 +351,6 @@ To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:
 
 .. tip::
   Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. See :ref:`jobs-controller`.
-
-
-.. _spot-jobs-end-to-end:
-
-Examples
---------
-
-.. _bert:
-
-BERT end-to-end
-~~~~~~~~~~~~~~~
-
-We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
-
-.. note::
-  You can find all the code for this example `in the SkyPilot GitHub repository <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_
-
-In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.
-
-This example:
-
-- has SkyPilot find a V100 instance on any cloud,
-- uses spot instances to save cost, and
-- uses checkpointing to recover preempted jobs quickly.
-
-.. code-block:: yaml
-  :emphasize-lines: 8-11,41-44
-
-  # bert_qa.yaml
-  name: bert-qa
-
-  resources:
-    accelerators: V100:1
-    use_spot: true  # Use spot instances to save cost.
-
-  file_mounts:
-    /checkpoint:
-      name: # NOTE: Fill in your bucket name
-      mode: MOUNT
-
-  envs:
-    # Fill in your wandb key: copy from https://wandb.ai/authorize
-    # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
-    # to pass the key in the command line, during `sky jobs launch`.
-    WANDB_API_KEY:
-
-  # Assume your working directory is under `~/transformers`.
-  workdir: ~/transformers
-
-  setup: |
-    pip install -e .
-    cd examples/pytorch/question-answering/
-    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
-    pip install wandb
-
-  run: |
-    cd examples/pytorch/question-answering/
-    python run_qa.py \
-      --model_name_or_path bert-base-uncased \
-      --dataset_name squad \
-      --do_train \
-      --do_eval \
-      --per_device_train_batch_size 12 \
-      --learning_rate 3e-5 \
-      --num_train_epochs 50 \
-      --max_seq_length 384 \
-      --doc_stride 128 \
-      --report_to wandb \
-      --output_dir /checkpoint/bert_qa/ \
-      --run_name $SKYPILOT_TASK_ID \
-      --save_total_limit 10 \
-      --save_steps 1000
-
-The highlighted lines add a bucket for checkpoints.
-As HuggingFace has built-in support for periodic checkpointing, we just need to pass the highlighted arguments to save checkpoints to the bucket.
-(See more on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`__).
-To see another example of periodic checkpointing with PyTorch, check out `our ResNet example <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`__.
-
-We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for all recoveries of the same job will be saved
-to the same run in Weights & Biases.
-
-.. note::
-  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-managed-2022-10-06-05-17-09-750781_bert-qa_8-0") can be used to identify the same job, i.e., it is kept identical across all
-  recoveries of the job.
-  It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
-  via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
-  the task whenever it is invoked. See more about :ref:`environment variables provided by SkyPilot <sky-env-vars>`.
-
-With the highlighted changes, the managed job can now resume training after preemption! We can enjoy the benefits of
-cost savings from spot instances without worrying about preemption or losing progress.
-
-.. code-block:: console
-
-  $ sky jobs launch -n bert-qa bert_qa.yaml
-
-
-Real-world examples
-~~~~~~~~~~~~~~~~~~~
-
-* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
-* `Large-scale vector database ingestion <https://github.com/skypilot-org/skypilot/tree/master/examples/vector_database>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
-* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
-* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
-* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
 
 .. _scaling-to-many-jobs:
@@ -625,6 +516,28 @@ you can still tear it down manually with
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
+To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+
+Setup and best practices
+------------------------
+
+.. _managed-jobs-creds:
+
+Using long-lived credentials
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks. For this reason, it's preferred to set up long-lived credential access, such as a ``~/.aws/credentials`` file on AWS, or a service account json key file on GCP.
+
+To use long-lived static credentials for the jobs controller, just make sure the right credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller. **If you're already using local credentials that don't expire, no action is needed.**
+
+To set up credentials:
+
+- **AWS**: :ref:`Create a dedicated SkyPilot IAM user <dedicated-aws-user>` and use a static ``~/.aws/credentials`` file.
+- **GCP**: :ref:`Create a GCP service account <gcp-service-account>` with a static JSON key file.
+- **Other clouds**: Make sure you are using credentials that do not expire.
+
+.. _jobs-controller-custom-resources:
 
 Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -706,7 +619,7 @@ Best practices for scaling up the jobs controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
-  For managed jobs, it's highly recommended to use service accounts for :ref:`cloud authentication <cloud-auth>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
+  For managed jobs, it's highly recommended to use :ref:`long-lived credentials for cloud authentication <managed-jobs-creds>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 

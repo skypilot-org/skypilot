@@ -35,6 +35,10 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
+# Shared directory to communicate with fusermount-server, refer to
+# addons/fuse-proxy/README.md for more details.
+_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
+
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
@@ -42,8 +46,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-
-    LEGACY_SINGLETON_REGION = 'kubernetes'
 
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
@@ -110,9 +112,13 @@ class Kubernetes(clouds.Cloud):
             # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to terminate itself with exec auth.
+            # Pod does not have permissions to down itself with exec auth.
             unsupported_features[
-                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+                clouds.CloudImplementationFeatures.AUTODOWN] = message
+        unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
+            'Stopping clusters is not supported on Kubernetes.')
+        unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
+            'Auto-stop is not supported on Kubernetes.')
         # Allow spot instances if supported by the cluster
         try:
             spot_label_key, _ = kubernetes_utils.get_spot_label(context)
@@ -229,32 +235,52 @@ class Kubernetes(clouds.Cloud):
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
         # kubernetes cluster/context).
-        regions_to_return = []
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if autoscaler_type is None and instance_type is not None:
-            # If autoscaler is not set, check if the instance type fits in the
-            # cluster. Else, rely on the autoscaler to provision the right
-            # instance type without running checks. Worst case, if autoscaling
-            # fails, the pod will be stuck in pending state until
-            # provision_timeout, after which failover will be triggered.
-            for r in regions:
-                context = r.name
-                try:
-                    fits, reason = kubernetes_utils.check_instance_fits(
-                        context, instance_type)
-                except exceptions.KubeAPIUnreachableError as e:
-                    cls._log_unreachable_context(context, str(e))
-                    continue
-                if fits:
-                    regions_to_return.append(r)
-                else:
-                    logger.debug(
-                        f'Instance type {instance_type} does '
-                        'not fit in the Kubernetes cluster with context: '
-                        f'{context}. Reason: {reason}')
-        else:
-            regions_to_return = regions
+        if instance_type is None:
+            return regions
 
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if (autoscaler_type is not None and not kubernetes_utils.get_autoscaler(
+                autoscaler_type).can_query_backend):
+            # Unsupported autoscaler type. Rely on the autoscaler to
+            # provision the right instance type without running checks.
+            # Worst case, if autoscaling fails, the pod will be stuck in
+            # pending state until provision_timeout, after which failover
+            # will be triggered.
+            #
+            # Removing this if statement produces the same behavior,
+            # because can_create_new_instance_of_type() always returns True
+            # for unsupported autoscaler types.
+            # This check is here as a performance optimization to avoid
+            # further code executions that is known to return this result.
+            return regions
+
+        regions_to_return = []
+        for r in regions:
+            context = r.name
+            try:
+                fits, reason = kubernetes_utils.check_instance_fits(
+                    context, instance_type)
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
+                continue
+            if fits:
+                regions_to_return.append(r)
+                continue
+            logger.debug(f'Instance type {instance_type} does '
+                         'not fit in the existing Kubernetes cluster '
+                         'with context: '
+                         f'{context}. Reason: {reason}')
+            if autoscaler_type is None:
+                continue
+            autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
+            logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
+            if autoscaler.can_create_new_instance_of_type(
+                    context, instance_type):
+                logger.debug(f'Kubernetes cluster {context} can be '
+                             'autoscaled to create instance type '
+                             f'{instance_type}. Including {context} '
+                             'in the list of regions to return.')
+                regions_to_return.append(r)
         return regions_to_return
 
     def instance_type_to_hourly_cost(self,
@@ -403,38 +429,43 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        image_id_dict = resources.image_id
-        if image_id_dict is not None:
-            # Use custom image specified in resources
-            if None in image_id_dict:
-                image_id = image_id_dict[None]
+        def _get_image_id(resources: 'resources_lib.Resources') -> str:
+            image_id_dict = resources.image_id
+            if image_id_dict is not None:
+                # Use custom image specified in resources
+                if None in image_id_dict:
+                    image_id = image_id_dict[None]
+                else:
+                    assert resources.region in image_id_dict, image_id_dict
+                    image_id = image_id_dict[resources.region]
+                if image_id.startswith('docker:'):
+                    image_id = image_id[len('docker:'):]
             else:
-                assert resources.region in image_id_dict, image_id_dict
-                image_id = image_id_dict[resources.region]
-            if image_id.startswith('docker:'):
-                image_id = image_id[len('docker:'):]
-        else:
-            # Select image based on whether we are using GPUs or not.
-            image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-            # Get the container image ID from the service catalog.
-            image_id = service_catalog.get_image_id_from_tag(
-                image_id, clouds='kubernetes')
+                # Select image based on whether we are using GPUs or not.
+                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+                # Get the container image ID from the service catalog.
+                image_id = service_catalog.get_image_id_from_tag(
+                    image_id, clouds='kubernetes')
+            return image_id
+
+        image_id = _get_image_id(resources)
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
 
         k8s_acc_label_key = None
-        k8s_acc_label_value = None
+        k8s_acc_label_values = None
         k8s_topology_label_key = None
         k8s_topology_label_value = None
         k8s_resource_key = None
         tpu_requested = False
+        avoid_label_keys = None
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
         if acc_count > 0 and acc_type is not None:
-            (k8s_acc_label_key, k8s_acc_label_value, k8s_topology_label_key,
+            (k8s_acc_label_key, k8s_acc_label_values, k8s_topology_label_key,
              k8s_topology_label_value) = (
-                 kubernetes_utils.get_accelerator_label_key_value(
+                 kubernetes_utils.get_accelerator_label_key_values(
                      context, acc_type, acc_count))
             if (k8s_acc_label_key ==
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
@@ -442,7 +473,11 @@ class Kubernetes(clouds.Cloud):
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
-
+        else:
+            avoid_label_keys = kubernetes_utils.get_accelerator_label_keys(
+                context)
+            if len(avoid_label_keys) == 0:
+                avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None)
 
         remote_identity = skypilot_config.get_nested(
@@ -514,6 +549,13 @@ class Kubernetes(clouds.Cloud):
             # cpus is <1.
             'num-cpus': str(max(int(cpus), 1)),
         }
+
+        # Get the storage class name for high availability controller's PVC
+        k8s_ha_storage_class_name = skypilot_config.get_nested(
+            ('kubernetes', 'high_availability', 'storage_class_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -525,14 +567,15 @@ class Kubernetes(clouds.Cloud):
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
-            'k8s_acc_label_value': k8s_acc_label_value,
+            'k8s_acc_label_values': k8s_acc_label_values,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': k8s_automount_sa_token,
             'k8s_fuse_device_required': fuse_device_required,
-            # Namespace to run the FUSE device manager in
+            # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,
@@ -547,6 +590,19 @@ class Kubernetes(clouds.Cloud):
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
                 custom_resources, custom_ray_options, no_restart=False),
+            'k8s_high_availability_deployment_volume_mount_name':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
+                ),
+            'k8s_high_availability_deployment_volume_mount_path':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                ),
+            'k8s_high_availability_deployment_setup_script_path':
+                (constants.PERSISTENT_SETUP_SCRIPT_PATH),
+            'k8s_high_availability_deployment_run_script_dir':
+                (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_storage_class_name':
+                (k8s_ha_storage_class_name),
+            'avoid_label_keys': avoid_label_keys,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -618,7 +674,6 @@ class Kubernetes(clouds.Cloud):
             chosen_instance_type = (
                 kubernetes_utils.KubernetesInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
-
         # Check the availability of the specified instance type in all contexts.
         available_regions = self.regions_with_offering(
             chosen_instance_type,
@@ -636,7 +691,17 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Kubernetes."""
+        # Check for port forward dependencies
+        reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
+        if reasons is not None:
+            formatted = '\n'.join(
+                [reasons[0]] +
+                [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
+            return (False, formatted)
+
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
@@ -658,7 +723,8 @@ class Kubernetes(clouds.Cloud):
         success = False
         for context in existing_allowed_contexts:
             try:
-                check_result = kubernetes_utils.check_credentials(context)
+                check_result = kubernetes_utils.check_credentials(
+                    context, run_optional_checks=True)
                 if check_result[0]:
                     success = True
                     if check_result[1] is not None:
@@ -714,12 +780,6 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region == self.LEGACY_SINGLETON_REGION:
-            # For backward compatibility, we allow the region to be set to the
-            # legacy singleton region.
-            # TODO: Remove this after 0.9.0.
-            return region, zone
-
         if region == kubernetes.in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
             # since there is no context name available.

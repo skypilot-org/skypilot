@@ -1,13 +1,21 @@
-# Serving Qwen2 on Your Own Kubernetes or Cloud
+# Serving Qwen3/Qwen2 on Your Own Kubernetes or Cloud
 
 [Qwen2](https://github.com/QwenLM/Qwen2) is one of the top open LLMs.
 As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS Chatbot Arena Leaderboard](https://chat.lmsys.org/?leaderboard).
 
-**Update (Sep 18, 2024) -** SkyPilot now supports the [**Qwen2.5**](https://qwenlm.github.io/blog/qwen2.5/) model! 
+**Update (Apr 28, 2025) -** SkyPilot now supports the [**Qwen3**](https://qwenlm.github.io/blog/qwen3/) model! 
+
+📰 **Update (Sep 18, 2024) -** SkyPilot now supports the [**Qwen2.5**](https://qwenlm.github.io/blog/qwen2.5/) model! 
 
 📰 **Update (Jun 6, 2024) -** SkyPilot now also supports the [**Qwen2**](https://qwenlm.github.io/blog/qwen2/) model! It further improves the competitive model, Qwen1.5.
 
 📰 **Update (April 26, 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [qwen15-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen15-110b.yaml) to serve the 110B model.
+
+## One command to start a Qwen3
+
+```bash
+sky launch -c qwen qwen3-235b.yaml
+```
 
 <p align="center">
     <img src="https://i.imgur.com/d7tEhAl.gif" alt="qwen" width="600"/>
@@ -32,7 +40,7 @@ After [installing SkyPilot](https://docs.skypilot.co/en/latest/getting-started/i
 1. Start serving Qwen 110B on a single instance with any available GPU in the list specified in [qwen15-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen15-110b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [qwen25-72b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen25-72b.yaml) or [qwen25-7b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen25-7b.yaml) for a smaller model):
 
 ```console
-sky launch -c qwen qwen15-110b.yaml
+sky launch -c qwen qwen3-235b.yaml
 ```
 2. Send a request to the endpoint for completion:
 ```bash
@@ -41,7 +49,7 @@ ENDPOINT=$(sky status --endpoint 8000 qwen)
 curl http://$ENDPOINT/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-110B-Chat",
+      "model": "Qwen/Qwen3-235B-A22B-FP8",
       "prompt": "My favorite food is",
       "max_tokens": 512
   }' | jq -r '.choices[0].text'
@@ -52,7 +60,7 @@ curl http://$ENDPOINT/v1/completions \
 curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-110B-Chat",
+      "model": "Qwen/Qwen3-235B-A22B-FP8",
       "messages": [
         {
           "role": "system",
@@ -66,6 +74,25 @@ curl http://$ENDPOINT/v1/chat/completions \
       "max_tokens": 512
   }' | jq -r '.choices[0].message.content'
 ```
+<details>
+<summary>Qwen3 output</summary>
+
+```
+The concept of "the best food" is highly subjective and depends on personal preferences, cultural background, dietary needs, and even mood! For example:
+
+- **Some crave comfort foods** like macaroni and cheese, ramen, or dumplings.  
+- **Others prioritize health** and might highlight dishes like quinoa bowls, grilled salmon, or fresh salads.  
+- **Global favorites** often include pizza, sushi, tacos, or curry.  
+- **Unique or adventurous eaters** might argue for dishes like insects, fermented foods, or molecular gastronomy creations.  
+
+Could you clarify what you mean by "best"? For instance:  
+- Are you asking about taste, health benefits, cultural significance, or something else?  
+- Are you looking for a specific dish, ingredient, or cuisine?  
+
+This helps me tailor a more meaningful answer! 😊
+```
+
+</details>
 
 ## Running Multimodal Qwen2-VL
 

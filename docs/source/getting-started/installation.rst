@@ -132,10 +132,10 @@ Installing via ``uv`` is also supported:
 .. code-block:: shell
 
   uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+  uv pip install --prerelease allow 'azure-cli>=2.65.0'
+  # Explicitly install prerelease dependency to work around https://docs.astral.sh/uv/pip/compatibility/#pre-release-compatibility
+  # Optionally only install specific clouds - e.g. 'skypilot[aws,gcp,kubernetes]'
+  uv pip install 'omegaconf>=2.4.0dev3' 'skypilot[all]'
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
@@ -235,19 +235,22 @@ AWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+To set up AWS credentials, log into the AWS console and `create an access key for yourself <https://docs.aws.amazon.com/IAM/latest/UserGuide/access-key-self-managed.html#Using_CreateAccessKey>`_. If you don't see the "Security credentials" link shown in the AWS instructions, you may be using SSO; see :ref:`aws-sso`.
+
+Now configure your credentials.
 
 .. code-block:: shell
-
-  # Install boto
-  pip install boto3
 
   # Configure your AWS credentials
   aws configure
 
+- For **AWS Access Key ID**, copy the "Access key" value from console.
+- For the **AWS Secret Access Key**, copy the "Secret access key" value from console.
+- The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+
 To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
-**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
+**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`dedicated-aws-user`.
 
 .. _installation-gcp:
 
@@ -539,51 +542,34 @@ Nebius
 
   mkdir -p ~/.nebius
   nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
-
-If you have one tenant you can run:
-
-.. code-block:: shell
-
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
+**Optional**: You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
 
 .. code-block:: shell
 
   echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
 
-To use *Service Account* authentication, follow these steps:
+Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
-1. **Create a Service Account** using the Nebius web console.
-2. **Generate PEM Keys**:
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
 
 .. code-block:: shell
 
-   openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
+  # Install boto
+  pip install boto3
+  # Configure your Nebius Object Storage credentials
+  aws configure --profile nebius
 
-3.  **Generate and Save the Credentials File**:
+In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
 
-* Save the file as `~/.nebius/credentials.json`.
-* Ensure the file matches the expected format below:
+.. code-block:: bash
 
-.. code-block:: json
-
-     {
-         "subject-credentials": {
-             "alg": "RS256",
-             "private-key": "PKCS#8 PEM with new lines escaped as \n",
-             "kid": "public-key-id",
-             "iss": "service-account-id",
-             "sub": "service-account-id"
-         }
-     }
-
-
-**Important Notes:**
-
-* The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
-* Service Accounts are restricted to a single region. Ensure you configure the Service Account for the appropriate region during creation.
-
+  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
+  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
+  aws configure set region eu-west1 --profile nebius
+  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
 
 Request quotas for first time users
 --------------------------------------

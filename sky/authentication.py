@@ -25,19 +25,18 @@ import re
 import socket
 import subprocess
 import sys
+import typing
 from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 import filelock
-import yaml
 
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
@@ -67,6 +66,11 @@ MAX_TRIALS = 64
 # the former dir is empheral.
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
 
+if typing.TYPE_CHECKING:
+    import yaml
+else:
+    yaml = adaptors_common.LazyImport('yaml')
+
 
 def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
     user_hash = common_utils.get_user_hash()
@@ -82,6 +86,13 @@ def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
+    # Keep the import of the cryptography local to avoid expensive
+    # third-party imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
     key = rsa.generate_private_key(backend=default_backend(),
                                    public_exponent=65537,
                                    key_size=2048)
@@ -204,6 +215,9 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             sys.exit(1)
         else:
             raise
+    except gcp.auth_error_exception() as e:
+        raise exceptions.InvalidCloudCredentials(
+            f'{common_utils.format_exception(e)}')
     except socket.timeout:
         logger.error('Socket timed out when trying to get the GCP project. '
                      'Please check your network connection.')

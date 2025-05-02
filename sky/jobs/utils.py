@@ -17,13 +17,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
-import psutil
 from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
@@ -40,8 +40,12 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import psutil
+
     import sky
     from sky import dag as dag_lib
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -125,6 +129,11 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        # This can happen if the cluster was preempted and background status
+        # refresh already noticed and cleaned it up.
+        logger.info(f'Cluster {cluster_name} not found.')
+        return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
@@ -412,10 +421,9 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 'managed_job_event',
                                 f'jobs-callback-{job_id}-{task_id}.log')
-        result = log_lib.run_bash_command_with_log(
-            bash_command=event_callback,
-            log_path=log_path,
-            env_vars=dict(
+        env_vars = task.envs.copy() if task.envs else {}
+        env_vars.update(
+            dict(
                 SKYPILOT_TASK_ID=str(
                     task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
                 SKYPILOT_TASK_IDS=str(
@@ -427,6 +435,9 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                 TASK_NAME=task.name or '',
                 # TODO(MaoZiming): Future event type Job or Spot.
                 EVENT_TYPE='Spot'))
+        result = log_lib.run_bash_command_with_log(bash_command=event_callback,
+                                                   log_path=log_path,
+                                                   env_vars=env_vars)
         logger.info(
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')

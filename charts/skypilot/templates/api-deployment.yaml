@@ -15,13 +15,24 @@ spec:
     metadata:
       labels:
         app: {{ .Release.Name }}-api
+        # This label indicates that the API server is ready to serve requests.
+        skypilot.co/ready: "true"
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
-      serviceAccountName: {{ .Release.Name }}-api-sa
+      serviceAccountName: {{ include "skypilot.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      runtimeClassName: {{ .Values.runtimeClassName }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
         imagePullPolicy: Always
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
@@ -53,9 +64,8 @@ spec:
           {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
           echo "Copying config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
-          # The configmap serves as the ground truth for the config.yaml file.
-          # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
-          cp /tmp/config.yaml /root/.sky/config.yaml
+          # The configmap serves as the ground truth for the config.yaml file, read-only
+          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
@@ -92,8 +102,7 @@ spec:
         {{- end }}
         {{- if .Values.apiService.config }}
         - name: skypilot-config
-          mountPath: /tmp/config.yaml
-          subPath: config.yaml
+          mountPath: /var/skypilot/config
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-config
@@ -111,9 +120,18 @@ spec:
         - name: kube-config
           mountPath: /root/.kube
         {{- end }}
+        {{- if .Values.runpodCredentials.enabled }}
+        - name: runpod-config
+          mountPath: /root/.runpod
+          readOnly: true
+        {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         image: {{ .Values.apiService.image }}
         command: ["/bin/sh", "-c"]
         args:
@@ -132,19 +150,23 @@ spec:
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: aws-credentials
-              key: aws_access_key_id
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.accessKeyIdKeyName }}
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: aws-credentials
-              key: aws_secret_access_key
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.secretAccessKeyKeyName }}
         volumeMounts:
         - name: aws-config
           mountPath: /root/.aws
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         image: google/cloud-sdk:latest
         command: ["/bin/sh", "-c"]
         env:
@@ -161,6 +183,36 @@ spec:
         - name: gcp-config
           mountPath: /root/.config/gcloud
       {{- end }}
+      {{- if .Values.runpodCredentials.enabled }}
+      - name: create-runpod-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up RunPod credentials..."
+          if [ -n "$RUNPOD_API_KEY" ]; then
+            echo "RunPod credentials found in environment variable."
+            mkdir -p /root/.runpod
+            echo "[default]" > /root/.runpod/config.toml
+            echo "api_key = \"$RUNPOD_API_KEY\"" >> /root/.runpod/config.toml
+          else
+            echo "RunPod credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: RUNPOD_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.runpodCredentials.runpodSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: runpod-config
+          mountPath: /root/.runpod
+      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -174,12 +226,15 @@ spec:
       - name: aws-config
         emptyDir: {}
       {{- end }}
-
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
         secret:
-          secretName: gcp-credentials
+          secretName: {{ .Values.gcpCredentials.gcpSecretName }}
       - name: gcp-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.runpodCredentials.enabled }}
+      - name: runpod-config
         emptyDir: {}
       {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}

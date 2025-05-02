@@ -12,6 +12,7 @@ from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
+from sky.clouds import cloud
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -132,7 +133,8 @@ def _list_accelerators(
 
     # First check if Kubernetes is enabled. This ensures k8s python client is
     # installed. Do not put any k8s-specific logic before this check.
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        cloud.CloudCapability.COMPUTE)
     if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(),
                                         enabled_clouds):
         return {}, {}, {}
@@ -259,16 +261,16 @@ def _list_accelerators(
 
                 accelerators_available = accelerator_count - allocated_qty
 
-                # Initialize the entry if it doesn't exist yet
-                if accelerator_name not in total_accelerators_available:
-                    total_accelerators_available[accelerator_name] = 0
-
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
-                    total_accelerators_available[accelerator_name] = (
-                        total_accelerators_available.get(accelerator_name, 0) +
-                        quantized_availability)
+                    if quantized_availability > 0:
+                        # only increment when quantized availability is positive
+                        # to avoid assertion errors checking keyset sizes in
+                        # core.py _realtime_kubernetes_gpu_availability_single
+                        total_accelerators_available[accelerator_name] = (
+                            total_accelerators_available.get(
+                                accelerator_name, 0) + quantized_availability)
 
     result = []
 

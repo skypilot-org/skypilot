@@ -12,7 +12,7 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -35,6 +35,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
+from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
@@ -150,7 +151,21 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Shutdown: Add any cleanup code here if needed
 
 
+# Add a new middleware class to handle /internal/dashboard prefix
+class InternalDashboardPrefixMiddleware(
+        starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle /internal/dashboard prefix in requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        path = request.url.path
+        if path.startswith('/internal/dashboard/'):
+            # Remove /internal/dashboard prefix and update request scope
+            request.scope['path'] = path.replace('/internal/dashboard/', '/', 1)
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -210,7 +225,7 @@ async def kubernetes_node_info(
         request: fastapi.Request,
         kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody
 ) -> None:
-    """Gets Kubernetes node information."""
+    """Gets Kubernetes nodes information and hints."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='kubernetes_node_info',
@@ -273,8 +288,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # these into a single call or have a TTL cache for (task, admin_policy)
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
-    try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+
+    def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -282,14 +297,17 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # server thread.
         dag, _ = admin_policy_utils.apply(
             dag, request_options=validate_body.request_options)
-        for task in dag.tasks:
-            # Will validate workdir and file_mounts in the backend, as those
-            # need to be validated after the files are uploaded to the SkyPilot
-            # API server with `upload_mounts_to_api_server`.
-            task.validate_name()
-            task.validate_run()
-            for r in task.resources:
-                r.validate()
+        # Skip validating workdir and file_mounts, as those need to be
+        # validated after the files are uploaded to the SkyPilot API server
+        # with `upload_mounts_to_api_server`.
+        dag.validate(skip_file_mounts=True, skip_workdir=True)
+
+    try:
+        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        loop = asyncio.get_running_loop()
+        # Apply admin policy and validate DAG is blocking, run it in a separate
+        # thread executor to avoid blocking the uvicorn event loop.
+        await loop.run_in_executor(None, validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
@@ -675,6 +693,13 @@ async def logs(
     )
 
 
+@app.get('/users')
+async def users() -> List[Dict[str, Any]]:
+    """Gets all users."""
+    user_list = global_user_state.get_all_users()
+    return [user.to_dict() for user in user_list]
+
+
 @app.post('/download_logs')
 async def download_logs(
         request: fastapi.Request,
@@ -994,14 +1019,17 @@ async def health() -> Dict[str, str]:
         A dictionary with the following keys:
         - status: str; The status of the API server.
         - api_version: str; The API version of the API server.
-        - commit: str; The commit hash of SkyPilot used for API server.
         - version: str; The version of SkyPilot used for API server.
+        - version_on_disk: str; The version of the SkyPilot installation on
+          disk, which can be used to warn about restarting the API server
+        - commit: str; The commit hash of SkyPilot used for API server.
     """
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
-        'commit': sky.__commit__,
         'version': sky.__version__,
+        'version_on_disk': common.get_skypilot_version_on_disk(),
+        'commit': sky.__commit__,
     }
 
 
@@ -1094,6 +1122,35 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
+# Add a route to serve static files
+@app.get('/{full_path:path}')
+async def serve_static_or_dashboard(full_path: str):
+    """Serves static files for any unmatched routes.
+
+    Handles the /dashboard prefix from Next.js configuration.
+    """
+    # Check if the path starts with 'dashboard/' and remove it if it does
+    if full_path.startswith('dashboard/'):
+        full_path = full_path[len('dashboard/'):]
+
+    # Try to serve the file directly from the out directory first
+    file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
+    if os.path.isfile(file_path):
+        return fastapi.responses.FileResponse(file_path)
+
+    # If file not found, serve the index.html for client-side routing.
+    # For example, the non-matched arbitrary route (/ or /test) from
+    # client will be redirected to the index.html.
+    index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
+    try:
+        with open(index_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return fastapi.responses.HTMLResponse(content=content)
+    except Exception as e:
+        logger.error(f'Error serving dashboard: {e}')
+        raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == '__main__':
     import uvicorn
 
@@ -1110,13 +1167,12 @@ if __name__ == '__main__':
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    num_workers = 1
-    if cmd_args.deploy:
-        num_workers = common_utils.get_cpu_count()
+    config = server_config.compute_server_config(cmd_args.deploy)
+    num_workers = config.num_server_workers
 
     sub_procs = []
     try:
-        sub_procs = executor.start(cmd_args.deploy)
+        sub_procs = executor.start(config)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
@@ -1140,6 +1196,9 @@ if __name__ == '__main__':
                 # The process may not be started yet, close it anyway.
                 proc.close()
 
+        # Terminate processes in reverse order in case dependency, especially
+        # queue server. Terminate queue server first does not affect the
+        # correctness of cleanup but introduce redundant error messages.
         subprocess_utils.run_in_parallel(cleanup,
-                                         sub_procs,
+                                         list(reversed(sub_procs)),
                                          num_threads=len(sub_procs))

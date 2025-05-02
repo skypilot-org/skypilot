@@ -9,7 +9,7 @@ import sys
 from typing import Dict, List
 
 install_requires = [
-    'wheel',
+    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
@@ -79,11 +79,6 @@ remote = [
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, according to
-    # https://github.com/boto/botocore/issues/2926
-    # We have to explicitly pin the version to optimize the time for
-    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
-    'urllib3<2',
     # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
     # should instead use CLI V2 which is not pip-installable. See
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
@@ -131,7 +126,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0'],
+    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
@@ -150,7 +145,9 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': ['nebius>=0.2.0',]
+    'nebius': [
+        'nebius>=0.2.0',
+    ] + aws_dependencies
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius

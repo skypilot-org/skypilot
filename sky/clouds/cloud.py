@@ -13,6 +13,8 @@ import math
 import typing
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
+from typing_extensions import assert_never
+
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -35,7 +37,7 @@ class CloudImplementationFeatures(enum.Enum):
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'  # Includes both stop and autostop.
+    STOP = 'stop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     IMAGE_ID = 'image_id'
@@ -45,7 +47,22 @@ class CloudImplementationFeatures(enum.Enum):
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
+    HIGH_AVAILABILITY_CONTROLLERS = ('high_availability_controllers'
+                                    )  # Controller can auto-restart
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
+    AUTOSTOP = 'autostop'  # Pod/VM can stop itself
+    AUTODOWN = 'autodown'  # Pod/VM can down itself
+
+
+# Use str, enum.Enum to allow CloudCapability to be used as a string.
+class CloudCapability(str, enum.Enum):
+    # Compute capability.
+    COMPUTE = 'compute'
+    # Storage capability.
+    STORAGE = 'storage'
+
+
+ALL_CAPABILITIES = [CloudCapability.COMPUTE, CloudCapability.STORAGE]
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -401,13 +418,16 @@ class Cloud:
         try:
             self.check_features_are_supported(resources,
                                               resources_required_features)
-        except exceptions.NotSupportedError:
+        except exceptions.NotSupportedError as e:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
             # are not considered.
+            # UPDATE(kyuds): passing in NotSupportedError reason string
+            # to hint for issue #5344. Did not remove above comment as
+            # reason is not displayed when other resources are valid.
             return resources_utils.FeasibleResources(resources_list=[],
                                                      fuzzy_candidate_list=[],
-                                                     hint=None)
+                                                     hint=str(e))
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(
@@ -435,13 +455,36 @@ class Cloud:
         return {reservation: 0 for reservation in specific_reservations}
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
         string describing the reason if the user cannot access.
+
+        Raises NotSupportedError if the capability is
+        not supported by this cloud.
         """
-        raise NotImplementedError
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_compute_credentials()
+        elif cloud_capability == CloudCapability.STORAGE:
+            return cls._check_storage_credentials()
+        assert_never(cloud_capability)
+
+    @classmethod
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        this cloud's compute service."""
+        raise exceptions.NotSupportedError(
+            f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        this cloud's storage service."""
+        raise exceptions.NotSupportedError(
+            f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod

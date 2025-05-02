@@ -297,8 +297,8 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
 def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     """Setup a gcp service account with IAM roles.
 
-    Creates a gcp service acconut and binds IAM roles which allow it to control
-    control storage/compute services. Specifically, the head node needs to have
+    Creates a gcp service account and binds IAM roles which allow it to control
+    storage/compute services. Specifically, the head node needs to have
     an IAM role that allows it to create further gce instances and store items
     in google cloud storage.
 
@@ -311,7 +311,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     )
     service_account = _get_service_account(email, project_id, iam)
 
-    permissions = gcp_utils.get_minimal_permissions()
+    permissions = gcp_utils.get_minimal_compute_permissions()
     roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES
     if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
         roles = (constants.DEFAULT_SERVICE_ACCOUNT_ROLES +
@@ -571,35 +571,45 @@ def get_usable_vpc_and_subnet(
 
     specific_vpc_to_use = config.provider_config.get('vpc_name', None)
     if specific_vpc_to_use is not None:
+        if '/' in specific_vpc_to_use:
+            # VPC can also be specified in the format PROJECT_ID/VPC_NAME.
+            # This enables use of shared VPCs.
+            split_vpc_value = specific_vpc_to_use.split('/')
+            if len(split_vpc_value) != 2:
+                raise ValueError(f'Invalid VPC name: {specific_vpc_to_use}. '
+                                 'Please specify the VPC name in the format '
+                                 'PROJECT_ID/VPC_NAME.')
+            project_id = split_vpc_value[0]
+            specific_vpc_to_use = split_vpc_value[1]
+
         vpcnets_all = _list_vpcnets(project_id,
                                     compute,
                                     filter=f'name={specific_vpc_to_use}')
-        # On GCP, VPC names are unique, so it'd be 0 or 1 VPC found.
-        assert (len(vpcnets_all) <=
-                1), (f'{len(vpcnets_all)} VPCs found with the same name '
-                     f'{specific_vpc_to_use}')
-        if len(vpcnets_all) == 1:
-            # Skip checking any firewall rules if the user has specified a VPC.
-            logger.info(f'Using user-specified VPC {specific_vpc_to_use!r}.')
-            subnets = _list_subnets(project_id,
-                                    region,
-                                    compute,
-                                    network=specific_vpc_to_use)
-            if not subnets:
-                _skypilot_log_error_and_exit_for_failover(
-                    'SUBNET_NOT_FOUND_FOR_VPC',
-                    f'No subnet for region {region} found for specified VPC '
-                    f'{specific_vpc_to_use!r}. '
-                    f'Check the subnets of VPC {specific_vpc_to_use!r} at '
-                    'https://console.cloud.google.com/networking/networks')
-            return specific_vpc_to_use, subnets[0]
-        else:
+        if not vpcnets_all:
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
                 'VPC_NOT_FOUND',
                 f'No VPC with name {specific_vpc_to_use!r} is found. '
                 'To fix: specify a correct VPC name.')
             # Should not reach here.
+            assert False
+
+        # On GCP, VPC names are unique within a project.
+        assert len(vpcnets_all) == 1, (vpcnets_all, specific_vpc_to_use)
+        # Skip checking any firewall rules if the user has specified a VPC.
+        logger.info(f'Using user-specified VPC {specific_vpc_to_use!r}.')
+        subnets = _list_subnets(project_id,
+                                region,
+                                compute,
+                                network=specific_vpc_to_use)
+        if not subnets:
+            _skypilot_log_error_and_exit_for_failover(
+                'SUBNET_NOT_FOUND_FOR_VPC',
+                f'No subnet for region {region} found for specified VPC '
+                f'{specific_vpc_to_use!r}. '
+                f'Check the subnets of VPC {specific_vpc_to_use!r} at '
+                'https://console.cloud.google.com/networking/networks')
+        return specific_vpc_to_use, subnets[0]
 
     subnets_all = _list_subnets(project_id, region, compute)
 

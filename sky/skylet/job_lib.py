@@ -11,20 +11,26 @@ import shlex
 import signal
 import sqlite3
 import time
+import typing
 from typing import Any, Dict, List, Optional, Sequence
 
 import colorama
 import filelock
-import psutil
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -624,7 +630,7 @@ def update_job_status(job_ids: List[int],
                         'it to FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
             elif job_pid < 0:
-                # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                # TODO(zhwu): Backward compatibility, remove after 0.10.0.
                 # We set the job status to PENDING instead of actually
                 # checking ray job status and let the status in job table
                 # take effect in the later max.
@@ -876,7 +882,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # child processes.
             elif job['pid'] < 0:
                 try:
-                    # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                    # TODO(zhwu): Backward compatibility, remove after 0.10.0.
                     # The job was submitted with ray job submit before #4318.
                     job_client = _create_ray_job_submission_client()
                     job_client.stop_job(_make_ray_job_id(job['job_id']))
@@ -1002,7 +1008,7 @@ class JobLibCodeGen:
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
-        # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+        # TODO(zhwu): Backward compatibility, remove after 0.12.0.
         if user_hash is None:
             code = [
                 (f'cancelled = job_lib.cancel_jobs_encoded_results('

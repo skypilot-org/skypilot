@@ -1,18 +1,25 @@
 .. _config-yaml:
 
-Advanced Configurations
-=======================
+Advanced Configuration
+======================
 
-You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
-Such configurations apply to all new clusters and do not affect existing clusters.
+Configuration sources and overrides
+-----------------------------------
 
-.. tip::
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
-  Some config fields can be overridden on a per-task basis through the ``experimental.config_overrides`` field. See :ref:`here <task-yaml-experimental>` for more details.
+For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
+
+Refer to :ref:`config-sources-and-overrides` for more details.
+
+.. _config-yaml-syntax:
 
 Syntax
 ------
+
+For details about SkyServe controller and its customization, see :ref:`customizing-sky-serve-controller-resources`.
 
 Below is the configuration syntax and some example values. See detailed explanations under each field.
 
@@ -28,12 +35,15 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
-    :ref:`controller <config-yaml-jobs-controller>`:
-      resources:  # same spec as 'resources' in a task YAML
+    controller:
+      :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         cloud: gcp
         region: us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
+      :ref:`autostop <config-yaml-jobs-controller-autostop>`:
+        idle_minutes: 10
+        down: false  # use with caution!
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -176,9 +186,10 @@ Supported bucket types:
     # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-resources:
 
-``jobs.controller``
-~~~~~~~~~~~~~~~~~~~
+``jobs.controller.resources``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure resources for the managed jobs controller.
 
@@ -198,6 +209,37 @@ Example:
         cpus: 4+
         memory: 8x
         disk_size: 50
+
+.. _config-yaml-jobs-controller-autostop:
+
+``jobs.controller.autostop``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
+
+By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically restarted when a new job is launched.
+
+If you want the controller to automatically terminate instead of autostopping, set ``down: true``. Use this with caution: ``down: true`` can leak clusters if SkyPilot crashes and all job logs will be lost when the controller is terminated.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable autostop.
+      autostop: false
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Enable autostop with custom config.
+      autostop:
+        # Default values:
+        idle_minutes: 10  # Set time to idle autostop/autodown.
+        down: false  # Terminate instead of stopping. Caution: setting this to true will cause logs to be lost and could lead to resource leaks if SkyPilot crashes.
+
 
 .. _config-yaml-allowed-clouds:
 
@@ -239,7 +281,7 @@ The following run options are applied by default and cannot be overridden:
 ~~~~~~~~~~~~~~~~~~~~~~
 
 This field can be useful for mounting volumes and other advanced Docker
-configurations. You can specify a list of arguments or a string, where the
+configuration. You can specify a list of arguments or a string, where the
 former will be combined into a single string with spaces. The following is
 an example option for mounting the Docker socket and increasing the size of ``/dev/shm``:
 
@@ -309,7 +351,7 @@ Example:
 ``aws``
 ~~~~~~~
 
-Advanced AWS configurations (optional).
+Advanced AWS configuration (optional).
 
 Apply to all new instances but not existing ones.
 
@@ -583,7 +625,7 @@ Supported values:
 ``gcp``
 ~~~~~~~
 
-Advanced GCP configurations (optional).
+Advanced GCP configuration (optional).
 
 Apply to all new instances but not existing ones.
 
@@ -615,20 +657,35 @@ Example:
 
 VPC to use (optional).
 
-Default: ``null``, which implies the following behavior. First, all existing
+Default: ``null``, which implies the following behavior: All existing
 VPCs in the project are checked against the minimal recommended firewall
 rules for SkyPilot to function. If any VPC satisfies these rules, it is
 used. Otherwise, a new VPC named ``skypilot-vpc`` is automatically created
 with the minimal recommended firewall rules and will be used.
 
-If this field is set, SkyPilot will use the VPC with this name. Useful for
-when users want to manually set up a VPC and precisely control its
+If this field is set, SkyPilot will use the VPC with this name. The VPC must
+have the :ref:`necessary firewall rules <gcp-minimum-firewall-rules>`. Useful
+for when users want to manually set up a VPC and precisely control its
 firewall rules. If no region restrictions are given, SkyPilot only
 provisions in regions for which a subnet of this VPC exists. Errors are
 thrown if VPC with this name is not found. The VPC does not get modified
 in any way, except when opening ports (e.g., via ``resources.ports``) in
 which case new firewall rules permitting public traffic to those ports
 will be added.
+
+By default, only VPCs from the current project are used.
+
+.. code-block:: yaml
+
+  gcp:
+    vpc-name: my-vpc
+
+To use a shared VPC from another GCP project, specify the name as ``<project ID>/<vpc name>``. For example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc-name: my-project-123456/default
 
 .. _config-yaml-gcp-use-internal-ips:
 
@@ -794,7 +851,7 @@ Default: ``false``.
 ``azure``
 ~~~~~~~~~~~
 
-Advanced Azure configurations (optional).
+Advanced Azure configuration (optional).
 
 .. _config-yaml-azure-resource-group-vm:
 
@@ -829,7 +886,7 @@ Example:
 ``kubernetes``
 ~~~~~~~~~~~~~~~
 
-Advanced Kubernetes configurations (optional).
+Advanced Kubernetes configuration (optional).
 
 .. _config-yaml-kubernetes-ports:
 
@@ -956,7 +1013,7 @@ Example:
 ``oci``
 ~~~~~~~
 
-Advanced OCI configurations (optional).
+Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
@@ -980,7 +1037,7 @@ Example:
 .. code-block:: yaml
 
     oci:
-        # Region-specific configurations
+        # Region-specific configuration
         ap-seoul-1:
           # The OCID of the VCN to use for instances (optional).
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
@@ -990,3 +1047,9 @@ Example:
         us-ashburn-1:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+
+.. toctree::
+   :hidden:
+
+   Configuration Sources <config-sources>

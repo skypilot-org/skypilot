@@ -26,6 +26,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.skylet import constants
 
 
@@ -360,7 +361,7 @@ def test_gcp_mig():
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env={
-            'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml',
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
             constants.SKY_API_SERVER_URL_ENV_VAR:
                 sky.server.common.get_server_url()
         })
@@ -400,15 +401,16 @@ def test_gcp_force_enable_external_ips():
         ),
         f'sky down -y {name}',
     ]
-    skypilot_config = 'tests/test_yamls/force_enable_external_ips_config.yaml'
-    test = smoke_tests_utils.Test('gcp_force_enable_external_ips',
-                                  test_commands,
-                                  f'sky down -y {name}',
-                                  env={
-                                      'SKYPILOT_CONFIG': skypilot_config,
-                                      constants.SKY_API_SERVER_URL_ENV_VAR:
-                                          sky.server.common.get_server_url()
-                                  })
+    skypilot_config_file = 'tests/test_yamls/force_enable_external_ips_config.yaml'
+    test = smoke_tests_utils.Test(
+        'gcp_force_enable_external_ips',
+        test_commands,
+        f'sky down -y {name}',
+        env={
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_file,
+            constants.SKY_API_SERVER_URL_ENV_VAR:
+                sky.server.common.get_server_url()
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -433,8 +435,11 @@ def test_image_no_conda():
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
-@pytest.mark.no_nebius  # Nebius does not support autostop
+@pytest.mark.no_nebius  # Nebius does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
+    timeout = 80
+    if generic_cloud == 'azure':
+        timeout *= 3
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
@@ -447,7 +452,7 @@ def test_custom_default_conda_env(generic_cloud: str):
         smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
             cluster_status=[sky.ClusterStatus.STOPPED],
-            timeout=80),
+            timeout=timeout),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',

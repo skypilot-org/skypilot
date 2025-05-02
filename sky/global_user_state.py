@@ -26,11 +26,12 @@ from sky.utils import status_lib
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
+    from sky.clouds import cloud
     from sky.data import Storage
 
 logger = sky_logging.init_logger(__name__)
 
-_ENABLED_CLOUDS_KEY = 'enabled_clouds'
+_ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
@@ -183,6 +184,11 @@ def get_user(user_id: str) -> models.User:
     if row is None:
         return models.User(id=user_id)
     return models.User(id=row[0], name=row[1])
+
+
+def get_all_users() -> List[models.User]:
+    rows = _DB.cursor.execute('SELECT id, name FROM users').fetchall()
+    return [models.User(id=row[0], name=row[1]) for row in rows]
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -423,6 +429,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         # Must invalidate IP list to avoid directly trying to ssh into a
         # stopped VM, which leads to timeout.
         if hasattr(handle, 'stable_internal_external_ips'):
+            handle = typing.cast('backends.CloudVmRayResourceHandle', handle)
             handle.stable_internal_external_ips = None
         current_time = int(time.time())
         _DB.cursor.execute(
@@ -795,9 +802,11 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_cached_enabled_clouds() -> List['clouds.Cloud']:
+def get_cached_enabled_clouds(
+        cloud_capability: 'cloud.CloudCapability') -> List['clouds.Cloud']:
+
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
-                              (_ENABLED_CLOUDS_KEY,))
+                              (_get_capability_key(cloud_capability),))
     ret = []
     for (value,) in rows:
         ret = json.loads(value)
@@ -817,10 +826,16 @@ def get_cached_enabled_clouds() -> List['clouds.Cloud']:
     return enabled_clouds
 
 
-def set_enabled_clouds(enabled_clouds: List[str]) -> None:
-    _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
-                       (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))
+def set_enabled_clouds(enabled_clouds: List[str],
+                       cloud_capability: 'cloud.CloudCapability') -> None:
+    _DB.cursor.execute(
+        'INSERT OR REPLACE INTO config VALUES (?, ?)',
+        (_get_capability_key(cloud_capability), json.dumps(enabled_clouds)))
     _DB.conn.commit()
+
+
+def _get_capability_key(cloud_capability: 'cloud.CloudCapability') -> str:
+    return _ENABLED_CLOUDS_KEY_PREFIX + cloud_capability.value
 
 
 def add_or_update_storage(storage_name: str,

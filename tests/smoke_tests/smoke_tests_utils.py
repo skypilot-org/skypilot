@@ -1,22 +1,31 @@
 import contextlib
 import enum
 import inspect
+import json
 import os
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import (Any, Dict, Generator, List, NamedTuple, Optional, Sequence,
+                    Set, Tuple)
 import uuid
 
 import colorama
 import pytest
+import requests
+from smoke_tests.docker import docker_utils
+import yaml
 
 import sky
 from sky import serve
+from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
+from sky.server import common as server_common
+from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -48,7 +57,7 @@ LOW_RESOURCE_PARAM = {
     'memory': '4+',
 }
 LOW_CONTROLLER_RESOURCE_ENV = {
-    'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
+    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
@@ -204,13 +213,19 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTA
 
 
 def get_cmd_wait_until_job_status_contains_matching_job_id(
-        cluster_name: str, job_id: str, job_status: List[sky.JobStatus],
-        timeout: int):
-    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+        cluster_name: str,
+        job_id: str,
+        job_status: List[sky.JobStatus],
+        timeout: int,
+        all_users: bool = False):
+    cmd = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
         cluster_name=cluster_name,
         job_id=job_id,
         job_status=_statuses_to_str(job_status),
         timeout=timeout)
+    if all_users:
+        cmd = cmd.replace('sky queue ', 'sky queue -u ')
+    return cmd
 
 
 def get_cmd_wait_until_job_status_contains_without_matching_job(
@@ -326,15 +341,63 @@ def is_eks_cluster() -> bool:
     return result.returncode == 0
 
 
-def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+    return common_utils.make_cluster_name_on_cloud(
         cluster_name, sky.GCP.max_cluster_name_length())
+
+
+def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+    name_on_cloud = get_replica_cluster_name_on_gcp(name, replica_id)
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name:{name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     return (f'gcloud compute instances delete --zone={zone}'
             f' --quiet $({query_cmd})')
+
+
+@contextlib.contextmanager
+def override_sky_config(
+    test: Test, env_dict: Dict[str, str]
+) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+    override_sky_config_dict = skypilot_config.config_utils.Config()
+    if is_remote_server_test():
+        endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+        override_sky_config_dict.set_nested(('api_server', 'endpoint'),
+                                            endpoint)
+        test.echo(
+            f'Overriding API server endpoint: '
+            f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
+        )
+    if pytest_controller_cloud():
+        cloud = pytest_controller_cloud()
+        override_sky_config_dict.set_nested(
+            ('jobs', 'controller', 'resources', 'cloud'), cloud)
+        override_sky_config_dict.set_nested(
+            ('serve', 'controller', 'resources', 'cloud'), cloud)
+        test.echo(
+            f'Overriding controller cloud: '
+            f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
+        )
+
+    if not override_sky_config_dict:
+        yield None
+        return
+
+    temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
+    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+        # Read the original config
+        original_config = skypilot_config.parse_config_file(
+            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+    else:
+        original_config = skypilot_config.config_utils.Config()
+    overlay_config = skypilot_config.overlay_skypilot_config(
+        original_config, override_sky_config_dict)
+    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
+    temp_config_file.flush()
+    # Update the environment variable to use the temporary file
+    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+    yield temp_config_file
 
 
 def run_one_test(test: Test) -> None:
@@ -345,7 +408,7 @@ def run_one_test(test: Test) -> None:
         write = test.echo
         flush = lambda: None
         subprocess_out = sys.stderr
-        test.echo(f'Test started. Log to stdout')
+        test.echo('Test started. Log to stdout')
     else:
         log_file = tempfile.NamedTemporaryFile('a',
                                                prefix=f'{test.name}-',
@@ -359,62 +422,66 @@ def run_one_test(test: Test) -> None:
     env_dict = os.environ.copy()
     if test.env:
         env_dict.update(test.env)
-    for command in test.commands:
-        write(f'+ {command}\n')
-        flush()
-        proc = subprocess.Popen(
-            command,
-            stdout=subprocess_out,
-            stderr=subprocess.STDOUT,
-            shell=True,
-            executable='/bin/bash',
-            env=env_dict,
-        )
-        try:
-            proc.wait(timeout=test.timeout)
-        except subprocess.TimeoutExpired as e:
+
+    with override_sky_config(test, env_dict):
+        for command in test.commands:
+            write(f'+ {command}\n')
             flush()
-            test.echo(f'Timeout after {test.timeout} seconds.')
-            test.echo(str(e))
-            write(f'Timeout after {test.timeout} seconds.\n')
-            flush()
-            # Kill the current process.
-            proc.terminate()
-            proc.returncode = 1  # None if we don't set it.
-            break
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                executable='/bin/bash',
+                env=env_dict,
+            )
+            try:
+                proc.wait(timeout=test.timeout)
+            except subprocess.TimeoutExpired as e:
+                flush()
+                test.echo(f'Timeout after {test.timeout} seconds.')
+                test.echo(str(e))
+                write(f'Timeout after {test.timeout} seconds.\n')
+                flush()
+                # Kill the current process.
+                proc.terminate()
+                proc.returncode = 1  # None if we don't set it.
+                break
+
+            if proc.returncode:
+                break
+
+        style = colorama.Style
+        fore = colorama.Fore
+        outcome = (
+            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
+            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if proc.returncode else ''
+        msg = (f'{outcome}.'
+               f'{reason}')
+        if log_to_stdout:
+            test.echo(msg)
+        else:
+            msg += f'\nLog: less -r {log_file.name}\n'
+            test.echo(msg)
+            write(msg)
+
+        if (proc.returncode == 0 or
+                pytest.terminate_on_failure) and test.teardown is not None:
+            subprocess_utils.run(
+                test.teardown,
+                stdout=subprocess_out,
+                stderr=subprocess.STDOUT,
+                timeout=10 * 60,  # 10 mins
+                shell=True,
+                env=env_dict,
+            )
 
         if proc.returncode:
-            break
-
-    style = colorama.Style
-    fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command}' if proc.returncode else ''
-    msg = (f'{outcome}.'
-           f'{reason}')
-    if log_to_stdout:
-        test.echo(msg)
-    else:
-        msg += f'\nLog: less -r {log_file.name}\n'
-        test.echo(msg)
-        write(msg)
-
-    if (proc.returncode == 0 or
-            pytest.terminate_on_failure) and test.teardown is not None:
-        subprocess_utils.run(
-            test.teardown,
-            stdout=subprocess_out,
-            stderr=subprocess.STDOUT,
-            timeout=10 * 60,  # 10 mins
-            shell=True,
-        )
-
-    if proc.returncode:
-        if log_to_stdout:
-            raise Exception(f'test failed')
-        else:
-            raise Exception(f'test failed: less -r {log_file.name}')
+            if log_to_stdout:
+                raise Exception(f'test failed')
+            else:
+                raise Exception(f'test failed: less -r {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
@@ -614,3 +681,69 @@ def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
     finally:
         for file in files:
             os.unlink(file)
+
+
+def is_remote_server_test() -> bool:
+    return 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ
+
+
+def pytest_controller_cloud() -> Optional[str]:
+    return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def override_env_config(config: Dict[str, str]):
+    """Override the environment variable for the test."""
+    for key, value in config.items():
+        os.environ[key] = value
+
+
+def get_api_server_url() -> str:
+    """Get the API server URL in the test environment."""
+    if is_remote_server_test():
+        return docker_utils.get_api_server_endpoint_inside_docker()
+    return server_common.get_server_url()
+
+
+def get_dashboard_cluster_status_request_id() -> str:
+    """Get the status of the cluster from the dashboard."""
+    body = payloads.StatusBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/status',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_dashboard_jobs_queue_request_id() -> str:
+    """Get the jobs queue from the dashboard."""
+    body = payloads.JobsQueueBody(all_users=True,)
+    response = requests.post(
+        f'{get_api_server_url()}/internal/dashboard/jobs/queue',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+def get_response_from_request_id(request_id: str) -> Any:
+    """Waits for and gets the result of a request.
+
+    Args:
+        request_id: The request ID of the request to get.
+
+    Returns:
+        The ``Request Returns`` of the specified request. See the documentation
+        of the specific requests above for more details.
+
+    Raises:
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
+    """
+    response = requests.get(
+        f'{get_api_server_url()}/internal/dashboard/api/get?request_id={request_id}',
+        timeout=15)
+    request_task = None
+    if response.status_code == 200:
+        request_task = requests_lib.Request.decode(
+            requests_lib.RequestPayload(**response.json()))
+        return request_task.get_return_value()
+    raise RuntimeError(f'Failed to get request {request_id}: '
+                       f'{response.status_code} {response.text}')

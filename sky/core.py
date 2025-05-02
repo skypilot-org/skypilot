@@ -19,6 +19,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -352,31 +353,37 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
-        if down:
-            raise ValueError('Using autodown (rather than autostop) is not '
-                             'supported for SkyPilot controllers. Pass '
-                             '`down=False` or omit it instead.')
-        if idle_minutes_to_autostop is not None:
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
+        if down or idle_minutes_to_autostop:
+            arguments = []
+            if down:
+                arguments.append('`down`')
+            if idle_minutes_to_autostop is not None:
+                arguments.append('`idle_minutes_to_autostop`')
+            arguments_str = ' and '.join(arguments) + ' argument'
+            if len(arguments) > 1:
+                arguments_str += 's'
             raise ValueError(
-                'Passing a custom autostop setting is currently not '
+                'Passing per-request autostop/down settings is currently not '
                 'supported when starting SkyPilot controllers. To '
-                'fix: omit the `idle_minutes_to_autostop` argument to use the '
-                f'default autostop settings (got: {idle_minutes_to_autostop}).')
-        idle_minutes_to_autostop = (
-            constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+                f'fix: omit the {arguments_str} to use the '
+                f'default autostop settings from config.')
+        idle_minutes_to_autostop, down = (
+            controller_utils.get_controller_autostop_config(
+                controller=controller))
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name,
-                               retry_until_up=retry_until_up)
+    (handle, _) = backend.provision(dummy_task,
+                                    to_provision=handle.launched_resources,
+                                    dryrun=False,
+                                    stream_logs=True,
+                                    cluster_name=cluster_name,
+                                    retry_until_up=retry_until_up)
     storage_mounts = backend.get_storage_mounts_metadata(handle.cluster_name)
     # Passing all_file_mounts as None ensures the local source set in Storage
     # to not redundantly sync source to the bucket.
@@ -628,26 +635,21 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
-    # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
-    if not down and not is_cancel:
-        try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.STOP})
-        except exceptions.NotSupportedError as e:
-            raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
-                f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  {_stop_not_supported_message(handle.launched_resources)}.'
-            ) from e
-
-    # Check if autodown is required and supported
+    # Check if autostop/autodown is required and supported
     if not is_cancel:
         try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.AUTO_TERMINATE})
+            if down:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.AUTODOWN})
+            else:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.STOP})
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.AUTOSTOP})
         except exceptions.NotSupportedError as e:
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
@@ -1001,7 +1003,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds() -> List[clouds.Cloud]:
-    return global_user_state.get_cached_enabled_clouds()
+    return global_user_state.get_cached_enabled_clouds(
+        sky_cloud.CloudCapability.COMPUTE)
 
 
 @usage_lib.entrypoint
@@ -1009,22 +1012,62 @@ def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None
-) -> List[models.RealtimeGpuAvailability]:
+) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
 
-    counts, capacity, available = service_catalog.list_accelerator_realtime(
-        gpus_only=True,
-        clouds='kubernetes',
-        name_filter=name_filter,
-        region_filter=context,
-        quantity_filter=quantity_filter,
-        case_sensitive=False)
-    assert (set(counts.keys()) == set(capacity.keys()) == set(
-        available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                             f'capacity ({list(capacity.keys())}), '
-                             f'and available ({list(available.keys())}) '
-                             'must be same.')
-    if len(counts) == 0:
-        err_msg = 'No GPUs found in Kubernetes cluster. '
+    if context is None:
+        context_list = clouds.Kubernetes.existing_allowed_contexts()
+    else:
+        context_list = [context]
+
+    def _realtime_kubernetes_gpu_availability_single(
+        context: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> List[models.RealtimeGpuAvailability]:
+        counts, capacity, available = service_catalog.list_accelerator_realtime(
+            gpus_only=True,
+            clouds='kubernetes',
+            name_filter=name_filter,
+            region_filter=context,
+            quantity_filter=quantity_filter,
+            case_sensitive=False)
+        assert (set(counts.keys()) == set(capacity.keys()) == set(
+            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
+                                 f'capacity ({list(capacity.keys())}), '
+                                 f'and available ({list(available.keys())}) '
+                                 'must be the same.')
+        realtime_gpu_availability_list: List[
+            models.RealtimeGpuAvailability] = []
+
+        for gpu, _ in sorted(counts.items()):
+            realtime_gpu_availability_list.append(
+                models.RealtimeGpuAvailability(
+                    gpu,
+                    counts.pop(gpu),
+                    capacity[gpu],
+                    available[gpu],
+                ))
+        return realtime_gpu_availability_list
+
+    availability_lists: List[Tuple[str,
+                                   List[models.RealtimeGpuAvailability]]] = []
+    cumulative_count = 0
+    parallel_queried = subprocess_utils.run_in_parallel(
+        lambda ctx: _realtime_kubernetes_gpu_availability_single(
+            context=ctx,
+            name_filter=name_filter,
+            quantity_filter=quantity_filter), context_list)
+
+    for ctx, queried in zip(context_list, parallel_queried):
+        cumulative_count += len(queried)
+        if len(queried) == 0:
+            # don't add gpu results for clusters that don't have any
+            logger.debug(f'No gpus found in k8s cluster {ctx}')
+            continue
+        availability_lists.append((ctx, queried))
+
+    if cumulative_count == 0:
+        err_msg = 'No GPUs found in any Kubernetes clusters. '
         debug_msg = 'To further debug, run: sky check '
         if name_filter is not None:
             gpu_info_msg = f' {name_filter!r}'
@@ -1032,24 +1075,13 @@ def realtime_kubernetes_gpu_availability(
                 gpu_info_msg += (' with requested quantity'
                                  f' {quantity_filter}')
             err_msg = (f'Resources{gpu_info_msg} not found '
-                       'in Kubernetes cluster. ')
+                       'in Kubernetes clusters. ')
             debug_msg = ('To show available accelerators on kubernetes,'
                          ' run: sky show-gpus --cloud kubernetes ')
         full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                         debug_msg)
         raise ValueError(full_err_msg)
-
-    realtime_gpu_availability_list: List[models.RealtimeGpuAvailability] = []
-
-    for gpu, _ in sorted(counts.items()):
-        realtime_gpu_availability_list.append(
-            models.RealtimeGpuAvailability(
-                gpu,
-                counts.pop(gpu),
-                capacity[gpu],
-                available[gpu],
-            ))
-    return realtime_gpu_availability_list
+    return availability_lists
 
 
 # =================
@@ -1061,7 +1093,8 @@ def local_up(gpus: bool,
              ssh_user: Optional[str],
              ssh_key: Optional[str],
              cleanup: bool,
-             context_name: Optional[str] = None) -> None:
+             context_name: Optional[str] = None,
+             password: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key, cleanup):
@@ -1087,7 +1120,8 @@ def local_up(gpus: bool,
     if ips:
         assert ssh_user is not None and ssh_key is not None
         kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name)
+                                                      cleanup, context_name,
+                                                      password)
     else:
         # Run local deployment (kind) if no remote args are specified
         kubernetes_deploy_utils.deploy_local_cluster(gpus)
@@ -1134,7 +1168,9 @@ def local_down() -> None:
         # Run sky check
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Running sky check...')):
-            sky_check.check(clouds=['kubernetes'], quiet=True)
+            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                       clouds=['kubernetes'],
+                                       quiet=True)
         logger.info(
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,

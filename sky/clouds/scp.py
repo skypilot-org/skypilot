@@ -58,6 +58,8 @@ class SCP(clouds.Cloud):
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            (f'High availability controllers are not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
@@ -312,7 +314,9 @@ class SCP(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        SCP's compute service."""
         try:
             scp_utils.SCPClient().list_instances()
         except (AssertionError, KeyError, scp_utils.SCPClientError,
