@@ -180,6 +180,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'azure_arm_parameters', 'cloudInitSetupCommands'),
+    ('available_node_types', 'ray_head_default', 'node_config', 'pvc_spec'),
+    ('available_node_types', 'ray_head_default', 'node_config',
+     'deployment_spec'),
 ]
 # These keys are expected to change when provisioning on an existing cluster,
 # but they don't actually represent a change that requires re-provisioning the
@@ -279,11 +282,11 @@ def _optimize_file_mounts(yaml_path: str) -> None:
             # the dst.
             mkdir_parent = f'mkdir -p {dst}'
             src_basename = f'{src_basename}/*'
-        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+        mv = (f'cp -rf {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
               f'{dst_parent_dir}/{dst_basename}')
         fragment = f'({mkdir_parent} && {mv})'
         commands.append(fragment)
-    postprocess_runtime_files_command = ' && '.join(commands)
+    postprocess_runtime_files_command = '; '.join(commands)
 
     setup_commands = yaml_config.get('setup_commands', [])
     if setup_commands:
@@ -703,6 +706,15 @@ def write_cluster_config(
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
+    is_custom_docker = ('true' if to_provision.extract_docker_image()
+                        is not None else 'false')
+
+    # Here, if users specify the controller to be high availability, we will
+    # provision a high availability controller. Whether the cloud supports
+    # this feature has been checked by
+    # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
+    high_availability_specified = controller_utils.high_availability_specified(
+        cluster_name_on_cloud)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -742,7 +754,9 @@ def write_cluster_config(
                 # syntax.
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}', conda_auto_activate),
+                        '{conda_auto_activate}',
+                        conda_auto_activate).replace('{is_custom_docker}',
+                                                     is_custom_docker),
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',
@@ -785,8 +799,13 @@ def write_cluster_config(
                 'sky_ray_yaml_local_path': tmp_yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
+                'ssh_max_sessions_config':
+                    constants.SET_SSH_MAX_SESSIONS_CONFIG_CMD,
                 # Authentication (optional).
                 **auth_config,
+
+                # High availability
+                'high_availability': high_availability_specified,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -799,8 +818,12 @@ def write_cluster_config(
             cluster_config_overrides=to_provision.cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
-        pod_config = yaml_obj['available_node_types']['ray_head_default'][
-            'node_config']
+        pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']
+
+        # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
+        pod_config.pop('deployment_spec', None)
+        pod_config.pop('pvc_spec', None)
         valid, message = kubernetes_utils.check_pod_config(pod_config)
         if not valid:
             raise exceptions.InvalidCloudConfigs(
@@ -2583,11 +2606,36 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
+    def _update_record_with_resources(record: Optional[Dict[str, Any]]) -> None:
+        """Add the resources to the record."""
+        if record is None:
+            return
+        handle = record['handle']
+        if handle is None:
+            return
+        record['nodes'] = handle.launched_nodes
+        if handle.launched_resources is None:
+            return
+        record['cloud'] = (f'{handle.launched_resources.cloud}'
+                           if handle.launched_resources.cloud else None)
+        record['region'] = (f'{handle.launched_resources.region}'
+                            if handle.launched_resources.region else None)
+        record['cpus'] = (f'{handle.launched_resources.cpus}'
+                          if handle.launched_resources.cpus else None)
+        record['memory'] = (f'{handle.launched_resources.memory}'
+                            if handle.launched_resources.memory else None)
+        record['accelerators'] = (f'{handle.launched_resources.accelerators}'
+                                  if handle.launched_resources.accelerators else
+                                  None)
+
     # Add auth_config to the records
     for record in records:
         _update_record_with_credentials_and_resources_str(record)
 
     if refresh == common.StatusRefreshMode.NONE:
+        # Add resources to the records
+        for record in records:
+            _update_record_with_resources(record)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -2663,6 +2711,9 @@ def get_clusters(
         for cluster_name, e in failed_clusters:
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
 
+    # Add resources to the records
+    for record in kept_records:
+        _update_record_with_resources(record)
     return kept_records
 
 

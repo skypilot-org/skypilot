@@ -310,6 +310,7 @@ def get_service_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.serve import load_balancing_policies
+    from sky.serve import spot_placer
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -362,6 +363,10 @@ def get_service_schema():
                         'type': 'integer',
                         'minimum': 0,
                     },
+                    'num_overprovision': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
                     'target_qps_per_replica': {
                         'type': 'number',
                         'minimum': 0,
@@ -372,6 +377,11 @@ def get_service_schema():
                     'base_ondemand_fallback_replicas': {
                         'type': 'integer',
                         'minimum': 0,
+                    },
+                    'spot_placer': {
+                        'type': 'string',
+                        'case_insensitive_enum': list(
+                            spot_placer.SPOT_PLACERS.keys())
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
@@ -463,6 +473,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
+    # TODO: experimental.config_overrides has been deprecated in favor of the
+    # top-level `config` field. Remove in v0.11.0.
     config_override_schema = _filter_schema(
         get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
@@ -545,6 +557,9 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
+            'config': _filter_schema(
+                get_config_schema(),
+                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
             **_experimental_task_schema(),
         }
     }
@@ -594,13 +609,6 @@ def get_cluster_schema():
 
 
 _NETWORK_CONFIG_SCHEMA = {
-    'vpc_name': {
-        'oneOf': [{
-            'type': 'string',
-        }, {
-            'type': 'null',
-        }],
-    },
     'use_internal_ips': {
         'type': 'boolean',
     },
@@ -717,6 +725,29 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
+    autostop_schema = {
+        'anyOf': [
+            {
+                # Use boolean to disable autostop completely, e.g.
+                #   autostop: false
+                'type': 'boolean',
+            },
+            {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'idle_minutes': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
+                    'down': {
+                        'type': 'boolean',
+                    },
+                },
+            },
+        ],
+    }
     controller_resources_schema = {
         'type': 'object',
         'required': [],
@@ -728,6 +759,10 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                    },
+                    'autostop': autostop_schema,
                 }
             },
             'bucket': {
@@ -757,6 +792,13 @@ def get_config_schema():
                 },
                 'security_group_name':
                     (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }],
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -794,6 +836,19 @@ def get_config_schema():
                 },
                 'enable_gvnic': {
                     'type': 'boolean'
+                },
+                'vpc_name': {
+                    'oneOf': [
+                        {
+                            'type': 'string',
+                            # vpc-name or project-id/vpc-name
+                            # VPC name and Project ID have -, a-z, and 0-9.
+                            'pattern': '^(?:[-a-z0-9]+/)?[-a-z0-9]+$'
+                        },
+                        {
+                            'type': 'null',
+                        }
+                    ],
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
@@ -867,6 +922,16 @@ def get_config_schema():
                         type.value
                         for type in kubernetes_enums.KubernetesAutoscalerType
                     ]
+                },
+                'high_availability': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'storage_class_name': {
+                            'type': 'string',
+                        }
+                    }
                 },
             }
         },

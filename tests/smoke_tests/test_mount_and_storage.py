@@ -148,7 +148,9 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 # ---------- storage ----------
 def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
                                        storage_name: str, ls_hello_command: str,
-                                       cloud: str, only_mount: bool):
+                                       cloud: str, only_mount: bool,
+                                       include_mount_cached: bool):
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -165,6 +167,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         include_s3_mount=include_s3_mount,
         include_gcs_mount=include_gcs_mount,
         include_azure_mount=include_azure_mount,
+        include_mount_cached=include_mount_cached,
     )
     f.write(content)
     f.flush()
@@ -183,6 +186,19 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         # the mounted directory
         f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
     ]
+    if include_mount_cached and cloud != 'kubernetes':
+        if cloud == 'aws':
+            rclone_stores = data_utils.Rclone.RcloneStores.S3
+        elif cloud == 'gcp':
+            rclone_stores = data_utils.Rclone.RcloneStores.GCS
+        elif cloud == 'azure':
+            rclone_stores = data_utils.Rclone.RcloneStores.AZURE
+        else:
+            raise ValueError(f'Invalid cloud provider: {cloud}')
+        rclone_profile_name = rclone_stores.get_profile_name(storage_name)
+        test_commands.append(
+            f'sky exec {cluster_name} -- "set -ex; '
+            f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt;"')
     clean_command = (
         f'sky down -y {cluster_name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
@@ -198,7 +214,7 @@ def test_aws_storage_mounts_with_stop():
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False)
+            f, name, storage_name, ls_hello_command, cloud, False, True)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts',
             test_commands,
@@ -216,7 +232,7 @@ def test_aws_storage_mounts_with_stop_only_mount():
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, True)
+            f, name, storage_name, ls_hello_command, cloud, True, False)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts_only_mount',
             test_commands,
@@ -234,7 +250,7 @@ def test_gcp_storage_mounts_with_stop():
     ls_hello_command = f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False)
+            f, name, storage_name, ls_hello_command, cloud, False, True)
         test = smoke_tests_utils.Test(
             'gcp_storage_mounts',
             test_commands,
@@ -261,7 +277,7 @@ def test_azure_storage_mounts_with_stop():
                         f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False)
+            f, name, storage_name, ls_hello_command, cloud, False, True)
         test = smoke_tests_utils.Test(
             'azure_storage_mounts',
             test_commands,
@@ -302,7 +318,7 @@ def test_kubernetes_storage_mounts():
     ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, 'kubernetes', False)
+            f, name, storage_name, ls_hello_command, 'kubernetes', False, False)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
@@ -371,7 +387,6 @@ def test_kubernetes_context_switch():
 # credentials for getting azure storage commands, even though the API server
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
-@pytest.mark.no_nebius  # Docker image is currently not supported on Nebius.
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize(
     'image_id',
@@ -409,10 +424,13 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     if azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
-        # azure blob. That will not be supported on the ubuntu 18.04 image
-        # and thus fail. For other clouds, the private mount on other
-        # storage types (GCS/S3) should succeed.
-        include_private_mount = False if generic_cloud == 'azure' else True
+        # azure blob. Also, if we're running on Kubernetes, the private mount
+        # might be created on azure blob to avoid the issue of the fuse adapter
+        # not being able to access the mount point. That will not be supported on
+        # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
+        # on other storage types (GCS/S3) should succeed.
+        include_private_mount = False if (
+            generic_cloud == 'azure' or generic_cloud == 'kubernetes') else True
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
                                   include_private_mount=include_private_mount)
@@ -483,7 +501,6 @@ def test_nebius_storage_mounts(generic_cloud: str):
         'tests/test_yamls/test_nebius_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
-    endpoint_url = nebius.create_endpoint()
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -492,7 +509,7 @@ def test_nebius_storage_mounts(generic_cloud: str):
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+            f'aws s3 ls s3://{storage_name}/hello.txt --profile={nebius.NEBIUS_PROFILE_NAME}'
         ]
 
         test = smoke_tests_utils.Test(
@@ -508,8 +525,8 @@ def test_nebius_storage_mounts(generic_cloud: str):
 def test_ibm_storage_mounts():
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-        storage_name, Rclone.RcloneClouds.IBM)
+    rclone_profile_name = data_utils.Rclone.RcloneStores.IBM.get_profile_name(
+        storage_name)
     template_str = pathlib.Path(
         'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
@@ -522,7 +539,7 @@ def test_ibm_storage_mounts():
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
+            f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt',
         ]
         test = smoke_tests_utils.Test(
             'ibm_storage_mounts',
@@ -533,15 +550,98 @@ def test_ibm_storage_mounts():
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Testing Storage ----------
-# These tests are essentially unit tests for Storage, but they require
-# credentials and network connection. Thus, they are included with smoke tests.
-# Since these tests require cloud credentials to verify bucket operations,
-# they should not be run when the API server is remote and the user does not
-# have any credentials locally.
-# TODO(SKY-1219): In the future, we should figure out a way to ship these tests
-#  to the API server and run them there. Maybe these tests can be packaged as a
-#  SkyPilot task run on a remote cluster launched via the API server.
+@pytest.mark.no_vast  # VAST does not support multi-cloud features
+@pytest.mark.no_fluidstack  # FluidStack doesn't have stable package installation
+@pytest.mark.parametrize('ignore_file',
+                         [constants.SKY_IGNORE_FILE, constants.GIT_IGNORE_FILE])
+def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
+    """Tests that .skyignore patterns correctly exclude files when using sky launch and sky jobs launch.
+
+    Creates a temporary directory with various files and folders, adds a .skyignore file
+    that excludes specific files and folders, then verifies the exclusions work properly
+    when using sky launch and sky jobs launch commands.
+    """
+    ignore_type = ignore_file.lstrip('.').replace('ignore', '')
+    name = smoke_tests_utils.get_cluster_name()
+    name = f'{name}-{ignore_type}'
+    jobs_name = f'{name}-job'
+
+    # Path to the YAML file that defines the task
+    yaml_path = 'tests/test_yamls/test_skyignore.yaml'
+
+    # Prepare a temporary directory with test files and .skyignore or .gitignore
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create directory structure
+        dirs = [
+            'keep_dir', 'exclude_dir', 'nested/keep_subdir',
+            'nested/exclude_subdir'
+        ]
+        files = [
+            'script.py',  # Keep (not relevant as we don't use it)
+            'exclude.py',  # Exclude
+            'data.txt',  # Keep
+            'temp.log',  # Exclude
+            'keep_dir/keep.txt',  # Keep
+            'exclude_dir/notes.md',  # Directory excluded
+            'nested/keep_subdir/test.py',  # Keep
+            'nested/exclude_subdir/test.sh',  # Directory excluded
+        ]
+
+        # Create directories
+        for dir_name in dirs:
+            os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
+
+        # Create files
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(f'Content for {file_path}')
+
+        # Create .skyignore file
+        ignore_content = """
+# Exclude specific files
+exclude.py
+*.log
+
+# Exclude directories
+/exclude_dir
+/nested/exclude_subdir
+"""
+        with open(os.path.join(temp_dir, ignore_file), 'w',
+                  encoding='utf-8') as f:
+            f.write(ignore_content)
+        if ignore_file == constants.GIT_IGNORE_FILE:
+            # Initialize git repository to make sure gitignore is used
+            subprocess.run(['git', 'init'], cwd=temp_dir, check=True)
+
+        # Run test commands
+        test_commands = [
+            # Test with sky launch
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --workdir {temp_dir} {yaml_path}',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded
+
+            # Test with sky jobs launch
+            f'sky jobs launch -y -n {jobs_name} --workdir {temp_dir} {yaml_path}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{jobs_name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=60),
+        ]
+
+        teardown_commands = [
+            f'sky down -y {name}', f'sky jobs cancel -y {jobs_name}'
+        ]
+
+        test = smoke_tests_utils.Test(
+            'skyignore_exclusion_test',
+            test_commands,
+            teardown_commands,
+            smoke_tests_utils.get_timeout(generic_cloud, 15 * 60),  # 15 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.local
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
@@ -741,14 +841,13 @@ class TestStorageWithCredentials:
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
             url = f's3://{bucket_name}'
-            return f'aws s3 rb {url} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+            return f'aws s3 rb {url} --force --profile={nebius.NEBIUS_PROFILE_NAME}'
 
         if store_type == storage_lib.StoreType.IBM:
-            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-                bucket_name, Rclone.RcloneClouds.IBM)
-            return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
+            rclone_profile_name = (data_utils.Rclone.RcloneStores.IBM.
+                                   get_profile_name(bucket_name))
+            return f'rclone purge {rclone_profile_name}:{bucket_name} && rclone config delete {rclone_profile_name}'
 
     @classmethod
     def list_all_files(cls, store_type: storage_lib.StoreType,
@@ -833,18 +932,17 @@ class TestStorageWithCredentials:
             recursive_flag = '--recursive' if recursive else ''
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2 {recursive_flag}'
         if store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
             if suffix:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
             recursive_flag = '--recursive' if recursive else ''
-            return f'aws s3 ls {url} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
+            return f'aws s3 ls {url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
 
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
-            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-                bucket_name, Rclone.RcloneClouds.IBM)
+            bucket_rclone_profile = data_utils.Rclone.generate_rclone_bucket_profile_name(
+                bucket_name, data_utils.Rclone.RcloneClouds.IBM)
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @staticmethod
@@ -905,11 +1003,10 @@ class TestStorageWithCredentials:
             else:
                 return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
         elif store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
             if suffix:
-                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
             else:
-                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -932,8 +1029,7 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
         elif store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
-            return f'aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
+            return f'aws s3 ls s3://{bucket_name} --recursive --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1106,6 +1202,9 @@ class TestStorageWithCredentials:
         # with .gitignore and .git/info/exclude files to test exclude filter.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
+            # Initialize git repository
+            subprocess.check_call(['git', 'init'], cwd=tmpdir)
+
             # Creates file structure to be uploaded in the Storage
             self.create_dir_structure(tmpdir, gitignore_structure)
 
@@ -1117,7 +1216,6 @@ class TestStorageWithCredentials:
 
             # Create .git/info/exclude and list files/dirs to be excluded in it
             temp_path = f'{tmpdir}/.git/info/'
-            os.makedirs(temp_path)
             temp_exclude_path = os.path.join(temp_path, 'exclude')
             file_path = os.path.join(skypilot_path,
                                      'tests/git_info_exclude_test')
@@ -1183,14 +1281,13 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_awscli_bucket_nebius(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
-        endpoint_url = nebius.create_endpoint()
         bucket_uri = f's3://{tmp_bucket_name}'
         subprocess.check_call(
-            f'aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
+            f'aws s3 mb {bucket_uri} --profile={nebius.NEBIUS_PROFILE_NAME}',
             shell=True)
         yield tmp_bucket_name, f'nebius://{tmp_bucket_name}'
         subprocess.check_call(
-            f'aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
+            f'aws s3 rb {bucket_uri} --force --profile={nebius.NEBIUS_PROFILE_NAME}',
             shell=True)
 
     @pytest.fixture
@@ -1483,8 +1580,7 @@ class TestStorageWithCredentials:
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('nebius'):
-                endpoint_url = nebius.create_endpoint()
-                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={nebius.NEBIUS_PROFILE_NAME}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('cos'):
                 # Using API calls, since using rclone requires a profile's name

@@ -1,7 +1,6 @@
 """Nebius cloud adaptor."""
 import os
 import threading
-from typing import Optional
 
 from sky.adaptors import common
 from sky.utils import annotations
@@ -29,11 +28,6 @@ MAX_RETRIES_TO_DISK_DELETE = 120
 MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
 
 POLL_INTERVAL = 5
-
-_iam_token = None
-_sdk = None
-_tenant_id = None
-_project_id = None
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Nebius AI Cloud.'
                          'Try pip install "skypilot[nebius]"')
@@ -82,56 +76,49 @@ def vpc():
     return vpc_v1
 
 
+@annotations.lru_cache(scope='request')
 def get_iam_token():
-    global _iam_token
-    if _iam_token is None:
-        try:
-            with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
-                      encoding='utf-8') as file:
-                _iam_token = file.read().strip()
-        except FileNotFoundError:
-            return None
-    return _iam_token
+    try:
+        with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
+                  encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
+@annotations.lru_cache(scope='request')
 def is_token_or_cred_file_exist():
     return (os.path.exists(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH)) or
             os.path.exists(os.path.expanduser(NEBIUS_CREDENTIALS_PATH)))
 
 
+@annotations.lru_cache(scope='request')
 def get_project_id():
-    global _project_id
-    if _project_id is None:
-        try:
-            with open(os.path.expanduser(NEBIUS_PROJECT_ID_PATH),
-                      encoding='utf-8') as file:
-                _project_id = file.read().strip()
-        except FileNotFoundError:
-            return None
-    return _project_id
+    try:
+        with open(os.path.expanduser(NEBIUS_PROJECT_ID_PATH),
+                  encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
+@annotations.lru_cache(scope='request')
 def get_tenant_id():
-    global _tenant_id
-    if _tenant_id is None:
-        try:
-            with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
-                      encoding='utf-8') as file:
-                _tenant_id = file.read().strip()
-        except FileNotFoundError:
-            return None
-    return _tenant_id
+    try:
+        with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
+                  encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return None
 
 
+@annotations.lru_cache(scope='request')
 def sdk():
-    global _sdk
-    if _sdk is None:
-        if get_iam_token() is not None:
-            _sdk = nebius.sdk.SDK(credentials=get_iam_token())
-            return _sdk
-        _sdk = nebius.sdk.SDK(
-            credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
-    return _sdk
+    token = get_iam_token()
+    if token is not None:
+        return nebius.sdk.SDK(credentials=token)
+    return nebius.sdk.SDK(
+        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
 
 
 def get_nebius_credentials(boto3_session):
@@ -168,7 +155,7 @@ def session():
 
 
 @annotations.lru_cache(scope='global')
-def resource(resource_name: str, region: str = DEFAULT_REGION, **kwargs):
+def resource(resource_name: str, **kwargs):
     """Create a Nebius resource.
 
     Args:
@@ -181,21 +168,13 @@ def resource(resource_name: str, region: str = DEFAULT_REGION, **kwargs):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    nebius_credentials = get_nebius_credentials(session_)
-    endpoint = create_endpoint(region)
 
-    return session_.resource(
-        resource_name,
-        endpoint_url=endpoint,
-        aws_access_key_id=nebius_credentials.access_key,
-        aws_secret_access_key=nebius_credentials.secret_key,
-        region_name=region,
-        **kwargs)
+    return session_.resource(resource_name, **kwargs)
 
 
 @annotations.lru_cache(scope='global')
-def client(service_name: str, region):
-    """Create an Nebius client of a certain service.
+def client(service_name: str):
+    """Create Nebius client of a certain service.
 
     Args:
         service_name: Nebius service name (e.g., 's3').
@@ -207,14 +186,8 @@ def client(service_name: str, region):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    nebius_credentials = get_nebius_credentials(session_)
-    endpoint = create_endpoint(region)
 
-    return session_.client(service_name,
-                           endpoint_url=endpoint,
-                           aws_access_key_id=nebius_credentials.access_key,
-                           aws_secret_access_key=nebius_credentials.secret_key,
-                           region_name=region)
+    return session_.client(service_name)
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
@@ -223,10 +196,3 @@ def botocore_exceptions():
     # pylint: disable=import-outside-toplevel
     from botocore import exceptions
     return exceptions
-
-
-def create_endpoint(region: Optional[str] = DEFAULT_REGION) -> str:
-    """Reads accountid necessary to interact with Nebius Object Storage"""
-    if region is None:
-        region = DEFAULT_REGION
-    return f'https://storage.{region}.nebius.cloud:443'

@@ -147,7 +147,7 @@ class OCIConfig:
         if config_path_via_env_var is not None:
             config_path = config_path_via_env_var
         else:
-            config_path = skypilot_config.CONFIG_PATH
+            config_path = skypilot_config.get_user_config_path()
         return config_path
 
     @classmethod

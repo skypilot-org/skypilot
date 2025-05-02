@@ -117,7 +117,7 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': None,
+    # 'announcement': '<div style="padding: 24px; text-align: center; font-size: 0.8rem; line-height: 1;">Put meetup and other announcements here.</div>',
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',

@@ -6,6 +6,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
+import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -28,12 +29,10 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-    import numpy as np
 
     from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
-    np = adaptors_common.LazyImport('numpy')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -278,6 +277,8 @@ class Optimizer:
                     launchable_resources_list)
             return num_available_reserved_nodes_per_resource
 
+        indent_prefix = ' ' * len('Hint: ')
+
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
@@ -291,11 +292,11 @@ class Optimizer:
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources, cloud_candidates, fuzzy_candidates = (
-                    _fill_in_launchable_resources(
-                        task=node,
-                        blocked_resources=blocked_resources,
-                        quiet=quiet))
+                (launchable_resources, cloud_candidates, fuzzy_candidates,
+                 resource_hints) = (_fill_in_launchable_resources(
+                     task=node,
+                     blocked_resources=blocked_resources,
+                     quiet=quiet))
                 node_to_candidate_map[node] = cloud_candidates
                 # Has to call the printing after the launchable resources are
                 # computed, because the missing fields of the resources are
@@ -336,9 +337,6 @@ class Optimizer:
                             orig_resources)
 
                 for resources in launchable_list:
-                    if do_print:
-                        logger.debug(f'resources: {resources}')
-
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = (
@@ -356,13 +354,14 @@ class Optimizer:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
                     if do_print:
-                        logger.debug(
-                            '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
-                                estimated_runtime, estimated_runtime / 3600))
+                        debug_msg = (
+                            f'resources: {resources}, '
+                            f'estimated_runtime: {estimated_runtime} s '
+                            f'({estimated_runtime / 3600:.1f} hr)')
                         if minimize_cost:
-                            logger.debug(
-                                '  estimated_cost (not incl. egress): ${:.1f}'.
-                                format(estimated_cost_or_time))
+                            debug_msg += (', estimated_cost: '
+                                          f'${estimated_cost_or_time:.1f}')
+                        logger.debug(debug_msg)
                     node_to_cost_map[node][resources] = estimated_cost_or_time
             if not node_to_cost_map[node]:
                 source_hint = 'catalog'
@@ -393,6 +392,18 @@ class Optimizer:
                 node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
                                                  r.repr_with_region_zone
                                                  for r in node.resources)
+                hints_concat = '\n'.join([
+                    f'{bold}Resource: {repr(resource)}{reset}\n' +
+                    '\n'.join(hint_list)
+                    for resource, hint_list in resource_hints.items()
+                    if hint_list
+                ])
+                hints_formatted = '\n'.join(
+                    map(lambda r: f'{indent_prefix}{r}',
+                        hints_concat.split('\n')))
+                resource_hints_string = (
+                    f'Hint: Check Per Resource Hint\n{hints_formatted}'
+                    if hints_formatted else '')
                 error_msg = (
                     f'{source_hint.capitalize()} does not contain any '
                     f'instances satisfying the request: '
@@ -401,8 +412,9 @@ class Optimizer:
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky show-gpus{reset} '
                     'to list available accelerators.\n'
-                    f'      {bold}sky check{reset} to check the enabled '
-                    'clouds.')
+                    f'{indent_prefix}{bold}sky check{reset} to check the '
+                    'enabled clouds.\n'
+                    f'{resource_hints_string}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(error_msg)
         return node_to_cost_map, node_to_candidate_map
@@ -713,7 +725,7 @@ class Optimizer:
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
             table = _create_table(['SOURCE', 'TARGET', 'SIZE (GB)', metric])
-            table.add_rows(reversed(message_data))
+            table.add_rows(list(reversed(message_data)))
             logger.info(f'Egress plan:\n{table}\n')
 
     @staticmethod
@@ -1050,7 +1062,7 @@ class Optimizer:
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
-                    launchable_resources_map, _, _ = (
+                    launchable_resources_map, _, _, _ = (
                         _fill_in_launchable_resources(
                             task=local_task,
                             blocked_resources=blocked_resources,
@@ -1140,50 +1152,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-def _make_launchables_for_valid_region_zones(
-    launchable_resources: resources_lib.Resources
-) -> List[resources_lib.Resources]:
-    assert launchable_resources.is_launchable()
-    # In principle, all provisioning requests should be made at the granularity
-    # of a single zone. However, for on-demand instances, we batch the requests
-    # to the zones in the same region in order to leverage the region-level
-    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
-    # API calls, and thus the overall failover time. Note that this optimization
-    # does not affect the user cost since the clouds charge the same prices for
-    # on-demand instances in the same region regardless of the zones. On the
-    # other hand, for spot instances, we do not batch the requests because the
-    # "AWS" spot prices may vary across zones.
-    # For GCP, we do not batch the requests because GCP reservation system is
-    # zone based. Therefore, price estimation is potentially different across
-    # zones.
-
-    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
-    # while we return per-region resources here, the provisioner will still
-    # issue the request for one zone at a time.
-    # NOTE(woosuk): If we support Azure spot instances, we should batch the
-    # requests since Azure spot prices are region-level.
-    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
-    # in the same region and have the same price.
-    # TODO(woosuk): A better design is to implement batching at a higher level
-    # (e.g., in provisioner or optimizer), not here.
-    launchables = []
-    regions = launchable_resources.get_valid_regions_for_launchable()
-    for region in regions:
-        if (launchable_resources.use_spot and region.zones is not None or
-                launchable_resources.cloud.optimize_by_zone()):
-            # Spot instances.
-            # Do not batch the per-zone requests.
-            for zone in region.zones:
-                launchables.append(
-                    launchable_resources.copy(region=region.name,
-                                              zone=zone.name))
-        else:
-            # On-demand instances.
-            # Batch the requests at the granularity of a single region.
-            launchables.append(launchable_resources.copy(region=region.name))
-    return launchables
-
-
 def _filter_out_blocked_launchable_resources(
         launchable_resources: Iterable[resources_lib.Resources],
         blocked_resources: Iterable[resources_lib.Resources]):
@@ -1260,7 +1228,8 @@ def _fill_in_launchable_resources(
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates, List[str]]:
+           _PerCloudCandidates, List[str], Dict[resources_lib.Resources,
+                                                List[str]]]:
     """Fills in the launchable resources for the task.
 
     Returns:
@@ -1269,6 +1238,8 @@ def _fill_in_launchable_resources(
           Resources,
         Dict mapping Cloud to a list of feasible Resources (for printing),
         Sorted list of fuzzy candidates (alternative GPU names).
+        Dict mapping requested Resources and a list of hints for why the
+          resource is unavailable if so.
     Raises:
       ResourcesUnavailableError: if all resources required by the task are on
         a cloud that is not enabled.
@@ -1282,6 +1253,8 @@ def _fill_in_launchable_resources(
     all_fuzzy_candidates = set()
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(
         List[resources_lib.Resources])
+    resource_hints: Dict[resources_lib.Resources,
+                         List[str]] = collections.defaultdict(list)
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
@@ -1306,6 +1279,7 @@ def _fill_in_launchable_resources(
         for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
+                resource_hints[resources].append(feasible_resources.hint)
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
@@ -1313,7 +1287,8 @@ def _fill_in_launchable_resources(
                 cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
-                    _make_launchables_for_valid_region_zones(cheapest))
+                    resources_utils.make_launchables_for_valid_region_zones(
+                        cheapest))
                 cloud_candidates[cloud] = feasible_resources.resources_list
             else:
                 all_fuzzy_candidates.update(
@@ -1347,8 +1322,11 @@ def _fill_in_launchable_resources(
                                     'to allow for larger instances.'
                                     f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
-                    logger.info(f'{repr(cloud)}: {hint}')
+                    logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                f'{repr(cloud)}: {hint}'
+                                f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    return launchable, cloud_candidates, list(sorted(all_fuzzy_candidates))
+    return launchable, cloud_candidates, list(
+        sorted(all_fuzzy_candidates)), resource_hints

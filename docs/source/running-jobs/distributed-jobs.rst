@@ -23,10 +23,14 @@ For example, here is a simple example to train a GPT-like model (inspired by Kar
       cd examples
       git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp
       # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
+      uv venv --python 3.10
+      source .venv/bin/activate
       uv pip install -r requirements.txt "numpy<2" "torch==1.12.1+cu113" --extra-index-url https://download.pytorch.org/whl/cu113
 
   run: |
-      cd examples/mingpt
+      cd examples
+      source .venv/bin/activate
+      cd mingpt
       export LOGLEVEL=INFO
 
       MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
@@ -124,7 +128,7 @@ To execute a job on the head node only (a common scenario for tools like
 
 SSH into worker nodes
 ---------------------
-In addition to the head node, the SSH configurations for the worker nodes of a multi-node cluster are also added to ``~/.ssh/config`` as ``<cluster_name>-worker<n>``.
+In addition to the head node, the SSH configuration values for the worker nodes of a multi-node cluster are also added to ``~/.ssh/config`` as ``<cluster_name>-worker<n>``.
 This allows you directly to SSH into the worker nodes, if required.
 
 .. code-block:: console

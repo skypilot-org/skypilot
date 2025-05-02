@@ -23,7 +23,6 @@ from sky.adaptors import nebius
 from sky.adaptors import oci
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import ux_utils
 
@@ -454,19 +453,18 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, Rclone.RcloneClouds.IBM)
-        data_path_in_bucket = bucket_name + data_path
-        rclone_config_data = Rclone.get_rclone_config(bucket_name,
-                                                      Rclone.RcloneClouds.IBM,
-                                                      bucket_region)
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.IBM.get_profile_name(bucket_name))
+        data_path_in_bucket = f'{bucket_name}{data_path}'
+        rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
+            rclone_profile_name=rclone_profile_name, region=bucket_region)
         # configure_rclone stores bucket profile in remote cluster's rclone.conf
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ &&'
-            f' echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}')
+            f' mkdir -p {constants.RCLONE_CONFIG_DIR} &&'
+            f' echo "{rclone_config}">> {constants.RCLONE_CONFIG_PATH}')
         download_via_rclone = (
             'rclone copy '
-            f'{bucket_rclone_profile}:{data_path_in_bucket} {destination}')
+            f'{rclone_profile_name}:{data_path_in_bucket} {destination}')
 
         all_commands = list(self._GET_RCLONE)
         all_commands.append(configure_rclone)
@@ -580,13 +578,11 @@ class NebiusCloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        endpoint_url = nebius.create_endpoint()
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
-                               f'--endpoint {endpoint_url} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)
@@ -595,12 +591,10 @@ class NebiusCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        endpoint_url = nebius.create_endpoint()
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                f'cp {source} {destination} '
-                               f'--endpoint {endpoint_url} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)

@@ -207,11 +207,8 @@ class ClusterInfo:
 
     def get_feasible_ips(self, force_internal_ips: bool = False) -> List[str]:
         """Get internal or external IPs depends on the settings."""
-        if self.provider_config is not None:
-            use_internal_ips = self.provider_config.get('use_internal_ips',
-                                                        False)
-        else:
-            use_internal_ips = False
+        use_internal_ips = (self.provider_config is not None and
+                            self.provider_config.get('use_internal_ips', False))
         return self._get_ips(use_internal_ips or not self.has_external_ips() or
                              force_internal_ips)
 

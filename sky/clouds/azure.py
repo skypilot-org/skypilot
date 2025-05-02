@@ -90,6 +90,9 @@ class Azure(clouds.Cloud):
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
+                f'High availability controllers are not supported on {cls._REPR}.'
+            ),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (

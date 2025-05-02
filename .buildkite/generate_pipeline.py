@@ -40,6 +40,13 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
+# We use a separate queue for generic cloud tests on remote servers because:
+# - generic_cloud queue has high concurrency on a single VM
+# - remote-server requires launching a docker container per test
+# - Reusing generic_cloud queue to run remote-server tests would overload the VM
+# Kubernetes has low concurrency on a single VM originally,
+# so remote-server won't drain VM resources, we can reuse the same queue.
+QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
 # We use KUBE_BACKEND to specify the queue for kubernetes tests mark as
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
@@ -56,6 +63,27 @@ CLOUD_QUEUE_MAP = {
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
+
+
+def _get_buildkite_queue(cloud: str, remote_server: bool,
+                         run_on_cloud_kube_backend: bool) -> str:
+    """Get the Buildkite queue for a given cloud.
+
+    We use a separate queue for generic cloud tests on remote servers because:
+    - generic_cloud queue has high concurrency on a single VM
+    - remote-server requires launching a docker container per test
+    - Reusing generic_cloud queue to run remote-server tests would overload the VM
+
+    Kubernetes has low concurrency on a single VM originally,
+    so remote-server won't drain VM resources, we can reuse the same queue.
+    """
+    if run_on_cloud_kube_backend:
+        return QUEUE_KUBE_BACKEND
+
+    queue = CLOUD_QUEUE_MAP[cloud]
+    if queue == QUEUE_GENERIC_CLOUD and remote_server:
+        return QUEUE_GENERIC_CLOUD_REMOTE_SERVER
+    return queue
 
 
 def _parse_args(args: Optional[str] = None):
@@ -82,6 +110,12 @@ def _parse_args(args: Optional[str] = None):
     # -k argument for a test selection pattern
     parser.add_argument("-k")
 
+    parser.add_argument("--remote-server", action="store_true")
+
+    parser.add_argument('--base-branch')
+
+    parser.add_argument('--controller-cloud')
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -105,7 +139,15 @@ def _parse_args(args: Optional[str] = None):
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
 
-    return default_clouds_to_run, parsed_args.k
+    extra_args = []
+    if parsed_args.remote_server:
+        extra_args.append('--remote-server')
+    if parsed_args.base_branch:
+        extra_args.append(f'--base-branch {parsed_args.base_branch}')
+    if parsed_args.controller_cloud:
+        extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
+
+    return default_clouds_to_run, parsed_args.k, extra_args
 
 
 def _extract_marked_tests(
@@ -128,12 +170,11 @@ def _extract_marked_tests(
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
-    print(f'args: {args}')
-    default_clouds_to_run, k_value = _parse_args(args)
+    default_clouds_to_run, k_value, extra_args = _parse_args(args)
 
-    print(f'default_clouds_to_run: {default_clouds_to_run}, k_value: {k_value}')
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
+    remote_server = '--remote-server' in extra_args
 
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
@@ -142,7 +183,7 @@ def _extract_marked_tests(
         # conftest.py
         if 'skip' in marks:
             continue
-        if k_value is not None and k_value not in function_name:
+        if k_value is not None and k_value not in function_name and k_value not in file_path:
             # TODO(zpoint): support and/or in k_value
             continue
 
@@ -206,10 +247,12 @@ def _extract_marked_tests(
             param_list += [None
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
-            QUEUE_KUBE_BACKEND
-            if run_on_cloud_kube_backend else CLOUD_QUEUE_MAP[cloud]
+            _get_buildkite_queue(cloud, remote_server,
+                                 run_on_cloud_kube_backend)
             for cloud in final_clouds_to_include
-        ], param_list)
+        ], param_list, [
+            extra_args for _ in range(len(final_clouds_to_include))
+        ])
 
     return function_cloud_map
 
@@ -222,15 +265,19 @@ def _generate_pipeline(test_file: str,
     generated_steps_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param in zip(*clouds_queues_param):
+        for cloud, queue, param, extra_args in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
+            if extra_args:
+                command += f' {" ".join(extra_args)}'
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue
+            if 'PYTHON_VERSION' in os.environ:
+                command = f'PYTHONPATH="$PWD:$PYTHONPATH" {command}'
             step = {
                 'label': label,
                 'command': command,
@@ -253,6 +300,7 @@ def _generate_pipeline(test_file: str,
 
 def _dump_pipeline_to_file(yaml_file_path: str,
                            pipelines: List[Dict[str, Any]],
+                           trigger_command: str,
                            extra_env: Optional[Dict[str, str]] = None):
     default_env = {
         'LOG_TO_STDOUT': '1',
@@ -265,11 +313,30 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         all_steps = []
         for pipeline in pipelines:
             all_steps.extend(pipeline['steps'])
-        final_pipeline = {'steps': all_steps, 'env': default_env}
+
+        # Extract key from trigger command, keeping only valid characters
+        key = re.sub(r'[^a-zA-Z0-9_\-:]', '',
+                     re.match(r'^[^ ]*', trigger_command).group(0))
+        # Generate formatted group name from key
+        group_name = ' '.join(
+            word.capitalize() for word in re.split(r'[-_]', key))
+
+        grouped_steps = [{
+            'group': group_name,
+            'key': key,
+            'notify': [{
+                'github_commit_status': {
+                    'context': f'{trigger_command}'
+                }
+            }],
+            'steps': all_steps
+        }]
+
+        final_pipeline = {'steps': grouped_steps, 'env': default_env}
         yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
-def _convert_release(test_files: List[str], args: str):
+def _convert_release(test_files: List[str], args: str, trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -278,10 +345,12 @@ def _convert_release(test_files: List[str], args: str):
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines)
+    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
+                           trigger_command)
 
 
-def _convert_quick_tests_core(test_files: List[str], args: List[str]):
+def _convert_quick_tests_core(test_files: List[str], args: List[str],
+                              trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -294,6 +363,7 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str]):
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
                            output_file_pipelines,
+                           trigger_command,
                            extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
@@ -302,23 +372,28 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str]):
               type=str,
               help='Args to pass to pytest, e.g., --managed-jobs --aws')
 def main(args):
-    test_files = os.listdir('tests/smoke_tests')
+    test_files = []
+    for root, _, files in os.walk('tests/smoke_tests'):
+        for file in files:
+            if file.endswith('.py') and file.startswith('test_'):
+                test_files.append(os.path.join(root, file))
     release_files = []
     quick_tests_core_files = []
     for test_file in test_files:
-        if not test_file.startswith('test_'):
-            continue
-        test_file_path = os.path.join('tests/smoke_tests', test_file)
         if "test_quick_tests_core" in test_file or "test_backward_compat" in test_file:
-            quick_tests_core_files.append(test_file_path)
+            quick_tests_core_files.append(test_file)
         else:
-            release_files.append(test_file_path)
+            release_files.append(test_file)
 
     args = args or os.getenv('ARGS', '')
     print(f'args: {args}')
+    # If trigger via buildkite, TRIGGER_COMMAND should be set.
+    # Otherwise, use the args passed in for local testing.
+    trigger_command = os.getenv('TRIGGER_COMMAND', '') or args or '/smoke-test'
+    print(f'trigger_command: {trigger_command}')
 
-    _convert_release(release_files, args)
-    _convert_quick_tests_core(quick_tests_core_files, args)
+    _convert_release(release_files, args, trigger_command)
+    _convert_quick_tests_core(quick_tests_core_files, args, trigger_command)
 
 
 if __name__ == '__main__':

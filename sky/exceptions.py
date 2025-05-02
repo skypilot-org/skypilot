@@ -180,6 +180,17 @@ class InvalidCloudConfigs(Exception):
     pass
 
 
+class InvalidCloudCredentials(Exception):
+    """Raised when the cloud credentials are invalid."""
+    pass
+
+
+class InconsistentHighAvailabilityError(Exception):
+    """Raised when the high availability property in the user config
+    is inconsistent with the actual cluster."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
@@ -260,7 +271,7 @@ class CommandError(SkyPilotExcludeArgsBaseException):
                 # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
-                       f'{returncode}.\n{error_msg}')
+                       f'{returncode}.\n{error_msg}\n{detailed_reason}')
         super().__init__(message)
 
 
@@ -285,6 +296,11 @@ class ClusterDoesNotExist(ValueError):
     """Raise when trying to operate on a cluster that does not exist."""
     # This extends ValueError for compatibility reasons - we used to throw
     # ValueError instead of this.
+    pass
+
+
+class CachedClusterUnavailable(Exception):
+    """Raised when a cached cluster record is unavailable."""
     pass
 
 
@@ -470,6 +486,11 @@ class ApiServerConnectionError(RuntimeError):
             f'Could not connect to SkyPilot API server at {server_url}. '
             f'Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')
+
+
+class APIVersionMismatchError(RuntimeError):
+    """Raised when the API version mismatch."""
+    pass
 
 
 class JobExitCode(enum.IntEnum):

@@ -18,16 +18,18 @@ logger = sky_logging.init_logger(__name__)
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-    '~/container_env_var.sh && '
-    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
-)
+    'export -p > ~/container_env_var.sh && '
+    '$(prefix_cmd) '
+    'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
 
 # Docker daemon may not be ready when the machine is firstly started. The error
 # message starts with the following string. We should wait for a while and retry
 # the command.
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
+
+DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
+
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
@@ -173,22 +175,25 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
-                    wait_for_docker_daemon):
-                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
-                    if rc == 0:
-                        # Set returncode to 1 if failed to connect to docker
-                        # daemon after timeout.
-                        rc = 1
-                    break
-                # Close the cached connection to make the permission update of
-                # ssh user take effect, e.g. usermod -aG docker $USER, called
-                # by cloud-init of Azure.
-                self.runner.close_cached_connection()
-                logger.info('Failed to connect to docker daemon. It might be '
-                            'initializing, retrying in 5 seconds...')
-                time.sleep(5)
-                continue
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr or
+                    DOCKER_SOCKET_NOT_READY_STR in stdout + stderr):
+                if wait_for_docker_daemon:
+                    if time.time(
+                    ) - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                        if rc == 0:
+                            # Set returncode to 1 if failed to connect to docker
+                            # daemon after timeout.
+                            rc = 1
+                        break
+                    # Close the cached connection to make the permission update
+                    # of ssh user take effect, e.g. usermod -aG docker $USER,
+                    # called by cloud-init of Azure.
+                    self.runner.close_cached_connection()
+                    logger.info(
+                        'Failed to connect to docker daemon. It might be '
+                        'initializing, retrying in 5 seconds...')
+                    time.sleep(5)
+                    continue
             break
         subprocess_utils.handle_returncode(
             rc,

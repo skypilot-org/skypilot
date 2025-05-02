@@ -37,3 +37,16 @@ run: |
     --torch-compile-max-bs 8 \
     --host 0.0.0.0 \
     --port 30000
+
+# Optional: Service configuration for SkyServe deployment
+# This will be ignored when deploying with `sky launch`
+service:
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe:
+    path: /health
+    # Allow up to 1 hour for cold start
+    initial_delay_seconds: 3600
+  # Autoscaling from 0 to 2 replicas
+  replica_policy:
+    min_replicas: 0
+    max_replicas: 2

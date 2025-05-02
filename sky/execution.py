@@ -159,9 +159,9 @@ def _execute(
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
       clone_disk_from: Optional[str]; if set, clone the disk from the specified
         cluster.
-      skip_unecessary_provisioning: bool; if True, compare the calculated
+      skip_unnecessary_provisioning: bool; if True, compare the calculated
         cluster config to the current cluster's config. If they match, shortcut
-        provisioning even if we have Stage.PROVISION.
+        provisioning and setup, even if we have Stage.PROVISION and Stage.SETUP.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -208,9 +208,19 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
+    is_controller_high_availability_supported = False
+
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+        if controller_utils.high_availability_specified(cluster_name,
+                                                        skip_warning=False):
+            requested_features.add(clouds.CloudImplementationFeatures.
+                                   HIGH_AVAILABILITY_CONTROLLERS)
+            # If we provision a cluster that supports high availability
+            # controllers, we can use the high availability controller.
+            is_controller_high_availability_supported = True
 
     # Add requested features from the task
     requested_features |= task.get_required_cloud_features()
@@ -237,11 +247,12 @@ def _execute(
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
             if idle_minutes_to_autostop >= 0:
-                requested_features.add(
-                    clouds.CloudImplementationFeatures.AUTO_TERMINATE)
-                if not down:
+                if down:
                     requested_features.add(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTODOWN)
+                else:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
@@ -294,21 +305,27 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    backend.register_info(dag=dag,
-                          optimize_target=optimize_target,
-                          requested_features=requested_features)
+    backend.register_info(
+        dag=dag,
+        optimize_target=optimize_target,
+        requested_features=requested_features,
+        # That's because we want to do commands in task.setup and task.run again
+        # after K8S pod recovers from a crash.
+        # See `kubernetes-ray.yml.j2` for more details.
+        dump_final_script=is_controller_high_availability_supported)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
     try:
+        provisioning_skipped = False
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            handle = backend.provision(
+            (handle, provisioning_skipped) = backend.provision(
                 task,
                 task.best_resources,
                 dryrun=dryrun,
@@ -341,7 +358,11 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            backend.setup(handle, task, detach_setup=detach_setup)
+            if skip_unnecessary_provisioning and provisioning_skipped:
+                logger.debug('Unnecessary provisioning was skipped, so '
+                             'skipping setup as well.')
+            else:
+                backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -523,6 +544,8 @@ def launch(
                 Stage.PROVISION,
                 Stage.SYNC_WORKDIR,
                 Stage.SYNC_FILE_MOUNTS,
+                # Setup will be skipped if provisioning was skipped.
+                Stage.SETUP,
                 Stage.PRE_EXEC,
                 Stage.EXEC,
                 Stage.DOWN,
@@ -619,7 +642,7 @@ def exec(  # pylint: disable=redefined-builtin
         if dryrun.
     """
     entrypoint = task
-    entrypoint.validate(workdir_only=True)
+    entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
 
