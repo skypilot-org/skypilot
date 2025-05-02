@@ -13,6 +13,6 @@ Training
    NeMo <nemo.md>
    Ray <ray.md>
    Training on TPUs <tpu.md>
+   Training with EFA <aws_efa.md>
    Unsloth <unsloth.md>
    Vertex AI <https://medium.com/google-cloud/streamline-ai-ml-model-development-on-gke-with-skypilot-and-vertex-ai-workbench-453729a8897c>
-   EFA <aws_efa.md>
