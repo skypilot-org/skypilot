@@ -209,15 +209,15 @@ app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 # Serve static files from the dashboard directory
-if not os.path.exists(f'{server_constants.DASHBOARD_DIR}/_next'):
+if not os.path.exists(server_constants.DASHBOARD_NEXT_DIR):
     logger.warning(
-        f'Dashboard directory {server_constants.DASHBOARD_DIR}/_next does '
+        f'Dashboard directory {server_constants.DASHBOARD_NEXT_DIR} does '
         f'not exist. Create it for the dashboard static files mount.')
-    os.makedirs(f'{server_constants.DASHBOARD_DIR}/_next', exist_ok=True)
-app.mount('/dashboard/_next',
-          staticfiles.StaticFiles(
-              directory=f'{server_constants.DASHBOARD_DIR}/_next'),
-          name='dashboard')
+    os.makedirs(server_constants.DASHBOARD_NEXT_DIR, exist_ok=True)
+app.mount(
+    '/dashboard/_next',
+    staticfiles.StaticFiles(directory=server_constants.DASHBOARD_NEXT_DIR),
+    name='dashboard')
 
 
 @app.post('/check')
@@ -1179,7 +1179,7 @@ async def serve_dashboard():
     """Serves the Next.js dashboard application.
 
     Returns:
-        FileResponse for static files or index.html for client-side routing.
+        FileResponse for index.html for client-side routing.
 
     Raises:
         HTTPException: If the path is invalid or file not found.

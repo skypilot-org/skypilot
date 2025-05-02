@@ -30,3 +30,4 @@ API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'
 # The path to the dashboard build output
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
                              'out')
+DASHBOARD_NEXT_DIR = os.path.join(DASHBOARD_DIR, '_next')
