@@ -72,13 +72,11 @@ async def call_chat_completion_async(
         metric.response_start = time.time()
         fetch_metric_at_end = False
 
-        # --- BEGIN Manual Iteration ---
-        iterator = res.__aiter__()  # Get the async iterator
+        iterator = res.__aiter__()
         while True:
             try:
-                chunk = await iterator.__anext__()  # Get next item
+                chunk = await iterator.__anext__()
 
-                # --- Process the valid chunk (same logic as before) ---
                 t_this_round = time.time()
                 choice = chunk.choices[0]
                 if metric.streaming_start is None:
@@ -86,36 +84,43 @@ async def call_chat_completion_async(
                 if metric.ttft is None:
                     metric.ttft = t_this_round - st
 
-                # Check chunk.usage AFTER confirming chunk is valid and has usage
-                if chunk.usage is not None:
-                    fetch_metric_at_end = False  # Assume if usage appears once, it's reliable
+                if chunk.usage is None:
+                    fetch_metric_at_end = True
+                if not fetch_metric_at_end:
+                    assert chunk.usage is not None
                     if metric.input_tokens is None:
                         metric.input_tokens = chunk.usage.prompt_tokens
-                else:
-                    # If usage is None in a data chunk, we need the final chunk
-                    fetch_metric_at_end = True
+                    else:
+                        assert metric.input_tokens == chunk.usage.prompt_tokens
+                    metric.output_tokens += chunk.usage.completion_tokens
 
+                logger.info(f"completion_tokens: {chunk.usage.completion_tokens}")
+                metric.output_tokens += chunk.usage.completion_tokens
+
+                # For vLLM, finish_reason is None;
+                # for SGLang, finish_reason is empty string ''.
                 if choice.finish_reason:
                     metric.e2e_latency = t_this_round - st
                     metric.end = t_this_round
-                    if fetch_metric_at_end or chunk.usage is not None:
-                        # Need to record final metrics here from the last chunk
-                        if chunk.usage:
-                            metric.input_tokens = chunk.usage.prompt_tokens
-                            metric.output_tokens = chunk.usage.completion_tokens  # Use total from last chunk
-                            if hasattr(chunk.usage, 'prompt_tokens_details') and chunk.usage.prompt_tokens_details:
-                                metric.cached_tokens = chunk.usage.prompt_tokens_details.cached_tokens
-                            else:
-                                metric.cached_tokens = 0  # Assume 0 if details missing
-                        else:
-                            # This case is problematic if last chunk has no usage info
-                            logger.warning("Final chunk missing usage info!")
-                    break  # Exit while loop
+                    if fetch_metric_at_end:
 
+                        def _record_metric(chunk: ChatCompletionChunk) -> None:
+                            metric.input_tokens = chunk.usage.prompt_tokens
+                            metric.output_tokens += chunk.usage.completion_tokens
+                            metric.cached_tokens = (
+                                chunk.usage.prompt_tokens_details.cached_tokens)
+
+                        # For SGLang, the usage is only included in the last chunk.
+                        # v0.4.3.post2, usage in next chunk
+                        # async for chunk in res:
+                        #     _record_metric(chunk)
+                        #     break
+                        # v0.4.5, usage in current chunk
+                        _record_metric(chunk)
+                    break
                 delta = choice.delta.content
                 if delta is not None:
                     output += delta
-                # --- End of valid chunk processing ---
 
             except StopAsyncIteration:
                 # Stream finished normally, but maybe without a finish_reason chunk?
@@ -128,6 +133,7 @@ async def call_chat_completion_async(
 
             except json.JSONDecodeError as json_err:
                 # Catch the specific JSON error likely caused by heartbeats
+                logger.warning("json value: %s", chunk)
                 if "Expecting value: line 1 column 1 (char 0)" in str(json_err):
                     logger.warning(f"Ignoring JSONDecodeError likely caused by heartbeat/empty event: {json_err}")
                     # Simply continue to the next iteration to wait for valid data
