@@ -10,7 +10,7 @@ By default, the SkyServe controller runs as a single instance (either a VM or a 
 
 To enhance resilience and ensure service continuity, SkyServe offers a High Availability (HA) mode for its controller. When enabled, the controller leverages Kubernetes capabilities to automatically recover from failures.
 
-Benefits of HA Controller:
+Benefits of HA controller:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 * **Automatic Recovery:** The controller and load balancer can automatically restart after crashes or node failures.
 * **Service Continuity:** Minimizes downtime for your served applications.
@@ -24,7 +24,7 @@ Prerequisites
 .. note::
     Currently, HA mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development.
 
-How to Enable HA Mode
+How to enable HA mode
 ---------------------
 To enable High Availability for the SkyServe controller, set the ``high_availability`` flag to ``true`` within the ``serve.controller`` section of your SkyPilot configuration file (``~/.sky/config.yaml``):
 
@@ -47,9 +47,9 @@ To enable High Availability for the SkyServe controller, set the ``high_availabi
         high_availability: true
 
 .. note::
-    Enabling or disabling ``high_availability`` only affects **new** SkyServe controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first terminate all services and then tear down the existing controller using ``sky down --purge <controller_name>``. See `Important Considerations`_ below.
+    Enabling or disabling ``high_availability`` only affects **new** SkyServe controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first terminate all services and then tear down the existing controller using ``sky down --purge <controller_name>``. See `Important considerations`_ below.
 
-How it Works
+How it works
 ------------
 When ``high_availability: true`` is set, SkyPilot modifies how the SkyServe controller is deployed on Kubernetes:
 
@@ -61,7 +61,7 @@ When ``high_availability: true`` is set, SkyPilot modifies how the SkyServe cont
     * A marker file (``/home/sky/k8s_container_ready``) is created on the PVC after the first successful startup.
     * When a controller pod starts, it checks for this marker file. If the file exists (indicating a restart), the pod re-runs the saved setup and run scripts from the PVC to bring the controller and load balancer back online and recover the state of ongoing replica operations (provisioning, termination).
 
-Configuration Details
+Configuration details
 ---------------------
 Besides the main ``serve.controller.high_availability: true`` flag, you can customize HA behavior further:
 
@@ -78,14 +78,14 @@ Besides the main ``serve.controller.high_availability: true`` flag, you can cust
 
     **Purpose:** Different storage classes offer varying performance (IOPS, throughput), features (snapshots, backups), and costs. If your cluster provides multiple options and you have specific requirements for the controller's storage (e.g., needing faster disk I/O or a particular backup strategy), you can specify a storage class. If omitted, the default storage class configured in your Kubernetes cluster will be used.
 
-Important Considerations
+Important considerations
 ------------------------
 * **Currently Kubernetes Only:** This feature relies entirely on Kubernetes mechanisms (Deployments, PVCs) and is only available when the controller's specified ``cloud`` is ``kubernetes``. Support for other clouds (AWS, GCP, Azure VMs) is under development.
 * **Persistent K8s Required:** The HA mechanism depends on the Kubernetes cluster itself being available. Ensure your K8s control plane and nodes are stable.
 * **No Effect on Existing Controllers:** Setting ``high_availability: true`` in ``config.yaml`` will **not** convert an existing non-HA controller (running or stopped) to HA mode, nor will setting it to ``false`` convert an existing HA controller to non-HA. You must tear down the existing controller first (``sky down --purge sky-serve-controller`` after terminating all services) for the new setting to apply when the controller is next launched.
 * **Inconsistent State Error:** If you attempt to launch a service (``sky serve up``) and the ``high_availability`` setting in your ``config.yaml`` *conflicts* with the actual state of the existing SkyServe controller cluster on Kubernetes (e.g., you enabled HA in config, but the controller exists as a non-HA Pod, or vice-versa), SkyPilot will raise an ``InconsistentHighAvailabilityError``. To resolve this, terminate all services, tear down the controller (``sky down --purge sky-serve-controller``), and then run ``sky serve up`` again with the desired consistent configuration.
 
-Recovery Example
+Recovery example
 ----------------
 This example demonstrates the automatic recovery capability of the HA controller:
 
