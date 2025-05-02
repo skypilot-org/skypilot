@@ -168,14 +168,27 @@ class Controllers(enum.Enum):
         # we may not know the exact name, because we are missing the server-side
         # common.SERVER_ID. So, we will assume anything that matches the prefix
         # is a controller.
+        prefix = None
         if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
             controller = cls.SKY_SERVE_CONTROLLER
+            prefix = common.SKY_SERVE_CONTROLLER_PREFIX
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
+            prefix = common.JOB_CONTROLLER_PREFIX
         if controller is not None and name != controller.value.cluster_name:
             # The client-side cluster_name is not accurate. Assume that `name`
             # is the actual cluster name, so need to set the controller's
             # cluster name to the input name.
+
+            # Assert that the cluster name is well-formed. It should be
+            # {prefix}{hash}, where prefix is set above, and hash is a valid
+            # user hash.
+            assert prefix is not None, prefix
+            assert name.startswith(prefix), name
+            assert common_utils.is_valid_user_hash(name[len(prefix):]), (name,
+                                                                         prefix)
+
+            # Update the cluster name.
             controller.value.cluster_name = name
         return controller
 
