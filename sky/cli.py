@@ -3922,42 +3922,44 @@ def show_gpus(
 
     # --- New function to format Slurm table ---
     def _format_slurm_gpu_table(
-            nodes_gpu_info: List[Dict[str, Any]],
+            partition_gpu_info: List[Tuple[str, List[models.RealtimeGpuAvailability]]], # Changed input type annotation
             name_filter: Optional[str] = None,
             quantity_filter: Optional[int] = None):
         """Formats Slurm real-time GPU availability into a table."""
-        if not nodes_gpu_info:
+        del name_filter, quantity_filter # Filters applied in core/sdk layer now
+
+        if not partition_gpu_info:
              # This case should ideally be caught by the SDK/core function
              # raising ValueError, but handle defensively.
              return None
 
-        # Dynamically determine the maximum length for node names and partitions
+        # Dynamically determine the maximum length for partition names
         # to avoid overly wide tables for short names.
-        max_node_len = max(len(n['node_name']) for n in nodes_gpu_info) if nodes_gpu_info else 10
-        max_part_len = max(len(n['partition']) for n in nodes_gpu_info) if nodes_gpu_info else 10
+        max_part_len = max(len(p[0]) for p in partition_gpu_info) if partition_gpu_info else 10
         # Set a reasonable max limit to prevent excessive width
-        max_node_len = min(max_node_len, 30)
-        max_part_len = min(max_part_len, 20)
+        max_part_len = min(max_part_len, 30) # Increased max partition width slightly
 
         slurm_gpu_table = log_utils.create_table(
-            [f'NODE(max:{max_node_len})', f'PARTITION(max:{max_part_len})',
-             'NODE_STATE', 'GPU_TYPE', 'TOTAL_GPUS', 'FREE_GPUS'])
+            [f'PARTITION(max:{max_part_len})', 'GPU_TYPE',
+             'REQUESTABLE_QTY_PER_NODE', 'TOTAL_GPUS_IN_PARTITION', 'FREE_GPUS_IN_PARTITION']) # Updated headers
 
-        for node_info in nodes_gpu_info:
-             # Apply filters again here if the backend didn't filter completely,
-             # or just rely on backend filtering.
-             # Example re-filtering (usually done in backend/SDK):
-             # if name_filter and not re.match(...): continue
-             # if quantity_filter and node_info['free_gpus'] < quantity_filter: continue
-
-             slurm_gpu_table.add_row([
-                 common_utils.truncate_long_string(node_info['node_name'], max_node_len),
-                 common_utils.truncate_long_string(node_info['partition'], max_part_len),
-                 node_info['node_state'],
-                 node_info['gpu_type'],
-                 str(node_info['total_gpus']),
-                 str(node_info['free_gpus'])
-             ])
+        for partition_name, availability_list in partition_gpu_info:
+            if not availability_list: # Skip partitions with no matching GPUs
+                continue
+            # Sort GPUs within the partition for consistent order
+            availability_list.sort(key=lambda x: x.gpu)
+            for i, gpu_availability in enumerate(availability_list):
+                # Display partition name only for the first GPU in the partition
+                display_partition = common_utils.truncate_long_string(partition_name, max_part_len) if i == 0 else ""
+                slurm_gpu_table.add_row([
+                    display_partition,
+                    gpu_availability.gpu,
+                    _list_to_str(gpu_availability.counts), # Use the helper from show_gpus
+                    str(gpu_availability.capacity), # Global capacity reported per type for now
+                    str(gpu_availability.available) # Global available reported per type for now
+                ])
+        if not slurm_gpu_table.rows: # Check if any rows were actually added
+            return None
         return slurm_gpu_table
     # --- End of new function ---
 
