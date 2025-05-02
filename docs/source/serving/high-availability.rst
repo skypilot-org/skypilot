@@ -26,7 +26,7 @@ Prerequisites
 
 How to enable HA mode
 ---------------------
-To enable High Availability for the SkyServe controller, set the ``high_availability`` flag to ``true`` within the ``serve.controller`` section of your SkyPilot configuration file (``~/.sky/config.yaml``):
+To enable High Availability for the SkyServe controller, set the ``high_availability`` flag to ``true`` within the ``serve.controller`` section of your :ref:`SkyPilot configuration <config-yaml>`:
 
 .. code-block:: yaml
     :emphasize-lines: 8
