@@ -3449,30 +3449,55 @@ def show_gpus(
         realtime_gpu_infos = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
-
-        for (ctx, availability_list) in realtime_gpu_availability_lists:
-            realtime_gpu_table = log_utils.create_table(
-                ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-            for realtime_gpu_availability in sorted(availability_list):
-                gpu_availability = models.RealtimeGpuAvailability(
-                    *realtime_gpu_availability)
-                available_qty = (gpu_availability.available
-                                 if gpu_availability.available != -1 else
-                                 no_permissions_str)
-                realtime_gpu_table.add_row([
-                    gpu_availability.gpu,
-                    _list_to_str(gpu_availability.counts),
-                    gpu_availability.capacity,
-                    available_qty,
-                ])
-                gpu = gpu_availability.gpu
-                capacity = gpu_availability.capacity
-                # we want total, so skip permission denied.
-                available = max(gpu_availability.available, 0)
-                if capacity > 0:
-                    total_gpu_info[gpu][0] += capacity
-                    total_gpu_info[gpu][1] += available
-            realtime_gpu_infos.append((ctx, realtime_gpu_table))
+        
+        # TODO(kyuds): remove backwards compatibility code (else branch)
+        # when API version is bumped
+        if realtime_gpu_availability_lists:
+            # can't check for isinstance tuple as the tuple is converted to list
+            if len(realtime_gpu_availability_lists[0]) == 2:
+                for (ctx, availability_list) in realtime_gpu_availability_lists:
+                    realtime_gpu_table = log_utils.create_table(
+                        ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                    for realtime_gpu_availability in sorted(availability_list):
+                        gpu_availability = models.RealtimeGpuAvailability(
+                            *realtime_gpu_availability)
+                        available_qty = (gpu_availability.available
+                                        if gpu_availability.available != -1 else
+                                        no_permissions_str)
+                        realtime_gpu_table.add_row([
+                            gpu_availability.gpu,
+                            _list_to_str(gpu_availability.counts),
+                            gpu_availability.capacity,
+                            available_qty,
+                        ])
+                        gpu = gpu_availability.gpu
+                        capacity = gpu_availability.capacity
+                        # we want total, so skip permission denied.
+                        available = max(gpu_availability.available, 0)
+                        if capacity > 0:
+                            total_gpu_info[gpu][0] += capacity
+                            total_gpu_info[gpu][1] += available
+                    realtime_gpu_infos.append((ctx, realtime_gpu_table))
+            else:
+                # can remove this with api server version bump.
+                # 2025.05.03
+                click.echo("else branch")
+                availability_list = realtime_gpu_availability_lists
+                realtime_gpu_table = log_utils.create_table(
+                        ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                for realtime_gpu_availability in sorted(availability_list):
+                    gpu_availability = models.RealtimeGpuAvailability(
+                        *realtime_gpu_availability)
+                    available_qty = (gpu_availability.available
+                                    if gpu_availability.available != -1 else
+                                    no_permissions_str)
+                    realtime_gpu_table.add_row([
+                        gpu_availability.gpu,
+                        _list_to_str(gpu_availability.counts),
+                        gpu_availability.capacity,
+                        available_qty,
+                    ])
+                realtime_gpu_infos.append((context, realtime_gpu_table))
 
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs
