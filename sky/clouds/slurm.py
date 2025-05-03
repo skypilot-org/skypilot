@@ -16,4 +16,7 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to Slurm."""
-        return (True, None)
+        return (False, None)
+
+    def get_credential_file_mounts(self) -> registry.Dict[str, str]:
+        return {}

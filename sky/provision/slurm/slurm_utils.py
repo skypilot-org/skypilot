@@ -1,6 +1,6 @@
 """Utility functions for Slurm provisioning."""
 import collections
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 from sky import exceptions
 from sky import models
@@ -81,36 +81,57 @@ def slurm_gpu_availability(
                        f'not found in the Slurm cluster.')
         raise ValueError(err_msg)
 
-    partition_data: Dict[str, Dict[
-        str, List[common.InstanceTypeInfo]]] = collections.defaultdict(
-            lambda: collections.defaultdict(list))
-
-    for gpu_type, instances in qtys_map.items():
-        for instance in instances:
-            partition = instance.region
-            if partition is None:
-                partition = 'unknown_partition'
-            partition_data[partition][gpu_type].append(instance)
-
     result_list: List[Tuple[str, List[models.RealtimeGpuAvailability]]] = []
 
-    for partition, gpu_type_map in sorted(partition_data.items()):
+    # Get all node info once to avoid repeated calls in the loop
+    try:
+        all_nodes_info = slurm_catalog.get_slurm_node_info_list()
+    except (RuntimeError, exceptions.NotSupportedError) as e:
+        logger.warning(f'Could not retrieve any Slurm node info: {e}')
+        all_nodes_info = []
+
+    # Group nodes by partition
+    nodes_by_partition: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for node_info in all_nodes_info:
+        partition = node_info.get('partition', 'unknown_partition')
+        nodes_by_partition[partition].append(node_info)
+
+    for partition, nodes_in_partition in sorted(nodes_by_partition.items()):
         availability_list: List[models.RealtimeGpuAvailability] = []
-        for gpu_type, instances in sorted(gpu_type_map.items()):
-            counts = sorted(
-                list(set(inst.accelerator_count for inst in instances)))
-            capacity = total_capacity.get(gpu_type, 0)
-            available = total_available.get(gpu_type, 0)
+        
+        # Calculate partition-specific totals and observed counts
+        partition_total_capacity: Dict[str, int] = collections.defaultdict(int)
+        partition_total_available: Dict[str, int] = collections.defaultdict(int)
+        partition_gpu_counts: Dict[str, Set[int]] = collections.defaultdict(set)
+
+        for node_info in nodes_in_partition:
+            gpu_type = node_info.get('gpu_type')
+            if not gpu_type: continue # Skip nodes without a GPU type reported
+            
+            total_gpus = node_info.get('total_gpus', 0)
+            free_gpus = node_info.get('free_gpus', 0)
+
+            partition_total_capacity[gpu_type] += total_gpus
+            partition_total_available[gpu_type] += free_gpus
+            if total_gpus > 0:
+                 partition_gpu_counts[gpu_type].add(total_gpus)
+
+        # Create RealtimeGpuAvailability objects for each GPU type in this partition
+        for gpu_type in sorted(partition_gpu_counts.keys()):
+            counts = sorted(list(partition_gpu_counts[gpu_type]))
+            capacity = partition_total_capacity.get(gpu_type, 0)
+            available = partition_total_available.get(gpu_type, 0)
 
             availability_list.append(
                 models.RealtimeGpuAvailability(
                     gpu_type,
-                    counts,
-                    capacity,
-                    available,
+                    counts, # Observed counts in this partition
+                    capacity, # Partition-specific total
+                    available, # Partition-specific free
                 ))
+                
         if availability_list:
-            result_list.append((partition, availability_list))
+             result_list.append((partition, availability_list))
 
     if not result_list:
         raise ValueError('No GPUs found after processing Slurm cluster data.')

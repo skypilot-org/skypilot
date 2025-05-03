@@ -3679,7 +3679,7 @@ def show_gpus(
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from k8s_realtime_table.get_string()
                         yield '\n\n'
-                        yield _format_kubernetes_node_info(ctx) + '\n'
+                    yield _format_kubernetes_node_info(ctx) + '\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3713,7 +3713,7 @@ def show_gpus(
                                'Total Slurm GPUs'
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from total_table.get_string()
-                        yield '\n'
+                        yield '\n\n'
 
                     # print individual infos.
                     for (partition,
@@ -3727,8 +3727,8 @@ def show_gpus(
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from slurm_realtime_table.get_string()
                         yield '\n\n'
-                        # Add the per-node table here
-                        yield _format_slurm_node_info() + '\n'
+                    # Add the per-node table here
+                    yield _format_slurm_node_info() + '\n'
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
                 if not slurm_is_enabled:
@@ -3833,7 +3833,7 @@ def show_gpus(
                            'Total Kubernetes GPUs'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from total_table.get_string()
-                    yield '\n'
+                    yield '\n\n'
 
                 # print individual tables
                 for (ctx, k8s_realtime_table) in k8s_realtime_infos:
@@ -3874,8 +3874,8 @@ def show_gpus(
                     yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                            'Total Slurm GPUs'
                            f'{colorama.Style.RESET_ALL}\n')
-                    yield from total_table.get_string() + '\n'
-
+                    yield from total_table.get_string()
+                    yield '\n\n'
                 # print individual tables
                 for (partition, slurm_realtime_table) in slurm_realtime_infos:
                     if partition:
@@ -3888,7 +3888,7 @@ def show_gpus(
                     yield from slurm_realtime_table.get_string()
                     yield '\n\n'
                     # Add the per-node table here
-                    yield _format_slurm_node_info() + '\n-----\n\n'
+                    yield _format_slurm_node_info() + '\n\n'
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources A10G not found ...")
