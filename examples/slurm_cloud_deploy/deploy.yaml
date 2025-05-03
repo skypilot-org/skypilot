@@ -91,8 +91,9 @@ run: |
     if command -v nvidia-smi &> /dev/null; then
       gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
       if [ $gpu_count -gt 0 ]; then
-        GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/ /_/g')
-        echo "Detected GPU type: $GPU_TYPE (will be configured as generic 'gpu' resources)"
+        # Get GPU type from nvidia-smi and clean up the name
+        GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g')
+        echo "Detected GPU type: $GPU_TYPE (will be configured as specific 'gpu' resources)"
       fi
     fi
 
@@ -106,7 +107,7 @@ run: |
   AuthType=auth/munge
   # Linear is required for support running multiple jobs on the same node
   SelectType=select/linear
-  # SelectTypeParameters=CR_Core_Memory
+  # SelectTypeParameters=CR_Core
   # Use Linux process tracking instead of cgroups
   ProctrackType=proctrack/linuxproc
   # Enable GPU support via Generic Resources (if GPUs are present)
@@ -142,12 +143,14 @@ run: |
         if command -v nvidia-smi &> /dev/null; then
           gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
           if [ $gpu_count -gt 0 ]; then
-            # Add Gres information to slurm.conf node entry - using generic 'gpu' type
-            node_gres="Gres=gpu:${gpu_count}"
+            # Get GPU type from nvidia-smi and clean up the name
+            GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g')
+            # Add Gres information to slurm.conf node entry with specific GPU type
+            node_gres="Gres=gpu:${GPU_TYPE}:${gpu_count}"
             gpu_id_max=$(($gpu_count - 1))
             
-            # Add controller's GPU configuration to gres.conf - using generic 'gpu' type
-            echo "NodeName=${node_hostname} Name=gpu File=/dev/nvidia[0-${gpu_id_max}]" | sudo tee -a /etc/slurm/gres.conf
+            # Add controller's GPU configuration to gres.conf with specific GPU type
+            echo "NodeName=${node_hostname} Name=gpu Type=${GPU_TYPE} File=/dev/nvidia[0-${gpu_id_max}]" | sudo tee -a /etc/slurm/gres.conf
           else
             node_gres=""
           fi
@@ -166,15 +169,18 @@ run: |
         node_cores_per_socket=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Core(s) per socket:\" | awk '{print \$4}'" </dev/null)
         node_threads_per_core=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Thread(s) per core:\" | awk '{print \$4}'" </dev/null)
         
-        # Check only for GPU count on remote node
+        # Check for GPUs on remote node
         if ssh -o StrictHostKeyChecking=no $node "command -v nvidia-smi" &> /dev/null; then
           gpu_count=$(ssh -o StrictHostKeyChecking=no $node "nvidia-smi --query-gpu=name --format=csv,noheader | wc -l" </dev/null)
           if [ $gpu_count -gt 0 ]; then
-            # Add Gres information to slurm.conf node entry - using generic 'gpu' type
-            node_gres="Gres=gpu:${gpu_count}"
+            # Get GPU type from nvidia-smi and clean up the name
+            GPU_TYPE=$(ssh -o StrictHostKeyChecking=no $node "nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g'" </dev/null)
+            # Add Gres information to slurm.conf node entry with specific GPU type
+            node_gres="Gres=gpu:${GPU_TYPE}:${gpu_count}"
             gpu_id_max=$(($gpu_count - 1))
-            # Add node's GPU configuration to gres.conf - using generic 'gpu' type
-            echo "NodeName=${node_hostname} Name=gpu File=/dev/nvidia[0-${gpu_id_max}]" | sudo tee -a /etc/slurm/gres.conf
+            
+            # Add node's GPU configuration to gres.conf with specific GPU type
+            echo "NodeName=${node_hostname} Name=gpu Type=${GPU_TYPE} File=/dev/nvidia[0-${gpu_id_max}]" | sudo tee -a /etc/slurm/gres.conf
           else
             node_gres=""
           fi

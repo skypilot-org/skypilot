@@ -115,7 +115,7 @@ run: |
     else
       echo "Creating new user: $user"
       # Create user with home in /mnt
-      sudo useradd -m -d "/mnt/$user" "$user"
+      sudo useradd -m -d "/mnt/$user" -s /bin/bash "$user"
       
       # Set password to username (for testing)
       echo "Setting password for $user"
