@@ -198,7 +198,7 @@ This example demonstrates the automatic recovery capability of the HA controller
         kubectl get pods -l skypilot-head-node=1
         # Note the pod name will be different, and STATUS should be Running
 
-6.  **Verify Service Again:** Even though the controller pod was restarted, the service endpoint should still be accessible (there might be a brief interruption depending on load balancer and K8s response times).
+6.  **Verify Service Again:** Even though the controller pod was restarted, the service endpoint should remains the same and still be accessible (there might be a brief interruption depending on load balancer and K8s response times).
 
     .. code-block:: bash
 
