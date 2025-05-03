@@ -3481,7 +3481,6 @@ def show_gpus(
             else:
                 # can remove this with api server version bump.
                 # 2025.05.03
-                click.echo("else branch")
                 availability_list = realtime_gpu_availability_lists
                 realtime_gpu_table = log_utils.create_table(
                         ['GPU', qty_header, 'TOTAL_GPUS', free_header])
@@ -3530,7 +3529,7 @@ def show_gpus(
             'Kubernetes per node accelerator availability ')
         if nodes_info.hint:
             k8s_per_node_acc_message += nodes_info.hint
-        return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
+        return (f'{colorama.Fore.CYAN}{colorama.Style.NORMAL}'
                 f'{k8s_per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
@@ -3582,7 +3581,7 @@ def show_gpus(
                                'Total Kubernetes GPUs'
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from total_table.get_string()
-                        yield '\n-----\n\n'
+                        yield '\n\n'
 
                     # print individual infos.
                     for (ctx, k8s_realtime_table) in k8s_realtime_infos:
@@ -3592,7 +3591,7 @@ def show_gpus(
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from k8s_realtime_table.get_string()
                         yield '\n\n'
-                        yield _format_kubernetes_node_info(ctx) + '\n-----\n\n'
+                        yield _format_kubernetes_node_info(ctx) + '\n\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3694,7 +3693,7 @@ def show_gpus(
                            'Total Kubernetes GPUs'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from total_table.get_string()
-                    yield '\n-----\n\n'
+                    yield '\n\n'
 
                 # print individual tables
                 for (ctx, k8s_realtime_table) in k8s_realtime_infos:
