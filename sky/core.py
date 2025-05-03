@@ -1015,7 +1015,14 @@ def realtime_kubernetes_gpu_availability(
     name_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    """Gets the real-time Kubernetes GPU availability.
 
+    Returns:
+        A list of tuples, where each tuple contains:
+        - context (str): The Kubernetes context.
+        - availability_list (List[models.RealtimeGpuAvailability]): A list
+            of RealtimeGpuAvailability objects for that context.
+    """
     if context is None:
         context_list = clouds.Kubernetes.existing_allowed_contexts()
     else:

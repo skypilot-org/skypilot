@@ -249,21 +249,46 @@ def list_accelerators_realtime(
         if quantity_filter and node_total_gpus < quantity_filter:
             continue
 
-        # Create InstanceTypeInfo for this configuration
-        if node_total_gpus > 0:  # Only add counts > 0
-            instance_info = common.InstanceTypeInfo(
-                instance_type=None,  # Slurm doesn't have instance types
-                accelerator_name=gpu_type,
-                accelerator_count=node_total_gpus,
-                cpu_count=node_info['vcpu_count'],
-                memory=node_info['memory_gb'],
-                price=0.0,  # Slurm doesn't have price info
-                region=partition,  # Use partition as region
-                cloud='slurm',  # Specify cloud as 'slurm'
-                device_memory=0.0,  # We don't have GPU memory info from Slurm
-                spot_price=0.0,  # Slurm doesn't have spot pricing
-            )
-            qtys_map[gpu_type].add(instance_info)
+        # Apply partition filter if specified
+        if partition_filter and partition != partition_filter:
+            continue
+
+        # Create InstanceTypeInfo objects for various GPU counts
+        # Similar to Kubernetes, generate powers of 2 up to node_total_gpus
+        if node_total_gpus > 0:
+            count = 1
+            while count <= node_total_gpus:
+                instance_info = common.InstanceTypeInfo(
+                    instance_type=None,  # Slurm doesn't have instance types
+                    accelerator_name=gpu_type,
+                    accelerator_count=count,
+                    cpu_count=node_info['vcpu_count'],
+                    memory=node_info['memory_gb'],
+                    price=0.0,  # Slurm doesn't have price info
+                    region=partition,  # Use partition as region
+                    cloud='slurm',  # Specify cloud as 'slurm'
+                    device_memory=0.0,  # No GPU memory info from Slurm
+                    spot_price=0.0,  # Slurm doesn't have spot pricing
+                )
+                qtys_map[gpu_type].add(instance_info)
+                count *= 2
+            
+            # Add the actual total if it's not already included
+            # (e.g., if node has 12 GPUs, include counts 1, 2, 4, 8, 12)
+            if count // 2 != node_total_gpus:
+                instance_info = common.InstanceTypeInfo(
+                    instance_type=None,
+                    accelerator_name=gpu_type,
+                    accelerator_count=node_total_gpus,
+                    cpu_count=node_info['vcpu_count'],
+                    memory=node_info['memory_gb'],
+                    price=0.0,
+                    region=partition,
+                    cloud='slurm',
+                    device_memory=0.0,
+                    spot_price=0.0,
+                )
+                qtys_map[gpu_type].add(instance_info)
 
         # Map of GPU type -> total count across all matched nodes
         total_capacity[gpu_type] += node_total_gpus

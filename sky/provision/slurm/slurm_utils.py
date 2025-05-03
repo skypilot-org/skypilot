@@ -33,13 +33,13 @@ def slurm_gpu_availability(
         Example structure:
         [
             ('gpu_partition_1', [
-                RealtimeGpuAvailability(gpu='V100', counts=[4, 8],
+                RealtimeGpuAvailability(gpu='V100', counts=[1, 2, 4, 8],
                                         capacity=16, available=10),
-                RealtimeGpuAvailability(gpu='A100', counts=[8],
+                RealtimeGpuAvailability(gpu='A100', counts=[1, 2, 4, 8],
                                         capacity=8, available=0),
             ]),
             ('gpu_partition_2', [
-                RealtimeGpuAvailability(gpu='V100', counts=[4],
+                RealtimeGpuAvailability(gpu='V100', counts=[1, 2, 4],
                                         capacity=4, available=4),
             ])
         ]
@@ -98,8 +98,7 @@ def slurm_gpu_availability(
         # Create RealtimeGpuAvailability objects for each GPU type in this
         # partition
         for gpu_type in sorted(partition_gpu_counts.keys()):
-            # Generate requestable quantities based on max *free* GPUs on a
-            # single node
+            # Get max free GPUs on a single node for this type
             max_requestable_on_single_node = max_free_gpus_per_node_type.get(
                 gpu_type, 0)
 
@@ -108,8 +107,20 @@ def slurm_gpu_availability(
                     max_requestable_on_single_node < quantity_filter):
                 continue  # Skip GPU type if max free is less than filter
 
-            requestable_quantities = list(
-                range(1, max_requestable_on_single_node + 1))
+            # Generate powers of 2 for requestable quantities (1, 2, 4, 8, etc.)
+            # plus the actual maximum if it's not a power of 2
+            requestable_quantities = []
+            count = 1
+            while count <= max_requestable_on_single_node:
+                requestable_quantities.append(count)
+                count *= 2
+            
+            # Add the actual maximum if not already included
+            if requestable_quantities and requestable_quantities[-1] != max_requestable_on_single_node:
+                requestable_quantities.append(max_requestable_on_single_node)
+            
+            # Sort the quantities for consistent ordering
+            requestable_quantities.sort()
 
             capacity = partition_total_capacity.get(gpu_type, 0)
             available = partition_total_available.get(gpu_type, 0)

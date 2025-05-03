@@ -3540,10 +3540,9 @@ def show_gpus(
             for realtime_gpu_availability in sorted(availability_list):
                 gpu_availability = models.RealtimeGpuAvailability(
                     *realtime_gpu_availability)
-                # Generate sequence of requestable quantities (1 to max)
-                max_per_node = max(
-                    gpu_availability.counts) if gpu_availability.counts else 0
-                requestable_quantities = list(range(1, max_per_node + 1))
+                # Use the counts directly from the backend, which are already
+                # generated in powers of 2 (plus any actual maximums)
+                requestable_quantities = gpu_availability.counts
                 realtime_gpu_table.add_row([
                     gpu_availability.gpu,
                     _list_to_str(requestable_quantities),
