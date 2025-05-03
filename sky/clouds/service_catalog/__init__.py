@@ -130,7 +130,8 @@ def list_accelerator_realtime(
     case_sensitive: bool = True,
     all_regions: bool = False,
     require_price: bool = False,
-) -> Tuple[Dict[str, List['common.InstanceTypeInfo']], Dict[str, int], Dict[str, int]]:
+) -> Tuple[Dict[str, List['common.InstanceTypeInfo']], Dict[str, int], Dict[
+        str, int]]:
     """Lists all accelerators offered by Sky with their realtime availability.
 
     Realtime availability is the total number of accelerators in the cluster
@@ -157,7 +158,9 @@ def list_accelerator_realtime(
 
     final_qtys_map: Dict[str, List['common.InstanceTypeInfo']] = {}
     for gpu, items in qtys_map_raw.items():
-        final_qtys_map[gpu] = sorted(items, key=lambda x: (x.accelerator_count, x.region or ''))
+        final_qtys_map[gpu] = sorted(items,
+                                     key=lambda x:
+                                     (x.accelerator_count, x.region or ''))
 
     return (final_qtys_map, total_accelerators_capacity,
             total_accelerators_available)

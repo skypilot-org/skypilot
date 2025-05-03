@@ -1889,7 +1889,6 @@ def slurm_node_info() -> server_common.RequestId:
             for a single Slurm node (node_name, partition, node_state,
             gpu_type, total_gpus, free_gpus, vcpu_count, memory_gb).
     """
-    response = requests.get(
-        f'{server_common.get_server_url()}/slurm_node_info',
-        cookies=server_common.get_api_cookie_jar())
+    response = requests.get(f'{server_common.get_server_url()}/slurm_node_info',
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)

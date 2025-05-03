@@ -520,4 +520,3 @@ class SlurmGpuAvailabilityRequestBody(RequestBody):
     """Request body for getting Slurm real-time GPU availability."""
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
-

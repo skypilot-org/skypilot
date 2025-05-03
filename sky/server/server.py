@@ -33,6 +33,7 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import slurm_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
@@ -51,7 +52,6 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
-from sky.provision.slurm import slurm_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -1149,9 +1149,8 @@ async def slurm_node_info(request: fastapi.Request) -> None:
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
+
 # Add a route to serve static files
-# IMPORTANT: This route must be the last route in the file to avoid
-# short-circuiting other GET requests.
 @app.get('/{full_path:path}')
 async def serve_static_or_dashboard(full_path: str):
     """Serves static files for any unmatched routes.
@@ -1179,17 +1178,6 @@ async def serve_static_or_dashboard(full_path: str):
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
 
-
-# @app.get('/status_kubernetes')
-# async def status_kubernetes(request: fastapi.Request) -> None:
-#     """Gets Kubernetes status."""
-#     executor.schedule_request(
-#         request_id=request.state.request_id,
-#         request_name='status_kubernetes',
-#         request_body=payloads.RequestBody(),
-#         func=core.status_kubernetes,
-#         schedule_type=requests_lib.ScheduleType.SHORT,
-#     )
 
 if __name__ == '__main__':
     import uvicorn
