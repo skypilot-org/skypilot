@@ -3524,7 +3524,7 @@ def show_gpus(
                 ])
 
         k8s_per_node_acc_message = (
-            'Kubernetes per-node accelerator availability')
+            'Kubernetes per-node GPU availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
