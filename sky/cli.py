@@ -3465,8 +3465,8 @@ def show_gpus(
                     gpu_availability = models.RealtimeGpuAvailability(
                         *realtime_gpu_availability)
                     available_qty = (gpu_availability.available
-                                        if gpu_availability.available != -1
-                                        else no_permissions_str)
+                                     if gpu_availability.available != -1 else
+                                     no_permissions_str)
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
@@ -3509,8 +3509,8 @@ def show_gpus(
             if acc_type is None:
                 acc_type = '-'
             node_table.add_row([
-                node_name, acc_type,
-                node_info.total['accelerator_count'], available
+                node_name, acc_type, node_info.total['accelerator_count'],
+                available
             ])
         k8s_per_node_acc_message = (
             'Kubernetes per node accelerator availability ')
