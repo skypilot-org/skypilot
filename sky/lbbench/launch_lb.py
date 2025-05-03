@@ -10,7 +10,7 @@ from sky.lbbench import gen_cmd
 from sky.lbbench import utils
 
 enabled_systems = [i for i in gen_cmd.enabled_systems if i < 3]
-describes = [gen_cmd.describes[i] for i in enabled_systems]
+describes = [gen_cmd.raw_describes[i] for i in enabled_systems]
 
 
 def _prepare_sky_global_lb(st: Dict[str, Any], ct: List[Dict[str, Any]],
@@ -57,15 +57,16 @@ def main():
     sn2st = {s['name']: s for s in all_st}
 
     def _get_single_cmd(idx: int) -> str:
+        idx_in_sns = enabled_systems.index(idx)
         if idx == 0:
-            return _prepare_sgl_cmd(sn2st[sns[0]])
+            return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]])
         elif idx == 1:
             # Global least load
-            return _prepare_sky_global_lb(sn2st[sns[1]], ct, 'least_load',
+            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct, 'least_load',
                                           utils.global_least_load_cluster)
         elif idx == 2:
             # Sky SGL enhanced
-            return _prepare_sky_global_lb(sn2st[sns[2]], ct, 'prefix_tree',
+            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct, 'prefix_tree',
                                           utils.sky_sgl_enhanced_cluster)
         else:
             raise ValueError(f'Invalid index: {idx}')

@@ -10,7 +10,7 @@ from typing import List
 
 from sky.lbbench import utils
 
-describes = [
+raw_describes = [
     'sgl',
     'global_least_load',
     'sky_sgl_enhanced',
@@ -19,11 +19,12 @@ describes = [
     'sky_pull_pull_small_3',
     'sky_push_pull',
     'sky_push_push',
-    'sky_pull_pull_rate_limit_prefix_tree',
+    # 'sky_pull_pull_rate_limit_prefix_tree',
+    'sky_pull_pull_rate_limit_thershold_prefix_tree',
     'sky_pull_pull_rate_limit_least_load',
     'sky_pull_pull_rate_limit_round_robin',
 ]
-presents = [
+raw_presents = [
     'Baseline\\n[SGLang]',
     'Baseline\\n[LeastLoad]',
     'Baseline\\n[SGLang+SelPush]',
@@ -32,16 +33,17 @@ presents = [
     'Ours\\n[Pull/StealSmall3+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
-    'Ours\\n[SelPush/Prefix+Pull]',
+    # 'Ours\\n[SelPush/Prefix+Pull]',
+    'Ours\\n[SelPushThr/Prefix+Pull]',
     'Ours\\n[SelPush/LL+Pull]',
     'Ours\\n[SelPush/RR+Pull]',
 ]
 
 enabled_systems = [
-    0,  # sgl router
-    1,  # global least load
-    # 2,  # sgl router enhanced
-    3,  # sky pulling in lb, pulling in replica, but workload stealing
+    # 0,  # sgl router
+    # 1,  # global least load
+    2,  # sgl router enhanced
+    # 3,  # sky pulling in lb, pulling in replica, but workload stealing
     # 4,  # sky pulling in lb, pulling in replica, but steal small #requests
     # 5,  # sky pushing in lb, pulling in replica
     # 6,  # sky pushing in lb, pushing in replica
@@ -50,8 +52,8 @@ enabled_systems = [
     # 9,  # sky pulling in lb, pulling in replica, but rate limit. with round robin.
 ]
 
-describes = [describes[i] for i in enabled_systems]
-presents = [presents[i] for i in enabled_systems]
+describes = [raw_describes[i] for i in enabled_systems]
+presents = [raw_presents[i] for i in enabled_systems]
 
 ct = None
 sn2st = None

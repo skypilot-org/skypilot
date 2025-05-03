@@ -1266,7 +1266,8 @@ class SkyServeLoadBalancer:
                 conf = await response.json()
                 # if its queue size is less than self's, it's available
                 lb_available = (conf['queue_size'] <= self_qsize and
-                                conf['num_available_replicas'] > 0)
+                                conf['queue_size'] <= _STEAL_TRIGGER_THRESHOLD
+                                and conf['num_available_replicas'] > 0)
                 logger.info(
                     f"{lb} queue size: {conf['queue_size']}, self_qsize: {self_qsize}"
                 )
