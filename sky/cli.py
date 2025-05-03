@@ -3529,7 +3529,7 @@ def show_gpus(
             'Kubernetes per node accelerator availability ')
         if nodes_info.hint:
             k8s_per_node_acc_message += nodes_info.hint
-        return (f'{colorama.Fore.CYAN}{colorama.Style.NORMAL}'
+        return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                 f'{k8s_per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
