@@ -3483,7 +3483,8 @@ def show_gpus(
                         total_gpu_info[gpu][1] += available
                 realtime_gpu_infos.append((ctx, realtime_gpu_table))
                 # Collect node info for this context
-                nodes_info = sdk.stream_and_get(sdk.kubernetes_node_info(context=ctx))
+                nodes_info = sdk.stream_and_get(
+                    sdk.kubernetes_node_info(context=ctx))
                 all_nodes_info.append((ctx, nodes_info))
 
         # display an aggregated table for all contexts
@@ -3498,20 +3499,18 @@ def show_gpus(
 
         return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
-
-
     def _format_kubernetes_node_info_combined(contexts_info):
         node_table = log_utils.create_table(
             ['CONTEXT', 'NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
         no_permissions_str = '<no permissions>'
         hints = []
-        
+
         for context, nodes_info in contexts_info:
             context_name = context if context else 'default'
             if nodes_info.hint:
                 hints.append(f'{context_name}: {nodes_info.hint}')
-                
+
             for node_name, node_info in nodes_info.node_info_dict.items():
                 available = node_info.free[
                     'accelerators_available'] if node_info.free[
@@ -3520,19 +3519,44 @@ def show_gpus(
                 if acc_type is None:
                     acc_type = '-'
                 node_table.add_row([
-                    context_name, node_name, acc_type, 
+                    context_name, node_name, acc_type,
                     node_info.total['accelerator_count'], available
                 ])
-        
+
         k8s_per_node_acc_message = (
             'Kubernetes per-node accelerator availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
-            
+
         return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                 f'{k8s_per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
+
+    def _format_kubernetes_realtime_gpu(total_table, k8s_realtime_infos,
+                                      all_nodes_info, show_node_info: bool):
+        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+               'Kubernetes GPUs'
+               f'{colorama.Style.RESET_ALL}\n')
+        # print total table
+        if total_table is not None:
+            yield from total_table.get_string()
+            yield '\n'
+
+        # print individual infos.
+        for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+            # Print context header separately
+            if ctx:
+                context_str = f'Context: {ctx}'
+            else:
+                context_str = 'Default Context'
+            yield (
+                f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
+            )
+            yield from k8s_realtime_table.get_string()
+            yield '\n'
+        if show_node_info:
+            yield _format_kubernetes_node_info_combined(all_nodes_info)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3575,26 +3599,12 @@ def show_gpus(
                 else:
                     print_section_titles = True
 
-                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                            'Kubernetes GPUs'
-                            f'{colorama.Style.RESET_ALL}\n')
-                    # print total table
-                    if total_table is not None:
-                        yield from total_table.get_string()
-                        yield '\n'
+                    yield from _format_kubernetes_realtime_gpu(
+                        total_table,
+                        k8s_realtime_infos,
+                        all_nodes_info,
+                        show_node_info=True)
 
-                    # print individual infos.
-                    for (ctx, k8s_realtime_table) in k8s_realtime_infos:
-                        # Print context header separately
-                        context_str = f'Context: {ctx}' if ctx else 'Default Context'
-                        yield (f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n')
-                        yield from k8s_realtime_table.get_string()
-                        yield '\n'
-                    
-                    # Add combined node table after showing individual GPU tables
-                    if all_nodes_info:
-                        yield '\n'
-                        yield _format_kubernetes_node_info_combined(all_nodes_info)
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3685,31 +3695,18 @@ def show_gpus(
             print_section_titles = True
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
-                k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(  # pylint: disable=line-too-long
-                    context=region,
-                    name_filter=name,
-                    quantity_filter=quantity)
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region, name_filter=name, quantity_filter=quantity)
 
-                # print total table
-                if total_table is not None:
-                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                           'Total Kubernetes GPUs'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from total_table.get_string()
-                    yield '\n\n'
-
-                # print individual tables
-                for (ctx, k8s_realtime_table) in k8s_realtime_infos:
-                    context_str = f'(Context: {ctx})' if ctx else ''
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs {context_str}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_realtime_table.get_string()
-                    yield '\n\n'
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                         k8s_realtime_infos,
+                                                         all_nodes_info,
+                                                         show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
-                yield str(e)
+                yield common_utils.format_exception(e, use_bracket=True)
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
