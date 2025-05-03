@@ -91,6 +91,8 @@ from sky.utils.cli_utils import status_utils
 if typing.TYPE_CHECKING:
     import types
 
+    import prettytable
+
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
 
@@ -3415,9 +3417,12 @@ def show_gpus(
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
     def _get_kubernetes_realtime_gpu_tables(
-            context: Optional[str] = None,
-            name_filter: Optional[str] = None,
-            quantity_filter: Optional[int] = None):
+        context: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
+               Optional['prettytable.PrettyTable'], List[Tuple[
+                   str, 'models.KubernetesNodesInfo']]]:
         if quantity_filter:
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
@@ -3499,7 +3504,9 @@ def show_gpus(
 
         return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
-    def _format_kubernetes_node_info_combined(contexts_info):
+    def _format_kubernetes_node_info_combined(
+            contexts_info: List[Tuple[str,
+                                      'models.KubernetesNodesInfo']]) -> str:
         node_table = log_utils.create_table(
             ['CONTEXT', 'NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
@@ -3532,8 +3539,11 @@ def show_gpus(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
-    def _format_kubernetes_realtime_gpu(total_table, k8s_realtime_infos,
-                                        all_nodes_info, show_node_info: bool):
+    def _format_kubernetes_realtime_gpu(
+            total_table: 'prettytable.PrettyTable',
+            k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
+            all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            show_node_info: bool) -> Generator[str, None, None]:
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                'Kubernetes GPUs'
                f'{colorama.Style.RESET_ALL}\n')
