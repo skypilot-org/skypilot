@@ -3449,7 +3449,7 @@ def show_gpus(
         realtime_gpu_infos = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
-        
+
         # TODO(kyuds): remove backwards compatibility code (else branch)
         # when API version is bumped
         if realtime_gpu_availability_lists:
@@ -3462,8 +3462,8 @@ def show_gpus(
                         gpu_availability = models.RealtimeGpuAvailability(
                             *realtime_gpu_availability)
                         available_qty = (gpu_availability.available
-                                        if gpu_availability.available != -1 else
-                                        no_permissions_str)
+                                         if gpu_availability.available != -1
+                                         else no_permissions_str)
                         realtime_gpu_table.add_row([
                             gpu_availability.gpu,
                             _list_to_str(gpu_availability.counts),
@@ -3483,13 +3483,13 @@ def show_gpus(
                 # 2025.05.03
                 availability_list = realtime_gpu_availability_lists
                 realtime_gpu_table = log_utils.create_table(
-                        ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                    ['GPU', qty_header, 'TOTAL_GPUS', free_header])
                 for realtime_gpu_availability in sorted(availability_list):
                     gpu_availability = models.RealtimeGpuAvailability(
                         *realtime_gpu_availability)
                     available_qty = (gpu_availability.available
-                                    if gpu_availability.available != -1 else
-                                    no_permissions_str)
+                                     if gpu_availability.available != -1 else
+                                     no_permissions_str)
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
