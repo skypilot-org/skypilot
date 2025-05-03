@@ -12,33 +12,42 @@ from sky.lbbench import utils
 
 describes = [
     'sgl',
+    'global_least_load',
     'sky_sgl_enhanced',
     'sky_pull_pull',
     # 'sky_pull_pull_small',
     'sky_pull_pull_small_3',
     'sky_push_pull',
     'sky_push_push',
-    'sky_pull_pull_rate_limit',
+    'sky_pull_pull_rate_limit_prefix_tree',
+    'sky_pull_pull_rate_limit_least_load',
+    'sky_pull_pull_rate_limit_round_robin',
 ]
 presents = [
-    'Baseline',
-    'Baseline\\n[Pull]',
+    'Baseline\\n[SGLang]',
+    'Baseline\\n[LeastLoad]',
+    'Baseline\\n[SGLang+SelPush]',
     'Ours\\n[Pull/Steal+Pull]',
     # 'Ours\\n[Pull/StealSmall+Pull]',
     'Ours\\n[Pull/StealSmall3+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
-    'Ours\\n[Pull/RateLimit+Pull]',
+    'Ours\\n[SelPush/Prefix+Pull]',
+    'Ours\\n[SelPush/LL+Pull]',
+    'Ours\\n[SelPush/RR+Pull]',
 ]
 
 enabled_systems = [
     0,  # sgl router
-    1,  # sgl router enhanced
-    2,  # sky pulling in lb, pulling in replica, but workload stealing
-    3,  # sky pulling in lb, pulling in replica, but steal small #requests
-    4,  # sky pushing in lb, pulling in replica
-    5,  # sky pushing in lb, pushing in replica
-    6,  # sky pulling in lb, pulling in replica, but rate limit
+    1,  # global least load
+    # 2,  # sgl router enhanced
+    3,  # sky pulling in lb, pulling in replica, but workload stealing
+    # 4,  # sky pulling in lb, pulling in replica, but steal small #requests
+    # 5,  # sky pushing in lb, pulling in replica
+    # 6,  # sky pushing in lb, pushing in replica
+    7,  # sky pulling in lb, pulling in replica, but rate limit. with prefix tree.
+    # 8,  # sky pulling in lb, pulling in replica, but rate limit. with least load.
+    # 9,  # sky pulling in lb, pulling in replica, but rate limit. with round robin.
 ]
 
 describes = [describes[i] for i in enabled_systems]
@@ -63,6 +72,10 @@ def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
         sgl_ip = _get_head_ip_for_cluster(utils.sgl_cluster)
         return f'{sgl_ip}:9001'
     if index == 1:
+        global_least_load_ip = _get_head_ip_for_cluster(
+            utils.global_least_load_cluster)
+        return f'{global_least_load_ip}:9002'
+    if index == 2:
         sky_sgl_enhanced_ip = _get_head_ip_for_cluster(
             utils.sky_sgl_enhanced_cluster)
         return f'{sky_sgl_enhanced_ip}:9002'

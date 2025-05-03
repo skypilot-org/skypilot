@@ -6,9 +6,9 @@ import collections
 import copy
 import json
 import os
+from pathlib import Path
 import subprocess
 import time
-import traceback
 from typing import Any, Awaitable, Dict, List, Union
 
 from rich import print as rp
@@ -16,20 +16,22 @@ from rich import print as rp
 from sky.lbbench import oai
 from sky.lbbench import utils
 
-dataset_link = 'https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl'  # pylint: disable=line-too-long
+dataset_link = 'https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl'  # pylint: disable=line-too-long
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--data-path', type=str, default='@temp/test.jsonl')
-    parser.add_argument('--num-questions', type=int, default=200)
     parser.add_argument('--num-branches', type=int, default=2)
+    parser.add_argument('--duration', type=float, default=10)
+    parser.add_argument('--seed', type=str, default='default')
 
 
 def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         'data-path': args.data_path,
-        'num-questions': args.num_questions,
         'num-branches': args.num_branches,
+        'duration': args.duration,
+        'seed': args.seed,
     }
 
 
@@ -49,8 +51,9 @@ async def _dummy_start() -> utils.OAIChatHistory:
     return []
 
 
-async def _tree_search(uid: int, question: str,
-                       num_branches: int) -> List[utils.OAIChatHistory]:
+async def _tree_search(question: str, num_branches: int, tic: float,
+                       duration: float,
+                       real_user: str) -> List[utils.OAIChatHistory]:
     prompts = [
         PROPOSE_PLAN_PROMPT.format(question=question), EXECUTE_PLAN_PROMPT,
         REFLECT_PLAN_PROMPT, FINAL_ANSWER_PROMPT
@@ -71,42 +74,63 @@ async def _tree_search(uid: int, question: str,
             if len(s) == len(prompts) * 2:
                 results.append(s)
                 continue
+            if time.time() - tic > duration:
+                continue
             prompt = prompts[len(s) // 2]
             s.append(utils.get_one_round('user', prompt))
             for _ in range(num_branches):
                 call_llm_coro = oai.call_chat_completion_async(s,
                                                                temperature=temp,
                                                                max_tokens=256,
-                                                               uid=str(uid),
+                                                               uid=real_user,
                                                                stop=None)
                 tasks.append(asyncio.create_task(call_llm_coro))
     return results
 
 
-async def _user_task(uid: int, questions: List[str],
-                     num_branches: int) -> List[utils.OAIChatHistory]:
-    time_to_sleep = uid * 10
-    rp(f'User {uid}: sleep for {time_to_sleep} seconds to start')
+async def _user_task(uid: int, questions: List[str], num_branches: int,
+                     duration: float,
+                     real_user: str) -> List[utils.OAIChatHistory]:
+    # time_to_sleep = uid * 10
+    # rp(f'User {uid}: sleep for {time_to_sleep} seconds to start')
     rp(f'User {uid}: {len(questions)} questions in total')
-    await asyncio.sleep(time_to_sleep)
+    # await asyncio.sleep(time_to_sleep)
     rp(f'User {uid}: start sending requests')
     tic = time.time()
-    tasks = []
-    for question in questions:
-        tasks.append(
-            asyncio.create_task(_tree_search(uid, question, num_branches)))
+    # tasks = []
     results = []
-    for i, task in enumerate(asyncio.as_completed(tasks)):
-        result = await task
-        if isinstance(result, Exception):
-            rp(f'User {uid} FAILED: {result}.'
-               f'  Traceback: {traceback.format_exc()}')
-            continue
-        results.extend(result)
-        progress = f'({i+1}/{len(questions)})'
-        rp(f'User {uid}: {progress:^8} questions completed. '
-           f'Latency: {time.time() - tic:.3f}')
-    return results
+    while True:
+        for question in questions:
+            result = await _tree_search(question, num_branches, tic, duration,
+                                        real_user)
+            results.extend(result)
+            if time.time() - tic > duration:
+                return results
+    # for i, task in enumerate(asyncio.as_completed(tasks)):
+    #     result = await task
+    #     if isinstance(result, Exception):
+    #         rp(f'User {uid} FAILED: {result}.'
+    #            f'  Traceback: {traceback.format_exc()}')
+    #         continue
+    #     results.extend(result)
+    #     progress = f'({i+1}/{len(questions)})'
+    #     rp(f'User {uid}: {progress:^8} questions completed. '
+    #        f'Latency: {time.time() - tic:.3f}')
+    # return results
+
+
+def download_dataset(dp: str) -> None:
+    if not os.path.exists(dp):
+        Path(dp).parent.mkdir(parents=True, exist_ok=True)
+        rp(f'Data path {dp} does not exist. Downloading...')
+        subprocess.run(['wget', f'{dataset_link}', '-O', dp], check=True)
+
+
+seed2idx = {
+    'us-east-2': 0,
+    'ap-northeast-1': 1,
+    'eu-central-1': 2,
+}
 
 
 def launch_user_tasks(
@@ -115,18 +139,23 @@ def launch_user_tasks(
     uid2questions = collections.defaultdict(list)
     idx = 0
     dp = args.data_path
-    if not os.path.exists(dp):
-        rp(f'Data path {dp} does not exist. Downloading...')
-        subprocess.run(['wget', f'wget {dataset_link}', '-O', dp], check=True)
+    download_dataset(dp)
+    seed = args.seed
+    if seed not in seed2idx:
+        raise ValueError(f'Invalid seed: {seed}')
+    desired_idx = seed2idx[seed]
     with open(dp, encoding='utf-8') as fin:
-        for line in fin:
+        for i, line in enumerate(fin):
             if line.startswith('#'):
+                continue
+            # Use different sets of questions for different regions.
+            if i % num_users != desired_idx:
                 continue
             uid2questions[idx % num_users].append(json.loads(line)['question'])
             idx += 1
-            if idx >= args.num_questions:
+            if idx >= 100 * num_users:
                 break
     return [
-        _user_task(uid, questions, args.num_branches)
+        _user_task(uid, questions, args.num_branches, args.duration, seed)
         for uid, questions in uid2questions.items()
     ]

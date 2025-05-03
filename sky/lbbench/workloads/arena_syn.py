@@ -39,7 +39,7 @@ def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
     multi_turn_data = []
     chunk_data = datasets.load_dataset(DATASET_NAME, split='train')
     for d in chunk_data:
-        if d['turn'] > 1:
+        if d['turn'] > 1 or True:
             multi_turn_data.append({
                 'turn': d['turn'],
                 'tstamp': d['tstamp'],
@@ -69,7 +69,7 @@ async def _multi_turn_conv(duration: int, tic: float, uid: str,
             result = await oai.call_chat_completion_async(
                 history,
                 temperature=0.0,
-                max_tokens=256,
+                max_tokens=512,
                 uid=uid,
                 stop=None,
                 only_return_new_round=True)

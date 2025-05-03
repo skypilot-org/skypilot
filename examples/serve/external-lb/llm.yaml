@@ -10,11 +10,13 @@ service:
     # Don't use /v1/chat/completions as that will be
     # queued and it is possible to fail for timeout.
     path: /v1/models
-  replicas: 4
+  replicas: 6
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
   load_balancing_policy: prefix_tree
+  # load_balancing_policy: least_load
+  # load_balancing_policy: round_robin
   external_load_balancers:
     - resources:
         cloud: aws
@@ -24,10 +26,10 @@ service:
         cloud: aws
         region: ap-northeast-1
       load_balancing_policy: prefix_tree
-    # - resources:
-    #     cloud: aws
-    #     region: eu-central-1
-    #   load_balancing_policy: prefix_tree
+    - resources:
+        cloud: aws
+        region: eu-central-1
+      load_balancing_policy: prefix_tree
   # max_concurrent_requests: 50
 
 resources:
@@ -38,7 +40,7 @@ resources:
   ordered:
     - region: us-east-2
     - region: ap-northeast-1
-    # - region: eu-central-1
+    - region: eu-central-1
   ports: 8081
 
 setup: |

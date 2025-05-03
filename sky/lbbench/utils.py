@@ -8,6 +8,7 @@ import sky
 OAIChatHistory = List[Dict[str, str]]
 
 sky_sgl_enhanced_cluster = 'sgl-router-pull'
+global_least_load_cluster = 'global-least-load'
 sgl_cluster = 'sgl-router'
 
 
