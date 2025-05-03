@@ -103,6 +103,7 @@ def slurm_gpu_availability(
         partition_total_capacity: Dict[str, int] = collections.defaultdict(int)
         partition_total_available: Dict[str, int] = collections.defaultdict(int)
         partition_gpu_counts: Dict[str, Set[int]] = collections.defaultdict(set)
+        max_free_gpus_per_node_type: Dict[str, int] = collections.defaultdict(int)
 
         for node_info in nodes_in_partition:
             gpu_type = node_info.get('gpu_type')
@@ -115,17 +116,22 @@ def slurm_gpu_availability(
             partition_total_available[gpu_type] += free_gpus
             if total_gpus > 0:
                  partition_gpu_counts[gpu_type].add(total_gpus)
+            # Track max free GPUs on a single node for this type
+            max_free_gpus_per_node_type[gpu_type] = max(max_free_gpus_per_node_type[gpu_type], free_gpus)
 
         # Create RealtimeGpuAvailability objects for each GPU type in this partition
         for gpu_type in sorted(partition_gpu_counts.keys()):
-            counts = sorted(list(partition_gpu_counts[gpu_type]))
+            # Generate requestable quantities based on max *free* GPUs on a single node
+            max_requestable_on_single_node = max_free_gpus_per_node_type.get(gpu_type, 0)
+            requestable_quantities = list(range(1, max_requestable_on_single_node + 1))
+            
             capacity = partition_total_capacity.get(gpu_type, 0)
             available = partition_total_available.get(gpu_type, 0)
 
             availability_list.append(
                 models.RealtimeGpuAvailability(
                     gpu_type,
-                    counts, # Observed counts in this partition
+                    requestable_quantities, # Use calculated requestable quantities
                     capacity, # Partition-specific total
                     available, # Partition-specific free
                 ))
