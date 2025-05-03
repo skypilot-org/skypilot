@@ -3453,7 +3453,8 @@ def show_gpus(
         if realtime_gpu_availability_lists:
             if len(realtime_gpu_availability_lists[0]) != 2:
                 # TODO(kyuds): for backwards compatibility, as we add new
-                # context to the response. Remove this if block after 0.10.0.
+                # context to the API server response in #5362. Remove this after
+                # 0.10.0.
                 realtime_gpu_availability_lists = [
                     (context, realtime_gpu_availability_lists)
                 ]
