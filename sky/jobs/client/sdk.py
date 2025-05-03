@@ -1,7 +1,8 @@
 """SDK functions for managed jobs."""
 import json
+import time
 import typing
-from typing import Dict, List, Optional, Union
+from typing import Dict, Generator, List, Optional, Union
 import webbrowser
 
 import click
@@ -12,6 +13,7 @@ from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
 from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -29,15 +31,112 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
+def _launch_batch_job(
+        dag: 'sky.Dag', name: Optional[str],
+        num_tasks: int) -> Generator[server_common.RequestId, None, None]:
+    # TODO(cooperc): Push the expansion of num_tasks to the jobs controller.
+    # The use of many API server requests here is a quick hack.
+
+    # TODO(cooperc): Handle ctrl+c correctly.
+
+    if len(dag.tasks) > 1:
+        raise ValueError('Batch jobs must have exactly one task.')
+
+    # Submit the parent job to get its ID.
+    logger.info('Launching parent job to get its ID.')
+    dummy_job_task = {
+        'name': dag.name,
+        'envs': {
+            '__SKYPILOT_PARENT_JOB_ID': '-1'
+        },
+    }
+    logger.debug(
+        f'dummy_job_task string: {common_utils.dump_yaml_str(dummy_job_task)}')
+    parent_job_body = payloads.JobsLaunchBody(
+        task=common_utils.dump_yaml_str(dummy_job_task),
+        name=name,
+    )
+    parent_job_response = requests.post(
+        f'{server_common.get_server_url()}/jobs/launch',
+        json=json.loads(parent_job_body.model_dump_json()),
+        timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
+    )
+    parent_job_request_id = server_common.get_request_id(parent_job_response)
+    # Yield first request id so CLI can show the logs.
+    yield parent_job_request_id
+    parent_job_id = sdk.get(parent_job_request_id)[0]
+
+    dag.tasks[0].envs['__SKYPILOT_PARENT_JOB_ID'] = parent_job_id
+    dag.tasks[0].envs['SKYPILOT_NUM_TASKS'] = str(num_tasks)
+    #request_ids = []
+    dag_name = dag.name
+    active_request_ids: List[server_common.RequestId] = []
+    for task_rank in range(num_tasks):
+        if server_common.is_api_server_local():
+            # Don't submit every single job at once, it will overload the
+            # local API server. Instead, submit up to 20 at a time.
+            # If too many requests are active, wait until one finishes.
+            # If the local API server burst is limited, this can be removed.
+            # Since each job launch holds the provisioning lock on the jobs
+            # controller cluster, this limit won't actually slow down the
+            # ultimate submission to the jobs controller. It will just delay
+            # the return of the sdk function and sort of break CLI --async.
+            # TODO(cooperc): Remove this once #5473 is solved.
+            while len(active_request_ids) >= 20:
+                logger.debug(
+                    f'Checking status of {len(active_request_ids)} requests: '
+                    f'{active_request_ids}')
+                requests_response = sdk.api_status(
+                    request_ids=active_request_ids, all_status=True)
+                for request in requests_response:
+                    request_status = requests_lib.RequestStatus(request.status)
+                    logger.debug(
+                        f'Request {request.request_id} status: {request_status}'
+                    )
+                    # Check if request is in terminal status.
+                    if request_status > requests_lib.RequestStatus.RUNNING:
+                        logger.debug(
+                            f'Request {request.request_id} finished, yielding '
+                            'and removing from active_request_ids.')
+                        active_request_ids.remove(request.request_id)
+                        yield request.request_id
+                # Sleep for a moment to avoid spamming the API server.
+                time.sleep(1)
+
+        dag.tasks[0].envs['SKYPILOT_TASK_RANK'] = str(task_rank)
+        logger.debug(f'dag string: {dag_utils.dump_chain_dag_to_yaml_str(dag)}')
+        dag.name = f'{dag_name}-{task_rank}'
+        body = payloads.JobsLaunchBody(
+            task=dag_utils.dump_chain_dag_to_yaml_str(dag),
+            name=f'{name}-{task_rank}',
+        )
+        response = requests.post(
+            f'{server_common.get_server_url()}/jobs/launch',
+            json=json.loads(body.model_dump_json()),
+            timeout=(5, None),
+            cookies=server_common.get_api_cookie_jar(),
+        )
+        request_id = server_common.get_request_id(response)
+        active_request_ids.append(request_id)
+        logger.debug(f'Submitted job {request_id}.')
+
+    # Yield any requests that are still active.
+    # In the naive case (not local API server), this is all the requests.
+    yield from active_request_ids
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    num_tasks: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-) -> server_common.RequestId:
+) -> Union[server_common.RequestId, Generator[server_common.RequestId, None,
+                                              None]]:
     """Launches a managed job.
 
     Please refer to sky.cli.job_launch for documentation.
@@ -46,6 +145,8 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        num_tasks: Number of tasks to run in parallel for batch jobs. If None,
+            the job will run as a single task.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -72,7 +173,13 @@ def launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
+    # XXX: confirm batch job delays mount cleanup correctly
     dag = client_common.upload_mounts_to_api_server(dag)
+
+    if num_tasks is not None:
+        # This is a batch job.
+        return _launch_batch_job(dag, name, num_tasks)
+
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.JobsLaunchBody(
         task=dag_str,

@@ -208,6 +208,13 @@ def launch(
 
         controller_task.managed_job_dag = dag
 
+        if dag.tasks[0].envs.get('__SKYPILOT_PARENT_JOB_ID') == -1:
+            # This is a parent job.
+            # Do not run the run section of the controller task, since the job
+            # is a dummy and it does not need to actually be submitted to the
+            # scheduler.
+            dag.tasks[0].run = None
+
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'

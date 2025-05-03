@@ -3472,10 +3472,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_submit_cmd = f'{mkdir_code} && {code}'
 
         if managed_job_dag is not None:
+            # Extract parent job id, if present.
+            parent_job_id_str = managed_job_dag.tasks[0].envs.get(
+                '__SKYPILOT_PARENT_JOB_ID')
+            parent_job_id = None
+            if parent_job_id_str is not None:
+                managed_job_dag.tasks[0].envs.pop('__SKYPILOT_PARENT_JOB_ID')
+                parent_job_id = int(parent_job_id_str)
+                logger.debug('EXEC CODE: this is a batch job, parent job id: '
+                             f'{parent_job_id}')
+
             # Add the managed job to job queue database.
             managed_job_codegen = managed_jobs.ManagedJobCodeGen()
             managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
+                job_id, managed_job_dag, parent_job_id=parent_job_id)
             # Set the managed job to PENDING state to make sure that this
             # managed job appears in the `sky jobs queue`, even if it needs to
             # wait to be submitted.
@@ -3553,6 +3563,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_id = int(job_id_match.group(1))
             else:
                 # For backward compatibility.
+                logger.debug(f'job_id_str: {job_id_str}')
                 job_id = int(job_id_str)
         except ValueError as e:
             logger.error(stderr)

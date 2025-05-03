@@ -36,6 +36,7 @@ import subprocess
 import sys
 import textwrap
 import traceback
+import types
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
                     Union)
@@ -87,9 +88,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-
-if typing.TYPE_CHECKING:
-    import types
 
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
@@ -3954,6 +3952,10 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--num-tasks',
+              default=None,
+              type=int,
+              help='Number of tasks to run in parallel for batch jobs.')
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3981,6 +3983,7 @@ def jobs_launch(
     yes: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
+    num_tasks: Optional[int] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -4046,7 +4049,28 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    result = managed_jobs.launch(dag,
+                                 name,
+                                 num_tasks,
+                                 _need_confirmation=not yes)
+
+    if isinstance(result, types.GeneratorType):
+        request_ids = []
+        job_ids = []
+        for request_id in result:
+            request_ids.append(request_id)
+            job_id_handle = _async_call_or_wait(request_id, async_call,
+                                                'sky.jobs.launch')
+            logger.debug(f'job_id_handle: {job_id_handle}')
+            # If async, job_id_handle is None
+            if job_id_handle is not None:
+                job_ids.append(job_id_handle[0])
+        click.secho('\n'.join(request_ids))
+        click.secho('Job ids:\n' + '\n'.join([str(id) for id in job_ids]))
+        sys.exit(0)
+
+    assert isinstance(result, server_common.RequestId)
+    request_id = result
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
