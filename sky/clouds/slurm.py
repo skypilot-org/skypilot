@@ -17,13 +17,16 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to Slurm."""
-        proc = subprocess.run(['sinfo'],
-                              stderr=subprocess.PIPE,
-                              stdout=subprocess.PIPE,
-                              check=False)
-        if proc.returncode != 0:
-            return (False, 'Slurm is not configured. To check, run: sinfo')
-        return (True, None)
+        try:
+            proc = subprocess.run(['sinfo'],
+                                stderr=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
+                                check=False, timeout=2)
+            if proc.returncode != 0:
+                return (False, 'Slurm is not configured. To check, run: sinfo')
+            return (True, None)
+        except FileNotFoundError:
+            return (False, 'Slurm command not found. To check, run: sinfo')
 
     def get_credential_file_mounts(self) -> registry.Dict[str, str]:
         return {}
