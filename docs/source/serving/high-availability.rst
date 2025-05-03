@@ -8,10 +8,10 @@ Overview
 --------
 By default, the SkyServe controller runs as a single instance (either a VM or a Kubernetes Pod). If this instance fails due to node issues, pod crashes, or other unexpected events, the service endpoint becomes unavailable until the controller is manually recovered or relaunched.
 
-To enhance resilience and ensure service continuity, SkyServe offers a High Availability (HA) mode for its controller. When enabled, the controller leverages Kubernetes capabilities to automatically recover from failures.
+To enhance resilience and ensure service continuity, SkyServe offers a High Availability mode for its controller. When enabled, the controller leverages the automatic recovery feature of Kubernetes Deployments to automatically recover from failures.
 
-Benefits of HA controller:
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Benefits of high availability controller:
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 * **Automatic Recovery:** The controller and load balancer can automatically restart after crashes or node failures.
 * **Service Continuity:** Minimizes downtime for your served applications.
 * **Managed by Kubernetes:** Relies on robust, industry-standard Kubernetes features for state management and process supervision.
@@ -22,14 +22,14 @@ Prerequisites
 * **Persistent Kubernetes:** The underlying Kubernetes cluster (control plane and nodes) must be running persistently. If using a local Kubernetes deployment (e.g., Minikube, Kind via ``sky local up``), the machine hosting the cluster must remain online.
 
 .. note::
-    Currently, HA mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development.
+    Currently, High Availability mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development.
 
-How to enable HA mode
----------------------
+How to enable high availability mode
+-------------------------------------
 To enable High Availability for the SkyServe controller, set the ``high_availability`` flag to ``true`` within the ``serve.controller`` section of your :ref:`SkyPilot configuration <config-yaml>`:
 
 .. code-block:: yaml
-    :emphasize-lines: 8
+    :emphasize-lines: 8,11
 
     serve:
       # NOTE: these settings only take effect for a *new* SkyServe controller,
@@ -38,10 +38,10 @@ To enable High Availability for the SkyServe controller, set the ``high_availabi
         # --- Controller Resources ---
         # Optional: Specify resources like cloud, region, cpus, disk_size
         resources:
-          cloud: kubernetes  # HA mode requires Kubernetes
+          cloud: kubernetes  # High Availability mode requires Kubernetes
           # region: <your-k8s-region> # Optional
           cpus: 2+           # Optional, example value
-          # disk_size: 100     # Optional, example value (affects PVC size in HA mode)
+          # disk_size: 100     # Optional, example value (affects PVC size in High Availability mode)
 
         # --- Enable High Availability ---
         high_availability: true
@@ -49,27 +49,25 @@ To enable High Availability for the SkyServe controller, set the ``high_availabi
 .. note::
     Enabling or disabling ``high_availability`` only affects **new** SkyServe controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first terminate all services and then tear down the existing controller using ``sky down <controller_name>``. See `Important considerations`_ below.
 
+.. note::
+    While the controller requires Kubernetes for High Availability mode, service replicas can still use any cloud or infrastructure supported by SkyPilot.
+
 How it works
 ------------
 When ``high_availability: true`` is set, SkyPilot modifies how the SkyServe controller is deployed on Kubernetes:
 
 1.  **Kubernetes Deployment:** Instead of launching a single Kubernetes Pod, the controller is launched as a Kubernetes `Deployment <https://kubernetes.io/docs/concepts/workloads/controllers/deployment/>`_ with ``replicas: 1``. The Deployment ensures that one instance of the controller pod is always running. If the pod crashes or the node it's on fails, Kubernetes automatically reschedules and starts a new pod.
-2.  **Persistent Volume Claim (PVC):** Controller state, including the service database (SQLite), logs, and potentially other runtime information, needs to persist across pod restarts. SkyPilot automatically creates a `PersistentVolumeClaim (PVC) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims>`_ for the controller. This PVC is mounted into the controller pod (typically at ``/home/sky``, which includes ``~/.sky/``). The size of the PVC is determined by the ``disk_size`` specified in the controller's ``resources`` configuration (or the default if not specified).
+2.  **Persistent Volume Claim (PVC):** Controller state, including the service database (SQLite), logs, and potentially other runtime information, needs to persist across pod restarts. SkyPilot automatically creates a `PersistentVolumeClaim (PVC) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims>`_ for the controller. This PVC is mounted into the controller pod (typically at ``/home/sky``, which includes ``~/.sky/``). The size of the PVC is determined by the ``disk_size`` specified in the controller's ``resources`` configuration (default is 100GB if not specified).
 3.  **Restart Policy:** The controller pod within the Deployment is configured with ``restartPolicy: Always``.
-4.  **Persistent Scripts & Recovery:** Setup commands and task ``run`` commands (like the one starting the Python service controller/load balancer) need to be re-executed reliably after a pod restart.
-    
-    * SkyPilot saves the final setup and run scripts to the persistent volume *before* executing them (in ``~/.sky/.controller_recovery_setup_commands.sh`` and ``~/.sky/.controller_recovery_task_run/`` respectively).
-    * A marker file (``/home/sky/k8s_container_ready``) is created on the PVC after the first successful startup.
-    * When a controller pod starts, it checks for this marker file. If the file exists (indicating a restart), the pod re-runs the saved setup and run scripts from the PVC to bring the controller and load balancer back online and recover the state of ongoing replica operations (provisioning, termination).
 
 Configuration details
 ---------------------
-Besides the main ``serve.controller.high_availability: true`` flag, you can customize HA behavior further:
+Besides the main ``serve.controller.high_availability: true`` flag, you can customize High Availability behavior further:
 
 .. raw:: html
 
    <ul>
-   <li><strong>Controller Resources (<code>serve.controller.resources</code>):</strong> As usual, you can specify <code>cloud</code> (must be Kubernetes), <code>region</code>, <code>cpus</code>, etc. The <code>disk_size</code> here directly determines the size of the PersistentVolumeClaim created for the HA controller.</li>
+   <li><strong>Controller Resources (<code>serve.controller.resources</code>):</strong> As usual, you can specify <code>cloud</code> (must be Kubernetes), <code>region</code>, <code>cpus</code>, etc. The <code>disk_size</code> here directly determines the size of the PersistentVolumeClaim created for the High Availability controller.</li>
    <li><strong>Kubernetes Storage Class (<code>kubernetes.high_availability.storage_class_name</code> - Optional):</strong> If your Kubernetes cluster has specific storage classes defined (e.g., for different performance tiers like SSD vs HDD, or specific features like backup), you can specify which one to use for the controller's PVC. This is configured under the <code>kubernetes</code> section in <code>config.yaml</code>:</li>
    </ul>
 
@@ -86,13 +84,13 @@ Besides the main ``serve.controller.high_availability: true`` flag, you can cust
 Important considerations
 ------------------------
 * **Currently Kubernetes Only:** This feature relies entirely on Kubernetes mechanisms (Deployments, PVCs) and is only available when the controller's specified ``cloud`` is ``kubernetes``. Support for other clouds (AWS, GCP, Azure VMs) is under development.
-* **Persistent K8s Required:** The HA mechanism depends on the Kubernetes cluster itself being available. Ensure your K8s control plane and nodes are stable.
-* **No Effect on Existing Controllers:** Setting ``high_availability: true`` in ``config.yaml`` will **not** convert an existing non-HA controller (running or stopped) to HA mode, nor will setting it to ``false`` convert an existing HA controller to non-HA. You must tear down the existing controller first (``sky down <sky-serve-controller-name>`` after terminating all services) for the new setting to apply when the controller is next launched.
-* **Inconsistent State Error:** If you attempt to launch a service (``sky serve up``) and the ``high_availability`` setting in your ``config.yaml`` *conflicts* with the actual state of the existing SkyServe controller cluster on Kubernetes (e.g., you enabled HA in config, but the controller exists as a non-HA Pod, or vice-versa), SkyPilot will raise an ``InconsistentHighAvailabilityError``. To resolve this, terminate all services, tear down the controller (``sky down <sky-serve-controller-name>``), and then run ``sky serve up`` again with the desired consistent configuration.
+* **Persistent K8s Required:** The High Availability mechanism depends on the Kubernetes cluster itself being available. Ensure your K8s control plane and nodes are stable.
+* **No Effect on Existing Controllers:** Setting ``high_availability: true`` in ``config.yaml`` will **not** convert an existing non-High Availability controller (running or stopped) to High Availability mode, nor will setting it to ``false`` convert an existing High Availability controller to non-High Availability. You must tear down the existing controller first (``sky down <sky-serve-controller-name>`` after terminating all services) for the new setting to apply when the controller is next launched.
+* **Inconsistent State Error:** If you attempt to launch a service (``sky serve up``) and the ``high_availability`` setting in your ``config.yaml`` *conflicts* with the actual state of the existing SkyServe controller cluster on Kubernetes (e.g., you enabled High Availability in config, but the controller exists as a non-High Availability Pod, or vice-versa), SkyPilot will raise an ``InconsistentHighAvailabilityError``. To resolve this, terminate all services, tear down the controller (``sky down <sky-serve-controller-name>``), and then run ``sky serve up`` again with the desired consistent configuration.
 
 Recovery example
 ----------------
-This example demonstrates the automatic recovery capability of the HA controller:
+This example demonstrates the automatic recovery capability of the High Availability controller:
 
 **0. Preparatory Steps (Ensure Clean State & Correct Config):**
 
@@ -110,7 +108,7 @@ This example demonstrates the automatic recovery capability of the HA controller
 
           sky down <sky-serve-controller-name>
 
-* **Set Configuration:** First, ensure your ``~/.sky/config.yaml`` enables HA mode as shown in the `How to enable HA mode`_ section.
+* **Set Configuration:** First, ensure your ``~/.sky/config.yaml`` enables High Availability mode as shown in the `How to enable High Availability mode`_ section.
 
   .. code-block:: yaml
       :caption: ~/.sky/config.yaml (relevant part)
@@ -122,10 +120,6 @@ This example demonstrates the automatic recovery capability of the HA controller
           high_availability: true
 
 * **Prepare Service Definition:**
-
-  .. code-block:: bash
-
-      sky api stop
 
 1.  **Prepare Configuration Files:**
 
@@ -151,7 +145,7 @@ This example demonstrates the automatic recovery capability of the HA controller
     .. code-block:: bash
 
         sky serve up -n my-http-service http_service.yaml
-        # This will launch the new HA controller based on your config.
+        # This will launch the new High Availability controller based on your config.
 
 3.  **Wait and Verify the Service:** Wait until the service status becomes ``READY``.
 
