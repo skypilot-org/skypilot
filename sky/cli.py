@@ -3521,10 +3521,12 @@ def show_gpus(
             available = node_info.free[
                 'accelerators_available'] if node_info.free[
                     'accelerators_available'] != -1 else no_permissions_str
-            node_table.add_row([
-                node_name, node_info.accelerator_type,
-                node_info.total['accelerator_count'], available
-            ])
+            total = node_info.total['accelerator_count']
+            if total > 0:
+                node_table.add_row([
+                    node_name, node_info.accelerator_type,
+                    node_info.total['accelerator_count'], available
+                ])
         k8s_per_node_acc_message = (
             'Kubernetes per node accelerator availability ')
         if nodes_info.hint:
@@ -3584,14 +3586,18 @@ def show_gpus(
                         yield '\n\n'
 
                     # print individual infos.
-                    for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+                    for (idx,
+                         (ctx,
+                          k8s_realtime_table)) in enumerate(k8s_realtime_infos):
                         context_str = f'(Context: {ctx})' if ctx else ''
                         yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                                f'Kubernetes GPUs {context_str}'
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from k8s_realtime_table.get_string()
                         yield '\n\n'
-                        yield _format_kubernetes_node_info(ctx) + '\n\n'
+                        yield _format_kubernetes_node_info(ctx)
+                        if idx != len(k8s_realtime_infos) - 1:
+                            yield '\n\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
