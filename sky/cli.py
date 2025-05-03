@@ -3426,9 +3426,12 @@ def show_gpus(
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
     def _get_kubernetes_realtime_gpu_tables(
-            context: Optional[str] = None,
-            name_filter: Optional[str] = None,
-            quantity_filter: Optional[int] = None):
+        context: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
+               Optional['prettytable.PrettyTable'], List[Tuple[
+                   str, 'models.KubernetesNodesInfo']]]:
         if quantity_filter:
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
@@ -3588,7 +3591,8 @@ def show_gpus(
         return realtime_gpu_infos, total_realtime_gpu_table
 
     def _format_kubernetes_node_info_combined(
-            contexts_info: List[Tuple[str, models.KubernetesNodesInfo]]) -> str:
+            contexts_info: List[Tuple[str,
+                                      'models.KubernetesNodesInfo']]) -> str:
         node_table = log_utils.create_table(
             ['CONTEXT', 'NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
@@ -3648,7 +3652,9 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _format_kubernetes_realtime_gpu(
-            total_table, k8s_realtime_infos, all_nodes_info,
+            total_table: 'prettytable.PrettyTable',
+            k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
+            all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             show_node_info: bool) -> Generator[str, None, None]:
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                'Kubernetes GPUs'
