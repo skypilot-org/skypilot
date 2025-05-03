@@ -91,6 +91,8 @@ from sky.utils.cli_utils import status_utils
 if typing.TYPE_CHECKING:
     import types
 
+    import prettytable
+
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
 
@@ -3458,30 +3460,43 @@ def show_gpus(
         realtime_gpu_infos = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
+        all_nodes_info = []
 
-        for (ctx, availability_list) in realtime_gpu_availability_lists:
-            realtime_gpu_table = log_utils.create_table(
-                ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-            for realtime_gpu_availability in sorted(availability_list):
-                gpu_availability = models.RealtimeGpuAvailability(
-                    *realtime_gpu_availability)
-                available_qty = (gpu_availability.available
-                                 if gpu_availability.available != -1 else
-                                 no_permissions_str)
-                realtime_gpu_table.add_row([
-                    gpu_availability.gpu,
-                    _list_to_str(gpu_availability.counts),
-                    gpu_availability.capacity,
-                    available_qty,
-                ])
-                gpu = gpu_availability.gpu
-                capacity = gpu_availability.capacity
-                # we want total, so skip permission denied.
-                available = max(gpu_availability.available, 0)
-                if capacity > 0:
-                    total_gpu_info[gpu][0] += capacity
-                    total_gpu_info[gpu][1] += available
-            realtime_gpu_infos.append((ctx, realtime_gpu_table))
+        if realtime_gpu_availability_lists:
+            if len(realtime_gpu_availability_lists[0]) != 2:
+                # TODO(kyuds): for backwards compatibility, as we add new
+                # context to the API server response in #5362. Remove this after
+                # 0.10.0.
+                realtime_gpu_availability_lists = [
+                    (context, realtime_gpu_availability_lists)
+                ]
+            for (ctx, availability_list) in realtime_gpu_availability_lists:
+                realtime_gpu_table = log_utils.create_table(
+                    ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                for realtime_gpu_availability in sorted(availability_list):
+                    gpu_availability = models.RealtimeGpuAvailability(
+                        *realtime_gpu_availability)
+                    available_qty = (gpu_availability.available
+                                     if gpu_availability.available != -1 else
+                                     no_permissions_str)
+                    realtime_gpu_table.add_row([
+                        gpu_availability.gpu,
+                        _list_to_str(gpu_availability.counts),
+                        gpu_availability.capacity,
+                        available_qty,
+                    ])
+                    gpu = gpu_availability.gpu
+                    capacity = gpu_availability.capacity
+                    # we want total, so skip permission denied.
+                    available = max(gpu_availability.available, 0)
+                    if capacity > 0:
+                        total_gpu_info[gpu][0] += capacity
+                        total_gpu_info[gpu][1] += available
+                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                # Collect node info for this context
+                nodes_info = sdk.stream_and_get(
+                    sdk.kubernetes_node_info(context=ctx))
+                all_nodes_info.append((ctx, nodes_info))
 
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs
@@ -3493,10 +3508,13 @@ def show_gpus(
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table
+        return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
-    def _get_slurm_realtime_gpu_tables(name_filter: Optional[str] = None,
-                                       quantity_filter: Optional[int] = None):
+    def _get_slurm_realtime_gpu_tables(
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
+               Optional['prettytable.PrettyTable']]:
         """Get Slurm GPU availability tables.
 
         Args:
@@ -3569,31 +3587,41 @@ def show_gpus(
 
         return realtime_gpu_infos, total_realtime_gpu_table
 
-    def _format_kubernetes_node_info(context: Optional[str]):
+    def _format_kubernetes_node_info_combined(
+            contexts_info: List[Tuple[str, models.KubernetesNodesInfo]]) -> str:
         node_table = log_utils.create_table(
-            ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+            ['CONTEXT', 'NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        nodes_info = sdk.stream_and_get(
-            sdk.kubernetes_node_info(context=context))
         no_permissions_str = '<no permissions>'
-        for node_name, node_info in nodes_info.node_info_dict.items():
-            available = node_info.free[
-                'accelerators_available'] if node_info.free[
-                    'accelerators_available'] != -1 else no_permissions_str
-            node_table.add_row([
-                node_name, node_info.accelerator_type,
-                node_info.total['accelerator_count'], available
-            ])
-        k8s_per_node_acc_message = (
-            'Kubernetes per node accelerator availability ')
-        if nodes_info.hint:
-            k8s_per_node_acc_message += nodes_info.hint
-        return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
+        hints = []
+
+        for context, nodes_info in contexts_info:
+            context_name = context if context else 'default'
+            if nodes_info.hint:
+                hints.append(f'{context_name}: {nodes_info.hint}')
+
+            for node_name, node_info in nodes_info.node_info_dict.items():
+                available = node_info.free[
+                    'accelerators_available'] if node_info.free[
+                        'accelerators_available'] != -1 else no_permissions_str
+                acc_type = node_info.accelerator_type
+                if acc_type is None:
+                    acc_type = '-'
+                node_table.add_row([
+                    context_name, node_name, acc_type,
+                    node_info.total['accelerator_count'], available
+                ])
+
+        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        if hints:
+            k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
+
+        return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                 f'{k8s_per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
-    def _format_slurm_node_info():
+    def _format_slurm_node_info() -> str:
         node_table = log_utils.create_table([
             'NODE_NAME', 'PARTITION', 'STATE', 'GPU_NAME', 'TOTAL_GPUS',
             'FREE_GPUS'
@@ -3618,6 +3646,54 @@ def show_gpus(
                 f'{slurm_per_node_msg}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
+
+    def _format_kubernetes_realtime_gpu(
+            total_table, k8s_realtime_infos, all_nodes_info,
+            show_node_info: bool) -> Generator[str, None, None]:
+        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+               'Kubernetes GPUs'
+               f'{colorama.Style.RESET_ALL}\n')
+        # print total table
+        if total_table is not None:
+            yield from total_table.get_string()
+            yield '\n'
+
+        # print individual infos.
+        for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+            # Print context header separately
+            if ctx:
+                context_str = f'Context: {ctx}'
+            else:
+                context_str = 'Default Context'
+            yield (
+                f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
+            )
+            yield from k8s_realtime_table.get_string()
+            yield '\n'
+        if show_node_info:
+            yield _format_kubernetes_node_info_combined(all_nodes_info)
+
+    def _format_slurm_realtime_gpu(
+            total_table, slurm_realtime_infos,
+            show_node_info: bool) -> Generator[str, None, None]:
+        # print total table
+        if total_table is not None:
+            yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                   'Slurm GPUs'
+                   f'{colorama.Style.RESET_ALL}\n')
+            yield from total_table.get_string()
+            yield '\n'
+
+        # print individual infos.
+        for (partition, slurm_realtime_table) in slurm_realtime_infos:
+            partition_str = f'Partition: {partition}'
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'{partition_str}'
+                   f'{colorama.Style.RESET_ALL}\n')
+            yield from slurm_realtime_table.get_string()
+            yield '\n'
+        if show_node_info:
+            yield _format_slurm_node_info()
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3653,7 +3729,7 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
+                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3662,23 +3738,12 @@ def show_gpus(
                 else:
                     print_section_titles = True
 
-                    # print total table
-                    if total_table is not None:
-                        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                               'Total Kubernetes GPUs'
-                               f'{colorama.Style.RESET_ALL}\n')
-                        yield from total_table.get_string()
-                        yield '\n'
+                    yield from _format_kubernetes_realtime_gpu(
+                        total_table,
+                        k8s_realtime_infos,
+                        all_nodes_info,
+                        show_node_info=True)
 
-                    # print individual infos.
-                    for (ctx, k8s_realtime_table) in k8s_realtime_infos:
-                        context_str = f'(Context: {ctx})' if ctx else ''
-                        yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                               f'Kubernetes GPUs {context_str}'
-                               f'{colorama.Style.RESET_ALL}\n')
-                        yield from k8s_realtime_table.get_string()
-                        yield '\n\n'
-                        yield _format_kubernetes_node_info(ctx) + '\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3706,28 +3771,10 @@ def show_gpus(
                 else:
                     print_section_titles = True
 
-                    # print total table
-                    if total_table is not None:
-                        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                               'Total Slurm GPUs'
-                               f'{colorama.Style.RESET_ALL}\n')
-                        yield from total_table.get_string()
-                        yield '\n\n'
+                    yield from _format_slurm_realtime_gpu(total_table,
+                                                          slurm_realtime_infos,
+                                                          show_node_info=True)
 
-                    # print individual infos.
-                    for (partition,
-                         slurm_realtime_table) in slurm_realtime_infos:
-                        if partition:
-                            partition_str = f'(Partition: {partition})'
-                        else:
-                            partition_str = ''
-                        yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                               f'Slurm GPUs {partition_str}'
-                               f'{colorama.Style.RESET_ALL}\n')
-                        yield from slurm_realtime_table.get_string()
-                        yield '\n\n'
-                    # Add the per-node table here
-                    yield _format_slurm_node_info() + '\n'
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
                 if not slurm_is_enabled:
@@ -3821,31 +3868,18 @@ def show_gpus(
             print_section_titles = True
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
-                k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(  # pylint: disable=line-too-long
-                    context=region,
-                    name_filter=name,
-                    quantity_filter=quantity)
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region, name_filter=name, quantity_filter=quantity)
 
-                # print total table
-                if total_table is not None:
-                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                           'Total Kubernetes GPUs'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from total_table.get_string()
-                    yield '\n\n'
-
-                # print individual tables
-                for (ctx, k8s_realtime_table) in k8s_realtime_infos:
-                    context_str = f'(Context: {ctx})' if ctx else ''
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs {context_str}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_realtime_table.get_string()
-                    yield '\n\n'
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
-                yield str(e)
+                yield common_utils.format_exception(e, use_bracket=True)
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3868,26 +3902,9 @@ def show_gpus(
                     _get_slurm_realtime_gpu_tables(name_filter=name,
                                                    quantity_filter=quantity))
 
-                # print total table
-                if total_table is not None:
-                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                           'Total Slurm GPUs'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from total_table.get_string()
-                    yield '\n\n'
-                # print individual tables
-                for (partition, slurm_realtime_table) in slurm_realtime_infos:
-                    if partition:
-                        partition_str = f'(Partition: {partition})'
-                    else:
-                        partition_str = ''
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Slurm GPUs {partition_str}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from slurm_realtime_table.get_string()
-                    yield '\n\n'
-                    # Add the per-node table here
-                    yield _format_slurm_node_info() + '\n\n'
+                yield from _format_slurm_realtime_gpu(total_table,
+                                                      slurm_realtime_infos,
+                                                      show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources A10G not found ...")

@@ -272,7 +272,7 @@ def list_accelerators_realtime(
                 )
                 qtys_map[gpu_type].add(instance_info)
                 count *= 2
-            
+
             # Add the actual total if it's not already included
             # (e.g., if node has 12 GPUs, include counts 1, 2, 4, 8, 12)
             if count // 2 != node_total_gpus:

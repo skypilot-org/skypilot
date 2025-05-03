@@ -1033,13 +1033,19 @@ def realtime_kubernetes_gpu_availability(
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None
     ) -> List[models.RealtimeGpuAvailability]:
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
-            gpus_only=True,
-            clouds='kubernetes',
-            name_filter=name_filter,
-            region_filter=context,
-            quantity_filter=quantity_filter,
-            case_sensitive=False)
+        (qtys_map, capacity,
+         available) = service_catalog.list_accelerator_realtime(
+             gpus_only=True,
+             clouds='kubernetes',
+             name_filter=name_filter,
+             region_filter=context,
+             quantity_filter=quantity_filter,
+             case_sensitive=False)
+        counts: Dict[str, List[int]] = collections.defaultdict(list)
+        for gpu, items in qtys_map.items():
+            for item in items:
+                counts[gpu].append(item.accelerator_count)
+            counts[gpu] = sorted(counts[gpu])
         assert (set(counts.keys()) == set(capacity.keys()) == set(
             available.keys())), (f'Keys of counts ({list(counts.keys())}), '
                                  f'capacity ({list(capacity.keys())}), '

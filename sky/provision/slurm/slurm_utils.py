@@ -114,11 +114,12 @@ def slurm_gpu_availability(
             while count <= max_requestable_on_single_node:
                 requestable_quantities.append(count)
                 count *= 2
-            
+
             # Add the actual maximum if not already included
-            if requestable_quantities and requestable_quantities[-1] != max_requestable_on_single_node:
+            if requestable_quantities and requestable_quantities[
+                    -1] != max_requestable_on_single_node:
                 requestable_quantities.append(max_requestable_on_single_node)
-            
+
             # Sort the quantities for consistent ordering
             requestable_quantities.sort()
 

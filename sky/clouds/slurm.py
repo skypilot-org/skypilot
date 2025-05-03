@@ -19,9 +19,10 @@ class Slurm(clouds.Cloud):
         """Checks if the user has access credentials to Slurm."""
         try:
             proc = subprocess.run(['sinfo'],
-                                stderr=subprocess.PIPE,
-                                stdout=subprocess.PIPE,
-                                check=False, timeout=2)
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.PIPE,
+                                  check=False,
+                                  timeout=2)
             if proc.returncode != 0:
                 return (False, 'Slurm is not configured. To check, run: sinfo')
             return (True, None)
