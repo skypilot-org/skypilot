@@ -106,10 +106,11 @@ Running the following command for 6 times.
 
 - `svc1`: SGLang Router
 - `svc2`: SGLang Router [Pull]
-- `svc3`: LB Pull + Replica Pull
-- `svc4`: LB Push + Replica Pull
-- `svc5`: LB Push + Replica Push
-- `svc6`: LB Pull + Replica Pull, but Pull by rate limiting instead of stealing
+- `svc3`: LB Pull (V1 stealing) + Replica Pull
+- `svc4`: LB Pull (V2 stealing) + Replica Pull
+- `svc5`: LB Push + Replica Pull
+- `svc6`: LB Push + Replica Push
+- `svc7`: LB Pull + Replica Pull, but Pull by selective pushing instead of stealing
 - There is no LB Pull + Replica Push since no request will left in replica. Hence no request left in LB to pull.
 
 You can launch all of them at once by:
@@ -118,9 +119,10 @@ You can launch all of them at once by:
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc1 --env HF_TOKEN
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc2 --env HF_TOKEN
 sky serve up examples/serve/external-lb/llm.yaml -y -n svc3 --env HF_TOKEN
-sky serve up examples/serve/external-lb/llm.yaml -y -n svc4 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true
-sky serve up examples/serve/external-lb/llm.yaml -y -n svc5 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env DO_PUSHING_TO_REPLICA=true
-sky serve up examples/serve/external-lb/llm.yaml -y -n svc6 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env LB_PUSHING_ENABLE_LB=false
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc4 --env HF_TOKEN --env USE_V2_STEALING=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc5 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc6 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env DO_PUSHING_TO_REPLICA=true
+sky serve up examples/serve/external-lb/llm.yaml -y -n svc7 --env HF_TOKEN --env DO_PUSHING_ACROSS_LB=true --env LB_PUSHING_ENABLE_LB=false
 ```
 
 Here is a easy-to-use script:

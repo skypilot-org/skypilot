@@ -9,6 +9,7 @@ envs:
 resources:
   # TODO(tian): Hack. We should figure out the optimal resources.
   cloud: aws
+  region: us-east-2
   cpus: 2+
   ports: 9002
 

@@ -14,6 +14,8 @@ describes = [
     'sgl',
     'sky_sgl_enhanced',
     'sky_pull_pull',
+    # 'sky_pull_pull_small',
+    'sky_pull_pull_small_3',
     'sky_push_pull',
     'sky_push_push',
     'sky_pull_pull_rate_limit',
@@ -22,7 +24,9 @@ describes = [
 presents = [
     'Baseline',
     'Baseline\\n[Pull]',
-    'Ours\\n[Pull/Stealing+Pull]',
+    'Ours\\n[Pull/Steal+Pull]',
+    # 'Ours\\n[Pull/StealSmall+Pull]',
+    'Ours\\n[Pull/StealSmall3+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
     'Ours\\n[Pull/RateLimit+Pull]',
@@ -34,10 +38,11 @@ all_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
     2,  # sky pulling in lb, pulling in replica, but workload stealing
-    3,  # sky pushing in lb, pulling in replica
-    4,  # sky pushing in lb, pushing in replica
-    5,  # sky pulling in lb, pulling in replica, but rate limit
-    6,  # gke
+    3,  # sky pulling in lb, pulling in replica, but steal small #requests
+    4,  # sky pushing in lb, pulling in replica
+    5,  # sky pushing in lb, pushing in replica
+    6,  # sky pulling in lb, pulling in replica, but rate limit
+    7,  # gke
 ]
 
 # Default to just running GKE
@@ -177,7 +182,7 @@ def main():
         scps.append(f'mkdir -p {output_local}/metric/{en}')
         for r in regions:
             cluster = _region_cluster_name(r)
-            region_cmd = f'{cmd} --seed {r}'
+            region_cmd = f'{cmd} --region {r} --seed {r} '
             if isinstance(regions, dict):
                 region_cmd += f' {regions[r]}'
             # TODO(tian): Instead of --fast, how about sky launch once

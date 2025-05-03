@@ -400,6 +400,7 @@ def sky_managed_cluster_envs() -> Dict[str, str]:
         # Disable minimize logging to get more details on the controller.
         env_options.Options.MINIMIZE_LOGGING.env_key: '0',
     })
+    print('sky_managed_cluster_envs', env_vars)
     return env_vars
 
 

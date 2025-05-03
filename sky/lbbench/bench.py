@@ -102,6 +102,7 @@ def main():
                         type=str,
                         required=True,
                         choices=all_workloads)
+    parser.add_argument('--region', type=str, default='none')
 
     # First parse just the workload argument to import the right module
     temp_args, _ = parser.parse_known_args()

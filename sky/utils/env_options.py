@@ -23,7 +23,8 @@ class Options(enum.Enum):
     # This should not be included in the controller envs.
     DO_PUSHING_ACROSS_LB = ('DO_PUSHING_ACROSS_LB', False)
     LB_PUSHING_ENABLE_LB = ('LB_PUSHING_ENABLE_LB', True)
-    DO_PUSHING_TO_REPLICA = ('ENABLE_PREFIX_LOAD_BALANCING', False)
+    DO_PUSHING_TO_REPLICA = ('DO_PUSHING_TO_REPLICA', False)
+    USE_V2_STEALING = ('USE_V2_STEALING', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         self.env_var = env_var

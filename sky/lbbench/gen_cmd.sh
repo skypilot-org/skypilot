@@ -1,2 +1,4 @@
-python3 -m sky.lbbench.launch_lb --service-names a31 a32
-python3 -m sky.lbbench.gen_cmd --service-names a31 a32 a33 a34 a35 a36 --exp-name arena_syn_mrc_fix_50_50_50_c2000_u150_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 50","ap-northeast-1":"--num-users 50","eu-central-1":"--num-users 50"}'
+python3 -m sky.lbbench.launch_lb --service-names a121 a122
+python3 -m sky.lbbench.gen_cmd --service-names a91 a92 a93 a94 --exp-name arena_syn_mrc_8_replica_100_100_100_c2000_u300_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 100","ap-northeast-1":"--num-users 100","eu-central-1":"--num-users 100"}'
+python3 -m sky.lbbench.gen_cmd --service-names a101 a102 --exp-name ablation_single_region_selective_pushing --extra-args '--workload arena_syn --duration 600 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 120"}'
+python3 -m sky.lbbench.gen_cmd --service-names a121 a122 a123 a124 a125 a126 a127 --exp-name arena_syn_40_40_fixed_c2000_u120_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 40","ap-northeast-1":"--num-users 40"}'
