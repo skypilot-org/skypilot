@@ -56,9 +56,13 @@ How it works
 ------------
 When ``high_availability: true`` is set, SkyPilot modifies how the SkyServe controller is deployed on Kubernetes:
 
-1.  **Kubernetes Deployment:** Instead of launching a single Kubernetes Pod, the controller is launched as a Kubernetes `Deployment <https://kubernetes.io/docs/concepts/workloads/controllers/deployment/>`_ with ``replicas: 1``. The Deployment ensures that one instance of the controller pod is always running. If the pod crashes or the node it's on fails, Kubernetes automatically reschedules and starts a new pod.
-2.  **Persistent Volume Claim (PVC):** Controller state, including the service database (SQLite), logs, and potentially other runtime information, needs to persist across pod restarts. SkyPilot automatically creates a `PersistentVolumeClaim (PVC) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims>`_ for the controller. This PVC is mounted into the controller pod (typically at ``/home/sky``, which includes ``~/.sky/``). The size of the PVC is determined by the ``disk_size`` specified in the controller's ``resources`` configuration (default is 100GB if not specified).
-3.  **Restart Policy:** The controller pod within the Deployment is configured with ``restartPolicy: Always``.
+The High Availability implementation relies on standard Kubernetes mechanisms to ensure controller resilience:
+
+* **Automatic Recovery:** The controller runs as a Kubernetes Deployment that automatically restarts pods after failures.
+* **Persistent State:** Critical controller state (database, configuration) is stored on persistent storage that survives pod restarts.
+* **Seamless Continuation:** When a new pod starts after a failure, it automatically reconnects to existing resources and continues operations without manual intervention.
+
+The entire recovery process is handled transparently by SkyPilot and Kubernetes, requiring no action from users when failures occur.
 
 Configuration details
 ---------------------
