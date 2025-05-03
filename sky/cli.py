@@ -3679,7 +3679,7 @@ def show_gpus(
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from k8s_realtime_table.get_string()
                         yield '\n\n'
-                    yield _format_kubernetes_node_info(ctx) + '\n'
+                        yield _format_kubernetes_node_info(ctx) + '\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)

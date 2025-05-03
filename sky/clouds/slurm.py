@@ -1,4 +1,5 @@
 """Kubernetes."""
+import subprocess
 from typing import Optional, Tuple
 
 from sky import clouds
@@ -16,7 +17,13 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to Slurm."""
-        return (False, None)
+        proc = subprocess.run(['sinfo'],
+                              stderr=subprocess.PIPE,
+                              stdout=subprocess.PIPE,
+                              check=False)
+        if proc.returncode != 0:
+            return (False, 'Slurm is not configured. To check, run: sinfo')
+        return (True, None)
 
     def get_credential_file_mounts(self) -> registry.Dict[str, str]:
         return {}

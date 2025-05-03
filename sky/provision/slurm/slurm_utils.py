@@ -1,13 +1,11 @@
 """Utility functions for Slurm provisioning."""
 import collections
-from typing import Any, Dict, List, Optional, Tuple, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import models
 from sky import sky_logging
-from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import slurm_catalog
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -52,35 +50,6 @@ def slurm_gpu_availability(
     """
     del env_vars, kwargs  # Currently unused
 
-    try:
-        qtys_map, total_capacity, total_available = (
-            slurm_catalog.list_accelerators_realtime(
-                gpus_only=True,
-                name_filter=name_filter,
-                region_filter=None,  # Handled internally by grouping
-                quantity_filter=quantity_filter,
-                case_sensitive=False))
-    except exceptions.NotSupportedError as e:
-        logger.error(f'Failed to query Slurm GPU availability: {e}')
-        raise
-    except Exception as e:
-        msg = (f'Error querying Slurm GPU availability: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
-        logger.error(msg)
-        raise ValueError(msg) from e
-
-    if not qtys_map:
-        err_msg = 'No GPUs found in the Slurm cluster.'
-        if name_filter is not None or quantity_filter is not None:
-            filters = []
-            if name_filter:
-                filters.append(f'name={name_filter!r}')
-            if quantity_filter:
-                filters.append(f'quantity>={quantity_filter}')
-            err_msg = (f'Resource matching filters ({", ".join(filters)}) '
-                       f'not found in the Slurm cluster.')
-        raise ValueError(err_msg)
-
     result_list: List[Tuple[str, List[models.RealtimeGpuAvailability]]] = []
 
     # Get all node info once to avoid repeated calls in the loop
@@ -91,56 +60,83 @@ def slurm_gpu_availability(
         all_nodes_info = []
 
     # Group nodes by partition
-    nodes_by_partition: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    nodes_by_partition: Dict[str,
+                             List[Dict[str,
+                                       Any]]] = collections.defaultdict(list)
     for node_info in all_nodes_info:
         partition = node_info.get('partition', 'unknown_partition')
         nodes_by_partition[partition].append(node_info)
 
     for partition, nodes_in_partition in sorted(nodes_by_partition.items()):
         availability_list: List[models.RealtimeGpuAvailability] = []
-        
+
         # Calculate partition-specific totals and observed counts
         partition_total_capacity: Dict[str, int] = collections.defaultdict(int)
         partition_total_available: Dict[str, int] = collections.defaultdict(int)
         partition_gpu_counts: Dict[str, Set[int]] = collections.defaultdict(set)
-        max_free_gpus_per_node_type: Dict[str, int] = collections.defaultdict(int)
+        max_free_gpus_per_node_type: Dict[str,
+                                          int] = collections.defaultdict(int)
 
         for node_info in nodes_in_partition:
             gpu_type = node_info.get('gpu_type')
-            if not gpu_type: continue # Skip nodes without a GPU type reported
-            
+            # Apply name_filter here if provided
+            if not gpu_type or (name_filter is not None and
+                                name_filter.lower() != gpu_type.lower()):
+                continue  # Skip nodes without GPU type or not matching filter
+
             total_gpus = node_info.get('total_gpus', 0)
             free_gpus = node_info.get('free_gpus', 0)
 
             partition_total_capacity[gpu_type] += total_gpus
             partition_total_available[gpu_type] += free_gpus
             if total_gpus > 0:
-                 partition_gpu_counts[gpu_type].add(total_gpus)
+                partition_gpu_counts[gpu_type].add(total_gpus)
             # Track max free GPUs on a single node for this type
-            max_free_gpus_per_node_type[gpu_type] = max(max_free_gpus_per_node_type[gpu_type], free_gpus)
+            max_free_gpus_per_node_type[gpu_type] = max(
+                max_free_gpus_per_node_type[gpu_type], free_gpus)
 
-        # Create RealtimeGpuAvailability objects for each GPU type in this partition
+        # Create RealtimeGpuAvailability objects for each GPU type in this
+        # partition
         for gpu_type in sorted(partition_gpu_counts.keys()):
-            # Generate requestable quantities based on max *free* GPUs on a single node
-            max_requestable_on_single_node = max_free_gpus_per_node_type.get(gpu_type, 0)
-            requestable_quantities = list(range(1, max_requestable_on_single_node + 1))
-            
+            # Generate requestable quantities based on max *free* GPUs on a
+            # single node
+            max_requestable_on_single_node = max_free_gpus_per_node_type.get(
+                gpu_type, 0)
+
+            # Apply quantity_filter here if provided
+            if (quantity_filter is not None and
+                    max_requestable_on_single_node < quantity_filter):
+                continue  # Skip GPU type if max free is less than filter
+
+            requestable_quantities = list(
+                range(1, max_requestable_on_single_node + 1))
+
             capacity = partition_total_capacity.get(gpu_type, 0)
             available = partition_total_available.get(gpu_type, 0)
 
             availability_list.append(
                 models.RealtimeGpuAvailability(
                     gpu_type,
-                    requestable_quantities, # Use calculated requestable quantities
-                    capacity, # Partition-specific total
-                    available, # Partition-specific free
+                    requestable_quantities,
+                    capacity,
+                    available,
                 ))
-                
-        if availability_list:
-             result_list.append((partition, availability_list))
 
+        if availability_list:
+            result_list.append((partition, availability_list))
+
+    # Check if any GPUs were found after processing all nodes/partitions
     if not result_list:
-        raise ValueError('No GPUs found after processing Slurm cluster data.')
+        err_msg = 'No GPUs found in the Slurm cluster matching the criteria.'
+        filters = []
+        if name_filter:
+            filters.append(f'name={name_filter!r}')
+        if quantity_filter:
+            filters.append(f'quantity>={quantity_filter}')
+        if filters:
+            err_msg = (f'Resource matching filters ({", ".join(filters)}) '
+                       f'not found in the Slurm cluster.')
+        raise ValueError(err_msg)
 
     return result_list
 
