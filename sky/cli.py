@@ -3523,8 +3523,7 @@ def show_gpus(
                     node_info.total['accelerator_count'], available
                 ])
 
-        k8s_per_node_acc_message = (
-            'Kubernetes per-node GPU availability')
+        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -3534,7 +3533,7 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _format_kubernetes_realtime_gpu(total_table, k8s_realtime_infos,
-                                      all_nodes_info, show_node_info: bool):
+                                        all_nodes_info, show_node_info: bool):
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                'Kubernetes GPUs'
                f'{colorama.Style.RESET_ALL}\n')
@@ -3700,9 +3699,9 @@ def show_gpus(
                      context=region, name_filter=name, quantity_filter=quantity)
 
                 yield from _format_kubernetes_realtime_gpu(total_table,
-                                                         k8s_realtime_infos,
-                                                         all_nodes_info,
-                                                         show_node_info=False)
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
