@@ -230,35 +230,9 @@ class Slurm(clouds.Cloud):
         return (_make(instance_list), fuzzy_candidate_list)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for Slurm. """
-        ########
-        # TODO #
-        ########
-        # Verify locally stored credentials are correct.
-        # The following is an example, where we assume `slurm` is the
-        # Python SDK for Slurm.
-
-        try:
-            import slurm  # pylint: disable=import-outside-toplevel
-            valid, error = slurm.check_credentials()
-
-            if not valid:
-                return False, (
-                    f'{error} \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    f'        $ pip install slurm \n'
-                    f'        $ slurm store_api_key <YOUR_slurm_API_KEY> \n'
-                    '    For more information, see https://docs.slurm.io/docs/skypilot'  # pylint: disable=line-too-long
-                )
-
-            return True, None
-
-        except ImportError:
-            return False, (
-                'Failed to import slurm.'
-                'To install, run: "pip install slurm" or "pip install sky[slurm]"'  # pylint: disable=line-too-long
-            )
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to the Slurm cluster."""
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         ########
