@@ -1,22 +1,29 @@
 """Slurm."""
 
 import json
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from paramiko import AuthenticationException
+from paramiko.client import AutoAddPolicy
+from paramiko.client import SSHClient
+from paramiko.config import SSHConfig
+
 from sky import clouds
+from sky import sky_logging
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
-_CREDENTIAL_FILES = [
-    # credential files for Slurm,
-    # TODO: Change this to the actual credential files
-    # SSH client key path for public key authentication?
-    'config.toml',
-]
+logger = sky_logging.init_logger(__name__)
+
+DEFAULT_SLURM_PATH = '~/.slurm/config'
+CREDENTIAL_PATH = DEFAULT_SLURM_PATH
 
 
 @registry.CLOUD_REGISTRY.register
@@ -41,8 +48,10 @@ class Slurm(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_utils.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        # logger.critical('[BYPASS] Check Slurm's unsupported features...')
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -177,7 +186,8 @@ class Slurm(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             return ([], [])
@@ -210,9 +220,10 @@ class Slurm(clouds.Cloud):
             default_instance_type = Slurm.get_default_instance_type(
                 cpus=resources.cpus)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -232,7 +243,37 @@ class Slurm(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        return True, None
+        # We can use ssh_config.get_hostnames to get a set of SlurmctldHost name aliases.
+        # For now, we use a single-node Slurm cluster for demo.
+        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        # existing_allowed_clusters = list(ssh_config.get_hostnames())
+        existing_allowed_clusters = ['test']
+
+        for cluster in existing_allowed_clusters:
+            # Retrieve the config options for a given SlurmctldHost name alias.
+            ssh_config_dict = ssh_config.lookup(cluster)
+
+            try:
+                ssh_client = SSHClient()
+                ssh_client.set_missing_host_key_policy(AutoAddPolicy())
+                ssh_client.connect(ssh_config_dict['hostname'],
+                                   port=ssh_config_dict['port'],
+                                   username=ssh_config_dict['user'],
+                                   key_filename=ssh_config_dict['identityfile'])
+
+                # Check health with a test command.
+                _, stdout, stderr = ssh_client.exec_command('sinfo')
+                output, error = stdout.read().decode(), stderr.read().decode()
+                if error != '':
+                    return (False, error)
+
+                return (True, '')
+            except AuthenticationException as e:
+                return (False,
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+            except Exception as e:  # pylint: disable=broad-except
+                return (False, f'Credential check failed for {cluster}: '
+                        f'{common_utils.format_exception(e)}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         ########
@@ -240,10 +281,7 @@ class Slurm(clouds.Cloud):
         ########
         # Return dictionary of credential file paths. This may look
         # something like:
-        return {
-            f'~/.slurm/{filename}': f'~/.slurm/{filename}'
-            for filename in _CREDENTIAL_FILES
-        }
+        return {}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

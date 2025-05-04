@@ -484,7 +484,7 @@ def get_instance_type_for_cpus_mem_impl(
     """Returns the cheapest instance type that satisfies the requirements.
 
     Args:
-        df: The catalog cloud catalog data frame.
+        df: The cloud catalog data frame.
         cpus: The number of vCPUs. Can be a number or a string "<number>+". If
             the string ends with "+", then the returned instance type should
             have at least the given number of vCPUs.
