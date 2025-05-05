@@ -134,7 +134,7 @@ run: |
         current_node_threads_per_core=$(ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "lscpu | grep \"Thread(s) per core:\" | awk '{print \$4}'" </dev/null)
         
         # Check remote GPUs
-        if ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "command -v nvidia-smi" &> /dev/null; then
+        if ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "command -v nvidia-smi" &> /dev/null </dev/null; then
           current_gpu_count=$(ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "nvidia-smi --query-gpu=name --format=csv,noheader | wc -l" </dev/null)
           if [ $current_gpu_count -gt 0 ]; then
             CURRENT_GPU_TYPE=$(ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g'" </dev/null)
@@ -180,7 +180,7 @@ run: |
       current_node_threads_per_core=$(ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "lscpu | grep \"Thread(s) per core:\" | awk '{print \$4}'" </dev/null)
       
       # Check remote GPUs
-      if ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "command -v nvidia-smi" &> /dev/null; then
+      if ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "command -v nvidia-smi" &> /dev/null </dev/null; then
         current_gpu_count=$(ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "nvidia-smi --query-gpu=name --format=csv,noheader | wc -l" </dev/null)
         if [ $current_gpu_count -gt 0 ]; then
           CURRENT_GPU_TYPE=$(ssh -o StrictHostKeyChecking=no $USERNAME@$current_node_ip "nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/NVIDIA //g' | sed 's/ /_/g'" </dev/null)
@@ -567,9 +567,10 @@ run: |
       
       while read -r node; do
         # Call function to process node: process_node <node_ip> <rank> <is_secondary_cluster> <target_cluster_name>
+        echo "Processing node: $node"
         process_node "$node" "$RANK" 1 "$CLUSTER_NAME"
         RANK=$((RANK+1))
-      done <<< "$SKYPILOT_NODE_IPS"
+      done <<< "$(echo "$SKYPILOT_NODE_IPS")" # Feed all IPs to the loop
       
       # Create partitions for this secondary cluster
       create_partitions 0 # 0 indicates secondary cluster
