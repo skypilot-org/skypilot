@@ -472,7 +472,7 @@ def get_instance_type_for_cpus_mem_impl(
             "<number>+" or "<number>x". If the string ends with "+", then the
             returned instance type should have at least the given memory size.
             If the string ends with "x", then the returned instance type should
-            have at least the given memory size times the given ratio.
+            have at least the given number of vCPUs times the given ratio.
     """
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
