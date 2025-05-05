@@ -565,8 +565,8 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 
   aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
   aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
-  aws configure set region REGION --profile nebius
-  aws configure set endpoint_url ENDPOINT  --profile nebius
+  aws configure set region <REGION> --profile nebius
+  aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
 Request quotas for first time users
 --------------------------------------
