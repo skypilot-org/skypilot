@@ -59,7 +59,7 @@ When ``high_availability: true`` is set, SkyPilot modifies how the SkyServe cont
 The High Availability implementation relies on standard Kubernetes mechanisms to ensure controller resilience:
 
 * **Automatic Recovery:** The controller runs as a Kubernetes Deployment that automatically restarts pods after failures.
-* **Persistent State:** Critical controller state (database, configuration) is stored on persistent storage that survives pod restarts.
+* **Persistent State:** Critical controller state (database, configuration) is stored on persistent storage that persists on pod restarts.
 * **Seamless Continuation:** When a new pod starts after a failure, it automatically reconnects to existing resources and continues operations without manual intervention.
 
 The entire recovery process is handled transparently by SkyPilot and Kubernetes, requiring no action from users when failures occur.
