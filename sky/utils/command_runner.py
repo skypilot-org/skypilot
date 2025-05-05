@@ -592,7 +592,7 @@ class SSHCommandRunner(CommandRunner):
         """Initialize SSHCommandRunner.
 
         Example Usage:
-            runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
+            runner = SSHCommandRunner((ip, port), ssh_user, ssh_private_key)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
