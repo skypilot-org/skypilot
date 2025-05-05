@@ -5,14 +5,12 @@ import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from paramiko import AuthenticationException
-from paramiko.client import AutoAddPolicy
-from paramiko.client import SSHClient
 from paramiko.config import SSHConfig
 
 from sky import clouds
 from sky import sky_logging
 from sky.clouds import service_catalog
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -254,23 +252,17 @@ class Slurm(clouds.Cloud):
             ssh_config_dict = ssh_config.lookup(cluster)
 
             try:
-                ssh_client = SSHClient()
-                ssh_client.set_missing_host_key_policy(AutoAddPolicy())
-                ssh_client.connect(ssh_config_dict['hostname'],
-                                   port=ssh_config_dict['port'],
-                                   username=ssh_config_dict['user'],
-                                   key_filename=ssh_config_dict['identityfile'])
-
-                # Check health with a test command.
-                _, stdout, stderr = ssh_client.exec_command('sinfo')
-                output, error = stdout.read().decode(), stderr.read().decode()
-                if error != '':
-                    return (False, error)
-
-                return (True, '')
-            except AuthenticationException as e:
-                return (False,
-                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                runner = command_runner.SSHCommandRunner(
+                    (ssh_config_dict['hostname'], ssh_config_dict['port']),
+                    ssh_config_dict['user'], ssh_config_dict['identityfile'][0])
+                returncode, stdout, stderr = runner.run('sinfo',
+                                                        require_outputs=True)
+                if returncode == 0:
+                    logger.info(stdout)
+                    return (True, '')
+                raise RuntimeError(
+                    f'sinfo command failed with return code {returncode}:\n{stderr}'
+                )
             except Exception as e:  # pylint: disable=broad-except
                 return (False, f'Credential check failed for {cluster}: '
                         f'{common_utils.format_exception(e)}')
