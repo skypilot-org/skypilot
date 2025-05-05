@@ -61,54 +61,64 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
     tasks: List[Coroutine[Any, Any, Union[utils.OAIChatHistory,
                                           Exception]]] = [_dummy_start()]
     results: List[utils.OAIChatHistory] = []
-    current_task: Optional[asyncio.Task[Union[utils.OAIChatHistory,
-                                              Exception]]] = None
-    while tasks or current_task is not None:
+    # current_task: Optional[asyncio.Task[Union[utils.OAIChatHistory,
+    #                                           Exception]]] = None
+    current_tasks: List[asyncio.Task[Union[utils.OAIChatHistory,
+                                           Exception]]] = []
+    # while tasks or current_task is not None:
+    while tasks or current_tasks:
         if time.time() - tic > duration:
+            len_cancelled = len(tasks) + len(current_tasks)
             print(f'[{tic:.1f}][{time.time() - tic:.3f}][START CANCEL] '
-                  f'User {uid} cancelling {len(tasks)} tasks')
+                  f'User {uid} cancelling {len_cancelled} tasks')
             for task in tasks:
                 task.close()
-            if current_task is not None:
+            for current_task in current_tasks:
                 current_task.cancel()
             print(f'[{tic:.1f}][{time.time() - tic:.3f}][END CANCEL] '
-                  f'User {uid} cancelled {len(tasks)} tasks')
+                  f'User {uid} cancelled {len_cancelled} tasks')
             return results
 
-        if current_task is None:
+        while tasks:
             task = tasks.pop(0)
             current_task = asyncio.create_task(task)
+            current_tasks.append(current_task)
 
-        if not current_task.done():
-            await asyncio.sleep(0.1)
-            continue
+        i = 0
+        while i < len(current_tasks):
+            current_task = current_tasks[i]
+            if not current_task.done():
+                i += 1
+                continue
 
-        s = await current_task
-        current_task = None
-        if isinstance(s, Exception):
-            print(s)
-            continue
-        print(f'[{tic:.1f}][{time.time() - tic:.3f}] User {uid} done one task, '
-              f'len(s): {len(s)}')
+            s = await current_task
+            current_tasks.pop(i)
+            if isinstance(s, Exception):
+                print(s)
+                continue
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}] User {uid} '
+                  f'done one task, {len(s)=}')
 
-        s = copy.deepcopy(s)
-        if len(s) == len(prompts) * 2 or time.time() - tic > duration:
-            results.append(s)
-            continue
-        prompt = prompts[len(s) // 2]
-        s.append(utils.get_one_round('user', prompt))
+            s = copy.deepcopy(s)
+            if len(s) == len(prompts) * 2 or time.time() - tic > duration:
+                results.append(s)
+                continue
+            prompt = prompts[len(s) // 2]
+            s.append(utils.get_one_round('user', prompt))
 
-        for _ in range(num_branches):
-            call_llm_coro = oai.call_chat_completion_async(
-                s,
-                temperature=temp,
-                max_tokens=256,
-                uid=real_user,
-                stop=None,
-                tic=tic,
-                duration=duration,
-            )
-            tasks.append(call_llm_coro)
+            for _ in range(num_branches):
+                call_llm_coro = oai.call_chat_completion_async(
+                    s,
+                    temperature=temp,
+                    max_tokens=512,
+                    uid=real_user,
+                    stop=None,
+                    tic=tic,
+                    duration=duration,
+                )
+                tasks.append(call_llm_coro)
+
+        await asyncio.sleep(0.1)
 
     return results
 
