@@ -3,17 +3,24 @@
 import typing
 from typing import Dict, List, Optional, Tuple
 
+from sky import sky_logging
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-LOCAL_VMS_PATH = '~/.sky/catalog/v5/slurm/vms.csv'
-_df = common.read_catalog(LOCAL_VMS_PATH)
+_PULL_FREQUENCY_HOURS = 7
 
-LOCAL_IMG_PATH = '~/.sky/catalog/v5/slurm/images.csv'
-_image_df = common.read_catalog(LOCAL_IMG_PATH)
+_df = common.read_catalog('slurm/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+# _image_df = common.read_catalog('slurm/images.csv',
+# pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+_DEFAULT_NUM_VCPUS = 2
+_DEFAULT_MEMORY_CPU_RATIO = 1
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -60,9 +67,26 @@ def get_vcpus_mem_from_instance_type(
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
-    # NOTE: After expanding catalog to multiple entries, you may
-    # want to specify a default instance type or family.
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
+    from sky.provision.slurm import utils as slurm_utils
+
+    # Delete unused disk_tier.
+    del disk_tier
+
+    # Slurm can provision resources through options like --cpus-per-task and --mem.
+    instance_cpus = float(
+        cpus.strip('+')) if cpus is not None else _DEFAULT_NUM_VCPUS
+    if memory is not None:
+        if memory.endswith('+'):
+            instance_mem = float(memory[:-1])
+        elif memory.endswith('x'):
+            instance_mem = float(memory[:-1]) * instance_cpus
+        else:
+            instance_mem = float(memory)
+    else:
+        instance_mem = instance_cpus * _DEFAULT_MEMORY_CPU_RATIO
+    virtual_instance_type = slurm_utils.SlurmInstanceType(
+        instance_cpus, instance_mem).name
+    return virtual_instance_type
 
 
 def get_accelerators_from_instance_type(
