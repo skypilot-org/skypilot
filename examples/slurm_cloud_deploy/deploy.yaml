@@ -565,6 +565,18 @@ run: |
       RANK=0
       declare -a NODE_INFO=()
       
+      # --- Idempotency: Clean up existing config for this cluster ---
+      echo "Removing existing configuration for cluster ${CLUSTER_NAME}..."
+      # Remove nodes from slurm.conf
+      sudo sed -i "/^NodeName=${CLUSTER_NAME}-node-.*/d" /mnt/slurm_config/slurm.conf
+      # Remove partitions from slurm.conf
+      sudo sed -i "/^PartitionName=${CLUSTER_NAME}-cpu.*/d" /mnt/slurm_config/slurm.conf
+      sudo sed -i "/^PartitionName=${CLUSTER_NAME}-gpu.*/d" /mnt/slurm_config/slurm.conf
+      # Remove nodes from gres.conf
+      sudo sed -i "/^NodeName=${CLUSTER_NAME}-node-.*/d" /mnt/slurm_config/gres.conf
+      echo "Cleanup complete."
+      # --- End Idempotency ---
+
       while read -r node; do
         # Call function to process node: process_node <node_ip> <rank> <is_secondary_cluster> <target_cluster_name>
         echo "Processing node: $node"
