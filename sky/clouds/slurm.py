@@ -254,7 +254,9 @@ class Slurm(clouds.Cloud):
             try:
                 runner = command_runner.SSHCommandRunner(
                     (ssh_config_dict['hostname'], ssh_config_dict['port']),
-                    ssh_config_dict['user'], ssh_config_dict['identityfile'][0])
+                    ssh_config_dict['user'],
+                    ssh_config_dict['identityfile'][0],
+                    disable_control_master=True)
                 returncode, stdout, stderr = runner.run('sinfo',
                                                         require_outputs=True)
                 if returncode == 0:
