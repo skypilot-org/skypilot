@@ -72,7 +72,9 @@ async def _multi_turn_conv(duration: int, tic: float, uid: str,
                 max_tokens=512,
                 uid=uid,
                 stop=None,
-                only_return_new_round=True)
+                only_return_new_round=True,
+                tic=tic,
+                duration=duration)
             if isinstance(result, Exception):
                 return history
             assert len(result) == 1

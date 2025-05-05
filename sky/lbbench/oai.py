@@ -1,5 +1,6 @@
 """OpenAI client."""
 
+import asyncio
 import json
 import threading
 import time
@@ -18,14 +19,14 @@ from rich import print as rp
 from sky.lbbench import utils
 
 global_metrics: List[utils.Metric] = []
-lock = threading.Lock()
+lock = None
 
 async_client: Optional[openai.AsyncOpenAI] = None
 model: Optional[str] = None
 
 
 async def init_oai(url: str) -> None:
-    global model, async_client
+    global model, async_client, lock
     async with aiohttp.ClientSession() as session:
         async with session.get(f'{url}/v1/models') as resp:
             try:
@@ -36,7 +37,9 @@ async def init_oai(url: str) -> None:
                 data = json.loads(await resp.text())
             model = data['data'][0]['id']
     async_client = openai.AsyncOpenAI(base_url=f'{url}/v1',
-                                      api_key='placeholder')
+                                      api_key='placeholder',
+                                      max_retries=0)
+    lock = asyncio.Lock()
 
 
 async def call_chat_completion_async(
@@ -45,17 +48,26 @@ async def call_chat_completion_async(
     max_tokens: int,
     uid: str,
     stop: Optional[List[str]] = None,
-    only_return_new_round: bool = False
+    only_return_new_round: bool = False,
+    tic: Optional[float] = None,
+    duration: Optional[float] = None,
 ) -> Union[utils.OAIChatHistory, Exception]:
+    assert lock is not None
     typed_messages = typing.cast(List[ChatCompletionMessageParam], messages)
     output = ''
     metric = utils.Metric(uid=uid)
     exception: Optional[Exception] = None
     assert async_client is not None and model is not None
     try:
+        default_timeout = 100.
+        if tic is not None and duration is not None:
+            if time.time() - tic > duration:
+                return []
+            default_timeout = min(default_timeout,
+                                  duration - (time.time() - tic))
         st = time.time()
         metric.start = st
-        res = await async_client.chat.completions.create(
+        res = await asyncio.wait_for(async_client.chat.completions.create(
             model=model,
             messages=typed_messages,
             temperature=temperature,
@@ -64,12 +76,20 @@ async def call_chat_completion_async(
             stream=True,
             stream_options=ChatCompletionStreamOptionsParam(include_usage=True),
             extra_headers={'x-hash-key': str(uid)},
-            timeout=100,
-        )
+            timeout=default_timeout,
+        ),
+                                     timeout=default_timeout)
         metric.headers = dict(res.response.headers)
         metric.response_start = time.time()
+        if metric.response_start - st > default_timeout:
+            print('/' * 30, metric.response_start - st, default_timeout)
         fetch_metric_at_end = False
         async for chunk in res:
+            if tic is not None and duration is not None and time.time(
+            ) - tic > duration:
+                metric.failed = 'timeout'
+                exception = RuntimeError('timeout')
+                break
             t_this_round = time.time()
             choice = chunk.choices[0]
             if metric.streaming_start is None:
@@ -111,11 +131,11 @@ async def call_chat_completion_async(
                 output += delta
     except Exception as e:  # pylint: disable=broad-except
         exception = e
-        rp(f'Error: {e}\n'
-           f'  Traceback: {traceback.format_exc()}')
+        # rp(f'Error: {e}\n'
+        #    f'  Traceback: {traceback.format_exc()}')
         metric.failed = str(e)
-    with lock:
-        global_metrics.append(metric)
+    # async with lock:
+    global_metrics.append(metric)
     if metric.failed is not None:
         assert exception is not None
         return exception

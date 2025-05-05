@@ -6,8 +6,7 @@ echo "Using prefix: $PREFIX"
 
 names=()
 # for i in {0..7}; do
-# for i in 0 1 3 7; do
-for i in 2 7; do
+for i in 0 1 2 3 4 7; do
   name="${PREFIX}${i}"
   names+=("$name")
 

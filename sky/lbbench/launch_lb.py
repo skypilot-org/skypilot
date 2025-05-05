@@ -62,11 +62,13 @@ def main():
             return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]])
         elif idx == 1:
             # Global least load
-            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct, 'least_load',
+            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
+                                          'least_load',
                                           utils.global_least_load_cluster)
         elif idx == 2:
             # Sky SGL enhanced
-            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct, 'prefix_tree',
+            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
+                                          'prefix_tree',
                                           utils.sky_sgl_enhanced_cluster)
         else:
             raise ValueError(f'Invalid index: {idx}')

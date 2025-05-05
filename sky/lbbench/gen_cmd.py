@@ -40,11 +40,11 @@ raw_presents = [
 ]
 
 enabled_systems = [
-    # 0,  # sgl router
-    # 1,  # global least load
+    0,  # sgl router
+    1,  # global least load
     2,  # sgl router enhanced
-    # 3,  # sky pulling in lb, pulling in replica, but workload stealing
-    # 4,  # sky pulling in lb, pulling in replica, but steal small #requests
+    3,  # sky pulling in lb, pulling in replica, but workload stealing
+    4,  # sky pulling in lb, pulling in replica, but steal small #requests
     # 5,  # sky pushing in lb, pulling in replica
     # 6,  # sky pushing in lb, pushing in replica
     7,  # sky pulling in lb, pulling in replica, but rate limit. with prefix tree.
@@ -300,7 +300,9 @@ def main():
 
     print(f'{"Parallel execution script":=^70}')
     print(f'Generated parallel execution script at {script_path}')
-    print(f'Run with: bash {script_path}')
+    run_log = '@temp/run.log'
+    print(f'Run with: bash {script_path} > {run_log} 2>&1')
+    print(f'Tail the log file: tail -f {run_log}')
 
     # print(f'{"Queue status puller (Running locally)":=^70}')
     # print(status_puller_cmd)
