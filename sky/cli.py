@@ -3546,14 +3546,15 @@ def show_gpus(
             show_node_info: bool) -> Generator[str, None, None]:
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                'Kubernetes GPUs'
-               f'{colorama.Style.RESET_ALL}\n')
+               f'{colorama.Style.RESET_ALL}')
         # print total table
         if total_table is not None:
-            yield from total_table.get_string()
             yield '\n'
+            yield from total_table.get_string()
 
         # print individual infos.
         for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+            yield '\n'
             # Print context header separately
             if ctx:
                 context_str = f'Context: {ctx}'
@@ -3563,8 +3564,9 @@ def show_gpus(
                 f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
             )
             yield from k8s_realtime_table.get_string()
-            yield '\n'
+
         if show_node_info:
+            yield '\n'
             yield _format_kubernetes_node_info_combined(all_nodes_info)
 
     def _output() -> Generator[str, None, None]:
