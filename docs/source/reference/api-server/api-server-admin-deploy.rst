@@ -59,7 +59,7 @@ Install the SkyPilot Helm chart with the following command:
     Here is a breakdown of the flags used in the command above:
 
     * ``upgrade --install``: Upgrade the API server if it already exists, or install it if it doesn't exist.
-    * ``--devel``: Use the latest development version of the API server, to use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
+    * ``--devel``: Use the latest development version of the SkyPilot helm chart. To use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
     * ``--namespace $NAMESPACE``: Specify the namespace to deploy the API server in.
     * ``--create-namespace``: Create the namespace if it doesn't exist.
     * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials for the API server.
