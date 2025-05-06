@@ -4,7 +4,26 @@ Using SkyPilot with Kueue
 =========================
 
 Kueue is an open source Kubernetes job scheduler.
-This example shows how SkyPilot can be usedwith Kueue to schedule jobs on Kubernetes.
+This example shows how SkyPilot can be used with Kueue to schedule jobs on Kubernetes.
+
+In this example, we explore a use case where two teams share one Kubernetes cluster:
+
+- Each team would like to host their own SkyPilot API server to submit jobs to.
+- Each team would like to have their own job queue with independent quota and priority.
+
+The example below walks through the steps to set up SkyPilot API servers and Kueue in the following architecture:
+
+.. image:: ../../../images/examples/k8s-with-kueue/final-architecture.svg
+   :alt: Kueue Example Architecture
+   :width: 80%
+   :align: center
+
+Prerequisites
+-------------
+
+* A Kubernetes cluster with LoadBalancer or NodePort service support
+* `Helm <https://helm.sh/docs/intro/install/>`_
+* `kubectl <https://kubernetes.io/docs/tasks/tools/>`_
 
 Install Kueue
 -------------
@@ -34,18 +53,23 @@ Kueue config needs to be patched to support plain pods.
     # Wait for the restart to complete
     kubectl -n kueue-system rollout status deployment kueue-controller-manager
 
-Create multiple namespaces
---------------------------
+Create team namespaces
+----------------------
 
-Multiple teams may share the same Kubernetes cluster under their own namespaces.
-To simulate this, two namespaces are created: ``team1`` and ``team2``.
+To simulate multiple teams sharing the same Kubernetes cluster,
+two namespaces are created: ``team1`` and ``team2``.
+
+.. image:: ../../../images/examples/k8s-with-kueue/namespaces.svg
+   :alt: Team Namespaces
+   :width: 80%
+   :align: center
 
 .. code-block:: bash
 
     kubectl create namespace team1
     kubectl create namespace team2
 
-Create a kueue resource flavor
+Create a Kueue resource flavor
 ------------------------------
 
 A ResourceFlavor is an object that represents resource variations (such as CPU architecture, GPU type, etc.)
@@ -68,8 +92,8 @@ To create the resource flavor above, save the snippet to ``kueue-resource-flavor
 
     kubectl apply -f kueue-resource-flavor.yaml
 
-Create a kueue admission check and provisioning request config
---------------------------------------------------------------
+Create a Kueue admission check
+------------------------------
 
 By default, Kueue will admit all pods that fits within the cluster queue's resource quota.
 However, there may be cases where the underlying cluster does not have the necessary resources,
@@ -181,6 +205,11 @@ The two teams (each using their respective namespaces) submit their jobs to thei
 The jobs from two teams are subject to the same quota defined in the cluster queue,
 and the jobs from the two teams are ordered by their priority together.
 
+.. image:: ../../../images/examples/k8s-with-kueue/one-queue.svg
+   :alt: One Cluster Queue Architecture
+   :width: 80%
+   :align: center
+
 To create the cluster and local queues above, save the snippet to ``kueue-one-cluster-queue.yaml`` and run the following command:
 
 .. code-block:: bash
@@ -263,43 +292,72 @@ Alternatively, the two teams can have their own cluster queues as follows:
 In this setup, the two namespaces ``team1`` and ``team2`` have their own separate cluster queues.
 Now, each team has their own quotas, and jobs from each team are ordered by their priority independently.
 
+.. image:: ../../../images/examples/k8s-with-kueue/two-queues.svg
+   :alt: Two Cluster Queues Architecture
+   :width: 80%
+   :align: center
+
 To create the cluster and local queues above, save the snippet to ``kueue-two-cluster-queues.yaml`` and run the following command:
 
 .. code-block:: bash
 
     kubectl apply -f kueue-two-cluster-queues.yaml
 
-Launch a SkyPilot job with Kueue
---------------------------------
 
-To launch a SkyPilot job with Kueue, simply set the ``kueue.x-k8s.io/queue-name`` field in ``resources.labels`` section of the SkyPilot job YAML.
+.. tip::
 
-``skypilot-job.yaml``:
+    To configure the interaction between multiple cluster queues, refer to `Kueue documentation on cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_.
+
+
+Deploy SkyPilot API servers
+---------------------------
+
+In this example, two SkyPilot API servers are deployed to the cluster so that each team interacts with their own SkyPilot API server.
+
+You can deploy SkyPilot API servers by following the steps in :ref:`Kubernetes Deployment Guide <sky-api-server-deploy>` twice,
+using ``team1`` and ``team2`` as the ``$NAMESPACE`` variable respectively.
+
+By default, each SkyPilot API server is granted permissions to use its hosting Kubernetes cluster
+and will launch tasks in the same namespace as the API server.
+
+.. image:: ../../../images/examples/k8s-with-kueue/api-servers.svg
+   :alt: API servers deployment
+   :width: 80%
+   :align: center
+
+Configure SkyPilot API server to use Kueue
+------------------------------------------
+
+The helm deployment of each SkyPilot API server can be configured to use Kueue by default.
+Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` section of the Kubernetes Deployment Guide
+for instructions on how to set the config file on a helm-deployed SkyPilot API server.
+
+For API server deployed in ``team1`` namespace, the following config should be set:
 
 .. code-block:: yaml
 
-    config:
-      kubernetes:
-        # a long provision timeout gives a job time to be scheduled
-        # by Kueue if the job cannot be scheduled immediately.
-        provision_timeout: 900
+    kubernetes:
+      pod_config:
+        metadata:
+          labels:
+            kueue.x-k8s.io/queue-name: skypilot-local-queue-team1
 
-    resources:
-      cloud: kubernetes
-      labels:
-        kueue.x-k8s.io/queue-name: skypilot-local-queue-team1
+For API server deployed in ``team2`` namespace, the following config should be set:
 
-    num_nodes: 1
+.. code-block:: yaml
 
-    run: |
-      echo hello
+    kubernetes:
+      pod_config:
+        metadata:
+          labels:
+            kueue.x-k8s.io/queue-name: skypilot-local-queue-team2
 
-Then launch the job in the respective namespace (``team1`` in the example above).
+The config above allows each API server to submit jobs to the respective local queue.
 
-.. code-block:: bash
-
-    kubectl config set-context --current --namespace=team1
-    sky launch skypilot-job.yaml
+.. image:: ../../../images/examples/k8s-with-kueue/final-architecture.svg
+   :alt: Final Architecture
+   :width: 80%
+   :align: center
 
 Further reading
 ---------------
@@ -313,3 +371,4 @@ Specifically, the following sections describe concepts that can be used to manag
 - `Define multiple resource flavors <https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/>`_
 - `Set up gang scheduling of multiple pods <https://kueue.sigs.k8s.io/docs/tasks/run/plain_pods/#running-a-group-of-pods-to-be-admitted-together>`_
 - `Use Kueue with multiple clusters <https://kueue.sigs.k8s.io/docs/concepts/multikueue/>`_
+- `Troubleshooting Kueue <https://kueue.sigs.k8s.io/docs/tasks/troubleshooting/>`_
