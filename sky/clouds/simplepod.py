@@ -168,7 +168,7 @@ class Simplepod(clouds.Cloud):
                      **kwargs) -> List[status_lib.ClusterStatus]:
         status_map = {
             'booting': status_lib.ClusterStatus.INIT,
-            'active': status_lib.ClusterStatus.UP,
+            'running': status_lib.ClusterStatus.UP,
             'unhealthy': status_lib.ClusterStatus.INIT,
             'terminating': None,
             'terminated': None,

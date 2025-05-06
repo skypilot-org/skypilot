@@ -191,7 +191,7 @@ class SimplePodClient:
         if template_id:
             payload['instanceTemplate'] = f'/instances/templates/{template_id}'
         else:
-            payload['instanceTemplate'] = f'/instances/templates/2189'
+            payload['instanceTemplate'] = f'/instances/templates/2320'
 
         if env_variables:
             payload['envVariables'] = env_variables

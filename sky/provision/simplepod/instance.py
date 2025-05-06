@@ -148,12 +148,13 @@ def terminate_instances(
 ) -> None:
     """Terminate specified instances for SimplePod."""
     del provider_config  # unused
-    instances = _filter_instances(cluster_name_on_cloud, None, head_only=False)
+    cluster_name_on_cloud = cluster_name_on_cloud.replace('-', '_')
+    instances = _filter_instances(cluster_name_on_cloud, ['running'])
     for inst_id, inst in instances.items():
-        logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('_head'):
             continue
         try:
+            logger.info(f'Terminating instance {inst_id}')
             client.delete_instance(inst_id)
             logger.info(f'Terminated instance {inst_id}')
         except Exception as e:  # pylint: disable=broad-except
@@ -244,24 +245,15 @@ def get_cluster_info(
     )
 
 def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]],
+                      status_filters: Optional[List[str]] = None,
                       head_only: bool = True) -> Dict[str, Any]:
-    instances = client.list_instances()
+    """Filters instances based on cluster name, status, and type (head/worker)."""
+    status_filters = {s.lower() for s in status_filters} if status_filters else None
 
-    filtered_instances = {}
-    for instance in instances:
-        name = instance['name']
-        status = instance['status']
-
-        if status_filters is not None and status not in [s.lower() for s in status_filters]:
-            continue
-
-        if not name.startswith(cluster_name_on_cloud):
-            continue
-
-        if head_only and 'head' not in name:
-            continue
-
-        filtered_instances[instance['id']] = instance
-
-    return filtered_instances
+    return {
+        instance['id']: instance
+        for instance in client.list_instances()
+        if instance['name'].startswith(cluster_name_on_cloud)
+        and (not status_filters or instance['status'].lower() in status_filters)
+        and (not head_only or 'head' in instance['name'])
+    }
