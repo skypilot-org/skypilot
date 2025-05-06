@@ -170,14 +170,14 @@ Here, we create a cluster queue and two local queues, one for each team.
       - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
         flavors:
         - name: "default-flavor"
-        # Adjust this value based on actual resource needs instead of "Infinite"
-        resources:
-        - name: "cpu"
-          nominalQuota: 1000000000    # "Infinite" quota
-        - name: "memory"
-          nominalQuota: 1000000000Gi  # "Infinite" quota
-        - name: "nvidia.com/gpu"
-          nominalQuota: 1000000000    # "Infinite" quota
+          # Adjust this value based on actual resource needs instead of "Infinite"
+          resources:
+          - name: "cpu"
+            nominalQuota: 1000000000    # "Infinite" quota
+          - name: "memory"
+            nominalQuota: 1000000000Gi  # "Infinite" quota
+          - name: "nvidia.com/gpu"
+            nominalQuota: 1000000000    # "Infinite" quota
       admissionChecks:
       - skypilot-kueue-prov
     ---
@@ -238,14 +238,14 @@ Alternatively, the two teams can have their own cluster queues as follows:
       - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
         flavors:
         - name: "default-flavor"
-        # Adjust this value based on actual resource needs instead of "Infinite"
-        resources:
-        - name: "cpu"
-          nominalQuota: 1000000000    # "Infinite" quota
-        - name: "memory"
-          nominalQuota: 1000000000Gi  # "Infinite" quota
-        - name: "nvidia.com/gpu"
-          nominalQuota: 1000000000    # "Infinite" quota
+          # Adjust this value based on actual resource needs instead of "Infinite"
+          resources:
+          - name: "cpu"
+            nominalQuota: 1000000000    # "Infinite" quota
+          - name: "memory"
+            nominalQuota: 1000000000Gi  # "Infinite" quota
+          - name: "nvidia.com/gpu"
+            nominalQuota: 1000000000    # "Infinite" quota
       admissionChecks:
       - skypilot-kueue-prov
     ---
@@ -260,14 +260,14 @@ Alternatively, the two teams can have their own cluster queues as follows:
       - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
         flavors:
         - name: "default-flavor"
-        # Adjust this value based on actual resource needs instead of "Infinite"
-        resources:
-        - name: "cpu"
-          nominalQuota: 1000000000    # "Infinite" quota
-        - name: "memory"
-          nominalQuota: 1000000000Gi  # "Infinite" quota
-        - name: "nvidia.com/gpu"
-          nominalQuota: 1000000000    # "Infinite" quota
+          # Adjust this value based on actual resource needs instead of "Infinite"
+          resources:
+          - name: "cpu"
+            nominalQuota: 1000000000    # "Infinite" quota
+          - name: "memory"
+            nominalQuota: 1000000000Gi  # "Infinite" quota
+          - name: "nvidia.com/gpu"
+            nominalQuota: 1000000000    # "Infinite" quota
       admissionChecks:
       - skypilot-kueue-prov
     ---
