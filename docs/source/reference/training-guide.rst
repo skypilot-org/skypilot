@@ -39,7 +39,7 @@ Example configuration:
 
 Use EFA
 ~~~~~~~
-Elastic Fabric Adapter (EFA) is a network interface for Amazon EC2 instances that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters with a simple additional setting in your SkyPilot YAML.
+AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia Infiniband that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters with a simple additional setting in your SkyPilot YAML.
 
 Example configuration:
 
@@ -56,7 +56,7 @@ Example configuration:
               requests:
                 vpc.amazonaws.com/efa: 4
 
-See `EFA example <https://docs.skypilot.co/en/latest/examples/training/aws_efa.html>`_ for more details.
+See `EFA example <https://github.com/skypilot-org/skypilot/tree/master/examples/aws_efa>`_ for more details.
 
 Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~
