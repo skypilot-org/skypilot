@@ -24,7 +24,7 @@ Kueue config needs to be patched to support plain pods.
 
 .. code-block:: bash
 
-    # Extract and patch the config nd save it to /tmp/kueueconfig.yaml
+    # Extract and patch the config and save it to /tmp/kueueconfig.yaml
     # This is required because SkyPilot creates and manages workloads as pods
     kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"]' > /tmp/kueueconfig.yaml
     # Apply the changes from /tmp/kueueconfig.yaml created above
