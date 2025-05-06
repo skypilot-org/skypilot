@@ -399,12 +399,11 @@ FAQs
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
-Multi-node jobs
-----------------
+* **Are multi-node jobs supported on Kubernetes?**
 
-:ref:`Multi-node jobs <dist-jobs>` are supported on Kubernetes. When a multi-node job is launched, each node in a SkyPilot cluster is provisioned as a separate pod.
+  :ref:`Multi-node jobs <dist-jobs>` are supported on Kubernetes. When a multi-node job is launched, each node in a SkyPilot cluster is provisioned as a separate pod.
 
-SkyPilot will attempt to place each pod on a different node in the cluster.
+  SkyPilot will attempt to place each pod on a different node in the cluster.
 
-SkyPilot will try to schedule all pods on a given cluster. If SkyPilot cannot schedule all pods on a given cluster (i.e. some or all of the pods cannot be scheduled),
-SkyPilot will fail over to another cluster or cloud.
+  SkyPilot will try to schedule all pods on a given cluster. If SkyPilot cannot schedule all pods on a given cluster (i.e. some or all of the pods cannot be scheduled),
+  SkyPilot will fail over to another cluster or cloud.
