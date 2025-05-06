@@ -32,15 +32,15 @@ After deploying the primary controller cluster, you can add secondary clusters a
 ```bash
 # Get the controller IP
 REGION=<region in `sky status -v`>
-CONTROLLER_IP=$(sky status --ip slurm | head -n 1)
+export CONTROLLER_IP=$(sky status --ip slurm | head -n 1)
 
 # Find the SSH key SkyPilot uses for the controller cluster
-SSH_KEY=$(cat $(grep -A3 "Host slurm" ~/.sky/generated/ssh/slurm | grep IdentityFile | head -n 1 | awk '{print $2}'))
+export SSH_KEY=$(cat $(grep -A3 "Host slurm" ~/.sky/generated/ssh/slurm | grep IdentityFile | head -n 1 | awk '{print $2}'))
 
 # Launch the secondary cluster with the controller IP and existing SSH key
 sky launch -c slurm-compute1 --region $REGION examples/slurm_cloud_deploy/deploy.yaml \
-  --env CONTROLLER_IP=$CONTROLLER_IP \
-  --env CONTROLLER_SSH_PRIVATE_KEY=$SSH_KEY
+  --env CONTROLLER_IP \
+  --env CONTROLLER_SSH_PRIVATE_KEY
 ```
 
 This will:
