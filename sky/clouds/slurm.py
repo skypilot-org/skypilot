@@ -10,6 +10,7 @@ from paramiko.config import SSHConfig
 from sky import clouds
 from sky import sky_logging
 from sky.clouds import service_catalog
+from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import registry
@@ -90,16 +91,10 @@ class Slurm(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
-        del num_nodes  # unused
-        regions = cls.regions_with_offering(instance_type,
-                                            accelerators,
-                                            use_spot,
-                                            region=region,
-                                            zone=None)
-        for r in regions:
-            assert r.zones is None, r
-            yield r.zones
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
+        # Always yield None for zones because Slurm does not support zones.
+        # This allows handling for any region without being restricted by zone logic.
+        yield None
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -165,23 +160,40 @@ class Slurm(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name: 'resources_utils.ClusterName',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name, zones, dryrun  # Unused.
+        # Parse ~/.slurm/config and get available SlurmctldHost
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
-        return {
+        # resources.memory and cpus are none if they are not explicitly set.
+        # we fetch the default values for the instance type in that case.
+        k = slurm_utils.SlurmInstanceType.from_instance_type(
+            resources.instance_type)
+        cpus = k.cpus
+        mem = k.memory
+        # Optionally populate accelerator information.
+        acc_count = k.accelerator_count if k.accelerator_count else 0
+        acc_type = k.accelerator_type if k.accelerator_type else None
+
+        deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
-            'region': region.name,
+            'cpus': str(cpus),
+            'memory': str(mem),
+            'accelerator_count': str(acc_count),
         }
+
+        return deploy_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
