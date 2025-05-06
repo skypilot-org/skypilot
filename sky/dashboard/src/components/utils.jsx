@@ -9,6 +9,9 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 
+// Refresh interval in milliseconds
+export const REFRESH_INTERVAL = 30000;
+
 function capitalizeFirstWord(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import { CustomTooltip as Tooltip, REFRESH_INTERVAL } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -75,7 +75,7 @@ export function Clusters() {
         </div>
       </div>
       <ClusterTable
-        refreshInterval={10000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         onOpenSSHModal={(cluster) => {
