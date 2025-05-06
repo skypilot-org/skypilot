@@ -27,10 +27,14 @@ Values
 
 Below is the available helm value keys and the default value of each key:
 
+..
+  Omitted values:
+  * storage.accessMode: accessMode other than ReadWriteOnce is not tested yet.
+
 .. parsed-literal::
 
   :ref:`apiService <helm-values-apiService>`:
-    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
+    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.1
     :ref:`preDeployHook <helm-values-apiService-preDeployHook>`: \|-
       # Run commands before deploying the API server, e.g. installing an admin
       # policy. Remember to set the admin policy in the config section below.
@@ -55,7 +59,6 @@ Below is the available helm value keys and the default value of each key:
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
     :ref:`storageClassName <helm-values-storage-storageClassName>`: ""
-    :ref:`accessMode <helm-values-storage-accessMode>`: ReadWriteOnce
     :ref:`size <helm-values-storage-size>`: 10Gi
     :ref:`selector <helm-values-storage-selector>`: {}
     :ref:`volumeName <helm-values-storage-volumeName>`: ""
@@ -163,19 +166,27 @@ Configuration for the SkyPilot API server deployment.
 
 Docker image to use for the API server.
 
-Default: ``berkeleyskypilot/skypilot-nightly:latest``
+Default: ``"berkeleyskypilot/skypilot:0.9.1"``
 
 .. code-block:: yaml
 
   apiService:
-    image: berkeleyskypilot/skypilot-nightly:latest
+    image: berkeleyskypilot/skypilot:0.9.1
+
+To use a nightly build, find the desired nightly version on `pypi <https://pypi.org/project/skypilot-nightly/#history>`_ and update the ``image`` value:
+
+.. code-block:: yaml
+
+  apiService:
+    # Replace 1.0.0.devYYYYMMDD with the desired nightly version
+    image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
 
 .. _helm-values-apiService-preDeployHook:
 
 ``apiService.preDeployHook``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Commands to run before deploying the API server (e.g., install admin policy).
+Commands to run before deploying the API server (e.g., install :ref:`admin policy <advanced-policy-config>`).
 
 Default: see the yaml below.
 
@@ -196,7 +207,7 @@ Default: see the yaml below.
 ``apiService.config``
 ^^^^^^^^^^^^^^^^^^^^^
 
-Content of the `SkyPilot config.yaml <https://docs.skypilot.co/en/latest/reference/config.html>`_ to set on the API server. Set to ``null`` to use an empty config.
+Content of the `SkyPilot config.yaml <https://docs.skypilot.co/en/latest/reference/config.html>`_ to set on the API server. Set to ``null`` to use an empty config. Refer to :ref:`setting the SkyPilot config <sky-api-server-config>` for more details.
 
 Default: ``null``
 
@@ -208,16 +219,12 @@ Default: ``null``
         - aws
         - gcp
 
-.. note::
-
-  New configuration takes a period of time to take effect after ``helm upgrade``.
-
 .. _helm-values-apiService-skipResourceCheck:
 
 ``apiService.skipResourceCheck``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Skip resource check for the API server (not recommended for production).
+Skip resource check for the API server (not recommended for production), refer to :ref:`tuning API server resources <sky-api-server-resources-tuning>` for more details.
 
 Default: ``false``
 
@@ -231,7 +238,7 @@ Default: ``false``
 ``apiService.resources``
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Resource requests and limits for the API server container. Refer to :ref:`tuning API server resources <sky-api-server-performance-best-practices>` for how to tune the resources[.
+Resource requests and limits for the API server container. Refer to :ref:`tuning API server resources <sky-api-server-resources-tuning>` for how to tune the resources.
 
 Default: see the yaml below.
 
@@ -284,28 +291,14 @@ Default: ``true``
 ``storage.storageClassName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Storage class to use for the API server, leave empty to use the default storage class.
+Storage class to use for the API server, leave empty to use the default storage class of the hosting Kubernetes cluster.
 
 Default: ``""``
 
 .. code-block:: yaml
 
   storage:
-    storageClassName: ""
-
-.. _helm-values-storage-accessMode:
-
-``storage.accessMode``
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Access mode for the API server storage.
-
-Default: ``ReadWriteOnce``
-
-.. code-block:: yaml
-
-  storage:
-    accessMode: ReadWriteOnce
+    storageClassName: gp2
 
 .. _helm-values-storage-size:
 
@@ -775,13 +768,16 @@ Default: ``gcp-credentials``
 ``podSecurityContext``
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Security context for the API server pod. Usually left empty to use defaults.
+Security context for the API server pod. Usually left empty to use defaults. Refer to `set the security context for Pod <https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod>`_ for more details.
 
 Default: ``{}``
 
 .. code-block:: yaml
 
-  podSecurityContext: {}
+  podSecurityContext:
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000
 
 .. _helm-values-securityContext:
 
