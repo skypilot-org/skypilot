@@ -96,7 +96,7 @@ Recovery example
 ----------------
 This example demonstrates the automatic recovery capability of the high availability controller:
 
-**0. Preparatory Steps (Ensure Clean State & Correct Config):**
+1. **Preparatory Steps (Ensure Clean State & Correct Config):**
 
 * **Terminate Existing Controller (if any):**
     * First, ensure **no services are running**. Terminate them with ``sky serve down <service_name>`` or ``sky serve down --all``.
@@ -123,9 +123,7 @@ This example demonstrates the automatic recovery capability of the high availabi
             cloud: kubernetes
           high_availability: true
 
-* **Prepare Service Definition:**
-
-1.  **Prepare Configuration Files:**
+2. **Prepare Configuration Files:**
 
 * **Service Definition (e.g., ``http_service.yaml``):** Use a simple HTTP service.
 
@@ -144,14 +142,14 @@ This example demonstrates the automatic recovery capability of the high availabi
 
   You can also use the ``http_server.yaml`` from the `examples/serve/http_server/task.yaml <https://github.com/skypilot-ai/skypilot/blob/main/examples/serve/http_server/task.yaml>`_ file.
 
-2.  **Launch the Service:**
+3. **Launch the Service:**
 
     .. code-block:: bash
 
         sky serve up -n my-http-service http_service.yaml
         # This will launch the new high availability controller based on your config.
 
-3.  **Wait and Verify the Service:** Wait until the service status becomes ``READY``.
+4. **Wait and Verify the Service:** Wait until the service status becomes ``READY``.
 
     .. code-block:: bash
 
@@ -166,7 +164,7 @@ This example demonstrates the automatic recovery capability of the high availabi
         curl $ENDPOINT
         # Should see the default HTML output from http.server
 
-4.  **Simulate Controller Failure (Manually Delete Pod):**
+5. **Simulate Controller Failure (Manually Delete Pod):**
     
     * Find the name of the controller pod. Controller pods typically contain "sky-serve-controller" and have the label ``skypilot-head-node=1``.
 
@@ -184,7 +182,7 @@ This example demonstrates the automatic recovery capability of the high availabi
           echo "Deleting controller pod: $CONTROLLER_POD"
           kubectl delete pod $CONTROLLER_POD
 
-5.  **Observe Recovery:** The Kubernetes Deployment will detect the missing pod and automatically create a new one to replace it.
+6. **Observe Recovery:** The Kubernetes Deployment will detect the missing pod and automatically create a new one to replace it.
 
     .. code-block:: bash
 
@@ -196,7 +194,7 @@ This example demonstrates the automatic recovery capability of the high availabi
         kubectl get pods -l skypilot-head-node=1
         # Note the pod name will be different, and STATUS should be Running
 
-6.  **Verify Service Again:** Even though the controller pod was restarted, the service endpoint should remains the same and still be accessible (there might be a brief interruption depending on load balancer and K8s response times).
+7.  **Verify Service Again:** Even though the controller pod was restarted, the service endpoint should remains the same and still be accessible (there might be a brief interruption depending on load balancer and K8s response times).
 
     .. code-block:: bash
 
