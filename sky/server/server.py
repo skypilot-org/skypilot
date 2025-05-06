@@ -1162,28 +1162,26 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
-@app.get('/dashboard/favicon.ico')
-async def serve_favicon():
-    return fastapi.responses.FileResponse(
-        os.path.join(server_constants.DASHBOARD_DIR, 'favicon.ico'))
-
-
-@app.get('/dashboard/skypilot.svg')
-async def serve_skypilot_svg():
-    return fastapi.responses.FileResponse(
-        os.path.join(server_constants.DASHBOARD_DIR, 'skypilot.svg'))
-
-
 @app.get('/dashboard/{full_path:path}')
-async def serve_dashboard():
+async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.
 
+    Args:
+        full_path: The path requested by the client.
+        e.g. /clusters, /jobs
+
     Returns:
-        FileResponse for index.html for client-side routing.
+        FileResponse for static files or index.html for client-side routing.
 
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
+    # Try to serve the file directly e.g. /skypilot.svg,
+    # /favicon.ico, and /videos, etc.
+    file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
+    if os.path.isfile(file_path):
+        return fastapi.responses.FileResponse(file_path)
+
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
