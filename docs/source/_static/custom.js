@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Team Deployment' },
         { selector: '.toctree-l1 > a', text: 'Examples' },
         { selector: '.toctree-l3 > a', text: 'DeepSeek-R1 for RAG' },
-        { selector: '.toctree-l2 > a', text: 'High Availability SkyServe Controller' },
+        { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
