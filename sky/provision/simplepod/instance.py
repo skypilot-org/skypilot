@@ -224,8 +224,6 @@ def get_cluster_info(
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
-        print(f"DEBUG PORT: {instance_info['ports']['direct'][1]['destPort']}")
-        print(f"DEBUG IP: {instance_info['rig']['ip']}")
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,

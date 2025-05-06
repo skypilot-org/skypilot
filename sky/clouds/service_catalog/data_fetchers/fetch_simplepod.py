@@ -15,7 +15,7 @@ from typing import Optional
 
 import requests
 
-ENDPOINT = 'https://apidev.simplemining.net/instances/market/list?rentalStatus=active&itemsPerPage=5'
+ENDPOINT = 'https://api.simplepod.ai/instances/market/list?rentalStatus=active&itemsPerPage=1000'
 DEFAULT_SIMPLEPOD_KEYS_PATH = os.path.expanduser('~/.simplepod/simplepod_keys')
 
 def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
@@ -23,11 +23,13 @@ def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
     response = requests.get(ENDPOINT, headers=headers)
     instances = response.json()
 
+    seen_instances = set()  # Track unique instances
+
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-            'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
+            'MemoryGiB', 'Price', 'Region', 'GpuInfo'
         ])
 
         for instance in instances:
@@ -53,17 +55,21 @@ def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
             }
             gpuinfo = json.dumps(gpuinfo_dict).replace('"', "'")
 
-            writer.writerow([
-                f"gpu_{gpu_count}x_{gpu_model.lower()}",  # InstanceType now uses integer
-                gpu_model,  # AcceleratorName
-                gpu_count,  # AcceleratorCount
-                vcpus,  # vCPUs
-                memory,  # MemoryGiB
-                f"{price:.3f}",  # Price with 3 decimal places
-                region,  # Region
-                gpuinfo,  # GpuInfo
-                ''  # SpotPrice
-            ])
+            # Create a unique identifier for the instance
+            instance_key = (gpu_model, gpu_count, vcpus, memory, price, region)
+
+            if instance_key not in seen_instances:
+                seen_instances.add(instance_key)  # Mark as seen
+                writer.writerow([
+                    f"gpu_{gpu_count}x_{gpu_model.lower()}_vcpu_{vcpus}",  # InstanceType now includes vCPUs
+                    gpu_model,  # AcceleratorName
+                    gpu_count,  # AcceleratorCount
+                    vcpus,  # vCPUs
+                    memory,  # MemoryGiB
+                    f"{price:.3f}",  # Price with 3 decimal places
+                    region,  # Region
+                    gpuinfo,  # GpuInfo
+                ])
 
 def get_api_key(cmdline_args: argparse.Namespace) -> str:
     """Get SimplePod API key from cmdline or DEFAULT_SIMPLEPOD_KEYS_PATH."""

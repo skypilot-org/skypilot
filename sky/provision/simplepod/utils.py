@@ -10,7 +10,7 @@ import requests
 
 from sky.utils import annotations
 
-ENDPOINT = 'https://apidev.simplepod.ai/'
+ENDPOINT = 'https://api.simplepod.ai/'
 SIMPLEPOD_API_KEY_PATH = '~/.simplepod/simplepod_keys'
 
 class SimplePodError(Exception):
