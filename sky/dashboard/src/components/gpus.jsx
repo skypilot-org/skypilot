@@ -8,14 +8,6 @@ import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import {
-  Table,
-  TableHeader,
-  TableRow,
-  TableHead,
-  TableBody,
-  TableCell,
-} from '@/components/ui/table';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
@@ -149,7 +141,7 @@ export function GPUs() {
           </Link>
         </div>
         <div className="flex items-center space-x-2">
-          {loading && isInitialLoad && (
+          {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
@@ -169,143 +161,153 @@ export function GPUs() {
         </div>
       </div>
 
-      {/* Summary Section */}
-      {!loading && !isInitialLoad && allGPUs.length > 0 && (
-        <Card className="mb-4 p-4">
-          <h3 className="text-lg font-semibold mb-3">Overall GPU Summary</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <Card className="p-4">
-              <p className="text-sm text-gray-500">Total GPU Types</p>
-              <p className="text-2xl font-bold">{totalGpuTypes}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-sm text-gray-500">Total GPUs (All Types)</p>
-              <p className="text-2xl font-bold">{grandTotalGPUs}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-sm text-gray-500">Total Free GPUs (All Types)</p>
-              <p className="text-2xl font-bold">{grandTotalFreeGPUs}</p>
-            </Card>
-          </div>
+      {/* Initial loading spinner */}
+      {isInitialLoad ? (
+        <div className="flex flex-col items-center justify-center h-64">
+          <CircularProgress size={32} className="mb-4" />
+          <span className="text-gray-500 text-lg">Loading...</span>
+        </div>
+      ) : (
+        <>
+          {/* Summary Section */}
+          {allGPUs.length > 0 && (
+            <Card className="mb-4 p-4">
+              <h3 className="text-lg font-semibold mb-3">Overall GPU Summary</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500">Total GPU Types</p>
+                  <p className="text-2xl font-bold">{totalGpuTypes}</p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500">Total GPUs (All Types)</p>
+                  <p className="text-2xl font-bold">{grandTotalGPUs}</p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500">Total Free GPUs (All Types)</p>
+                  <p className="text-2xl font-bold">{grandTotalFreeGPUs}</p>
+                </Card>
+              </div>
 
-          <h4 className="text-md font-semibold mb-3">GPU Types Breakdown</h4>
-          <div className="space-y-3">
-            {allGPUs.map((gpu) => {
-              const usedGpus = gpu.gpu_total - gpu.gpu_free;
-              const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-              const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-              return (
-                <div key={gpu.gpu_name} className="p-2 border rounded">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-medium">{gpu.gpu_name}</span>
-                    <span className="text-sm text-gray-600">
-                      {gpu.gpu_free} Free / {gpu.gpu_total} Total
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
-                    <div
-                      style={{ width: `${usedPercentage}%` }}
-                      className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
-                      title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
-                    >
-                      {usedGpus > 0 && usedPercentage > 10 ? `${usedGpus} Used` : ''}
+              <h4 className="text-md font-semibold mb-3">GPU Types Breakdown</h4>
+              <div className="space-y-3">
+                {allGPUs.map((gpu) => {
+                  const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                  const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
+                  const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
+                  return (
+                    <div key={gpu.gpu_name} className="p-2 border rounded">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-medium">{gpu.gpu_name}</span>
+                        <span className="text-sm text-gray-600">
+                          {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
+                        <div
+                          style={{ width: `${usedPercentage}%` }}
+                          className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
+                          title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
+                        >
+                          {usedGpus > 0 && usedPercentage > 10 ? `${usedGpus} Used` : ''}
+                        </div>
+                        <div
+                          style={{ width: `${freePercentage}%` }}
+                          className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
+                          title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
+                        >
+                           {gpu.gpu_free > 0 && freePercentage > 10 ? `${gpu.gpu_free} Free` : ''}
+                        </div>
+                      </div>
                     </div>
-                    <div
-                      style={{ width: `${freePercentage}%` }}
-                      className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
-                      title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
-                    >
-                       {gpu.gpu_free > 0 && freePercentage > 10 ? `${gpu.gpu_free} Free` : ''}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
+                  );
+                })}
+              </div>
+            </Card>
+          )}
 
-      {/* Per-Context GPU Summary Section */}
-      {!loading && !isInitialLoad && Object.keys(groupedPerContextGPUs).length > 0 && (
-        <Card className="mb-4 p-4">
-          <h3 className="text-lg font-semibold mb-3">Per-Context GPU Details</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {Object.entries(groupedPerContextGPUs).map(([context, gpusInContext]) => (
-              <Card key={context} className="p-4 border flex flex-col">
-                <h4 className="text-md font-semibold mb-3 text-sky-700">Context: {context}</h4>
-                <div className="space-y-3">
-                  {gpusInContext.map((gpu) => {
-                    const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                    const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-                    const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-                    return (
-                      <div key={gpu.gpu_name} className="p-2 border rounded-md bg-gray-50 mb-2">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="font-medium text-gray-800">{gpu.gpu_name}</span>
-                          <span className="text-xs text-gray-500">
-                            Requestable per Node: {gpu.gpu_requestable_qty_per_node}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center mb-1">
-                           <span className="text-sm text-gray-600">
-                            {gpu.gpu_free} Free / {gpu.gpu_total} Total
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded h-5 flex overflow-hidden mt-1">
-                          <div
-                            style={{ width: `${usedPercentage}%` }}
-                            className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
-                            title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
-                          >
-                            {usedGpus > 0 && usedPercentage > 10 ? `${usedGpus}` : ''}
+          {/* Per-Context GPU Summary Section */}
+          {Object.keys(groupedPerContextGPUs).length > 0 && (
+            <Card className="mb-4 p-4">
+              <h3 className="text-lg font-semibold mb-3">Per-Context GPU Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {Object.entries(groupedPerContextGPUs).map(([context, gpusInContext]) => (
+                  <Card key={context} className="p-4 border flex flex-col">
+                    <h4 className="text-md font-semibold mb-3 text-sky-700">Context: {context}</h4>
+                    <div className="space-y-3">
+                      {gpusInContext.map((gpu) => {
+                        const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                        const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
+                        const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
+                        return (
+                          <div key={gpu.gpu_name} className="p-2 border rounded-md bg-gray-50 mb-2">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="font-medium text-gray-800">{gpu.gpu_name}</span>
+                              <span className="text-xs text-gray-500">
+                                Requestable per Node: {gpu.gpu_requestable_qty_per_node}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center mb-1">
+                               <span className="text-sm text-gray-600">
+                                {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded h-5 flex overflow-hidden mt-1">
+                              <div
+                                style={{ width: `${usedPercentage}%` }}
+                                className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
+                                title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
+                              >
+                                {usedGpus > 0 && usedPercentage > 10 ? `${usedGpus}` : ''}
+                              </div>
+                              <div
+                                style={{ width: `${freePercentage}%` }}
+                                className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
+                                title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
+                              >
+                                {gpu.gpu_free > 0 && freePercentage > 10 ? `${gpu.gpu_free}` : ''}
+                              </div>
+                            </div>
                           </div>
-                          <div
-                            style={{ width: `${freePercentage}%` }}
-                            className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
-                            title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
-                          >
-                            {gpu.gpu_free > 0 && freePercentage > 10 ? `${gpu.gpu_free}` : ''}
+                        );
+                      })}
+                    </div>
+
+                    {/* Nodes Table within Context Card */}
+                    {groupedPerNodeGPUs[context] && groupedPerNodeGPUs[context].length > 0 && (
+                      <div className="mt-4 pt-3 border-t">
+                        <h5 className="text-sm font-semibold mb-2 text-gray-600">Nodes in {context}:</h5>
+                        <div className="max-h-52 overflow-y-auto">
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                              <thead className="bg-gray-100 sticky top-0 z-10">
+                                <tr>
+                                  <th className="p-2 text-left font-medium text-gray-600">Node Name</th>
+                                  <th className="p-2 text-left font-medium text-gray-600">GPU</th>
+                                  <th className="p-2 text-right font-medium text-gray-600">Total GPUs</th>
+                                  <th className="p-2 text-right font-medium text-gray-600">Free GPUs</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white divide-y divide-gray-200">
+                                {groupedPerNodeGPUs[context].map((node, index) => (
+                                  <tr key={`${node.node_name}-${index}`}>
+                                    <td className="p-2 whitespace-nowrap text-gray-700">{node.node_name}</td>
+                                    <td className="p-2 whitespace-nowrap text-gray-700">{node.gpu_name}</td>
+                                    <td className="p-2 whitespace-nowrap text-right text-gray-700">{node.gpu_total}</td>
+                                    <td className="p-2 whitespace-nowrap text-right text-gray-700">{node.gpu_free}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-
-                {/* Nodes Table within Context Card */}
-                {groupedPerNodeGPUs[context] && groupedPerNodeGPUs[context].length > 0 && (
-                  <div className="mt-4 pt-3 border-t">
-                    <h5 className="text-sm font-semibold mb-2 text-gray-600">Nodes in {context}:</h5>
-                    <div className="max-h-52 overflow-y-auto">
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead className="bg-gray-100 sticky top-0 z-10">
-                            <tr>
-                              <th className="p-2 text-left font-medium text-gray-600">Node Name</th>
-                              <th className="p-2 text-left font-medium text-gray-600">GPU</th>
-                              <th className="p-2 text-right font-medium text-gray-600">Total GPUs</th>
-                              <th className="p-2 text-right font-medium text-gray-600">Free GPUs</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
-                            {groupedPerNodeGPUs[context].map((node, index) => (
-                              <tr key={`${node.node_name}-${index}`}>
-                                <td className="p-2 whitespace-nowrap text-gray-700">{node.node_name}</td>
-                                <td className="p-2 whitespace-nowrap text-gray-700">{node.gpu_name}</td>
-                                <td className="p-2 whitespace-nowrap text-right text-gray-700">{node.gpu_total}</td>
-                                <td className="p-2 whitespace-nowrap text-right text-gray-700">{node.gpu_free}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </Card>
-            ))}
-          </div>
-        </Card>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
       )}
     </Layout>
   );
