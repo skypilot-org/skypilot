@@ -175,9 +175,10 @@ export function JobDetailPage() {
     }
   }
 
-  const title = (cluster && job)
-    ? `Job: ${job} @ ${cluster} | SkyPilot Dashboard`
-    : 'Job Details | SkyPilot Dashboard';
+  const title =
+    cluster && job
+      ? `Job: ${job} @ ${cluster} | SkyPilot Dashboard`
+      : 'Job Details | SkyPilot Dashboard';
 
   return (
     <>
@@ -294,7 +295,8 @@ export function JobDetailPage() {
                   {isPending ? (
                     <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
                       <span>
-                        Waiting for the job to start, please refresh after a while
+                        Waiting for the job to start, please refresh after a
+                        while
                       </span>
                     </div>
                   ) : isLoadingLogs ? (

@@ -55,7 +55,9 @@ function ClusterDetails() {
     return <div>Loading...</div>;
   }
 
-  const title = cluster ? `Cluster: ${cluster} | SkyPilot Dashboard` : 'Cluster Details | SkyPilot Dashboard';
+  const title = cluster
+    ? `Cluster: ${cluster} | SkyPilot Dashboard`
+    : 'Cluster Details | SkyPilot Dashboard';
 
   return (
     <>

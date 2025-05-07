@@ -134,7 +134,9 @@ function JobDetails() {
     (item) => String(item.id) === String(jobId)
   );
 
-  const title = jobId ? `Job: ${jobId} | SkyPilot Dashboard` : 'Job Details | SkyPilot Dashboard';
+  const title = jobId
+    ? `Job: ${jobId} | SkyPilot Dashboard`
+    : 'Job Details | SkyPilot Dashboard';
 
   return (
     <>
