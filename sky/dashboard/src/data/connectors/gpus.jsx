@@ -1,4 +1,9 @@
-import { ENDPOINT } from '@/data/connectors/constants';
+import {
+  ENDPOINT,
+  CLOUDS_LIST,
+  COMMON_GPUS,
+  TPU_LIST,
+} from '@/data/connectors/constants';
 
 export async function getGPUs() {
   const gpus = await getKubernetesGPUs();
@@ -163,6 +168,81 @@ async function getKubernetesGPUs() {
       allGPUs: [],
       perContextGPUs: [],
       perNodeGPUs: [],
+    };
+  }
+}
+
+export async function getCloudGPUs() {
+  try {
+    const response = await fetch(`${ENDPOINT}/list_accelerator_counts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        clouds: CLOUDS_LIST,
+        gpus_only: true,
+      }),
+    });
+    const id = response.headers.get('x-request-id');
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error('Error fetching cloud GPUs:', error.message);
+          } catch (jsonError) {
+            console.error('Error parsing JSON:', jsonError);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing JSON:', parseError);
+      }
+      return {
+        commonGPUs: [],
+        tpus: [],
+        otherGPUs: [],
+      };
+    }
+    const data = await fetchedData.json();
+    const allGPUs = data.return_value ? JSON.parse(data.return_value) : {};
+    // commonGPUs, keys from COMMON_GPUS in allGPUs and values are the count array join with comma
+    const commonGPUs = Object.keys(allGPUs)
+      .filter((gpu) => COMMON_GPUS.includes(gpu))
+      .map((gpu) => ({
+        gpu_name: gpu,
+        gpu_quantities: allGPUs[gpu].join(', '),
+      }))
+      .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
+    // tpus, keys starts with 'tpu-' in allGPUs and values are the count array join with comma
+    const tpus = Object.keys(allGPUs)
+      .filter((gpu) => gpu.startsWith('tpu-'))
+      .map((gpu) => ({
+        gpu_name: gpu,
+        gpu_quantities: allGPUs[gpu].join(', '),
+      }))
+      .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
+    // otherGPUs, keys not in COMMON_GPUS and not starts with 'tpu-' in allGPUs and values are the count array join with comma
+    const otherGPUs = Object.keys(allGPUs)
+      .filter((gpu) => !COMMON_GPUS.includes(gpu) && !gpu.startsWith('tpu-'))
+      .map((gpu) => ({
+        gpu_name: gpu,
+        gpu_quantities: allGPUs[gpu].join(', '),
+      }))
+      .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
+    return {
+      commonGPUs,
+      tpus,
+      otherGPUs,
+    };
+  } catch (error) {
+    console.error('Error fetching cloud GPUs:', error);
+    return {
+      commonGPUs: [],
+      tpus: [],
+      otherGPUs: [],
     };
   }
 }
