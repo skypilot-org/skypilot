@@ -3723,6 +3723,7 @@ def show_gpus(
 
         k8s_messages = ''
         slurm_messages = ''
+        k8s_printed = False
         if accelerator_str is None:
             # Collect k8s/slurm related messages and print them at end
             print_section_titles = False
@@ -3749,6 +3750,7 @@ def show_gpus(
                         k8s_realtime_infos,
                         all_nodes_info,
                         show_node_info=True)
+                    k8s_printed = True
 
                 if kubernetes_autoscaling:
                     k8s_messages += (
@@ -3776,6 +3778,8 @@ def show_gpus(
                     slurm_messages += str(e)
                 else:
                     print_section_titles = True
+                    if k8s_printed:
+                        yield '\n'
 
                     yield from _format_slurm_realtime_gpu(total_table,
                                                           slurm_realtime_infos,

@@ -166,3 +166,178 @@ async function getKubernetesGPUs() {
     };
   }
 }
+
+async function getSlurmPartitionGPUs() {
+  try {
+    const response = await fetch(
+      `${ENDPOINT}/slurm_gpu_availability`,
+      {
+        method: 'POST', // Matches server endpoint
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}), // Empty body, name_filter/quantity_filter are optional
+      }
+    );
+    const id = response.headers.get('x-request-id');
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error(
+              'Error fetching Slurm partition GPUs:',
+              error.message
+            );
+          } catch (jsonError) {
+            console.error('Error parsing JSON for Slurm error:', jsonError);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing JSON for Slurm 500 response:', parseError);
+      }
+      return [];
+    }
+    const data = await fetchedData.json();
+    const partitionGPUs = data.return_value ? JSON.parse(data.return_value) : [];
+    return partitionGPUs;
+  } catch (error) {
+    console.error('Error fetching Slurm partition GPUs:', error);
+    return [];
+  }
+}
+
+async function getSlurmPerNodeGPUs() {
+  try {
+    // Note: sdk.slurm_node_info() uses GET
+    const response = await fetch(`${ENDPOINT}/slurm_node_info`, {
+      method: 'GET', // Matches server endpoint
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    const id = response.headers.get('x-request-id');
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error(
+              'Error fetching Slurm per node GPUs:',
+              error.message
+            );
+          } catch (jsonError) {
+            console.error('Error parsing JSON for Slurm node error:', jsonError);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing JSON for Slurm node 500 response:', parseError);
+      }
+      return []; // Return empty array for consistency, though cli.py processes it as a list of dicts
+    }
+    const data = await fetchedData.json();
+    // The server directly returns a list of node dicts for slurm_node_info
+    const nodeInfo = data.return_value ? JSON.parse(data.return_value) : [];
+    return nodeInfo;
+  } catch (error) {
+    console.error('Error fetching Slurm per node GPUs:', error);
+    return [];
+  }
+}
+
+export async function getSlurmServiceGPUs() {
+  try {
+    const partitionGPUsRaw = await getSlurmPartitionGPUs();
+    const nodeGPUsRaw = await getSlurmPerNodeGPUs();
+
+    const allSlurmGPUs = {};
+    const perPartitionSlurmGPUs = {}; // { partition: { gpu_name: ..., ... } }
+    const perNodeSlurmGPUs = {}; // { 'partition/node_name': { ... } }
+
+    // Process partition GPUs
+    // partitionGPUsRaw is expected to be like: [ [partition_name, [ [gpu_name, counts, capacity, available], ... ] ], ... ]
+    for (const partitionData of partitionGPUsRaw) {
+      const partitionName = partitionData[0];
+      const gpusInPartition = partitionData[1];
+
+      for (const gpuRaw of gpusInPartition) {
+        const gpuName = gpuRaw[0];
+        // gpuRaw[1] is counts (list of requestable quantities), e.g., [1, 2, 4]
+        // For simplicity, we might not need all individual counts in the summary,
+        // but it's good to have if detailed view is needed later.
+        // For now, let's just store it as a string like k8s.
+        const gpuRequestableQtyPerNode = gpuRaw[1].join(', ');
+        const gpuTotal = gpuRaw[2]; // capacity
+        const gpuFree = gpuRaw[3];  // available
+
+        // Aggregate for allSlurmGPUs
+        if (gpuName in allSlurmGPUs) {
+          allSlurmGPUs[gpuName].gpu_total += gpuTotal;
+          allSlurmGPUs[gpuName].gpu_free += gpuFree;
+        } else {
+          allSlurmGPUs[gpuName] = {
+            gpu_total: gpuTotal,
+            gpu_free: gpuFree,
+            gpu_name: gpuName,
+          };
+        }
+
+        // Store for perPartitionSlurmGPUs
+        // Assuming one dominant GPU type per partition for this simplified structure,
+        // or that the data structure implies this. If multiple GPU types can exist
+        // meaningfully under a single 'perPartitionSlurmGPUs[partitionName]' entry,
+        // this will need adjustment (e.g., make it an array).
+        // For now, let's create an entry for each GPU type within a partition.
+        const partitionGpuKey = `${partitionName}#${gpuName}`; // Unique key for partition-gpu combo
+        perPartitionSlurmGPUs[partitionGpuKey] = {
+          gpu_name: gpuName,
+          gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
+          gpu_total: gpuTotal,
+          gpu_free: gpuFree,
+          partition: partitionName,
+        };
+      }
+    }
+
+    // Process node GPUs
+    // nodeGPUsRaw is expected to be like: [ {node_name, partition, gpu_type, total_gpus, free_gpus}, ... ]
+    for (const node of nodeGPUsRaw) {
+      const key = `${node.partition || 'default'}/${node.node_name}/${node.gpu_type || '-'}`;
+      perNodeSlurmGPUs[key] = {
+        node_name: node.node_name,
+        gpu_name: node.gpu_type || '-', // gpu_type might be null
+        gpu_total: node.total_gpus || 0,
+        gpu_free: node.free_gpus || 0,
+        partition: node.partition || 'default', // partition might be null
+      };
+    }
+
+    return {
+      allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
+        a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perPartitionSlurmGPUs: Object.values(perPartitionSlurmGPUs).sort(
+        (a, b) =>
+          a.partition.localeCompare(b.partition) ||
+          a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perNodeSlurmGPUs: Object.values(perNodeSlurmGPUs).sort(
+        (a, b) =>
+          (a.partition || '').localeCompare(b.partition || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
+      ),
+    };
+  } catch (error) {
+    console.error('Error fetching Slurm GPUs:', error);
+    return {
+      allSlurmGPUs: [],
+      perPartitionSlurmGPUs: [],
+      perNodeSlurmGPUs: [],
+    };
+  }
+}
