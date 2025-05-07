@@ -37,4 +37,3 @@ To use *Service Account* authentication, follow these steps:
 **Important Notes:**
 
 * The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
-* Service Accounts are restricted to a single region. Ensure you configure the Service Account for the appropriate region during creation.
