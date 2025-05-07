@@ -69,6 +69,21 @@ Simply add the `--async` flag:
 */5 * * * * SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml /opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job.yaml -y --async > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
 ```
 
+## Run multiple commands
+To run multiple commands at once, define the commands as a file:
+
+`cron.sh`
+```bash
+SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml
+/opt/anaconda3/envs/sky/bin/sky status
+/opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job.yaml -y
+```
+
+Then reference the script file in crontab:
+```console
+*/5 * * * * /absolute/path/to/cron.sh > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
+```
+
 ## Run a cronjob against remote API server
 Simply specify the following snippet in the config file passed into the cronjob.
 ```console
