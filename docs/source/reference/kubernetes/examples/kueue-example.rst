@@ -307,7 +307,11 @@ To create the cluster and local queues above, save the snippet to ``kueue-two-cl
 
 .. tip::
 
-    To configure the interaction between multiple cluster queues, refer to `Kueue documentation on cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_.
+    To configure the interaction between multiple cluster queues - for example, to implement fair sharing
+    between cluster queues, refer to following documentation:
+
+    `cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_.
+    `fair sharing <https://kueue.sigs.k8s.io/docs/concepts/preemption/#fair-sharing>`_.
 
 
 Deploy SkyPilot API servers
