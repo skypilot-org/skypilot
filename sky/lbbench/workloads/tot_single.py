@@ -9,12 +9,15 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import Any, Awaitable, Coroutine, Dict, List, Optional, Union
+from typing import Any, Awaitable, Coroutine, Dict, List, Union
 
 from rich import print as rp
 
+from sky.adaptors import common as adaptors_common
 from sky.lbbench import oai
 from sky.lbbench import utils
+
+xxhash = adaptors_common.LazyImport('xxhash')
 
 dataset_link = 'https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl'  # pylint: disable=line-too-long
 
@@ -24,6 +27,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--num-branches', type=int, default=2)
     parser.add_argument('--duration', type=float, default=10)
     parser.add_argument('--seed', type=str, default='default')
+    parser.add_argument('--disable-parallel', action='store_true')
 
 
 def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
@@ -32,6 +36,7 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
         'num-branches': args.num_branches,
         'duration': args.duration,
         'seed': args.seed,
+        'disable-parallel': args.disable_parallel,
     }
 
 
@@ -52,8 +57,8 @@ async def _dummy_start() -> utils.OAIChatHistory:
 
 
 async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
-                       duration: float,
-                       real_user: str) -> List[utils.OAIChatHistory]:
+                       duration: float, real_user: str, num_users: int,
+                       disable_parallel: bool) -> List[utils.OAIChatHistory]:
     prompts = [
         PROPOSE_PLAN_PROMPT.format(question=question), EXECUTE_PLAN_PROMPT,
         REFLECT_PLAN_PROMPT, FINAL_ANSWER_PROMPT
@@ -80,6 +85,8 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
             return results
 
         while tasks:
+            if disable_parallel and len(current_tasks) > 0:
+                break
             task = tasks.pop(0)
             current_task = asyncio.create_task(task)
             current_tasks.append(current_task)
@@ -107,6 +114,8 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
             s.append(utils.get_one_round('user', prompt))
 
             for _ in range(num_branches):
+                # hash_key = xxhash.xxh64(
+                #     json.dumps(s)[:100], seed=0).intdigest()
                 call_llm_coro = oai.call_chat_completion_async(
                     s,
                     temperature=temp,
@@ -115,6 +124,9 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
                     stop=None,
                     tic=tic,
                     duration=duration,
+                    # hash_key=f'{real_user}-{uid}',
+                    hash_key=f'{real_user}-{uid // (num_users // 5)}',
+                    # hash_key=str(hash_key),
                 )
                 tasks.append(call_llm_coro)
 
@@ -124,8 +136,9 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
 
 
 async def _user_task(tic: float, uid: int, questions: List[str],
-                     num_branches: int, duration: float,
-                     real_user: str) -> List[utils.OAIChatHistory]:
+                     num_branches: int, duration: float, real_user: str,
+                     num_users: int,
+                     disable_parallel: bool) -> List[utils.OAIChatHistory]:
     results = []
     iteration_cnt = 0
     while True:
@@ -136,7 +149,8 @@ async def _user_task(tic: float, uid: int, questions: List[str],
             print(f'[{tic:.1f}][{time.time() - tic:.3f}][START] User {uid} '
                   f'question {cnt} iteration {iteration_cnt}')
             result = await _tree_search(uid, question, num_branches, tic,
-                                        duration, real_user)
+                                        duration, real_user, num_users,
+                                        disable_parallel)
             print(f'[{tic:.1f}][{time.time() - tic:.3f}][END] User {uid} '
                   f'question {cnt} iteration {iteration_cnt}')
             results.extend(result)
@@ -184,5 +198,6 @@ def launch_user_tasks(
     return [
         asyncio.create_task(
             _user_task(tic, uid, questions, args.num_branches, args.duration,
-                       seed)) for uid, questions in uid2questions.items()
+                       seed, num_users, args.disable_parallel))
+        for uid, questions in uid2questions.items()
     ]

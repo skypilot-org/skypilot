@@ -4,17 +4,20 @@ import argparse
 import multiprocessing
 import shlex
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky.lbbench import gen_cmd
 from sky.lbbench import utils
 
-enabled_systems = [i for i in gen_cmd.enabled_systems if i < 3]
+enabled_systems = [i for i in gen_cmd.enabled_systems if i < 6]
 describes = [gen_cmd.raw_describes[i] for i in enabled_systems]
 
 
-def _prepare_sky_global_lb(st: Dict[str, Any], ct: List[Dict[str, Any]],
-                           policy: str, cluster_name: str) -> str:
+def _prepare_sky_global_lb(st: Dict[str, Any],
+                           ct: List[Dict[str, Any]],
+                           policy: str,
+                           cluster_name: str,
+                           extra_envs: Optional[Dict[str, str]] = None) -> str:
     ip = None
     for c in ct:
         if c['name'].startswith('sky-serve-controller'):
@@ -23,9 +26,17 @@ def _prepare_sky_global_lb(st: Dict[str, Any], ct: List[Dict[str, Any]],
     if ip is None:
         raise ValueError('SkyServe controller not found')
     controller_port = st['controller_port']
+    envs = {
+        'IP': ip,
+        'PORT': controller_port,
+        'POLICY': policy,
+    }
+    if extra_envs is not None:
+        envs.update(extra_envs)
+    envs_str = ' '.join([f'--env {k}={v}' for k, v in envs.items()])
     return (f'sky launch -c {cluster_name} -d --fast '
             '-y examples/serve/external-lb/global-sky-lb.yaml '
-            f'--env IP={ip} --env PORT={controller_port} --env POLICY={policy}')
+            f'{envs_str}')
 
 
 def _prepare_sgl_cmd(st: Dict[str, Any]) -> str:
@@ -61,15 +72,39 @@ def main():
         if idx == 0:
             return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]])
         elif idx == 1:
-            # Global least load
-            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
-                                          'least_load',
-                                          utils.global_least_load_cluster)
-        elif idx == 2:
             # Sky SGL enhanced
             return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
                                           'prefix_tree',
                                           utils.sky_sgl_enhanced_cluster)
+        elif idx == 2:
+            # Vanilla least load
+            return _prepare_sky_global_lb(
+                sn2st[sns[idx_in_sns]],
+                ct,
+                'least_load',
+                utils.vanilla_least_load_cluster,
+                extra_envs={'DISABLE_SELECTIVE_PUSHING': 'true'})
+        elif idx == 3:
+            # Global least load w/ selective pushing
+            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
+                                          'least_load',
+                                          utils.global_least_load_cluster)
+        elif idx == 4:
+            # Consistent hashing
+            return _prepare_sky_global_lb(
+                sn2st[sns[idx_in_sns]],
+                ct,
+                'consistent_hashing',
+                utils.consistent_hashing_cluster,
+                extra_envs={'DISABLE_SELECTIVE_PUSHING': 'true'})
+        elif idx == 5:
+            # Consistent hashing enhanced
+            return _prepare_sky_global_lb(
+                sn2st[sns[idx_in_sns]],
+                ct,
+                'consistent_hashing',
+                utils.consistent_hashing_enhanced_cluster,
+            )
         else:
             raise ValueError(f'Invalid index: {idx}')
 
@@ -87,8 +122,11 @@ def main():
     print('Both load balancers have been launched successfully. '
           'Check status with: \n'
           f'sky logs {utils.sgl_cluster}\n'
+          f'sky logs {utils.sky_sgl_enhanced_cluster}\n'
+          f'sky logs {utils.vanilla_least_load_cluster}\n'
           f'sky logs {utils.global_least_load_cluster}\n'
-          f'sky logs {utils.sky_sgl_enhanced_cluster}\n')
+          f'sky logs {utils.consistent_hashing_cluster}\n'
+          f'sky logs {utils.consistent_hashing_enhanced_cluster}\n')
 
 
 if __name__ == '__main__':

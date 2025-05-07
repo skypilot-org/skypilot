@@ -12,8 +12,17 @@ from sky.lbbench import utils
 
 raw_describes = [
     'sgl',
-    'global_least_load',
     'sky_sgl_enhanced',
+    'sky_vanilla_least_load',
+    'sky_least_load_enhanced',
+    'sky_consistent_hashing',
+    'sky_consistent_hashing_enhanced',
+    # 'sky_consistent_hashing_irregular_user',
+    # 'sky_consistent_hashing_enhanced_irregular_user',
+    # 'sky_consistent_hashing_prefix_hash',
+    # 'sky_consistent_hashing_enhanced_prefix_hash',
+    # 'sky_consistent_hashing_real_uid',
+    # 'sky_consistent_hashing_enhanced_real_uid',
     'sky_pull_pull',
     # 'sky_pull_pull_small',
     'sky_pull_pull_small_3',
@@ -23,34 +32,50 @@ raw_describes = [
     'sky_pull_pull_rate_limit_thershold_prefix_tree',
     'sky_pull_pull_rate_limit_least_load',
     'sky_pull_pull_rate_limit_round_robin',
+    'sky_pull_pull_rate_limit_consistent_hashing',
 ]
 raw_presents = [
-    'Baseline\\n[SGLang]',
-    'Baseline\\n[LeastLoad]',
-    'Baseline\\n[SGLang+SelPush]',
+    'SGLang',
+    'SGLang+SelPush',
+    'LeastLoad',
+    'LeastLoad+SelPush',
+    # 'ConsistentHashing',
+    # 'ConsistentHashing+SelPush',
+    # 'ConsistentHashing/IrregularUser',
+    # 'ConsistentHashing+SelPush/IrregularUser',
+    # 'CHash/PrefixHash',
+    # 'CHash+SelPush/PrefixHash',
+    'ConsistentHashing',
+    'ConsistentHashing+SelPush',
     'Ours\\n[Pull/Steal+Pull]',
     # 'Ours\\n[Pull/StealSmall+Pull]',
     'Ours\\n[Pull/StealSmall3+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
     # 'Ours\\n[SelPush/Prefix+Pull]',
-    'Ours\\n[SelPushThr/Prefix+Pull]',
+    'SkyWalk w/ Prefix',
     'Ours\\n[SelPush/LL+Pull]',
     'Ours\\n[SelPush/RR+Pull]',
+    'Ours\\n[SelPush/CH+Pull]',
 ]
 
 enabled_systems = [
     0,  # sgl router
-    1,  # global least load
-    2,  # sgl router enhanced
-    3,  # sky pulling in lb, pulling in replica, but workload stealing
-    4,  # sky pulling in lb, pulling in replica, but steal small #requests
-    # 5,  # sky pushing in lb, pulling in replica
-    # 6,  # sky pushing in lb, pushing in replica
-    7,  # sky pulling in lb, pulling in replica, but rate limit. with prefix tree.
-    # 8,  # sky pulling in lb, pulling in replica, but rate limit. with least load.
-    # 9,  # sky pulling in lb, pulling in replica, but rate limit. with round robin.
+    1,  # sgl router enhanced
+    2,  # vanilla least load
+    3,  # global least load
+    4,  # consistent hashing
+    5,  # consistent hashing with selective pushing
+    # 6,  # sky pulling in lb, pulling in replica, but workload stealing
+    # 7,  # sky pulling in lb, pulling in replica, but steal small #requests
+    # 8,  # sky pushing in lb, pulling in replica
+    # 9,  # sky pushing in lb, pushing in replica
+    10,  # selective pushing for both lb and replica. with prefix tree.
+    # 11,  # selective pushing for both lb and replica. with least load.
+    # 12,  # selective pushing for both lb and replica. with round robin.
+    # 13,  # selective pushing for both lb and replica. with consistent hashing.
 ]
+enabled_systems = [2, 3, 4, 5]
 
 describes = [raw_describes[i] for i in enabled_systems]
 presents = [raw_presents[i] for i in enabled_systems]
@@ -74,13 +99,25 @@ def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
         sgl_ip = _get_head_ip_for_cluster(utils.sgl_cluster)
         return f'{sgl_ip}:9001'
     if index == 1:
-        global_least_load_ip = _get_head_ip_for_cluster(
-            utils.global_least_load_cluster)
-        return f'{global_least_load_ip}:9002'
-    if index == 2:
         sky_sgl_enhanced_ip = _get_head_ip_for_cluster(
             utils.sky_sgl_enhanced_cluster)
         return f'{sky_sgl_enhanced_ip}:9002'
+    if index == 2:
+        vanilla_least_load_ip = _get_head_ip_for_cluster(
+            utils.vanilla_least_load_cluster)
+        return f'{vanilla_least_load_ip}:9002'
+    if index == 3:
+        global_least_load_ip = _get_head_ip_for_cluster(
+            utils.global_least_load_cluster)
+        return f'{global_least_load_ip}:9002'
+    if index == 4:
+        consistent_hashing_ip = _get_head_ip_for_cluster(
+            utils.consistent_hashing_cluster)
+        return f'{consistent_hashing_ip}:9002'
+    if index == 5:
+        consistent_hashing_enhanced_ip = _get_head_ip_for_cluster(
+            utils.consistent_hashing_enhanced_cluster)
+        return f'{consistent_hashing_enhanced_ip}:9002'
     global sn2st
     if sn2st is None:
         sn2st = {s['name']: s for s in utils.sky_serve_status()}
@@ -102,6 +139,7 @@ def main():
     parser.add_argument('--output-dir', type=str, default='@temp')
     parser.add_argument('--regions', type=str, default=None, nargs='+')
     parser.add_argument('--region-to-args', type=str, default=None)
+    parser.add_argument('--reload-client', action='store_true')
     args = parser.parse_args()
     sns = args.service_names
     if len(sns) != len(describes):
@@ -132,8 +170,9 @@ def main():
 
     for r in regions:
         cluster = _region_cluster_name(r)
+        fast = '--fast' if not args.reload_client else ''
         cn2cmds[cluster].append(f'sky launch --region {r} -c {cluster} -y '
-                                f'--fast --env CMD=whoami --env HF_TOKEN '
+                                f'{fast} --env CMD=whoami --env HF_TOKEN '
                                 'examples/serve/external-lb/client.yaml')
 
     output = '~/bench_result'
@@ -189,14 +228,19 @@ def main():
         for i, r in enumerate(regions):
             cluster = _region_cluster_name(r)
             region_safe = r.replace('-', '_')
-            f.write(f'launch_{region_safe}() {{\n')
-            f.write(f'  if sky status {cluster} | grep -q "UP"; then\n')
-            f.write(f'    echo "Cluster {cluster} is already '
-                    'UP, skipping launch"\n')
-            f.write('  else\n')
-            f.write(f'    {cn2cmds[cluster][0]}\n')
-            f.write('  fi\n')
-            f.write('}\n\n')
+            if args.reload_client:
+                f.write(f'launch_{region_safe}() {{\n')
+                f.write(f'  {cn2cmds[cluster][0]}\n')
+                f.write('}\n\n')
+            else:
+                f.write(f'launch_{region_safe}() {{\n')
+                f.write(f'  if sky status {cluster} | grep -q "UP"; then\n')
+                f.write(f'    echo "Cluster {cluster} is already '
+                        'UP, skipping launch"\n')
+                f.write('  else\n')
+                f.write(f'    {cn2cmds[cluster][0]}\n')
+                f.write('  fi\n')
+                f.write('}\n\n')
 
         # Write region-specific exec functions for each experiment
         f.write('# ---------- region-specific exec functions\n')

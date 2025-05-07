@@ -54,6 +54,7 @@ async def _dummy_start() -> utils.OAIChatHistory:
 async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
                        duration: float,
                        real_user: str) -> List[utils.OAIChatHistory]:
+    del uid
     prompts = [
         PROPOSE_PLAN_PROMPT.format(question=question), EXECUTE_PLAN_PROMPT,
         REFLECT_PLAN_PROMPT, FINAL_ANSWER_PROMPT
@@ -64,11 +65,13 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
     results: List[utils.OAIChatHistory] = []
     while tasks:
         if time.time() - tic > duration:
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}][START CANCEL] User {uid} '
+            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
+            #       f'[START CANCEL] User {uid} '
             #       f'cancelling {len(tasks)} tasks')
             for task in tasks:
                 task.cancel()
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}][END CANCEL] User {uid} '
+            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
+            #       f'[END CANCEL] User {uid} '
             #       f'cancelled {len(tasks)} tasks')
             return results
         st_wait = time.time()
@@ -84,11 +87,12 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
             continue
             # done, pending = [], tasks
         ed_wait = time.time()
-        # print(f'[{tic:.1f}][{ed_wait - tic:.3f}][END WAIT] User {uid} elapsed: '
+        # print(f'[{tic:.1f}][{ed_wait - tic:.3f}]'
+        #       f'[END WAIT] User {uid} elapsed: '
         #       f'{ed_wait - st_wait:.3f}, timeout: {timeout:.3f}, '
         #       f'len done: {len(done)}, len pending: {len(pending)}')
         if ed_wait - st_wait > timeout + 2:
-            print(">>> event-loop blocked for", ed_wait - st_wait, "s",
+            print('>>> event-loop blocked for', ed_wait - st_wait, 's',
                   len(done), len(pending), '        ', len(asyncio.all_tasks()))
             # print(">>> loop time:", asyncio.get_running_loop().time(),
             #     " wall:", time.perf_counter())
@@ -105,7 +109,8 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
             # st_copy = time.time()
             s = copy.deepcopy(s)
             # ed_copy = time.time()
-            # print(f'[{tic:.1f}][{ed_copy - tic:.3f}][COPY] User {uid} elapsed: '
+            # print(f'[{tic:.1f}][{ed_copy - tic:.3f}]'
+            #       f'[COPY] User {uid} elapsed: '
             #       f'{ed_copy - st_copy:.3f}')
             if len(s) == len(prompts) * 2 or time.time() - tic > duration:
                 results.append(s)
@@ -142,11 +147,13 @@ async def _user_task(tic: float, uid: int, questions: List[str],
         iteration_cnt += 1
         for question in questions:
             cnt += 1
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}][START] User {uid} question {cnt} '
+            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
+            #       f'[START] User {uid} question {cnt} '
             #       f'iteration {iteration_cnt}', flush=True)
             result = await _tree_search(uid, question, num_branches, tic,
                                         duration, real_user)
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}][END] User {uid} question {cnt} '
+            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
+            #       f'[END] User {uid} question {cnt} '
             #       f'iteration {iteration_cnt}', flush=True)
             results.extend(result)
             if time.time() - tic > duration:

@@ -15,6 +15,7 @@ service:
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
   load_balancing_policy: prefix_tree
+  # load_balancing_policy: consistent_hashing
   # load_balancing_policy: least_load
   # load_balancing_policy: round_robin
   external_load_balancers:
@@ -22,14 +23,17 @@ service:
         cloud: aws
         region: us-east-2
       load_balancing_policy: prefix_tree
+      # load_balancing_policy: consistent_hashing
     - resources:
         cloud: aws
         region: ap-northeast-1
       load_balancing_policy: prefix_tree
+      # load_balancing_policy: consistent_hashing
     - resources:
         cloud: aws
         region: eu-central-1
       load_balancing_policy: prefix_tree
+      # load_balancing_policy: consistent_hashing
   # max_concurrent_requests: 50
 
 resources:

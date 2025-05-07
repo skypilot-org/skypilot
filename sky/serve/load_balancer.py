@@ -44,6 +44,8 @@ _LB_PUSHING_ENABLE_LB = env_options.Options.LB_PUSHING_ENABLE_LB.get()
 _DO_PUSHING_TO_REPLICA = env_options.Options.DO_PUSHING_TO_REPLICA.get()
 _USE_V2_STEALING = env_options.Options.USE_V2_STEALING.get()
 
+_DISABLE_SELECTIVE_PUSHING = env_options.Options.DISABLE_SELECTIVE_PUSHING.get()
+
 
 @dataclasses.dataclass
 class RequestEntry:
@@ -785,9 +787,10 @@ class SkyServeLoadBalancer:
                         continue
 
                     logger.info(
-                        f"self._url: {self._url}, Queue Size: {entry.request.headers.get(_QUEUE_SIZE_HEADER, 0)}, "
-                        f"self actual queue size: {await self._request_queue.actual_size()}"
-                    )
+                        f'self._url: {self._url}, Queue Size: '
+                        f'{entry.request.headers.get(_QUEUE_SIZE_HEADER, 0)}, '
+                        'self actual queue size: '
+                        f'{await self._request_queue.actual_size()}')
 
                     # If enabled and when local replica all unavailable,
                     # try push it to other LBs.
@@ -879,7 +882,7 @@ class SkyServeLoadBalancer:
         assert self._request_queue is not None
         queue_size = await self._request_queue.qsize()
         logger.info(
-            f"Check LB configuration: {self._url}, queue_size: {queue_size}")
+            f'Check LB configuration: {self._url}, queue_size: {queue_size}')
         return fastapi.responses.JSONResponse(
             status_code=200,
             content={
@@ -1219,7 +1222,9 @@ class SkyServeLoadBalancer:
         """Probe the inference engine queue."""
         # Initially, immediately probe the inference engine queue.
         time_take_this_round = float(_IE_QUEUE_PROBE_INTERVAL)
+        cnt = 0
         while True:
+            cnt += 1
             await asyncio.sleep(
                 max(0, _IE_QUEUE_PROBE_INTERVAL - time_take_this_round))
             time_start = time.perf_counter()
@@ -1247,8 +1252,9 @@ class SkyServeLoadBalancer:
             time_end_set_replica = time.perf_counter()
             time_elapsed_set_replica = (time_end_set_replica -
                                         time_start_set_replica)
-            logger.debug(f'Probe time: {time_end_probe - time_start}s, '
-                         f'Set replica time: {time_elapsed_set_replica}s.')
+            if cnt % 30 == 0:
+                logger.info(f'Probe time: {time_end_probe - time_start}s, '
+                            f'Set replica time: {time_elapsed_set_replica}s.')
             time_take_this_round = time.perf_counter() - time_start
 
     async def _probe_lb_status_one_lb(
@@ -1268,9 +1274,8 @@ class SkyServeLoadBalancer:
                 lb_available = (conf['queue_size'] <= self_qsize and
                                 conf['queue_size'] <= _STEAL_TRIGGER_THRESHOLD
                                 and conf['num_available_replicas'] > 0)
-                logger.info(
-                    f"{lb} queue size: {conf['queue_size']}, self_qsize: {self_qsize}"
-                )
+                logger.info(f'{lb} queue size: {conf["queue_size"]}, '
+                            f'self_qsize: {self_qsize}')
                 self._lb_to_queue_size[lb] = conf['queue_size']
                 return lb_available, lb
         except Exception as e:  # pylint: disable=broad-except
@@ -1350,7 +1355,8 @@ class SkyServeLoadBalancer:
             if _DO_PUSHING_TO_REPLICA:
                 self._replica_pool.enable_load_balancing()
             else:
-                if self._use_ie_queue_indicator:
+                if (self._use_ie_queue_indicator and
+                        not _DISABLE_SELECTIVE_PUSHING):
                     self._tasks.append(
                         self._loop.create_task(self._probe_ie_queue()))
 
@@ -1412,7 +1418,10 @@ class SkyServeLoadBalancer:
             f'_DO_PUSHING_TO_REPLICA: {_DO_PUSHING_TO_REPLICA}, '
             f'[{os.getenv(env_options.Options.DO_PUSHING_TO_REPLICA.env_key)}], '
             f'_LB_PUSHING_ENABLE_LB: {_LB_PUSHING_ENABLE_LB}, '
-            f'[{os.getenv(env_options.Options.LB_PUSHING_ENABLE_LB.env_key)}]')
+            f'[{os.getenv(env_options.Options.LB_PUSHING_ENABLE_LB.env_key)}], '
+            f'_DISABLE_SELECTIVE_PUSHING: {_DISABLE_SELECTIVE_PUSHING}, '
+            f'[{os.getenv(env_options.Options.DISABLE_SELECTIVE_PUSHING.env_key)}]'
+        )
         uvicorn.run(self._app,
                     host='0.0.0.0',
                     port=self._load_balancer_port,

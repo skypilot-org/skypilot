@@ -6,6 +6,7 @@ envs:
   IP:
   PORT:
   POLICY:
+  DISABLE_SELECTIVE_PUSHING: false
 
 resources:
   # TODO(tian): Hack. We should figure out the optimal resources.

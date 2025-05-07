@@ -25,6 +25,7 @@ class Options(enum.Enum):
     LB_PUSHING_ENABLE_LB = ('LB_PUSHING_ENABLE_LB', True)
     DO_PUSHING_TO_REPLICA = ('DO_PUSHING_TO_REPLICA', False)
     USE_V2_STEALING = ('USE_V2_STEALING', False)
+    DISABLE_SELECTIVE_PUSHING = ('DISABLE_SELECTIVE_PUSHING', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         self.env_var = env_var

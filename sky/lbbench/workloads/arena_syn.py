@@ -16,7 +16,7 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 DATASET_NAME = 'lmsys/chatbot_arena_conversations'
-# DATASET_NAME = 'lmsys/lmsys-chat-1m'
+DATASET_NAME_1M = 'lmsys/lmsys-chat-1m'
 CONV_SELECTOR = 'conversation_a'
 
 
@@ -34,26 +34,61 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _load_dataset(num_conv: int) -> List[Dict[str, Any]]:
+seed2idx = {
+    'us-east-2': 0,
+    'ap-northeast-1': 1,
+    'eu-central-1': 2,
+}
+
+
+def _extract(d: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'turn': d['turn'],
+        'tstamp': d['tstamp'],
+        'user': d['judge'],
+        'conv': d[CONV_SELECTOR],
+    }
+
+
+def _load_dataset(seed: str) -> List[Dict[str, Any]]:
+    if seed not in seed2idx:
+        raise ValueError(f'Invalid seed: {seed}')
+    desired_idx = seed2idx[seed]
     tic = time.time()
     multi_turn_data = []
     chunk_data = datasets.load_dataset(DATASET_NAME, split='train')
+    i = 0
     for d in chunk_data:
-        if d['turn'] > 1 or True:
-            multi_turn_data.append({
-                'turn': d['turn'],
-                'tstamp': d['tstamp'],
-                'user': d['judge'],
-                'conv': d[CONV_SELECTOR],
-            })
-    random.shuffle(multi_turn_data)
-    multi_turn_data = multi_turn_data[:num_conv]
+        if d['turn'] > 1:
+            i += 1
+            if i % len(seed2idx) != desired_idx:
+                continue
+            multi_turn_data.append(_extract(d))
     print(f'Got {len(multi_turn_data)} multi-turn conversations '
           f'(took {time.time() - tic:.2f}s)')
     return multi_turn_data
 
 
-async def _multi_turn_conv(duration: int, tic: float, uid: str,
+def _load_dataset_1m(seed: str) -> List[Dict[str, Any]]:
+    tic = time.time()
+    step = 100000
+    slice_idx = seed2idx[seed]
+    slice_str = f'{slice_idx*step}:{(slice_idx+1)*step}'
+    chunk_data = datasets.load_dataset(DATASET_NAME_1M,
+                                       split=f'train[{slice_str}]')
+    multi_turn_data = []
+    for d in chunk_data:
+        if d['turn'] > 1:
+            multi_turn_data.append(_extract(d))
+    print(f'Got {len(multi_turn_data)} multi-turn conversations '
+          f'(took {time.time() - tic:.2f}s)')
+    return multi_turn_data
+
+
+# _load_dataset_1m('us-east-2')
+
+
+async def _multi_turn_conv(uid: int, duration: int, tic: float, real_uid: str,
                            conv: Dict[str, Any]) -> List[utils.OAIChatHistory]:
     history = []
     for i, msg in enumerate(conv['conv']):
@@ -66,17 +101,29 @@ async def _multi_turn_conv(duration: int, tic: float, uid: str,
             history.append(msg)
         else:
             assert msg['role'] == 'assistant'
-            result = await oai.call_chat_completion_async(
-                history,
-                temperature=0.0,
-                max_tokens=512,
-                uid=uid,
-                stop=None,
-                only_return_new_round=True,
-                tic=tic,
-                duration=duration)
+            task = asyncio.create_task(
+                oai.call_chat_completion_async(
+                    history,
+                    temperature=0.0,
+                    max_tokens=512,
+                    uid=real_uid,
+                    stop=None,
+                    only_return_new_round=True,
+                    tic=tic,
+                    duration=duration,
+                    # hash_key=f'{real_uid}-{uid}',
+                    hash_key=conv['user'],
+                ))
+            while not task.done():
+                if time.time() - tic > duration:
+                    task.cancel()
+                    return history
+                await asyncio.sleep(0.1)
+            result = await task
             if isinstance(result, Exception):
                 return history
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}] User {uid} '
+                  f'done one task, {len(result)=}')
             assert len(result) == 1
             history.extend(result)
     return history
@@ -104,7 +151,7 @@ async def _user_task(duration: int, tic: float, uid: int, max_uid: int,
         remaining = duration - elapsed
         if remaining <= 0:
             break
-        coro = _multi_turn_conv(duration, tic, real_uid, conv)
+        coro = _multi_turn_conv(uid, duration, tic, real_uid, conv)
         try:
             # result = await asyncio.wait_for(coro, timeout=remaining)
             result = await coro
@@ -138,7 +185,7 @@ def launch_user_tasks(
             ux_utils.spinner_message(
                 f'[bold cyan]Loading dataset {DATASET_NAME}[/]')) as spinner:
         random.seed(args.seed)
-        convs = _load_dataset(args.num_conv)
+        convs = _load_dataset(args.seed)
         spinner.update('[bold cyan]Grouping conversations[/]')
         user_to_convs: Dict[str,
                             List[Dict[str,

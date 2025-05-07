@@ -2,9 +2,7 @@
 
 import asyncio
 import json
-import threading
 import time
-import traceback
 import typing
 from typing import List, Optional, Union
 
@@ -14,7 +12,6 @@ from openai.types.chat import ChatCompletionStreamOptionsParam
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from openai.types.chat.chat_completion_message_param import (
     ChatCompletionMessageParam)
-from rich import print as rp
 
 from sky.lbbench import utils
 
@@ -51,6 +48,7 @@ async def call_chat_completion_async(
     only_return_new_round: bool = False,
     tic: Optional[float] = None,
     duration: Optional[float] = None,
+    hash_key: Optional[str] = None,
 ) -> Union[utils.OAIChatHistory, Exception]:
     assert lock is not None
     typed_messages = typing.cast(List[ChatCompletionMessageParam], messages)
@@ -75,7 +73,9 @@ async def call_chat_completion_async(
             stop=stop,
             stream=True,
             stream_options=ChatCompletionStreamOptionsParam(include_usage=True),
-            extra_headers={'x-hash-key': str(uid)},
+            extra_headers={
+                'x-hash-key': str(uid) if hash_key is None else hash_key
+            },
             timeout=default_timeout,
         ),
                                      timeout=default_timeout)
@@ -134,8 +134,8 @@ async def call_chat_completion_async(
         # rp(f'Error: {e}\n'
         #    f'  Traceback: {traceback.format_exc()}')
         metric.failed = str(e)
-    # async with lock:
-    global_metrics.append(metric)
+    async with lock:
+        global_metrics.append(metric)
     if metric.failed is not None:
         assert exception is not None
         return exception
