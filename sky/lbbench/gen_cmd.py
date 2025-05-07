@@ -17,6 +17,8 @@ raw_describes = [
     'sky_least_load_enhanced',
     'sky_consistent_hashing',
     'sky_consistent_hashing_enhanced',
+    'sky_round_robin',
+    'sky_round_robin_enhanced',
     # 'sky_consistent_hashing_irregular_user',
     # 'sky_consistent_hashing_enhanced_irregular_user',
     # 'sky_consistent_hashing_prefix_hash',
