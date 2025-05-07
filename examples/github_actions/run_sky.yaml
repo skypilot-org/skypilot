@@ -33,5 +33,7 @@ jobs:
       - name: Run SkyPilot job
         run: |
           source ~/sky/bin/activate
-          sky api login --endpoint <server>
+          sky api login --endpoint $SKYPILOT_API_SERVER_ENDPOINT
           SKYPILOT_PROJECT_CONFIG=skypilot_config.yaml sky jobs launch sample_job.yaml -y
+        env:
+          SKYPILOT_API_SERVER_ENDPOINT: ${{ secrets.SKYPILOT_API_SERVER_ENDPOINT }}
