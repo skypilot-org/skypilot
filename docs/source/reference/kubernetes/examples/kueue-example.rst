@@ -76,6 +76,12 @@ Create a Kueue resource flavor
 A ResourceFlavor is an object that represents resource variations (such as CPU architecture, GPU type, etc.)
 and allows you to associate them with cluster nodes through labels, taints and tolerations.
 
+.. note::
+
+    To learn more about ResourceFlavor, see:
+    - `Kueue Resource Flavor <https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/>`_
+    - `Cluster Queue Flavors and Resources <https://kueue.sigs.k8s.io/docs/concepts/cluster_queue/#flavors-and-resources>`_
+
 Here a default resource flavor is created to be used with Kueue.
 
 ``kueue-resource-flavor.yaml``:
@@ -443,4 +449,4 @@ Specifically, the following sections describe concepts that can be used to manag
 - `Define multiple resource flavors <https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/>`_
 - `Set up gang scheduling of multiple pods <https://kueue.sigs.k8s.io/docs/tasks/run/plain_pods/#running-a-group-of-pods-to-be-admitted-together>`_
 - `Use Kueue with multiple clusters <https://kueue.sigs.k8s.io/docs/concepts/multikueue/>`_
-- `Troubleshooting Kueue <https://kueue.sigs.k8s.io/docs/tasks/troubleshooting/>`_
+- `Troubleshoot Kueue <https://kueue.sigs.k8s.io/docs/tasks/troubleshooting/>`_
