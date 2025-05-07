@@ -23,7 +23,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         all_users: true,
       }),
     });
-    // TODO(syang): remove X-Request-ID after v0.10.0 is released.
+    // TODO(syang): remove X-Request-ID when v0.10.0 is released.
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
       response.headers.get('X-Request-ID');
@@ -101,7 +101,7 @@ export async function getClusterJobs({ clusterName }) {
         all_users: true,
       }),
     });
-    // TODO(syang): remove X-Request-ID after v0.10.0 is released.
+    // TODO(syang): remove X-Request-ID when v0.10.0 is released.
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
       response.headers.get('X-Request-ID');
