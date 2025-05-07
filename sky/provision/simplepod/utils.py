@@ -147,9 +147,9 @@ class SimplePodClient:
             public_key = f.read().strip()
         parts = instance_type.split()
 
-        if len(parts) == 2 and parts[0].startswith('gpu_'):
-            # Format: gpu_1x_rtx a2000 or gpu_1x_p104-100
-            gpu_type = parts[0].replace('gpu_1x_', '') + ' ' + parts[1]
+        if len(parts) >= 2 and parts[0].startswith('gpu_'):
+            # Format: gpu_1x_rtx 3060 ti, gpu_1x_rtx a2000, or gpu_1x_p104-100
+            gpu_type = parts[0].replace('gpu_1x_', '') + ' ' + ' '.join(parts[1:])
             gpu_count = 1
         elif len(parts) == 1 and parts[0].startswith('gpu_1x_'):
             # Format: gpu_1x_p104-100 (single part)
