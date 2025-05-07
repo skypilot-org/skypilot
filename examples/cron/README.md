@@ -31,12 +31,12 @@ To create a suitable schedule for a cron job, visit https://crontab.guru/.
 The output of the cron job is found in different places depending on the operating system. To find the job output easily, store the cronjob output to a file.
 
 ```console
-sudo mkdir -p /var/log/sky/cron/
+sudo mkdir -p /absolute/path/to/logs/
 crontab -e
 ```
 then edit the crontab file to include:
 ```console
-*/5 * * * * /opt/anaconda3/envs/sky/bin/sky status > "/var/log/sky/cron/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
+*/5 * * * * /opt/anaconda3/envs/sky/bin/sky status > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
 ```
 
 > `date` command can be specified here without using its full path, as
@@ -47,20 +47,26 @@ To pass in a configuration file to the cronjob, specify a `--config` file with p
 
 crontab example:
 ```console
-*/5 * * * * /opt/anaconda3/envs/sky/bin/sky status --config /absolute/path/to/config/file.yaml > "/var/log/sky/cron/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
+*/5 * * * * /opt/anaconda3/envs/sky/bin/sky status --config /absolute/path/to/config/file.yaml > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
 ```
 
 Alternatively, specify `SKYPILOT_GLOBAL_CONFIG` environment variable for the script.
 
 crontab example:
 ```console
-*/5 * * * * SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml /opt/anaconda3/envs/sky/bin/sky status > "/var/log/sky/cron/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
+*/5 * * * * SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml /opt/anaconda3/envs/sky/bin/sky status > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
 ```
 
 ## Run a task
 To run a task, refer to this sample cron job:
 ```console
-*/5 * * * * SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml /opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job.yaml > "/var/log/sky/cron/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
+*/5 * * * * SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml /opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job.yaml -y > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
+```
+
+## Run a task asynchronously
+Simply add the `--async` flag:
+```console
+*/5 * * * * SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml /opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job.yaml -y --async > "/absolute/path/to/logs/$(date +\%d\%m\%y_\%H\%M\%S).log" 2>&1
 ```
 
 ## Run a cronjob against remote API server
