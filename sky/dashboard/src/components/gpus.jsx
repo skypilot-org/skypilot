@@ -155,7 +155,7 @@ export function GPUs() {
       ) : (
         <>
           {/* Summary Section */}
-          {allGPUs.length > 0 && (
+          {allGPUs.length > 0 ? (
             <Card className="mb-4 p-4">
               <h3 className="text-lg font-semibold mb-3">
                 Overall GPU Summary
@@ -222,6 +222,15 @@ export function GPUs() {
                     </div>
                   );
                 })}
+              </div>
+            </Card>
+          ) : (
+            <Card className="mb-4 p-4">
+              <h3 className="text-lg font-semibold mb-3">
+                Overall GPU Summary
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <p className="text-sm text-gray-500">No GPUs found</p>
               </div>
             </Card>
           )}
