@@ -99,7 +99,7 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         response = await call_next(request)
-        response.headers['X-Request-ID'] = request_id
+        response.headers['X-Skypilot-Request-ID'] = request_id
         return response
 
 
@@ -174,7 +174,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    expose_headers=['X-Request-ID'])
+    expose_headers=['X-Skypilot-Request-ID'])
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])

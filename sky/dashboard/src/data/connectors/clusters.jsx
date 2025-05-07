@@ -23,7 +23,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         all_users: true,
       }),
     });
-    const id = response.headers.get('x-request-id');
+    const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
@@ -98,7 +98,7 @@ export async function getClusterJobs({ clusterName }) {
         all_users: true,
       }),
     });
-    const id = response.headers.get('x-request-id');
+    const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     const data = await fetchedData.json();
     const jobs = JSON.parse(data.return_value);
