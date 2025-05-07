@@ -4,6 +4,7 @@ This is a remote utility module that provides logging functionality.
 """
 import collections
 import copy
+import functools
 import io
 import multiprocessing.pool
 import os
@@ -116,26 +117,24 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     return ''.join(out)
 
 
-def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
-    """Redirect the process's filtered stdout/stderr to both stream and file"""
+def process_subprocess_stream(proc, stdout_stream_handler,
+                              stderr_stream_handler) -> Tuple[str, str]:
+    """Process the stream of a process in threads, blocking."""
     if proc.stderr is not None:
         # Asyncio does not work as the output processing can be executed in a
         # different thread.
         # selectors is possible to handle the multiplexing of stdout/stderr,
         # but it introduces buffering making the output not streaming.
         with multiprocessing.pool.ThreadPool(processes=1) as pool:
-            err_args = copy.copy(args)
-            err_args.line_processor = None
-            stderr_fut = pool.apply_async(_handle_io_stream,
-                                          args=(proc.stderr, sys.stderr,
-                                                err_args))
+            stderr_fut = pool.apply_async(stderr_stream_handler,
+                                          args=(proc.stderr, sys.stderr))
             # Do not launch a thread for stdout as the rich.status does not
             # work in a thread, which is used in
             # log_utils.RayUpLineProcessor.
-            stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+            stdout = stdout_stream_handler(proc.stdout, sys.stdout)
             stderr = stderr_fut.get()
     else:
-        stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+        stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
 
@@ -183,11 +182,6 @@ def run_with_log(
     # stdout and stderr.
     stdout_arg = stderr_arg = None
     ctx = context.get()
-    # Currently, process_stream can only run in main thread, we do not
-    # enable async context for requests that require process_stream
-    # TODO(aylei): refine process_stream to support async context.
-    assert not process_stream or ctx is None, (
-        'process_stream should be False when ctx is not None')
     if process_stream or ctx is not None:
         # Capture stdout/stderr of the subprocess if:
         # 1. Post-processing is needed (process_stream=True)
@@ -213,6 +207,8 @@ def run_with_log(
             subprocess_utils.kill_process_daemon(proc.pid)
             stdout = ''
             stderr = ''
+            stdout_stream_handler = None
+            stderr_stream_handler = None
 
             if process_stream:
                 if skip_lines is None:
@@ -239,19 +235,36 @@ def run_with_log(
                     replace_crlf=with_ray,
                     streaming_prefix=streaming_prefix,
                 )
-                # TODO(aylei): Process_subprocess_stream can be blocking when
-                # waiting for an new line, should figure out how to run this
-                # asynchonously. Currently we did not do this since:
-                # 1. this may call rich.status, which only works in main-thread
-                # 2. we do not call this in coroutine yet
-                stdout, stderr = process_subprocess_stream(proc, args)
+                stdout_stream_handler = functools.partial(
+                    _handle_io_stream,
+                    args=args,
+                )
+                if proc.stderr is not None:
+                    err_args = copy.copy(args)
+                    err_args.line_processor = None
+                    stderr_stream_handler = functools.partial(
+                        _handle_io_stream,
+                        args=err_args,
+                    )
             if ctx is not None:
-                context_utils.pipe_and_wait_process(
+                # When runs in a coroutine, always process the subprocess
+                # stream to:
+                # 1. handle context cancellation
+                # 2. redirect subprocess stdout/stderr to the contextual
+                #    stdout/stderr of current coroutine.
+                stdout, stderr = context_utils.pipe_and_wait_process(
                     ctx,
                     proc,
-                    cancel_callback=subprocess_utils.kill_children_processes)
-            else:
-                proc.wait()
+                    cancel_callback=subprocess_utils.kill_children_processes,
+                    stdout_stream_handler=stdout_stream_handler,
+                    stderr_stream_handler=stderr_stream_handler)
+            elif process_stream:
+                # When runs in a process, only process subprocess stream if
+                # necessary to avoid unnecessary stream handling overhead.
+                stdout, stderr = process_subprocess_stream(
+                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Ensure returncode is set.
+            proc.wait()
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode

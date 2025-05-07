@@ -275,6 +275,7 @@ class RayCodeGen:
         ray_address = 'auto'
         self._code = [
             textwrap.dedent(f"""\
+            import functools
             import getpass
             import hashlib
             import io

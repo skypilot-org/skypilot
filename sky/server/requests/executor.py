@@ -344,7 +344,7 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
 
 
-async def execute_request(request: api_requests.Request):
+async def execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.
 
     Similar to _request_execution_wrapper, but executed as coroutine in current
@@ -354,6 +354,7 @@ async def execute_request(request: api_requests.Request):
     ctx = context.get()
     if ctx is None:
         raise ValueError('Context is not initialized')
+    logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
     with api_requests.update_request(request.request_id) as request_task:
@@ -366,7 +367,6 @@ async def execute_request(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    sky_logging.reload_logger()
     loop = asyncio.get_running_loop()
     pyctx = contextvars.copy_context()
     func_call = functools.partial(pyctx.run, func, **request_body.to_kwargs())

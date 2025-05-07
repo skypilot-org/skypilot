@@ -682,7 +682,7 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
-    task = asyncio.create_task(executor.execute_request(request_task))
+    task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
     def cancel_task():
         task.cancel()

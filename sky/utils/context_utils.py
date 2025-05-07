@@ -5,7 +5,7 @@ import io
 import multiprocessing
 import subprocess
 import sys
-from typing import Any, Callable, IO, Optional
+from typing import Any, Callable, IO, Optional, Tuple
 
 from sky import sky_logging
 from sky.utils import context
@@ -13,53 +13,78 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
+StreamHandler = Callable[[IO[Any], IO[Any]], str]
 
-def pipe_and_wait_process(ctx: context.Context,
-                          proc: subprocess.Popen,
-                          poll_interval: float = 0.5,
-                          cancel_callback: Optional[Callable[[], None]] = None):
+
+def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:
+    """Passthrough the stream from the process to the output stream"""
+    wrapped = io.TextIOWrapper(in_stream,
+                               encoding='utf-8',
+                               newline='',
+                               errors='replace',
+                               write_through=True)
+    while True:
+        line = wrapped.readline()
+        if line:
+            out_stream.write(line)
+            out_stream.flush()
+        else:
+            break
+    return ''
+
+
+def pipe_and_wait_process(
+        ctx: context.Context,
+        proc: subprocess.Popen,
+        poll_interval: float = 0.5,
+        cancel_callback: Optional[Callable[[], None]] = None,
+        stdout_stream_handler: Optional[StreamHandler] = None,
+        stderr_stream_handler: Optional[StreamHandler] = None
+) -> Tuple[str, str]:
     """Wait for the process to finish or cancel it if the context is cancelled.
 
     Args:
         proc: The process to wait for.
         poll_interval: The interval to poll the process.
         cancel_callback: The callback to call if the context is cancelled.
+        stdout_stream_handler: An optional handler to handle the stdout stream,
+            if None, the stdout stream will be passed through.
+        stderr_stream_handler: An optional handler to handle the stderr stream,
+            if None, the stderr stream will be passed through.
     """
 
-    def pipe(in_stream: IO[Any], out_stream: IO[Any]):
-        wrapped = io.TextIOWrapper(in_stream,
-                                   encoding='utf-8',
-                                   newline='',
-                                   errors='replace',
-                                   write_through=True)
-        while True:
-            line = wrapped.readline()
-            if line:
-                out_stream.write(line)
-                out_stream.flush()
-            else:
-                break
+    if stdout_stream_handler is None:
+        stdout_stream_handler = passthrough_stream_handler
+    if stderr_stream_handler is None:
+        stderr_stream_handler = passthrough_stream_handler
 
     # Threads are lazily created, so no harm if stderr is None
     with multiprocessing.pool.ThreadPool(processes=2) as pool:
         # Context will be lost in the new thread, capture current output stream
         # and pass it to the new thread directly.
-        futs = []
-        futs.append(
-            pool.apply_async(pipe,
-                             (proc.stdout, ctx.output_stream(sys.stdout))))
+        stdout_fut = pool.apply_async(
+            stdout_stream_handler, (proc.stdout, ctx.output_stream(sys.stdout)))
+        stderr_fut = None
         if proc.stderr is not None:
-            futs.append(
-                pool.apply_async(pipe,
-                                 (proc.stderr, ctx.output_stream(sys.stderr))))
+            stderr_fut = pool.apply_async(
+                stderr_stream_handler,
+                (proc.stderr, ctx.output_stream(sys.stderr)))
         try:
             wait_process(ctx,
                          proc,
                          poll_interval=poll_interval,
                          cancel_callback=cancel_callback)
         finally:
-            for fut in futs:
-                fut.wait()
+            # Wait for the stream handler threads to exit when process is done
+            # or cancelled
+            stdout_fut.wait()
+            if stderr_fut is not None:
+                stderr_fut.wait()
+        stdout = stdout_fut.get()
+        stderr = ''
+        if stderr_fut is not None:
+            stderr = stderr_fut.get()
+        return stdout, stderr
 
 
 def wait_process(ctx: context.Context,

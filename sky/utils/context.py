@@ -8,6 +8,9 @@ import sys
 import typing
 from typing import Dict, Optional, TextIO
 
+# Capture the original os.getenv
+_os_getenv = os.getenv
+
 
 class Context(object):
     """SkyPilot typed context vars for threads and coroutines.
@@ -100,7 +103,7 @@ class Context(object):
     def getenv(self, key: str, fallback: Optional[str] = None):
         if key in self._env_overrides:
             return self._env_overrides[key]
-        return os.getenv(key, fallback)
+        return _os_getenv(key, fallback)
 
 
 _CONTEXT = contextvars.ContextVar('sky_context', default=None)
@@ -129,8 +132,11 @@ def getenv(env_var: str, default: None = None) -> Optional[str]:
 def getenv(env_var: str, default: Optional[str] = None) -> Optional[str]:
     ctx = get()
     if ctx is not None:
-        return ctx.getenv(env_var, default)
-    return os.getenv(env_var, default)
+        value = ctx.getenv(env_var, default)
+    value = _os_getenv(env_var, default)
+    if env_var == 'AWS_PROFILE':
+        print(f'getenv: {env_var}, {value}')
+    return value
 
 
 def initialize():
