@@ -8,10 +8,9 @@ import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
-from sky.adaptors import gcp
+from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants as provision_constants
-from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -142,218 +141,21 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def _run_instances(region: str, cluster_name_on_cloud: str,
                    config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    # NOTE: although google cloud instances have IDs, but they are
-    #  not used for indexing. Instead, we use the instance name.
-    labels = config.tags  # gcp uses 'labels' instead of aws 'tags'
-    labels = dict(sorted(copy.deepcopy(labels).items()))
-    resumed_instance_ids: List[str] = []
-    created_instance_ids: List[str] = []
+    logger.critical(f"[RUN INSTANCE] Region {region} | Cluster name {cluster_name_on_cloud}")
+    logger.critical(f"[RUN INSTANCE] Provision config {config}")
 
-    node_type = instance_utils.get_node_type(config.node_config)
-    project_id = config.provider_config['project_id']
-    availability_zone = config.provider_config['availability_zone']
+    # Resume any stopped worker nodes or create new ones.
+    # Use sbatch to submit a long-running job.
 
-    # SKY: 'TERMINATED' for compute VM, 'STOPPED' for TPU VM
-    # 'STOPPING' means the VM is being stopped, which needs
-    # to be included to avoid creating a new VM.
-    resource: Type[instance_utils.GCPInstance]
-    if node_type == instance_utils.GCPNodeType.COMPUTE:
-        resource = instance_utils.GCPComputeInstance
-    elif node_type == instance_utils.GCPNodeType.MIG:
-        resource = instance_utils.GCPManagedInstanceGroup
-    elif node_type == instance_utils.GCPNodeType.TPU:
-        resource = instance_utils.GCPTPUVMInstance
-    else:
-        raise ValueError(f'Unknown node type {node_type}')
-
-    filter_labels = {
-        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
-    }
-
-    # wait until all stopping instances are stopped/terminated
-    while True:
-        instances = resource.filter(
-            project_id=project_id,
-            zone=availability_zone,
-            label_filters=filter_labels,
-            status_filters=resource.STOPPING_STATES,
-        )
-        if not instances:
-            break
-        logger.info(f'run_instances: Waiting for {len(instances)} instances in '
-                    'STOPPING status')
-        time.sleep(constants.POLL_INTERVAL)
-
-    exist_instances = resource.filter(
-        project_id=project_id,
-        zone=availability_zone,
-        label_filters=filter_labels,
-        status_filters=None,
+    return common.ProvisionRecord(
+        provider_name='slurm',
+        region=region,
+        zone=None,
+        cluster_name=cluster_name_on_cloud,
+        head_instance_id=head_instance_id,
+        resumed_instance_ids=resumed_instance_ids,
+        created_instance_ids=created_instance_ids
     )
-    exist_instances = list(exist_instances.values())
-    head_instance_id = _get_head_instance_id(exist_instances)
-
-    # NOTE: We are not handling REPAIRING, SUSPENDING, SUSPENDED status.
-    pending_instances = []
-    running_instances = []
-    stopping_instances = []
-    stopped_instances = []
-
-    # SkyPilot: We try to use the instances with the same matching launch_config
-    # first. If there is not enough instances with matching launch_config, we
-    # then use all the instances with the same matching launch_config plus some
-    # instances with wrong launch_config.
-    def get_order_key(node):
-        import datetime  # pylint: disable=import-outside-toplevel
-
-        timestamp = node.get('lastStartTimestamp')
-        if timestamp is not None:
-            return datetime.datetime.strptime(timestamp,
-                                              '%Y-%m-%dT%H:%M:%S.%f%z')
-        return node['id']
-
-    logger.info(str(exist_instances))
-    for inst in exist_instances:
-        state = inst[resource.STATUS_FIELD]
-        if state in resource.PENDING_STATES:
-            pending_instances.append(inst)
-        elif state == resource.RUNNING_STATE:
-            running_instances.append(inst)
-        elif state in resource.STOPPING_STATES:
-            stopping_instances.append(inst)
-        elif state in resource.STOPPED_STATES:
-            stopped_instances.append(inst)
-        else:
-            raise RuntimeError(f'Unsupported state "{state}".')
-
-    pending_instances.sort(key=get_order_key, reverse=True)
-    running_instances.sort(key=get_order_key, reverse=True)
-    stopping_instances.sort(key=get_order_key, reverse=True)
-    stopped_instances.sort(key=get_order_key, reverse=True)
-
-    if stopping_instances:
-        raise RuntimeError(
-            'Some instances are being stopped during provisioning. '
-            'Please wait a while and retry.')
-
-    if head_instance_id is None:
-        if running_instances:
-            head_instance_id = resource.create_node_tag(
-                project_id,
-                availability_zone,
-                running_instances[0]['name'],
-                is_head=True,
-            )
-        elif pending_instances:
-            head_instance_id = resource.create_node_tag(
-                project_id,
-                availability_zone,
-                pending_instances[0]['name'],
-                is_head=True,
-            )
-    # TODO(suquark): Maybe in the future, users could adjust the number
-    #  of instances dynamically. Then this case would not be an error.
-    if config.resume_stopped_nodes and len(exist_instances) > config.count:
-        raise RuntimeError(
-            'The number of running/stopped/stopping '
-            f'instances combined ({len(exist_instances)}) in '
-            f'cluster "{cluster_name_on_cloud}" is greater than the '
-            f'number requested by the user ({config.count}). '
-            'This is likely a resource leak. '
-            'Use "sky down" to terminate the cluster.')
-
-    to_start_count = (config.count - len(running_instances) -
-                      len(pending_instances))
-
-    # Try to reuse previously stopped nodes with compatible configs
-    if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
-        resumed_instance_ids = [n['name'] for n in stopped_instances]
-        if resumed_instance_ids:
-            resumed_instance_ids = resource.start_instances(
-                cluster_name_on_cloud, project_id, availability_zone,
-                resumed_instance_ids, labels)
-        # In MIG case, the resumed_instance_ids will include the previously
-        # PENDING and RUNNING instances. To avoid double counting, we need to
-        # remove them from the resumed_instance_ids.
-        ready_instances = set(resumed_instance_ids)
-        ready_instances |= set([n['name'] for n in running_instances])
-        ready_instances |= set([n['name'] for n in pending_instances])
-        to_start_count = config.count - len(ready_instances)
-
-        if head_instance_id is None:
-            head_instance_id = resource.create_node_tag(
-                project_id,
-                availability_zone,
-                resumed_instance_ids[0],
-                is_head=True,
-            )
-
-    if to_start_count > 0:
-        errors, created_instance_ids = resource.create_instances(
-            cluster_name_on_cloud,
-            project_id,
-            availability_zone,
-            config.node_config,
-            labels,
-            to_start_count,
-            total_count=config.count,
-            include_head_node=head_instance_id is None)
-        if errors:
-            error = common.ProvisionerError('Failed to launch instances.')
-            error.errors = errors
-            raise error
-        if head_instance_id is None:
-            head_instance_id = created_instance_ids[0]
-
-    while True:
-        # wait until all instances are running
-        instances = resource.filter(
-            project_id=project_id,
-            zone=availability_zone,
-            label_filters=filter_labels,
-            status_filters=resource.PENDING_STATES,
-        )
-        if not instances:
-            break
-        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
-                     'in PENDING status.')
-        time.sleep(constants.POLL_INTERVAL)
-
-    # Check if the number of running instances is the same as the requested.
-    instances = resource.filter(
-        project_id=project_id,
-        zone=availability_zone,
-        label_filters=filter_labels,
-        status_filters=[resource.RUNNING_STATE],
-    )
-    if len(instances) != config.count:
-        logger.warning('The number of running instances is different from '
-                       'the requested number after provisioning '
-                       f'(requested: {config.count}, '
-                       f'observed: {len(instances)}). '
-                       'This could be some instances failed to start '
-                       'or some resource leak.')
-
-    assert head_instance_id is not None, 'head_instance_id is None'
-
-    tpu_node = config.provider_config.get('tpu_node')
-    if tpu_node is not None:
-        vpc_name = resource.get_vpc_name(project_id, availability_zone,
-                                         head_instance_id)
-        assert config.count == 1, 'TPU node only supports 1 instance'
-        instance_utils.create_tpu_node(
-            project_id,
-            availability_zone,
-            tpu_node,
-            vpc_name,
-        )
-    return common.ProvisionRecord(provider_name='gcp',
-                                  region=region,
-                                  zone=availability_zone,
-                                  cluster_name=cluster_name_on_cloud,
-                                  head_instance_id=head_instance_id,
-                                  resumed_instance_ids=resumed_instance_ids,
-                                  created_instance_ids=created_instance_ids)
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -361,27 +163,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """See sky/provision/__init__.py"""
     try:
         return _run_instances(region, cluster_name_on_cloud, config)
-    except gcp.http_error_exception() as e:
-        error_details = getattr(e, 'error_details')
-        errors = []
-        if isinstance(error_details, list):
-            for detail in error_details:
-                errors.append({
-                    'code': detail.get('reason'),
-                    'domain': detail.get('domain'),
-                    'message': detail.get('message', str(e)),
-                })
-        elif isinstance(error_details, str):
-            errors.append({
-                'code': None,
-                'domain': 'run_instances',
-                'message': error_details,
-            })
-        else:
-            raise
-        error = common.ProvisionerError('Failed to launch instances.')
-        error.errors = errors
-        raise error from e
+    except common.ProvisionerError('Failed to launch instances.') as e:
+        raise
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
