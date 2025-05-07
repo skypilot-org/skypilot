@@ -489,15 +489,19 @@ class Resources:
             return False
         return self._requires_fuse
 
+    def set_requires_fuse(self, value: bool) -> None:
+        """Sets whether this resource requires FUSE mounting support.
+
+        Args:
+            value: Whether the resource requires FUSE mounting support.
+        """
+        self._requires_fuse = value
+
     @property
     def cluster_config_overrides(self) -> Dict[str, Any]:
         if self._cluster_config_overrides is None:
             return {}
         return self._cluster_config_overrides
-
-    @requires_fuse.setter
-    def requires_fuse(self, value: Optional[bool]) -> None:
-        self._requires_fuse = value
 
     @property
     def docker_username_for_runpod(self) -> Optional[str]:
