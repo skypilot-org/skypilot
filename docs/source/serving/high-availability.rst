@@ -149,29 +149,29 @@ This example demonstrates the automatic recovery capability of the high availabi
 
   .. code-block:: bash
 
-      sky serve up -n my-http-service http_service.yaml
-      # This will launch the new high availability controller based on your config.
+    sky serve up -n my-http-service http_service.yaml
+    # This will launch the new high availability controller based on your config.
 
 4. **Wait and Verify the Service**: Wait until the service status becomes ``READY``.
 
   .. code-block:: bash
 
-      watch sky serve status my-http-service
-      # Wait for STATUS to become READY
+    watch sky serve status my-http-service
+    # Wait for STATUS to become READY
 
-      # Get the endpoint URL
-      ENDPOINT=$(sky serve status my-http-service --endpoint)
-      echo "Service endpoint: $ENDPOINT"
+    # Get the endpoint URL
+    ENDPOINT=$(sky serve status my-http-service --endpoint)
+    echo "Service endpoint: $ENDPOINT"
 
-      # Verify the service is rnvesponding correctly
-      curl $ENDPOINT
-      # Should see the default HTML output from http.server
+    # Verify the service is rnvesponding correctly
+    curl $ENDPOINT
+    # Should see the default HTML output from http.server
 
 5. **Simulate Controller Failure** (Manually Delete Pod):
     
   * Find the name of the controller pod. Controller pods typically contain "sky-serve-controller" and have the label ``skypilot-head-node=1``.
 
-  .. code-block:: bash
+    .. code-block:: bash
 
       kubectl get pods -l skypilot-head-node=1 | grep sky-serve-controller
       # Copy the controller pod name (e.g., sky-serve-controller-deployment-xxxxx-yyyyy)
@@ -182,27 +182,27 @@ This example demonstrates the automatic recovery capability of the high availabi
 
     .. code-block:: bash
 
-        echo "Deleting controller pod: $CONTROLLER_POD"
-        kubectl delete pod $CONTROLLER_POD
+      echo "Deleting controller pod: $CONTROLLER_POD"
+      kubectl delete pod $CONTROLLER_POD
 
 6. **Observe Recovery**: The Kubernetes Deployment will detect the missing pod and automatically create a new one to replace it.
 
   .. code-block:: bash
 
-      echo "Waiting for controller pod to recover..."
-      # Wait a few seconds for Kubernetes to react
-      sleep 15
+    echo "Waiting for controller pod to recover..."
+    # Wait a few seconds for Kubernetes to react
+    sleep 15
 
-      # Check that a new pod has started and is running (Status should be Running 1/1)
-      kubectl get pods -l skypilot-head-node=1
-      # Note the pod name will be different, and STATUS should be Running
+    # Check that a new pod has started and is running (Status should be Running 1/1)
+    kubectl get pods -l skypilot-head-node=1
+    # Note the pod name will be different, and STATUS should be Running
 
 7.  **Verify Service Again**: Even though the controller pod was restarted, the service endpoint should remains the same and still be accessible (there might be a brief interruption depending on load balancer and K8s response times).
 
-    .. code-block:: bash
+  .. code-block:: bash
 
-        echo "Re-checking service endpoint: $ENDPOINT"
-        curl $ENDPOINT
-        # Should still see the http.server output, indicating the service has recovered
+    echo "Re-checking service endpoint: $ENDPOINT"
+    curl $ENDPOINT
+    # Should still see the http.server output, indicating the service has recovered
 
 This example shows that even if the controller pod terminates unexpectedly, the Kubernetes Deployment mechanism automatically restores it, and thanks to the persisted state (via PVC) and recovery logic, the service continues to operate.
