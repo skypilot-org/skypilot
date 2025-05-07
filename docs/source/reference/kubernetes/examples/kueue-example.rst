@@ -47,7 +47,7 @@ the kueue config needs to be patched to support plain pods.
     # Extract and patch the config and save it to /tmp/kueueconfig.yaml
     # This is required because SkyPilot creates and manages workloads as pods
     kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"]' > /tmp/kueueconfig.yaml
-    # Apply the changes from /tmp/kueueconfig.yaml created above
+    # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
     kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
     # Restart the kueue-controller-manager pod with the following command
     kubectl -n kueue-system rollout restart deployment kueue-controller-manager
@@ -129,7 +129,9 @@ in the underlying cluster.
       - cpu
       - memory
 
-The ``ProvisioningClassConfig`` above uses ``ProvisioningClassName`` of ``check-capacity.autoscaling.x.k8s-io``.
+The ``ProvisioningClassConfig`` above uses ``ProvisioningClassName`` of ``check-capacity.autoscaling.x.k8s-io``,
+one of the two ``ProvisioningClassName`` s that are supported
+`out of the box <https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#supported-provisioningclasses>`_.
 
 This ProvisioningClass checks if necessary resources are available in the underlying cluster, and will attempt to
 provision them via an autoscaler if one is available.
@@ -239,6 +241,7 @@ Alternatively, the two teams can have their own cluster queues as follows:
       - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
         flavors:
         - name: "default-flavor"
+          # A quota must be set for each resource specified in CoveredResources.
           # Adjust this value based on actual resource needs instead of "Infinite"
           resources:
           - name: "cpu"
@@ -258,7 +261,10 @@ Alternatively, the two teams can have their own cluster queues as follows:
       cohort: "skypilot-cohort"
       namespaceSelector: {} # match all namespaces
       resourceGroups:
-      - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+      # If you do not want to specify a quota for a resource, you can
+      # leave the resource out of coveredResources.
+      # This clusterQueue does not specify a quota for "nvidia.com/gpu".
+      - coveredResources: ["cpu", "memory"]
         flavors:
         - name: "default-flavor"
           # Adjust this value based on actual resource needs instead of "Infinite"
@@ -267,8 +273,6 @@ Alternatively, the two teams can have their own cluster queues as follows:
             nominalQuota: 1000000000    # "Infinite" quota
           - name: "memory"
             nominalQuota: 1000000000Gi  # "Infinite" quota
-          - name: "nvidia.com/gpu"
-            nominalQuota: 1000000000    # "Infinite" quota
       admissionChecks:
       - skypilot-kueue-prov
     ---
@@ -310,8 +314,8 @@ To create the cluster and local queues above, save the snippet to ``kueue-two-cl
     To configure the interaction between multiple cluster queues - for example, to implement fair sharing
     between cluster queues, refer to following documentation:
 
-    `cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_.
-    `fair sharing <https://kueue.sigs.k8s.io/docs/concepts/preemption/#fair-sharing>`_.
+    - `cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_
+    - `fair sharing <https://kueue.sigs.k8s.io/docs/concepts/preemption/#fair-sharing>`_
 
 
 Deploy SkyPilot API servers
@@ -327,7 +331,6 @@ If the following command is used to deploy the SkyPilot API server on ``team1`` 
 
 .. code-block:: bash
 
-  # The following variables will be used throughout the guide
   NAMESPACE=team1
   RELEASE_NAME=skypilot-team1
   WEB_USERNAME=team1-user
@@ -343,7 +346,6 @@ The command to deploy ``team2`` namespace is similar, except the last two lines 
 
 .. code-block:: bash
 
-  # The following variables will be used throughout the guide
   NAMESPACE=team2
   RELEASE_NAME=skypilot-team2
   WEB_USERNAME=team2-user
@@ -396,8 +398,8 @@ For API server deployed in ``team1`` namespace, the following config should be s
   RELEASE_NAME=skypilot-team1
   helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
-    --reuse-values  \
-    --set-file apiService.config=skypilot-team2-config.yaml
+    --reuse-values \
+    --set-file apiService.config=skypilot-team1-config.yaml
 
 
 For API server deployed in ``team2`` namespace, the following config should be set:
@@ -418,7 +420,7 @@ For API server deployed in ``team2`` namespace, the following config should be s
   RELEASE_NAME=skypilot-team2
   helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
-    --reuse-values  \
+    --reuse-values \
     --set-file apiService.config=skypilot-team2-config.yaml
 
 
