@@ -70,13 +70,13 @@ enabled_systems = [
     5,  # consistent hashing with selective pushing
     6,  # round robin
     7,  # rr with selective pushing
-    # 8,  # sky pulling in lb, pulling in replica, but workload stealing
-    # 9,  # sky pulling in lb, pulling in replica, but steal small #requests
-    # 10,  # sky pushing in lb, pulling in replica
-    # 11,  # sky pushing in lb, pushing in replica
-    # 12,  # selective pushing for both lb and replica. with prefix tree.
-    # 13,  # selective pushing for both lb and replica. with least load.
-    # 14,  # selective pushing for both lb and replica. with round robin.
+    8,  # sky pulling in lb, pulling in replica, but workload stealing
+    9,  # sky pulling in lb, pulling in replica, but steal small #requests
+    10,  # sky pushing in lb, pulling in replica
+    11,  # sky pushing in lb, pushing in replica
+    12,  # selective pushing for both lb and replica. with prefix tree.
+    13,  # selective pushing for both lb and replica. with least load.
+    14,  # selective pushing for both lb and replica. with round robin.
     15,  # selective pushing for both lb and replica. with consistent hashing.
 ]
 enabled_systems = [6, 7, 15]
@@ -165,7 +165,6 @@ def main():
     output_local = f'{args.output_dir}/result'
     signal_file = tempfile.NamedTemporaryFile(delete=False).name
     queue_status_file = tempfile.NamedTemporaryFile(delete=False).name
-    jobs_names = 
 
     for e, d, p in zip(endpoints, describes, presents):
         en = f'{args.exp_name}_{d}'
