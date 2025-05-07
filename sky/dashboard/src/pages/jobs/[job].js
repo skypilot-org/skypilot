@@ -11,6 +11,7 @@ import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import Head from 'next/head';
 
 function JobDetails() {
   const router = useRouter();
@@ -133,157 +134,164 @@ function JobDetails() {
     (item) => String(item.id) === String(jobId)
   );
 
+  const title = jobId ? `Job: ${jobId} | SkyPilot Dashboard` : 'Job Details | SkyPilot Dashboard';
+
   return (
-    <Layout highlighted="jobs">
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-base flex items-center">
-          <Link href="/jobs" className="text-sky-blue hover:underline">
-            Managed Jobs
-          </Link>
-          <span className="mx-2 text-gray-500">›</span>
-          <Link
-            href={`/jobs/${jobId}`}
-            className="text-sky-blue hover:underline"
-          >
-            {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
-          </Link>
-        </div>
-
-        <div className="text-sm flex items-center">
-          {(loading ||
-            isRefreshing ||
-            isLoadingLogs ||
-            isLoadingControllerLogs) && (
-            <div className="flex items-center mr-4">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          <Tooltip content="Refresh" className="text-muted-foreground">
-            <button
-              onClick={handleManualRefresh}
-              disabled={loading || isRefreshing}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+    <>
+      <Head>
+        <title>{title}</title>
+      </Head>
+      <Layout highlighted="managed-jobs">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-base flex items-center">
+            <Link href="/jobs" className="text-sky-blue hover:underline">
+              Managed Jobs
+            </Link>
+            <span className="mx-2 text-gray-500">›</span>
+            <Link
+              href={`/jobs/${jobId}`}
+              className="text-sky-blue hover:underline"
             >
-              <RotateCwIcon className="w-4 h-4 mr-1.5" />
-              {!isMobile && <span>Refresh</span>}
-            </button>
-          </Tooltip>
-        </div>
-      </div>
-
-      {loading && isInitialLoad ? (
-        <div className="flex items-center justify-center py-32">
-          <CircularProgress size={20} className="mr-2" />
-          <span>Loading...</span>
-        </div>
-      ) : detailJobData ? (
-        <div className="space-y-8">
-          {/* Details Section */}
-          <div id="details-section">
-            <Card>
-              <div className="flex items-center justify-between px-4 pt-4">
-                <h3 className="text-lg font-semibold">Details</h3>
-              </div>
-              <div className="p-4">
-                <JobDetailsContent
-                  jobData={detailJobData}
-                  activeTab="info"
-                  setIsLoadingLogs={setIsLoadingLogs}
-                  setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                  isLoadingLogs={isLoadingLogs}
-                  isLoadingControllerLogs={isLoadingControllerLogs}
-                />
-              </div>
-            </Card>
+              {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
+            </Link>
           </div>
 
-          {/* Logs Section */}
-          <div id="logs-section" className="mt-6">
-            <Card>
-              <div className="flex items-center justify-between px-4 pt-4">
-                <div className="flex items-center">
-                  <h3 className="text-lg font-semibold">Logs</h3>
-                  <span className="ml-2 text-xs text-gray-500">
-                    (Logs are not streaming; click refresh to fetch the latest
-                    logs.)
-                  </span>
+          <div className="text-sm flex items-center">
+            {(loading ||
+              isRefreshing ||
+              isLoadingLogs ||
+              isLoadingControllerLogs) && (
+              <div className="flex items-center mr-4">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            <Tooltip content="Refresh" className="text-muted-foreground">
+              <button
+                onClick={handleManualRefresh}
+                disabled={loading || isRefreshing}
+                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+              >
+                <RotateCwIcon className="w-4 h-4 mr-1.5" />
+                {!isMobile && <span>Refresh</span>}
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+
+        {loading && isInitialLoad ? (
+          <div className="flex items-center justify-center py-32">
+            <CircularProgress size={20} className="mr-2" />
+            <span>Loading...</span>
+          </div>
+        ) : detailJobData ? (
+          <div className="space-y-8">
+            {/* Details Section */}
+            <div id="details-section">
+              <Card>
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <h3 className="text-lg font-semibold">Details</h3>
                 </div>
-                <Tooltip
-                  content="Refresh logs"
-                  className="text-muted-foreground"
-                >
-                  <button
-                    onClick={handleLogsRefresh}
-                    disabled={isLoadingLogs}
-                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                  >
-                    <RotateCwIcon
-                      className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                    />
-                  </button>
-                </Tooltip>
-              </div>
-              <div className="p-4">
-                <JobDetailsContent
-                  key={logsRefreshKey}
-                  jobData={detailJobData}
-                  activeTab="logs"
-                  setIsLoadingLogs={setIsLoadingLogs}
-                  setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                  isLoadingLogs={isLoadingLogs}
-                  isLoadingControllerLogs={isLoadingControllerLogs}
-                />
-              </div>
-            </Card>
-          </div>
-
-          {/* Controller Logs Section */}
-          <div id="controller-logs-section" className="mt-6">
-            <Card>
-              <div className="flex items-center justify-between px-4 pt-4">
-                <div className="flex items-center">
-                  <h3 className="text-lg font-semibold">Controller Logs</h3>
-                  <span className="ml-2 text-xs text-gray-500">
-                    (Logs are not streaming; click refresh to fetch the latest
-                    logs.)
-                  </span>
+                <div className="p-4">
+                  <JobDetailsContent
+                    jobData={detailJobData}
+                    activeTab="info"
+                    setIsLoadingLogs={setIsLoadingLogs}
+                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                    isLoadingLogs={isLoadingLogs}
+                    isLoadingControllerLogs={isLoadingControllerLogs}
+                  />
                 </div>
-                <Tooltip
-                  content="Refresh controller logs"
-                  className="text-muted-foreground"
-                >
-                  <button
-                    onClick={handleControllerLogsRefresh}
-                    disabled={isLoadingControllerLogs}
-                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              </Card>
+            </div>
+
+            {/* Logs Section */}
+            <div id="logs-section" className="mt-6">
+              <Card>
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <div className="flex items-center">
+                    <h3 className="text-lg font-semibold">Logs</h3>
+                    <span className="ml-2 text-xs text-gray-500">
+                      (Logs are not streaming; click refresh to fetch the latest
+                      logs.)
+                    </span>
+                  </div>
+                  <Tooltip
+                    content="Refresh logs"
+                    className="text-muted-foreground"
                   >
-                    <RotateCwIcon
-                      className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
-                    />
-                  </button>
-                </Tooltip>
-              </div>
-              <div className="p-4">
-                <JobDetailsContent
-                  key={controllerLogsRefreshKey}
-                  jobData={detailJobData}
-                  activeTab="controllerlogs"
-                  setIsLoadingLogs={setIsLoadingLogs}
-                  setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                  isLoadingLogs={isLoadingLogs}
-                  isLoadingControllerLogs={isLoadingControllerLogs}
-                />
-              </div>
-            </Card>
+                    <button
+                      onClick={handleLogsRefresh}
+                      disabled={isLoadingLogs}
+                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                    >
+                      <RotateCwIcon
+                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                      />
+                    </button>
+                  </Tooltip>
+                </div>
+                <div className="p-4">
+                  <JobDetailsContent
+                    key={logsRefreshKey}
+                    jobData={detailJobData}
+                    activeTab="logs"
+                    setIsLoadingLogs={setIsLoadingLogs}
+                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                    isLoadingLogs={isLoadingLogs}
+                    isLoadingControllerLogs={isLoadingControllerLogs}
+                  />
+                </div>
+              </Card>
+            </div>
+
+            {/* Controller Logs Section */}
+            <div id="controller-logs-section" className="mt-6">
+              <Card>
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <div className="flex items-center">
+                    <h3 className="text-lg font-semibold">Controller Logs</h3>
+                    <span className="ml-2 text-xs text-gray-500">
+                      (Logs are not streaming; click refresh to fetch the latest
+                      logs.)
+                    </span>
+                  </div>
+                  <Tooltip
+                    content="Refresh controller logs"
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={handleControllerLogsRefresh}
+                      disabled={isLoadingControllerLogs}
+                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                    >
+                      <RotateCwIcon
+                        className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
+                      />
+                    </button>
+                  </Tooltip>
+                </div>
+                <div className="p-4">
+                  <JobDetailsContent
+                    key={controllerLogsRefreshKey}
+                    jobData={detailJobData}
+                    activeTab="controllerlogs"
+                    setIsLoadingLogs={setIsLoadingLogs}
+                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                    isLoadingLogs={isLoadingLogs}
+                    isLoadingControllerLogs={isLoadingControllerLogs}
+                  />
+                </div>
+              </Card>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex items-center justify-center py-32">
-          <span>Job not found</span>
-        </div>
-      )}
-    </Layout>
+        ) : (
+          <div className="flex items-center justify-center py-32">
+            <span>Job not found</span>
+          </div>
+        )}
+      </Layout>
+    </>
   );
 }
 
