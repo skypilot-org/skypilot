@@ -7,12 +7,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
@@ -64,7 +59,6 @@ export function GPUs() {
       setAllSlurmGPUs(fetchedAllSlurmGPUs || []);
       setPerPartitionSlurmGPUs(fetchedPerPartitionSlurmGPUs || []);
       setPerNodeSlurmGPUs(fetchedPerNodeSlurmGPUsData || []);
-
     } catch (err) {
       console.error('Error fetching data:', err);
       setAllGPUs([]);
@@ -85,7 +79,10 @@ export function GPUs() {
     console.log('[DEBUG] Slurm State - allSlurmGPUs:', allSlurmGPUs);
   }, [allSlurmGPUs]);
   React.useEffect(() => {
-    console.log('[DEBUG] Slurm State - perPartitionSlurmGPUs:', perPartitionSlurmGPUs);
+    console.log(
+      '[DEBUG] Slurm State - perPartitionSlurmGPUs:',
+      perPartitionSlurmGPUs
+    );
   }, [perPartitionSlurmGPUs]);
   React.useEffect(() => {
     console.log('[DEBUG] Slurm State - perNodeSlurmGPUs:', perNodeSlurmGPUs);
@@ -131,7 +128,10 @@ export function GPUs() {
 
   // Calculate Slurm summary data
   const totalSlurmGpuTypes = allSlurmGPUs.length;
-  const grandTotalSlurmGPUs = allSlurmGPUs.reduce((sum, gpu) => sum + gpu.gpu_total, 0);
+  const grandTotalSlurmGPUs = allSlurmGPUs.reduce(
+    (sum, gpu) => sum + gpu.gpu_total,
+    0
+  );
   const grandTotalFreeSlurmGPUs = allSlurmGPUs.reduce(
     (sum, gpu) => sum + gpu.gpu_free,
     0
@@ -267,9 +267,7 @@ export function GPUs() {
                   </Card>
                 </div>
 
-                <h4 className="text-md font-semibold my-3">
-                  GPU Types
-                </h4>
+                <h4 className="text-md font-semibold my-3">GPU Types</h4>
                 <div
                   className={`
                     grid gap-4
@@ -285,7 +283,10 @@ export function GPUs() {
                     const usedPercentage =
                       gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
                     return (
-                      <div key={gpu.gpu_name} className="p-2 border rounded w-full">
+                      <div
+                        key={gpu.gpu_name}
+                        className="p-2 border rounded w-full"
+                      >
                         <div className="flex justify-between items-center mb-1">
                           <span className="font-medium">{gpu.gpu_name}</span>
                           <span className="text-sm text-gray-600">
@@ -319,7 +320,9 @@ export function GPUs() {
 
                 {/* Per-Context GPU Summary Section - MOVED HERE */}
                 {Object.keys(groupedPerContextGPUs).length > 0 && (
-                  <div className="mt-6 pt-6 border-t"> {/* Added margin and border for separation */}
+                  <div className="mt-6 pt-6 border-t">
+                    {' '}
+                    {/* Added margin and border for separation */}
                     <h3 className="text-lg font-semibold mb-3">
                       Per-Context GPU Detail
                     </h3>
@@ -360,16 +363,21 @@ export function GPUs() {
                                             {gpu.gpu_name}
                                           </span>
                                           <span className="text-xs text-gray-500 ml-2">
-                                            (Requestable: {gpu.gpu_requestable_qty_per_node} / Node)
+                                            (Requestable:{' '}
+                                            {gpu.gpu_requestable_qty_per_node} /
+                                            Node)
                                           </span>
                                         </div>
                                         <span className="text-sm text-gray-600">
-                                          {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                                          {gpu.gpu_free} Free / {gpu.gpu_total}{' '}
+                                          Total
                                         </span>
                                       </div>
                                       <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
                                         <div
-                                          style={{ width: `${usedPercentage}%` }}
+                                          style={{
+                                            width: `${usedPercentage}%`,
+                                          }}
                                           className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
                                           title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
                                         >
@@ -378,11 +386,14 @@ export function GPUs() {
                                             : ''}
                                         </div>
                                         <div
-                                          style={{ width: `${freePercentage}%` }}
+                                          style={{
+                                            width: `${freePercentage}%`,
+                                          }}
                                           className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                                           title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                                         >
-                                          {gpu.gpu_free > 0 && freePercentage > 10
+                                          {gpu.gpu_free > 0 &&
+                                          freePercentage > 10
                                             ? `${gpu.gpu_free} Free`
                                             : ''}
                                         </div>
@@ -415,7 +426,9 @@ export function GPUs() {
                                           <tbody className="bg-white divide-y divide-gray-200">
                                             {groupedPerNodeGPUs[context].map(
                                               (node, index) => (
-                                                <tr key={`${node.node_name}-${index}`}>
+                                                <tr
+                                                  key={`${node.node_name}-${index}`}
+                                                >
                                                   <td className="p-2 whitespace-nowrap text-gray-700">
                                                     {node.node_name}
                                                   </td>
@@ -444,13 +457,17 @@ export function GPUs() {
               </CardContent>
             </Card>
           )}
-          {initialDataLoaded && allGPUs.length === 0 && perContextGPUs.length === 0 && (
-            <Card className="mb-4">
-              <CardContent className="p-4">
-                <p className="text-sm text-gray-500">No Kubernetes GPUs found or Kubernetes is not configured.</p>
-              </CardContent>
-            </Card>
-          )}
+          {initialDataLoaded &&
+            allGPUs.length === 0 &&
+            perContextGPUs.length === 0 && (
+              <Card className="mb-4">
+                <CardContent className="p-4">
+                  <p className="text-sm text-gray-500">
+                    No Kubernetes GPUs found or Kubernetes is not configured.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
           {/* Slurm Summary Section */}
           {(allSlurmGPUs.length > 0 || perPartitionSlurmGPUs.length > 0) && (
@@ -473,7 +490,9 @@ export function GPUs() {
                       <p className="text-sm text-gray-500">
                         Total GPUs (All Types, Slurm)
                       </p>
-                      <p className="text-2xl font-bold">{grandTotalSlurmGPUs}</p>
+                      <p className="text-2xl font-bold">
+                        {grandTotalSlurmGPUs}
+                      </p>
                     </CardContent>
                   </Card>
                   <Card>
@@ -481,14 +500,14 @@ export function GPUs() {
                       <p className="text-sm text-gray-500">
                         Total Free GPUs (All Types, Slurm)
                       </p>
-                      <p className="text-2xl font-bold">{grandTotalFreeSlurmGPUs}</p>
+                      <p className="text-2xl font-bold">
+                        {grandTotalFreeSlurmGPUs}
+                      </p>
                     </CardContent>
                   </Card>
                 </div>
 
-                <h4 className="text-md font-semibold my-3">
-                  GPU Types
-                </h4>
+                <h4 className="text-md font-semibold my-3">GPU Types</h4>
                 <div
                   className={`
                     grid gap-4
@@ -504,7 +523,10 @@ export function GPUs() {
                     const usedPercentage =
                       gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
                     return (
-                      <div key={gpu.gpu_name} className="p-2 border rounded w-full">
+                      <div
+                        key={gpu.gpu_name}
+                        className="p-2 border rounded w-full"
+                      >
                         <div className="flex justify-between items-center mb-1">
                           <span className="font-medium">{gpu.gpu_name}</span>
                           <span className="text-sm text-gray-600">
@@ -538,7 +560,9 @@ export function GPUs() {
 
                 {/* Per-Partition Slurm GPU Summary Section - MOVED HERE */}
                 {Object.keys(groupedPerPartitionSlurmGPUs).length > 0 && (
-                  <div className="mt-6 pt-6 border-t"> {/* Added margin and border */}
+                  <div className="mt-6 pt-6 border-t">
+                    {' '}
+                    {/* Added margin and border */}
                     <h3 className="text-lg font-semibold mb-3">
                       Per-Partition GPU Detail
                     </h3>
@@ -550,7 +574,10 @@ export function GPUs() {
                     >
                       {Object.entries(groupedPerPartitionSlurmGPUs).map(
                         ([partition, gpusInPartition]) => (
-                          <Card key={partition} className="border flex flex-col">
+                          <Card
+                            key={partition}
+                            className="border flex flex-col"
+                          >
                             <CardHeader className="p-4 pb-2">
                               <CardTitle className="text-md font-normal">
                                 Partition: {partition}
@@ -579,16 +606,21 @@ export function GPUs() {
                                             {gpu.gpu_name}
                                           </span>
                                           <span className="text-xs text-gray-500 ml-2">
-                                            (Requestable: {gpu.gpu_requestable_qty_per_node} / Node)
+                                            (Requestable:{' '}
+                                            {gpu.gpu_requestable_qty_per_node} /
+                                            Node)
                                           </span>
                                         </div>
                                         <span className="text-sm text-gray-600">
-                                          {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                                          {gpu.gpu_free} Free / {gpu.gpu_total}{' '}
+                                          Total
                                         </span>
                                       </div>
                                       <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
                                         <div
-                                          style={{ width: `${usedPercentage}%` }}
+                                          style={{
+                                            width: `${usedPercentage}%`,
+                                          }}
                                           className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
                                           title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
                                         >
@@ -597,11 +629,14 @@ export function GPUs() {
                                             : ''}
                                         </div>
                                         <div
-                                          style={{ width: `${freePercentage}%` }}
+                                          style={{
+                                            width: `${freePercentage}%`,
+                                          }}
                                           className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                                           title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                                         >
-                                          {gpu.gpu_free > 0 && freePercentage > 10
+                                          {gpu.gpu_free > 0 &&
+                                          freePercentage > 10
                                             ? `${gpu.gpu_free} Free`
                                             : ''}
                                         </div>
@@ -613,7 +648,8 @@ export function GPUs() {
 
                               {/* Slurm Nodes Table within Partition Card */}
                               {groupedPerNodeSlurmGPUs[partition] &&
-                                groupedPerNodeSlurmGPUs[partition].length > 0 && (
+                                groupedPerNodeSlurmGPUs[partition].length >
+                                  0 && (
                                   <div className="mt-4 pt-3 border-t">
                                     <div className="max-h-52 overflow-y-auto">
                                       <div className="overflow-x-auto">
@@ -632,21 +668,23 @@ export function GPUs() {
                                             </tr>
                                           </thead>
                                           <tbody className="bg-white divide-y divide-gray-200">
-                                            {groupedPerNodeSlurmGPUs[partition].map(
-                                              (node, index) => (
-                                                <tr key={`${partition}-${node.node_name}-${index}`}>
-                                                  <td className="p-2 whitespace-nowrap text-gray-700">
-                                                    {node.node_name}
-                                                  </td>
-                                                  <td className="p-2 whitespace-nowrap text-gray-700">
-                                                    {node.gpu_name}
-                                                  </td>
-                                                  <td className="p-2 whitespace-nowrap text-right text-gray-700">
-                                                    {`${node.gpu_free} of ${node.gpu_total} free`}
-                                                  </td>
-                                                </tr>
-                                              )
-                                            )}
+                                            {groupedPerNodeSlurmGPUs[
+                                              partition
+                                            ].map((node, index) => (
+                                              <tr
+                                                key={`${partition}-${node.node_name}-${index}`}
+                                              >
+                                                <td className="p-2 whitespace-nowrap text-gray-700">
+                                                  {node.node_name}
+                                                </td>
+                                                <td className="p-2 whitespace-nowrap text-gray-700">
+                                                  {node.gpu_name}
+                                                </td>
+                                                <td className="p-2 whitespace-nowrap text-right text-gray-700">
+                                                  {`${node.gpu_free} of ${node.gpu_total} free`}
+                                                </td>
+                                              </tr>
+                                            ))}
                                           </tbody>
                                         </table>
                                       </div>
@@ -663,13 +701,17 @@ export function GPUs() {
               </CardContent>
             </Card>
           )}
-          {initialDataLoaded && allSlurmGPUs.length === 0 && perPartitionSlurmGPUs.length === 0 && (
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm text-gray-500">No Slurm GPUs found or Slurm is not configured.</p>
-              </CardContent>
-            </Card>
-          )}
+          {initialDataLoaded &&
+            allSlurmGPUs.length === 0 &&
+            perPartitionSlurmGPUs.length === 0 && (
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-gray-500">
+                    No Slurm GPUs found or Slurm is not configured.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
         </>
       )}
     </Layout>

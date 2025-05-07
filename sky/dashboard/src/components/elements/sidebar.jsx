@@ -176,7 +176,6 @@ export function TopBar() {
             {!isMobile && <span>Jobs</span>}
           </Link>
 
-
           <div
             className={`inline-flex items-center ${isMobile ? 'px-2 py-1' : 'px-1 pt-1'} text-gray-400`}
           >

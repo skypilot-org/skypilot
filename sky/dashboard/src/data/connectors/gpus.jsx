@@ -169,16 +169,13 @@ async function getKubernetesGPUs() {
 
 async function getSlurmPartitionGPUs() {
   try {
-    const response = await fetch(
-      `${ENDPOINT}/slurm_gpu_availability`,
-      {
-        method: 'POST', // Matches server endpoint
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}), // Empty body, name_filter/quantity_filter are optional
-      }
-    );
+    const response = await fetch(`${ENDPOINT}/slurm_gpu_availability`, {
+      method: 'POST', // Matches server endpoint
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}), // Empty body, name_filter/quantity_filter are optional
+    });
     const id = response.headers.get('x-request-id');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
@@ -201,7 +198,9 @@ async function getSlurmPartitionGPUs() {
       return [];
     }
     const data = await fetchedData.json();
-    const partitionGPUs = data.return_value ? JSON.parse(data.return_value) : [];
+    const partitionGPUs = data.return_value
+      ? JSON.parse(data.return_value)
+      : [];
     return partitionGPUs;
   } catch (error) {
     console.error('Error fetching Slurm partition GPUs:', error);
@@ -226,16 +225,19 @@ async function getSlurmPerNodeGPUs() {
         if (data.detail && data.detail.error) {
           try {
             const error = JSON.parse(data.detail.error);
-            console.error(
-              'Error fetching Slurm per node GPUs:',
-              error.message
-            );
+            console.error('Error fetching Slurm per node GPUs:', error.message);
           } catch (jsonError) {
-            console.error('Error parsing JSON for Slurm node error:', jsonError);
+            console.error(
+              'Error parsing JSON for Slurm node error:',
+              jsonError
+            );
           }
         }
       } catch (parseError) {
-        console.error('Error parsing JSON for Slurm node 500 response:', parseError);
+        console.error(
+          'Error parsing JSON for Slurm node 500 response:',
+          parseError
+        );
       }
       return []; // Return empty array for consistency, though cli.py processes it as a list of dicts
     }
@@ -272,7 +274,7 @@ export async function getSlurmServiceGPUs() {
         // For now, let's just store it as a string like k8s.
         const gpuRequestableQtyPerNode = gpuRaw[1].join(', ');
         const gpuTotal = gpuRaw[2]; // capacity
-        const gpuFree = gpuRaw[3];  // available
+        const gpuFree = gpuRaw[3]; // available
 
         // Aggregate for allSlurmGPUs
         if (gpuName in allSlurmGPUs) {
