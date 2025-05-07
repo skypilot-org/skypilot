@@ -23,15 +23,119 @@ import { getGPUs } from '@/data/connectors/gpus';
 import { REFRESH_INTERVAL } from '@/components/utils';
 
 export function GPUs() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const refreshDataRef = React.useRef(null);
   const isMobile = useMobile();
 
+  const [allGPUs, setAllGPUs] = useState([]);
+  const [perContextGPUs, setPerContextGPUs] = useState([]);
+  const [perNodeGPUs, setPerNodeGPUs] = useState([]);
+
+  const [allSortConfig, setAllSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+  const [contextSortConfig, setContextSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+  const [nodeSortConfig, setNodeSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+
+  const [allCurrentPage, setAllCurrentPage] = useState(1);
+  const [allPageSize, setAllPageSize] = useState(10);
+  const [contextCurrentPage, setContextCurrentPage] = useState(1);
+  const [contextPageSize, setContextPageSize] = useState(10);
+  const [nodeCurrentPage, setNodeCurrentPage] = useState(1);
+  const [nodePageSize, setNodePageSize] = useState(10);
+
+  const fetchData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const gpusResponse = await getGPUs();
+      const {
+        allGPUs: fetchedAllGPUs,
+        perContextGPUs: fetchedPerContextGPUs,
+        perNodeGPUs: fetchedPerNodeGPUs,
+      } = gpusResponse;
+
+      setAllGPUs(fetchedAllGPUs || []);
+      setPerContextGPUs(fetchedPerContextGPUs || []);
+      setPerNodeGPUs(fetchedPerNodeGPUs || []);
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setAllGPUs([]);
+      setPerContextGPUs([]);
+      setPerNodeGPUs([]);
+    } finally {
+      setLoading(false);
+      if (isInitialLoad) setIsInitialLoad(false);
+    }
+  }, [isInitialLoad]);
+
+  React.useEffect(() => {
+    if (refreshDataRef) {
+      refreshDataRef.current = fetchData;
+    }
+  }, [refreshDataRef, fetchData]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    fetchData();
+
+    const interval = setInterval(() => {
+      if (isCurrent) {
+        fetchData();
+      }
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      isCurrent = false;
+      clearInterval(interval);
+    };
+  }, [fetchData]);
+
   const handleRefresh = () => {
     if (refreshDataRef.current) {
+      setIsInitialLoad(true);
       refreshDataRef.current();
     }
   };
+
+  // Calculate summary data
+  const totalGpuTypes = allGPUs.length;
+  const grandTotalGPUs = allGPUs.reduce((sum, gpu) => sum + gpu.gpu_total, 0);
+  const grandTotalFreeGPUs = allGPUs.reduce((sum, gpu) => sum + gpu.gpu_free, 0);
+
+  // Group perContextGPUs by context
+  const groupedPerContextGPUs = React.useMemo(() => {
+    if (!perContextGPUs) return {};
+    return perContextGPUs.reduce((acc, gpu) => {
+      const { context } = gpu;
+      if (!acc[context]) {
+        acc[context] = [];
+      }
+      acc[context].push(gpu);
+      return acc;
+    }, {});
+  }, [perContextGPUs]);
+
+  // Group perNodeGPUs by context
+  const groupedPerNodeGPUs = React.useMemo(() => {
+    if (!perNodeGPUs) return {};
+    return perNodeGPUs.reduce((acc, node) => {
+      const { context } = node;
+      if (!acc[context]) {
+        acc[context] = [];
+      }
+      acc[context].push(node);
+      return acc;
+    }, {});
+  }, [perNodeGPUs]);
 
   return (
     <Layout highlighted="gpus">
@@ -45,7 +149,7 @@ export function GPUs() {
           </Link>
         </div>
         <div className="flex items-center space-x-2">
-          {loading && (
+          {loading && isInitialLoad && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
@@ -64,381 +168,145 @@ export function GPUs() {
           </Button>
         </div>
       </div>
-      <GPUsTable
-        refreshInterval={REFRESH_INTERVAL}
-        setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-      />
-    </Layout>
-  );
-}
 
-export function GPUsTable({ refreshInterval, setLoading, refreshDataRef }) {
-  const [allGPUs, setAllGPUs] = useState([]);
-  const [perContextGPUs, setPerContextGPUs] = useState([]);
-  const [perNodeGPUs, setPerNodeGPUs] = useState([]);
-
-  const [allSortConfig, setAllSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
-  });
-  const [contextSortConfig, setContextSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
-  });
-  const [nodeSortConfig, setNodeSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
-  });
-
-  const [loading, setLocalLoading] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-
-  const [allCurrentPage, setAllCurrentPage] = useState(1);
-  const [allPageSize, setAllPageSize] = useState(10);
-  const [contextCurrentPage, setContextCurrentPage] = useState(1);
-  const [contextPageSize, setContextPageSize] = useState(10);
-  const [nodeCurrentPage, setNodeCurrentPage] = useState(1);
-  const [nodePageSize, setNodePageSize] = useState(10);
-
-  const fetchData = React.useCallback(async () => {
-    setLocalLoading(true);
-    setLoading(true); // Set parent loading state
-    try {
-      const [gpusResponse] = await Promise.all([getGPUs()]);
-
-      const { allGPUs, perContextGPUs, perNodeGPUs } = gpusResponse;
-
-      setAllGPUs(allGPUs);
-      setPerContextGPUs(perContextGPUs);
-      setPerNodeGPUs(perNodeGPUs);
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      setAllGPUs([]);
-      setPerContextGPUs([]);
-      setPerNodeGPUs([]);
-    } finally {
-      setLocalLoading(false);
-      setLoading(false); // Clear parent loading state
-      setIsInitialLoad(false);
-    }
-  }, [setLoading]);
-
-  // Expose fetchData to parent component
-  React.useEffect(() => {
-    if (refreshDataRef) {
-      refreshDataRef.current = fetchData;
-    }
-  }, [refreshDataRef, fetchData]);
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    fetchData();
-
-    const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
-      }
-    }, refreshInterval);
-
-    return () => {
-      isCurrent = false;
-      clearInterval(interval);
-    };
-  }, [refreshInterval, fetchData]);
-
-  return (
-    <div className="relative">
-      <Card>
-        <div className="flex items-center justify-between p-4">
-          <h3 className="text-lg font-semibold">Kubernetes GPUs</h3>
-        </div>
-        <TableWithPaginationAndSort
-          title="Total"
-          columns={[
-            { key: 'gpu_name', label: 'GPU' },
-            { key: 'gpu_total', label: 'Total GPUS' },
-            { key: 'gpu_free', label: 'Total Free GPUs' },
-          ]}
-          data={allGPUs}
-          sortConfig={allSortConfig}
-          setSortConfig={setAllSortConfig}
-          currentPage={allCurrentPage}
-          setCurrentPage={setAllCurrentPage}
-          pageSize={allPageSize}
-          setPageSize={setAllPageSize}
-          loading={loading}
-          isInitialLoad={isInitialLoad}
-          emptyMessage={
-            'No GPUs found in any Kubernetes clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To further debug, run: sky check.'
-          }
-          rowKeyFn={(item) => item.gpu_name}
-        />
-        <TableWithPaginationAndSort
-          title="Per Context"
-          columns={[
-            { key: 'gpu_name', label: 'GPU' },
-            {
-              key: 'gpu_requestable_qty_per_node',
-              label: 'Requestable Quantity Per Node',
-            },
-            { key: 'gpu_total', label: 'Total GPUS' },
-            { key: 'gpu_free', label: 'Total Free GPUs' },
-            { key: 'context', label: 'Context' },
-          ]}
-          data={perContextGPUs}
-          sortConfig={contextSortConfig}
-          setSortConfig={setContextSortConfig}
-          currentPage={contextCurrentPage}
-          setCurrentPage={setContextCurrentPage}
-          pageSize={contextPageSize}
-          setPageSize={setContextPageSize}
-          loading={loading}
-          isInitialLoad={isInitialLoad}
-          emptyMessage={'No GPUs found in any Kubernetes clusters.'}
-          rowKeyFn={(item) => `${item.gpu_name}-${item.context}`}
-        />
-        <TableWithPaginationAndSort
-          title="Per Node"
-          columns={[
-            { key: 'node_name', label: 'Node Name' },
-            { key: 'gpu_name', label: 'GPU' },
-            { key: 'gpu_total', label: 'Total GPUS' },
-            { key: 'gpu_free', label: 'Total Free GPUs' },
-            { key: 'context', label: 'Context' },
-          ]}
-          data={perNodeGPUs}
-          sortConfig={nodeSortConfig}
-          setSortConfig={setNodeSortConfig}
-          currentPage={nodeCurrentPage}
-          setCurrentPage={setNodeCurrentPage}
-          pageSize={nodePageSize}
-          setPageSize={setNodePageSize}
-          loading={loading}
-          isInitialLoad={isInitialLoad}
-          emptyMessage={'No GPUs found in any Kubernetes clusters.'}
-          rowKeyFn={(item) =>
-            `${item.gpu_name}-${item.context}-${item.node_name}`
-          }
-        />
-      </Card>
-    </div>
-  );
-}
-
-function TableWithPaginationAndSort({
-  title,
-  columns,
-  data,
-  sortConfig,
-  setSortConfig,
-  currentPage,
-  setCurrentPage,
-  pageSize,
-  setPageSize,
-  loading,
-  isInitialLoad,
-  emptyMessage,
-  rowKeyFn,
-}) {
-  // Pagination
-  const sortedData = getSortedData(data, sortConfig);
-  const totalPages = Math.ceil(sortedData.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedData = sortedData.slice(startIndex, endIndex);
-
-  // Sorting
-  function getSortedData(data, sortConfig) {
-    if (!sortConfig.key) return data;
-    return [...data].sort((a, b) => {
-      if (a[sortConfig.key] < b[sortConfig.key])
-        return sortConfig.direction === 'ascending' ? -1 : 1;
-      if (a[sortConfig.key] > b[sortConfig.key])
-        return sortConfig.direction === 'ascending' ? 1 : -1;
-      return 0;
-    });
-  }
-
-  function getSortDirection(sortConfig, key) {
-    if (sortConfig.key === key) {
-      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
-    }
-    return '';
-  }
-
-  function requestSort(key) {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  }
-  // Render
-  return (
-    <>
-      <div className="flex items-center justify-between p-4">
-        <h4 className="text-md font-semibold">{title}</h4>
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {columns.map((col) => (
-              <TableHead
-                key={col.key}
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort(col.key)}
-              >
-                {col.label}
-                {getSortDirection(sortConfig, col.key)}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading && isInitialLoad ? (
-            <TableRow>
-              <TableCell
-                colSpan={columns.length}
-                className="text-center py-6 text-gray-500"
-              >
-                <div className="flex justify-center items-center">
-                  <CircularProgress size={20} className="mr-2" />
-                  <span>Loading...</span>
-                </div>
-              </TableCell>
-            </TableRow>
-          ) : paginatedData.length > 0 ? (
-            paginatedData.map((item, idx) => (
-              <TableRow key={rowKeyFn ? rowKeyFn(item, idx) : idx}>
-                {columns.map((col) => (
-                  <TableCell key={col.key}>{item[col.key]}</TableCell>
-                ))}
-              </TableRow>
-            ))
-          ) : (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="text-center py-6">
-                <div className="flex flex-col items-center space-y-4">
-                  <p className="text-gray-500">{emptyMessage}</p>
-                </div>
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-      {data.length > 0 && (
-        <PaginationControls
-          currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
-          pageSize={pageSize}
-          setPageSize={setPageSize}
-          totalRows={data.length}
-          totalPages={totalPages}
-        />
-      )}
-    </>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  setCurrentPage,
-  pageSize,
-  setPageSize,
-  totalRows,
-  totalPages,
-}) {
-  return (
-    <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-      <div className="flex items-center space-x-4">
-        <div className="flex items-center">
-          <span className="mr-2">Rows per page:</span>
-          <div className="relative inline-block">
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setCurrentPage(1);
-              }}
-              className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-              style={{ minWidth: '40px' }}
-            >
-              {[10, 30, 50, 100, 200].map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
+      {/* Summary Section */}
+      {!loading && !isInitialLoad && allGPUs.length > 0 && (
+        <Card className="mb-4 p-4">
+          <h3 className="text-lg font-semibold mb-3">Overall GPU Summary</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">Total GPU Types</p>
+              <p className="text-2xl font-bold">{totalGpuTypes}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">Total GPUs (All Types)</p>
+              <p className="text-2xl font-bold">{grandTotalGPUs}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">Total Free GPUs (All Types)</p>
+              <p className="text-2xl font-bold">{grandTotalFreeGPUs}</p>
+            </Card>
           </div>
-        </div>
-        <div>
-          {totalRows === 0
-            ? '0'
-            : `${(currentPage - 1) * pageSize + 1} – ${Math.min(currentPage * pageSize, totalRows)} of ${totalRows}`}
-        </div>
-        <div className="flex items-center space-x-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCurrentPage(currentPage - 1)}
-            disabled={currentPage === 1}
-            className="text-gray-500 h-8 w-8 p-0"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="chevron-left"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCurrentPage(currentPage + 1)}
-            disabled={currentPage === totalPages || totalPages === 0}
-            className="text-gray-500 h-8 w-8 p-0"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="chevron-right"
-            >
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </Button>
-        </div>
-      </div>
-    </div>
+
+          <h4 className="text-md font-semibold mb-3">GPU Types Breakdown</h4>
+          <div className="space-y-3">
+            {allGPUs.map((gpu) => {
+              const usedGpus = gpu.gpu_total - gpu.gpu_free;
+              const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
+              const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
+              return (
+                <div key={gpu.gpu_name} className="p-2 border rounded">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-medium">{gpu.gpu_name}</span>
+                    <span className="text-sm text-gray-600">
+                      {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
+                    <div
+                      style={{ width: `${usedPercentage}%` }}
+                      className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
+                      title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
+                    >
+                      {usedGpus > 0 && usedPercentage > 10 ? `${usedGpus} Used` : ''}
+                    </div>
+                    <div
+                      style={{ width: `${freePercentage}%` }}
+                      className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
+                      title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
+                    >
+                       {gpu.gpu_free > 0 && freePercentage > 10 ? `${gpu.gpu_free} Free` : ''}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Per-Context GPU Summary Section */}
+      {!loading && !isInitialLoad && Object.keys(groupedPerContextGPUs).length > 0 && (
+        <Card className="mb-4 p-4">
+          <h3 className="text-lg font-semibold mb-3">Per-Context GPU Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {Object.entries(groupedPerContextGPUs).map(([context, gpusInContext]) => (
+              <Card key={context} className="p-4 border flex flex-col">
+                <h4 className="text-md font-semibold mb-3 text-sky-700">Context: {context}</h4>
+                <div className="space-y-3">
+                  {gpusInContext.map((gpu) => {
+                    const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                    const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
+                    const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
+                    return (
+                      <div key={gpu.gpu_name} className="p-2 border rounded-md bg-gray-50 mb-2">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-medium text-gray-800">{gpu.gpu_name}</span>
+                          <span className="text-xs text-gray-500">
+                            Requestable per Node: {gpu.gpu_requestable_qty_per_node}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center mb-1">
+                           <span className="text-sm text-gray-600">
+                            {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded h-5 flex overflow-hidden mt-1">
+                          <div
+                            style={{ width: `${usedPercentage}%` }}
+                            className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
+                            title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
+                          >
+                            {usedGpus > 0 && usedPercentage > 10 ? `${usedGpus}` : ''}
+                          </div>
+                          <div
+                            style={{ width: `${freePercentage}%` }}
+                            className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
+                            title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
+                          >
+                            {gpu.gpu_free > 0 && freePercentage > 10 ? `${gpu.gpu_free}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Nodes Table within Context Card */}
+                {groupedPerNodeGPUs[context] && groupedPerNodeGPUs[context].length > 0 && (
+                  <div className="mt-4 pt-3 border-t">
+                    <h5 className="text-sm font-semibold mb-2 text-gray-600">Nodes in {context}:</h5>
+                    <div className="max-h-52 overflow-y-auto">
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-gray-100 sticky top-0 z-10">
+                            <tr>
+                              <th className="p-2 text-left font-medium text-gray-600">Node Name</th>
+                              <th className="p-2 text-left font-medium text-gray-600">GPU</th>
+                              <th className="p-2 text-right font-medium text-gray-600">Total GPUs</th>
+                              <th className="p-2 text-right font-medium text-gray-600">Free GPUs</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {groupedPerNodeGPUs[context].map((node, index) => (
+                              <tr key={`${node.node_name}-${index}`}>
+                                <td className="p-2 whitespace-nowrap text-gray-700">{node.node_name}</td>
+                                <td className="p-2 whitespace-nowrap text-gray-700">{node.gpu_name}</td>
+                                <td className="p-2 whitespace-nowrap text-right text-gray-700">{node.gpu_total}</td>
+                                <td className="p-2 whitespace-nowrap text-right text-gray-700">{node.gpu_free}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        </Card>
+      )}
+    </Layout>
   );
 }
