@@ -208,7 +208,7 @@ export function GPUs() {
                 <Card className="mb-4 p-4">
                   <div>
                     <h3 className="text-lg font-semibold mb-3">
-                      Overall GPU Summary
+                      GPUs on Kubernetes
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                       <Card className="p-4">
@@ -239,10 +239,8 @@ export function GPUs() {
                       </Card>
                     </div>
 
-                    <h4 className="text-md font-semibold mb-3">
-                      GPU Types Breakdown
-                    </h4>
-                    <div className="space-y-3">
+                    <h4 className="text-md font-semibold mb-3">GPU Types</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                       {allGPUs.map((gpu) => {
                         const usedGpus = gpu.gpu_total - gpu.gpu_free;
                         const freePercentage =
@@ -256,7 +254,7 @@ export function GPUs() {
                         return (
                           <div
                             key={gpu.gpu_name}
-                            className="p-2 border rounded"
+                            className="p-2 border rounded w-full"
                           >
                             <div className="flex justify-between items-center mb-1">
                               <span className="font-medium">
@@ -278,7 +276,7 @@ export function GPUs() {
                               </div>
                               <div
                                 style={{ width: `${freePercentage}%` }}
-                                className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
+                                className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                                 title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                               >
                                 {gpu.gpu_free > 0 && freePercentage > 10
@@ -296,7 +294,7 @@ export function GPUs() {
                 <Card className="mb-4 p-4">
                   <div>
                     <h3 className="text-lg font-semibold mb-3">
-                      Overall GPU Summary
+                      GPUs on Kubernetes
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                       <p className="text-sm text-gray-500">No GPUs found</p>
@@ -310,7 +308,7 @@ export function GPUs() {
                 <Card className="mb-4 p-4">
                   <div>
                     <h3 className="text-lg font-semibold mb-3">
-                      Per-Context GPU Details
+                      Per-Context GPUs
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {Object.entries(groupedPerContextGPUs).map(
@@ -320,7 +318,7 @@ export function GPUs() {
                             className="p-4 border flex flex-col"
                           >
                             <div>
-                              <h4 className="text-md font-semibold mb-3 text-sky-700">
+                              <h4 className="text-md font-normal mb-3">
                                 Context: {context}
                               </h4>
                               <div className="space-y-3">
@@ -337,24 +335,25 @@ export function GPUs() {
                                   return (
                                     <div
                                       key={gpu.gpu_name}
-                                      className="p-2 border rounded-md bg-gray-50 mb-2"
+                                      className="p-2 border rounded w-full mb-2"
                                     >
                                       <div className="flex justify-between items-center mb-1">
-                                        <span className="font-medium text-gray-800">
-                                          {gpu.gpu_name}
-                                        </span>
-                                        <span className="text-xs text-gray-500">
-                                          Requestable per Node:{' '}
-                                          {gpu.gpu_requestable_qty_per_node}
-                                        </span>
-                                      </div>
-                                      <div className="flex justify-between items-center mb-1">
+                                        <div>
+                                          <span className="font-medium text-gray-800">
+                                            {gpu.gpu_name}
+                                          </span>
+                                          <span className="text-xs text-gray-500 ml-2">
+                                            (Requestable:{' '}
+                                            {gpu.gpu_requestable_qty_per_node} /
+                                            Node)
+                                          </span>
+                                        </div>
                                         <span className="text-sm text-gray-600">
                                           {gpu.gpu_free} Free / {gpu.gpu_total}{' '}
                                           Total
                                         </span>
                                       </div>
-                                      <div className="w-full bg-gray-200 rounded h-5 flex overflow-hidden mt-1">
+                                      <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
                                         <div
                                           style={{
                                             width: `${usedPercentage}%`,
@@ -370,7 +369,7 @@ export function GPUs() {
                                           style={{
                                             width: `${freePercentage}%`,
                                           }}
-                                          className="bg-green-400 h-full flex items-center justify-center text-white text-xs"
+                                          className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                                           title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                                         >
                                           {gpu.gpu_free > 0 &&
@@ -388,12 +387,12 @@ export function GPUs() {
                               {groupedPerNodeGPUs[context] &&
                                 groupedPerNodeGPUs[context].length > 0 && (
                                   <div className="mt-4 pt-3 border-t">
-                                    <h5 className="text-sm font-semibold mb-2 text-gray-600">
+                                    {/* <h5 className="text-sm font-semibold mb-2 text-gray-600">
                                       Nodes in {context}:
-                                    </h5>
+                                    </h5> */}
                                     <div className="max-h-52 overflow-y-auto">
                                       <div className="overflow-x-auto">
-                                        <table className="min-w-full text-sm">
+                                        <table className="min-w-full text-sm border-b border-gray-200">
                                           <thead className="bg-gray-100 sticky top-0 z-10">
                                             <tr>
                                               <th className="p-2 text-left font-medium text-gray-600">
@@ -403,10 +402,7 @@ export function GPUs() {
                                                 GPU
                                               </th>
                                               <th className="p-2 text-right font-medium text-gray-600">
-                                                Total GPUs
-                                              </th>
-                                              <th className="p-2 text-right font-medium text-gray-600">
-                                                Free GPUs
+                                                Availability
                                               </th>
                                             </tr>
                                           </thead>
@@ -423,10 +419,7 @@ export function GPUs() {
                                                     {node.gpu_name}
                                                   </td>
                                                   <td className="p-2 whitespace-nowrap text-right text-gray-700">
-                                                    {node.gpu_total}
-                                                  </td>
-                                                  <td className="p-2 whitespace-nowrap text-right text-gray-700">
-                                                    {node.gpu_free}
+                                                    {`${node.gpu_free} of ${node.gpu_total} free`}
                                                   </td>
                                                 </tr>
                                               )
@@ -533,12 +526,12 @@ function CloudGpuTable({ data, title }) {
     <>
       <h3 className="text-lg font-semibold mb-3">{title}</h3>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-sm border-b border-gray-200">
           <thead className="bg-gray-100">
             <tr>
               <th className="p-2 text-left font-medium text-gray-600">GPU</th>
               <th className="p-2 text-left font-medium text-gray-600">
-                Available Quantities
+                Available Quantities / Node
               </th>
             </tr>
           </thead>
