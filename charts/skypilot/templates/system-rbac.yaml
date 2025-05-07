@@ -54,7 +54,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: {{ include "skypilot.serviceAccountName" . }}
-  namespace: {{ $namespace }}
+  namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
   name: {{ .Release.Name }}-system-cluster-role
