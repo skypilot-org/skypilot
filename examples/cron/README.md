@@ -76,8 +76,10 @@ To run multiple commands at once, define the commands as a file:
 ```bash
 SKYPILOT_GLOBAL_CONFIG=/absolute/path/to/config/file.yaml
 /opt/anaconda3/envs/sky/bin/sky status
-/opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job.yaml -y
+/opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job1.yaml -y --async
+/opt/anaconda3/envs/sky/bin/sky jobs launch /absolute/path/to/job2.yaml -y --async
 ```
+> Using `--async` flag can help launch multiple jobs at once  without waiting for each job to complete before starting the next job.
 
 Then reference the script file in crontab:
 ```console
