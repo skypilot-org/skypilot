@@ -181,7 +181,7 @@ async def test_logs():
         time.sleep(1)
 
     with mock.patch('sky.server.requests.executor.prepare_request') as mock_prepare, \
-         mock.patch('sky.server.requests.executor.execute_request',
+         mock.patch('sky.server.requests.executor.execute_request_coroutine',
                    side_effect=slow_execute) as mock_execute, \
          mock.patch('sky.server.stream_utils.stream_response',
                    side_effect=mock_stream_response) as mock_stream:
