@@ -687,6 +687,7 @@ async def logs(
     def cancel_task():
         task.cancel()
 
+    # Cancel the task after the request is done or client disconnects
     background_tasks.add_task(cancel_task)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
