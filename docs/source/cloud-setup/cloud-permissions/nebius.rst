@@ -37,3 +37,23 @@ To use *Service Account* authentication, follow these steps:
 **Important Notes:**
 
 * The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
+
+Using internal IPs
+-----------------------
+For security reason, users may only want to use internal IPs for SkyPilot instances.
+To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``nebius.use_internal_ips`` and ``nebius.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
+
+.. code-block:: yaml
+
+    nebius:
+      use_internal_ips: true
+      ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no myself@my.proxy
+
+The ``nebius.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
+
+Don't forget to switch on `AllowTcpForwarding`
+
+.. code-block:: bash
+
+    sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
+    sudo systemctl restart sshd
