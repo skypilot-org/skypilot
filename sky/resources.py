@@ -62,10 +62,11 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
+        job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
+                                     str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Union[Dict[str, str], str, None] = None,
+        image_id: Union[Optional[Dict[Optional[str], str]], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
@@ -177,7 +178,8 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
+        self._job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
+                                           str]] = None
         if job_recovery is not None:
             if isinstance(job_recovery, str):
                 job_recovery = {'strategy': job_recovery}
@@ -188,7 +190,7 @@ class Resources:
             if strategy_name == 'none':
                 self._job_recovery = None
             else:
-                if strategy_name is not None:
+                if strategy_name is not None and isinstance(strategy_name, str):
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
@@ -201,7 +203,8 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._image_id = image_id
+        self._image_id: Union[Optional[Dict[Optional[str], str]],
+                              str] = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
@@ -209,7 +212,8 @@ class Resources:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
-                    k.strip(): v.strip() for k, v in image_id.items()
+                    k.strip() if k is not None else k: v.strip()
+                    for k, v in image_id.items()
                 }
         self._is_image_managed = _is_image_managed
 
