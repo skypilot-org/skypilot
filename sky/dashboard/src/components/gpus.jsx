@@ -12,7 +12,9 @@ import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { getGPUs } from '@/data/connectors/gpus';
-import { REFRESH_INTERVAL } from '@/components/utils';
+
+// Set the refresh interval to 1 minute for GPU data
+const GPU_REFRESH_INTERVAL = 60000;
 
 export function GPUs() {
   const [loading, setLoading] = useState(true);
@@ -23,26 +25,6 @@ export function GPUs() {
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
-
-  const [allSortConfig, setAllSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
-  });
-  const [contextSortConfig, setContextSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
-  });
-  const [nodeSortConfig, setNodeSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
-  });
-
-  const [allCurrentPage, setAllCurrentPage] = useState(1);
-  const [allPageSize, setAllPageSize] = useState(10);
-  const [contextCurrentPage, setContextCurrentPage] = useState(1);
-  const [contextPageSize, setContextPageSize] = useState(10);
-  const [nodeCurrentPage, setNodeCurrentPage] = useState(1);
-  const [nodePageSize, setNodePageSize] = useState(10);
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -83,7 +65,7 @@ export function GPUs() {
       if (isCurrent) {
         fetchData();
       }
-    }, REFRESH_INTERVAL);
+    }, GPU_REFRESH_INTERVAL);
 
     return () => {
       isCurrent = false;
