@@ -1095,7 +1095,7 @@ Example:
 .. _config-yaml-nebius-use-internal-ips:
 
 ``nebius.use_internal_ips``
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Should instances be assigned private IPs only? (optional).
 
@@ -1110,7 +1110,7 @@ Default: ``false``.
 .. _config-yaml-nebius-ssh-proxy-command:
 
 ``nebius.ssh_proxy_command``
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 SSH proxy command (optional).
 
