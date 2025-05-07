@@ -14,12 +14,12 @@ Benefits of high availability controller:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 * **Automatic Recovery:** The controller and load balancer can automatically restart after crashes or node failures.
 * **Service Continuity:** Minimizes downtime for your served applications.
-* **Managed by Kubernetes:** Relies on robust, industry-standard Kubernetes features for state management and process supervision.
 
 Prerequisites
 -------------
 * **Kubernetes Cluster:** high availability mode is **currently only supported when using Kubernetes** as the cloud provider for the SkyServe controller. You must have a Kubernetes cluster configured for SkyPilot. See :ref:`Kubernetes Setup <kubernetes-setup>` for details.
 * **Persistent Kubernetes:** The underlying Kubernetes cluster (control plane and nodes) must be running persistently. If using a local Kubernetes deployment (e.g., Minikube, Kind via ``sky local up``), the machine hosting the cluster must remain online.
+* **PersistentVolumeClaim (PVC) Support:** The Kubernetes cluster must be able to provision PersistentVolumeClaims (e.g., via a default StorageClass or one specified in `config.yaml`), as these are required for storing the controller's persistent state.
 
 .. note::
     Currently, high availability mode is only supported for Kubernetes. Support for other clouds (e.g., AWS, GCP, Azure VMs) is under development.
@@ -61,6 +61,9 @@ The high availability implementation relies on standard Kubernetes mechanisms to
 * **Automatic Recovery:** The controller runs as a Kubernetes Deployment that automatically restarts pods after failures.
 * **Persistent State:** Critical controller state (database, configuration) is stored on persistent storage that persists on pod restarts.
 * **Seamless Continuation:** When a new pod starts after a failure, it automatically reconnects to existing resources and continues operations without manual intervention.
+
+.. note::
+    While the controller recovers automatically, the service endpoint, managed by the load balancer (which currently runs alongside the controller), may experience a brief downtime during the recovery process. Decoupling the load balancer from the controller for even higher availability is under active development.
 
 The entire recovery process is handled transparently by SkyPilot and Kubernetes, requiring no action from users when failures occur.
 
