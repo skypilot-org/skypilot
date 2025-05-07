@@ -23,7 +23,8 @@ Prerequisites
 
 * A Kubernetes cluster with LoadBalancer or NodePort service support
 * `Helm <https://helm.sh/docs/intro/install/>`_
-* `kubectl <https://kubernetes.io/docs/tasks/tools/>`_
+* `kubectl <https://kubernetes.io/docs/tasks/tools/#kubectl>`_
+* `yq <https://github.com/mikefarah/yq/#install>`_
 
 Install Kueue
 -------------
@@ -39,7 +40,7 @@ To install Kueue, run the following command:
     kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/$VERSION/manifests.yaml
 
 Kueue does not support scheduling plain pods out of the box. Since SkyPilot creates and manages workloads as pods,
-Kueue config needs to be patched to support plain pods.
+the kueue config needs to be patched to support plain pods.
 
 .. code-block:: bash
 
