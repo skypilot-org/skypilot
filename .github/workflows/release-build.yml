@@ -41,7 +41,7 @@ jobs:
         id: find_previous_release_branch
         run: |
           # Get the latest version from PyPI using JSON API
-          LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+          LATEST_PYPI_VERSION=$(curl -s https://pypi.org/pypi/skypilot/json | jq -r .info.version)
           echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
 
           # Determine the base branch for PyPI version
