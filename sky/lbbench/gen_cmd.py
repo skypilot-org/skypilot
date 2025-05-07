@@ -29,34 +29,36 @@ raw_describes = [
     'sky_push_pull',
     'sky_push_push',
     # 'sky_pull_pull_rate_limit_prefix_tree',
-    'sky_pull_pull_rate_limit_thershold_prefix_tree',
-    'sky_pull_pull_rate_limit_least_load',
-    'sky_pull_pull_rate_limit_round_robin',
-    'sky_pull_pull_rate_limit_consistent_hashing',
+    'sky_walk_prefix',
+    'sky_walk_ll',
+    'sky_walk_rr',
+    'sky_walk_ch',
 ]
 raw_presents = [
-    'SGLang',
-    'SGLang+SelPush',
-    'LeastLoad',
-    'LeastLoad+SelPush',
+    'SGL',
+    'SGL+SelPush',
+    'LL',
+    'LL+SelPush',
     # 'ConsistentHashing',
     # 'ConsistentHashing+SelPush',
     # 'ConsistentHashing/IrregularUser',
     # 'ConsistentHashing+SelPush/IrregularUser',
     # 'CHash/PrefixHash',
     # 'CHash+SelPush/PrefixHash',
-    'ConsistentHashing',
-    'ConsistentHashing+SelPush',
+    'CH',
+    'CH+SelPush',
+    'RR',
+    'RR+SelPush',
     'Ours\\n[Pull/Steal+Pull]',
     # 'Ours\\n[Pull/StealSmall+Pull]',
     'Ours\\n[Pull/StealSmall3+Pull]',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
     # 'Ours\\n[SelPush/Prefix+Pull]',
-    'SkyWalk w/ Prefix',
-    'Ours\\n[SelPush/LL+Pull]',
-    'Ours\\n[SelPush/RR+Pull]',
-    'Ours\\n[SelPush/CH+Pull]',
+    'SkyWalk/Prefix',
+    'SkyWalk/LL',
+    'SkyWalk/RR',
+    'SkyWalk/CH',
 ]
 
 enabled_systems = [
@@ -66,16 +68,18 @@ enabled_systems = [
     3,  # global least load
     4,  # consistent hashing
     5,  # consistent hashing with selective pushing
-    # 6,  # sky pulling in lb, pulling in replica, but workload stealing
-    # 7,  # sky pulling in lb, pulling in replica, but steal small #requests
-    # 8,  # sky pushing in lb, pulling in replica
-    # 9,  # sky pushing in lb, pushing in replica
-    10,  # selective pushing for both lb and replica. with prefix tree.
-    # 11,  # selective pushing for both lb and replica. with least load.
-    # 12,  # selective pushing for both lb and replica. with round robin.
-    # 13,  # selective pushing for both lb and replica. with consistent hashing.
+    6,  # round robin
+    7,  # rr with selective pushing
+    # 8,  # sky pulling in lb, pulling in replica, but workload stealing
+    # 9,  # sky pulling in lb, pulling in replica, but steal small #requests
+    # 10,  # sky pushing in lb, pulling in replica
+    # 11,  # sky pushing in lb, pushing in replica
+    # 12,  # selective pushing for both lb and replica. with prefix tree.
+    # 13,  # selective pushing for both lb and replica. with least load.
+    # 14,  # selective pushing for both lb and replica. with round robin.
+    15,  # selective pushing for both lb and replica. with consistent hashing.
 ]
-enabled_systems = [2, 3, 4, 5]
+enabled_systems = [6, 7, 15]
 
 describes = [raw_describes[i] for i in enabled_systems]
 presents = [raw_presents[i] for i in enabled_systems]
@@ -95,29 +99,11 @@ def _get_head_ip_for_cluster(cluster: str) -> str:
 
 
 def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
-    if index == 0:
-        sgl_ip = _get_head_ip_for_cluster(utils.sgl_cluster)
-        return f'{sgl_ip}:9001'
-    if index == 1:
-        sky_sgl_enhanced_ip = _get_head_ip_for_cluster(
-            utils.sky_sgl_enhanced_cluster)
-        return f'{sky_sgl_enhanced_ip}:9002'
-    if index == 2:
-        vanilla_least_load_ip = _get_head_ip_for_cluster(
-            utils.vanilla_least_load_cluster)
-        return f'{vanilla_least_load_ip}:9002'
-    if index == 3:
-        global_least_load_ip = _get_head_ip_for_cluster(
-            utils.global_least_load_cluster)
-        return f'{global_least_load_ip}:9002'
-    if index == 4:
-        consistent_hashing_ip = _get_head_ip_for_cluster(
-            utils.consistent_hashing_cluster)
-        return f'{consistent_hashing_ip}:9002'
-    if index == 5:
-        consistent_hashing_enhanced_ip = _get_head_ip_for_cluster(
-            utils.consistent_hashing_enhanced_cluster)
-        return f'{consistent_hashing_enhanced_ip}:9002'
+    if index < len(utils.single_lb_clusters):
+        cluster = utils.single_lb_clusters[index]
+        cluster_ip = _get_head_ip_for_cluster(cluster)
+        port = 9001 if index == 0 else 9002
+        return f'{cluster_ip}:{port}'
     global sn2st
     if sn2st is None:
         sn2st = {s['name']: s for s in utils.sky_serve_status()}
@@ -179,6 +165,7 @@ def main():
     output_local = f'{args.output_dir}/result'
     signal_file = tempfile.NamedTemporaryFile(delete=False).name
     queue_status_file = tempfile.NamedTemporaryFile(delete=False).name
+    jobs_names = 
 
     for e, d, p in zip(endpoints, describes, presents):
         en = f'{args.exp_name}_{d}'
@@ -348,24 +335,10 @@ def main():
     print(f'Run with: bash {script_path} > {run_log} 2>&1')
     print(f'Tail the log file: tail -f {run_log}')
 
-    # print(f'{"Queue status puller (Running locally)":=^70}')
-    # print(status_puller_cmd)
-    # print(f'{"Launch Clients":=^70}')
-    # # Use this order so that the overhead to launch the cluster is aligned.
-    # for _, cmds in cn2cmds.items():
-    #     for c in cmds:
-    #         print(c)
-    #     print('*' * 30)
-    # print(f'{"Sync down results":=^70}')
-    # for s in scps:
-    #     print(s)
-
     print(f'{"Generate result table":=^70}')
     for nm in name_mapping:
         print(nm)
 
 
 if __name__ == '__main__':
-    # py -m sky.lbbench.gen_cmd --service-names b1 b2 b3 --exp-name arena_syn_r3_c2000_u250_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000 --num-users 250' # pylint: disable=line-too-long
-    # py -m sky.lbbench.gen_cmd --service-names d1 d2 d3 --exp-name arena_syn_mrc_tail_c2000_u300_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000 --num-users 150' --region-to-users '{"us-east-2":200,"ap-northeast-1"}'
     main()

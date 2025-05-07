@@ -39,7 +39,7 @@ def prepare_lb_endpoints_and_confirm(exp2backend: Dict[str, str],
                 url = 'http://' + url
             endpoints = [url]
         elif '9001' in backend_url:  # SGLang Router
-            endpoints = [utils.sgl_cluster]
+            endpoints = [utils.single_lb_clusters[0]]
         else:
             return []
             # raise ValueError(f'Unknown backend URL: {backend_url}')
@@ -65,12 +65,12 @@ async def pull_queue_status(exp_name: str, endpoints: List[str],
     dest_name.parent.mkdir(parents=True, exist_ok=True)
     # Force flush it to make the tee works
     print(f'Pulling queue status:      tail -f {tmp_name} | jq', flush=True)
-    if utils.sgl_cluster in endpoints:
+    if utils.single_lb_clusters[0] in endpoints:
         while not event.is_set():
             await asyncio.sleep(1)
         await asyncio.to_thread(  # type: ignore[attr-defined]
-            lambda: os.system(
-                f'sky logs {utils.sgl_cluster} --no-follow > {dest_name} 2>&1'))
+            lambda: os.system(f'sky logs {utils.single_lb_clusters[0]} '
+                              f'--no-follow > {dest_name} 2>&1'))
     else:
         async with aiohttp.ClientSession() as session:
             with open(tmp_name, 'w', encoding='utf-8') as f:

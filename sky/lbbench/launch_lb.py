@@ -9,14 +9,16 @@ from typing import Any, Dict, List, Optional
 from sky.lbbench import gen_cmd
 from sky.lbbench import utils
 
-enabled_systems = [i for i in gen_cmd.enabled_systems if i < 6]
+enabled_systems = [
+    i for i in gen_cmd.enabled_systems if i < len(utils.single_lb_clusters)
+]
 describes = [gen_cmd.raw_describes[i] for i in enabled_systems]
 
 
 def _prepare_sky_global_lb(st: Dict[str, Any],
                            ct: List[Dict[str, Any]],
-                           policy: str,
                            cluster_name: str,
+                           policy: str,
                            extra_envs: Optional[Dict[str, str]] = None) -> str:
     ip = None
     for c in ct:
@@ -39,12 +41,12 @@ def _prepare_sky_global_lb(st: Dict[str, Any],
             f'{envs_str}')
 
 
-def _prepare_sgl_cmd(st: Dict[str, Any]) -> str:
+def _prepare_sgl_cmd(st: Dict[str, Any], cluster_name: str) -> str:
     worker_urls = []
     for r in st['replica_info']:
         worker_urls.append(r['endpoint'])
     worker_urls_str = shlex.quote(' '.join(worker_urls))
-    return (f'sky launch -c {utils.sgl_cluster} -d --fast '
+    return (f'sky launch -c {cluster_name} -d --fast '
             '-y examples/serve/external-lb/router.yaml '
             f'--env WORKER_URLS={worker_urls_str}')
 
@@ -54,7 +56,25 @@ def _run_cmd(cmd: str):
     subprocess.run(cmd, shell=True, check=True)
 
 
-def main():
+policy_and_extra_args = [
+    (None, None),
+    ('prefix_tree', None),
+    ('least_load', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('least_load', None),
+    ('consistent_hashing', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('consistent_hashing', None),
+    ('round_robin', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('round_robin', None),
+]
+
+
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--service-names', type=str, nargs='+', required=True)
     args = parser.parse_args()
@@ -69,64 +89,39 @@ def main():
 
     def _get_single_cmd(idx: int) -> str:
         idx_in_sns = enabled_systems.index(idx)
+        cluster_name = utils.single_lb_clusters[idx]
         if idx == 0:
-            return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]])
-        elif idx == 1:
-            # Sky SGL enhanced
+            return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]], cluster_name)
+        if idx < len(utils.single_lb_clusters):
+            policy, extra_envs = policy_and_extra_args[idx]
+            assert policy is not None
             return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
-                                          'prefix_tree',
-                                          utils.sky_sgl_enhanced_cluster)
-        elif idx == 2:
-            # Vanilla least load
-            return _prepare_sky_global_lb(
-                sn2st[sns[idx_in_sns]],
-                ct,
-                'least_load',
-                utils.vanilla_least_load_cluster,
-                extra_envs={'DISABLE_SELECTIVE_PUSHING': 'true'})
-        elif idx == 3:
-            # Global least load w/ selective pushing
-            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
-                                          'least_load',
-                                          utils.global_least_load_cluster)
-        elif idx == 4:
-            # Consistent hashing
-            return _prepare_sky_global_lb(
-                sn2st[sns[idx_in_sns]],
-                ct,
-                'consistent_hashing',
-                utils.consistent_hashing_cluster,
-                extra_envs={'DISABLE_SELECTIVE_PUSHING': 'true'})
-        elif idx == 5:
-            # Consistent hashing enhanced
-            return _prepare_sky_global_lb(
-                sn2st[sns[idx_in_sns]],
-                ct,
-                'consistent_hashing',
-                utils.consistent_hashing_enhanced_cluster,
-            )
-        else:
-            raise ValueError(f'Invalid index: {idx}')
+                                          cluster_name, policy, extra_envs)
+        raise ValueError(f'Invalid index: {idx}')
 
     commands = [_get_single_cmd(i) for i in enabled_systems]
     for cmd in commands:
         print(cmd)
     input('Press Enter to launch LBs...')
-    processes = []
+
+    processes: List[multiprocessing.Process] = []
     for cmd in commands:
         process = multiprocessing.Process(target=_run_cmd, args=(cmd,))
         processes.append(process)
         process.start()
     for process in processes:
         process.join()
+
+    logs = [
+        f'sky logs {cluster_name}\n'
+        for i, cluster_name in enumerate(utils.single_lb_clusters)
+        if i in enabled_systems
+    ]
+
     print('Both load balancers have been launched successfully. '
           'Check status with: \n'
-          f'sky logs {utils.sgl_cluster}\n'
-          f'sky logs {utils.sky_sgl_enhanced_cluster}\n'
-          f'sky logs {utils.vanilla_least_load_cluster}\n'
-          f'sky logs {utils.global_least_load_cluster}\n'
-          f'sky logs {utils.consistent_hashing_cluster}\n'
-          f'sky logs {utils.consistent_hashing_enhanced_cluster}\n')
+          f'{"=" * 70}\n'
+          f'{" ".join(logs)}')
 
 
 if __name__ == '__main__':
