@@ -121,7 +121,7 @@ def main() -> None:
     print('Both load balancers have been launched successfully. '
           'Check status with: \n'
           f'{"=" * 70}\n'
-          f'{" ".join(logs)}')
+          f'{"".join(logs)}')
 
 
 if __name__ == '__main__':

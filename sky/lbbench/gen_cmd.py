@@ -82,6 +82,7 @@ enabled_systems = [
     15,  # selective pushing for both lb and replica. with consistent hashing.
 ]
 enabled_systems = [6, 7, 15]
+# enabled_systems = [15]
 
 describes = [raw_describes[i] for i in enabled_systems]
 presents = [raw_presents[i] for i in enabled_systems]

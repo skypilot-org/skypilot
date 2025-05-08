@@ -124,8 +124,8 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
                     stop=None,
                     tic=tic,
                     duration=duration,
-                    # hash_key=f'{real_user}-{uid}',
-                    hash_key=f'{real_user}-{uid // (num_users // 5)}',
+                    hash_key=f'{real_user}-{uid}',
+                    # hash_key=f'{real_user}-{uid // (num_users // 5)}',
                     # hash_key=str(hash_key),
                 )
                 tasks.append(call_llm_coro)
