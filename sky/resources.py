@@ -934,7 +934,7 @@ class Resources:
                     'Cloud must be specified when image_id is provided.')
 
         try:
-            self._cloud.check_features_are_supported(
+            self.cloud.check_features_are_supported(
                 self,
                 requested_features={
                     clouds.CloudImplementationFeatures.IMAGE_ID
@@ -957,14 +957,14 @@ class Resources:
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
             if (image_id.startswith('skypilot:') and
-                    not self._cloud.is_image_tag_valid(image_id, region)):
+                    not self.cloud.is_image_tag_valid(image_id, region)):
                 region_str = f' ({region})' if region else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Image tag {image_id!r} is not valid, please make sure'
                         f' the tag exists in {self._cloud}{region_str}.')
 
-            if (self._cloud.is_same_cloud(clouds.AWS()) and
+            if (self.cloud.is_same_cloud(clouds.AWS()) and
                     not image_id.startswith('skypilot:') and region is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1069,12 +1069,14 @@ class Resources:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self.instance_type is not None, 'Instance type must be specified'
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self._instance_type, self.use_spot, self._region, self._zone)
+            self.instance_type, self.use_spot, self.region, self.zone)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot, self._region, self._zone)
+                self.accelerators, self.use_spot, self.region, self.zone)
         return hourly_cost * hours
 
     def get_accelerators_str(self) -> str:
@@ -1113,6 +1115,7 @@ class Resources:
         docker_image = self.extract_docker_image()
 
         # Cloud specific variables
+        assert self.cloud is not None, 'Cloud must be specified'
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun)
 
