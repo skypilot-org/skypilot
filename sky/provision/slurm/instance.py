@@ -4,6 +4,7 @@ import collections
 import copy
 from multiprocessing import pool
 import re
+import tempfile
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
@@ -12,6 +13,7 @@ from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.gcp import instance_utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import status_lib
 
@@ -141,11 +143,41 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def _run_instances(region: str, cluster_name_on_cloud: str,
                    config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    logger.critical(f"[RUN INSTANCE] Region {region} | Cluster name {cluster_name_on_cloud}")
-    logger.critical(f"[RUN INSTANCE] Provision config {config}")
+    provider_config = config.provider_config
 
     # Resume any stopped worker nodes or create new ones.
     # Use sbatch to submit a long-running job.
+    runner = command_runner.SSHCommandRunner(
+                    (provider_config['hostname'], provider_config['port']),
+                    provider_config['user'],
+                    provider_config['ssh_key'],
+                    disable_control_master=True)
+
+    provision_script = """#!/bin/bash
+#SBATCH --job-name=interactive-bash
+#SBATCH --output=interactive-bash.out
+#SBATCH --error=interactive-bash.err
+#SBATCH --ntasks=1
+#SBATCH --time=1:00:00
+
+sleep 1000000000
+"""
+    # with tempfile.NamedTemporaryFile(mode='w+', delete=True) as f:
+    with open("./provision.sh", "w") as f:
+        f.write(provision_script)
+        src_path = f.name
+        logger.critical(src_path)
+    tgt_path = "/tmp/provision.sh"
+    runner.rsync(src_path, tgt_path, up=True)
+    returncode, stdout, stderr = runner.run(f'sbatch {tgt_path}',
+                                            require_outputs=True)
+    if returncode == 0:
+        logger.info(stdout)
+
+    
+
+    # Wait until the instance is running.
+
 
     return common.ProvisionRecord(
         provider_name='slurm',
