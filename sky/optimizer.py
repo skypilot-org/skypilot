@@ -780,10 +780,10 @@ class Optimizer:
             assert cloud is not None, 'Cloud must be specified'
             assert (resources.instance_type is not None), \
                 'Instance type must be specified'
-            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+            vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
-            def format_number(x):
+            def format_number(x: Optional[float]) -> str:
                 if x is None:
                     return '-'
                 elif x.is_integer():
@@ -791,8 +791,8 @@ class Optimizer:
                 else:
                     return f'{x:.1f}'
 
-            vcpus = format_number(vcpus)
-            mem = format_number(mem)
+            vcpus = format_number(vcpus_)
+            mem = format_number(mem_)
 
             if resources.zone is None:
                 region_or_zone = resources.region
@@ -818,10 +818,13 @@ class Optimizer:
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
             cloud = resources.cloud
-            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+            assert cloud is not None, 'Cloud must be specified'
+            assert (resources.instance_type is not None), \
+                    'Instance type must be specified'
+            vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
-            def format_number(x):
+            def format_number(x: Optional[float]) -> str:
                 if x is None:
                     return '-'
                 elif x.is_integer():
@@ -829,8 +832,8 @@ class Optimizer:
                 else:
                     return f'{x:.1f}'
 
-            vcpus = format_number(vcpus)
-            mem = format_number(mem)
+            vcpus = format_number(vcpus_)
+            mem = format_number(mem_)
 
             if resources.zone is None:
                 region_or_zone = resources.region

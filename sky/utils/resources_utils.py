@@ -141,9 +141,13 @@ def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
     if simplify:
         cloud = resource.cloud
+        assert cloud is not None, 'Cloud must be specified'
+        assert (resource.instance_type is not None), \
+            'Instance type must be specified'
         if resource.accelerators is None:
             vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
                 resource.instance_type)
+            assert vcpu is not None, 'vCPU must be specified'
             hardware = f'vCPU={int(vcpu)}'
         else:
             hardware = f'{resource.accelerators}'
@@ -248,6 +252,7 @@ def make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
+        assert launchable_resources.cloud is not None, 'Cloud must be specified'
         optimize_by_zone = (override_optimize_by_zone or
                             launchable_resources.cloud.optimize_by_zone())
         # It is possible that we force the optimize_by_zone but some clouds
