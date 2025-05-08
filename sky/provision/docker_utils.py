@@ -226,9 +226,9 @@ class DockerInitializer:
                 **self.docker_config['docker_login_config'])
             self._run(
                 f'{self.docker_cmd} login --username '
-                f'{docker_login_config.username} '
-                f'--password {docker_login_config.password} '
-                f'{docker_login_config.server}',
+                f'{shlex.quote(docker_login_config.username)} '
+                f'--password {shlex.quote(docker_login_config.password)} '
+                f'{shlex.quote(docker_login_config.server)}',
                 wait_for_docker_daemon=True)
             # We automatically add the server prefix to the image name if
             # the user did not add it.

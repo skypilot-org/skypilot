@@ -214,8 +214,8 @@ you can provide the registry authentication details using :ref:`task environment
             SKYPILOT_DOCKER_PASSWORD: <password>
             SKYPILOT_DOCKER_SERVER: docker.io
 
-    .. tab-item:: Cloud Provider Registry (e.g., ECR)
-        :sync: csp-registry-tab
+    .. tab-item:: AWS Elastic Container Registry (ECR)
+        :sync: aws-ecr-tab
 
         .. code-block:: yaml
 
@@ -224,17 +224,61 @@ you can provide the registry authentication details using :ref:`task environment
 
           envs:
             # Values used in: docker login -u <user> -p <password> <registry server>
+            # Password for ECR can be generated with ``aws ecr get-login-password --region <region>``
             SKYPILOT_DOCKER_USERNAME: AWS
             SKYPILOT_DOCKER_PASSWORD: <password>
             SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
 
-We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
+        Or, you can use ``sky launch`` with the ``--env`` flag to pass the password:
 
-.. code-block:: console
+        .. code-block:: bash
 
-  $ # Docker Hub password:
-  $ export SKYPILOT_DOCKER_PASSWORD=...
-  $ # Or cloud registry password:
-  $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
-  $ # Pass --env:
-  $ sky launch task.yaml --env SKYPILOT_DOCKER_PASSWORD
+          sky launch sky.yaml \
+            --env SKYPILOT_DOCKER_PASSWORD="$(aws ecr get-login-password --region us-east-1)"
+
+    .. tab-item:: GCP Artifact Registry (GCR)
+        :sync: gcp-artifact-registry-tab
+
+        We support private GCP Artifact Registry (GCR) with a service account key.
+        See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_.
+
+        .. .. note::
+
+        ..     If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if ``SKYPILOT_DOCKER_*`` environment variables are not set.
+
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:<your-gcp-project-id>/<your-registry-repository>/<your-image-name>:<tag>
+
+          envs:
+            SKYPILOT_DOCKER_USERNAME: _json_key
+            SKYPILOT_DOCKER_PASSWORD: <gcp-service-account-key>
+            SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
+
+        Or, you can use ``sky launch`` with the ``--env`` flag to pass the service account key:
+
+        .. code-block:: bash
+
+          sky launch sky.yaml \
+            --env SKYPILOT_DOCKER_PASSWORD="$(cat ~/gcp-key.json)"
+
+    .. tab-item:: NVIDIA Container Registry (NGC)
+        :sync: nvidia-container-registry-tab
+
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:nvidia/pytorch:23.10-py3
+
+          envs:
+            SKYPILOT_DOCKER_USERNAME: $oauthtoken
+            SKYPILOT_DOCKER_PASSWORD: <NGC_API_KEY>
+            SKYPILOT_DOCKER_SERVER: nvcr.io
+
+        Or, you can use ``sky launch`` with the ``--env`` flag to pass the API key:
+
+        .. code-block:: bash
+
+          sky launch sky.yaml \
+            --env SKYPILOT_DOCKER_PASSWORD=<NGC_API_KEY>
