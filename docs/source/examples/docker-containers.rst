@@ -209,6 +209,7 @@ you can provide the registry authentication details using :ref:`task environment
 
           envs:
             # Values used in: docker login -u <user> -p <password> <registry server>
+            # The password should be a personal access token (PAT), see: https://app.docker.com/settings/personal-access-tokens
             SKYPILOT_DOCKER_USERNAME: <user>
             SKYPILOT_DOCKER_PASSWORD: <password>
             SKYPILOT_DOCKER_SERVER: docker.io
