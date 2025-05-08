@@ -324,3 +324,9 @@ def list_accelerators_realtime(
                  f'available={dict(total_available)}')
 
     return final_qtys_map, dict(total_capacity), dict(total_available)
+
+def validate_region_zone(
+    region_name: Optional[str],
+    zone_name: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    return (region_name, zone_name)
