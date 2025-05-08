@@ -59,11 +59,10 @@ class Resources:
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
-                                     str]] = None,
+        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Optional[Dict[Optional[str], str]], str, None] = None,
@@ -178,13 +177,12 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
-                                           str]] = None
+        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
         if job_recovery is not None:
             if isinstance(job_recovery, str):
                 job_recovery = {'strategy': job_recovery}
             if 'strategy' not in job_recovery:
-                job_recovery['strategy'] = None
+                job_recovery['strategy'] = 'none'
 
             strategy_name = job_recovery['strategy']
             if strategy_name == 'none':
@@ -462,8 +460,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(
-            self) -> Optional[Union[Dict[str, Optional[Union[str, int]]], str]]:
+    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
         return self._job_recovery
 
     @property
@@ -579,7 +576,7 @@ class Resources:
 
     def _set_accelerators(
         self,
-        accelerators: Union[None, str, Dict[str, int]],
+        accelerators: Union[None, str, Dict[str, Union[int, float]]],
         accelerator_args: Optional[Dict[str, str]],
     ) -> None:
         """Sets accelerators.
@@ -722,10 +719,10 @@ class Resources:
                     else:
                         table = log_utils.create_table(['Cloud', 'Hint'])
                         table.add_row(['-----', '----'])
-                        for cloud, error in cloud_to_errors.items():
+                        for cloud_str, error in cloud_to_errors.items():
                             reason_str = '\n'.join(textwrap.wrap(
                                 str(error), 80))
-                            table.add_row([str(cloud), reason_str])
+                            table.add_row([cloud_str, reason_str])
                         hint = table.get_string()
                     raise ValueError(
                         f'Invalid (region {self._region!r}, zone '
@@ -757,11 +754,12 @@ class Resources:
         ssh_proxy_command dict with region names as keys).
         """
         assert self.is_launchable(), self
-
-        regions = self._cloud.regions_with_offering(self._instance_type,
-                                                    self.accelerators,
-                                                    self._use_spot,
-                                                    self._region, self._zone)
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self.instance_type is not None, 'Instance type must be specified'
+        regions = self.cloud.regions_with_offering(self.instance_type,
+                                                   self.accelerators,
+                                                   self.use_spot, self.region,
+                                                   self.zone)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 
@@ -861,6 +859,7 @@ class Resources:
             cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
             if self._cpus is not None:
+                assert cpus is not None, 'CPUs must be specified'
                 if self._cpus.endswith('+'):
                     if cpus < float(self._cpus[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -875,6 +874,7 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
+                assert mem is not None, 'Memory must be specified'
                 if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -898,6 +898,8 @@ class Resources:
         if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
         # Validate the job recovery strategy
+        assert isinstance(self._job_recovery['strategy'],
+                          str), 'Job recovery strategy must be a string'
         registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
             self._job_recovery['strategy'])
 
