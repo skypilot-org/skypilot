@@ -1147,7 +1147,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                          str(e)) is None:
                 raise
             logger.debug(f'MIG {mig_name!r} does not exist. Skip '
-                           'deletion.')
+                         'deletion.')
             mig_exists_and_deleted = False
 
         # In the autostop case, the following deletion of instance template

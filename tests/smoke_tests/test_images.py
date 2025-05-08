@@ -365,17 +365,16 @@ def test_gcp_mig():
                 )),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                cmd=
-                (f'gcloud compute instances list --filter='
-                f'"(labels.ray-cluster-name:{name}-cpu)" '
-                f'--zones={zone} --format="value(name)" | wc -l | grep 1')),
+                cmd=(
+                    f'gcloud compute instances list --filter='
+                    f'"(labels.ray-cluster-name:{name}-cpu)" '
+                    f'--zones={zone} --format="value(name)" | wc -l | grep 1')),
             f'sky down -y {name}-cpu',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                cmd=
-                (f'gcloud compute instances list --filter='
-                f'"(labels.ray-cluster-name:{name}-cpu)" '
-                f'--zones={zone} --format="value(name)" | wc -l | grep 0'))
+                cmd=(f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{name}-cpu)" '
+                     f'--zones={zone} --format="value(name)" | wc -l | grep 0'))
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env={
