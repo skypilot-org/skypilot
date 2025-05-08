@@ -384,19 +384,19 @@ class Resources:
         return repr_str
 
     @property
-    def cloud(self):
+    def cloud(self) -> Optional[clouds.Cloud]:
         return self._cloud
 
     @property
-    def region(self):
+    def region(self) -> Optional[str]:
         return self._region
 
     @property
-    def zone(self):
+    def zone(self) -> Optional[str]:
         return self._zone
 
     @property
-    def instance_type(self):
+    def instance_type(self) -> Optional[str]:
         return self._instance_type
 
     @property
@@ -602,8 +602,10 @@ class Resources:
                             raise ValueError(parse_error)
                     try:
                         num = float(splits[1])
-                        num = int(num) if num.is_integer() else num
-                        accelerators = {splits[0]: num}
+                        assert num.is_integer(), (
+                            f'Number of accelerators must be an integer, '
+                            f'got {num}')
+                        accelerators = {splits[0]: int(num)}
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
@@ -615,10 +617,11 @@ class Resources:
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
-                assert (self.cloud.is_same_cloud(clouds.GCP()) or
-                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
-                            'Cloud must be GCP or Kubernetes for TPU '
-                            'accelerators.')
+                assert self.cloud is not None and (
+                    self.cloud.is_same_cloud(clouds.GCP()) or
+                    self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                        'Cloud must be GCP or Kubernetes for TPU '
+                        'accelerators.')
 
                 if accelerator_args is None:
                     accelerator_args = {}
@@ -662,6 +665,7 @@ class Resources:
     def need_cleanup_after_preemption_or_failure(self) -> bool:
         """Whether a resource needs cleanup after preemption or failure."""
         assert self.is_launchable(), self
+        assert self.cloud is not None, 'Cloud must be specified'
         return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
     def _try_canonicalize_accelerators(self) -> None:
