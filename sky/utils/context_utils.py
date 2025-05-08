@@ -3,6 +3,7 @@ import asyncio
 import functools
 import io
 import multiprocessing
+import os
 import subprocess
 import sys
 from typing import Any, Callable, IO, Optional, Tuple
@@ -11,9 +12,29 @@ from sky import sky_logging
 from sky.utils import context
 from sky.utils import subprocess_utils
 
-logger = sky_logging.init_logger(__name__)
-
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
+
+
+# TODO(aylei): call hijack_sys_attrs() proactivly in module init once we have
+# context widely adopted.
+def hijack_sys_attrs():
+    """hijack system attributes to be context aware
+
+    This function should be called at the very beginning of the processes
+    that might use sky.utils.context.
+    """
+    # Modify stdout and stderr of unvicorn process to be contextually aware,
+    # use setattr to bypass the TextIO type check.
+    setattr(sys, 'stdout', context.Stdout())
+    setattr(sys, 'stderr', context.Stderr())
+    # Reload logger to apply latest stdout and stderr.
+    sky_logging.reload_logger()
+    # Hijack os.environ with ContextualEnviron to make env variables
+    # contextually aware.
+    setattr(os, 'environ', context.ContextualEnviron(os.environ))
+    # Hijack subprocess.Popen to pass the contextual environ to subprocess
+    # by default.
+    setattr(subprocess, 'Popen', context.Popen)
 
 
 def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:

@@ -59,18 +59,140 @@ def test_log_redirection(ctx):
 
 def test_env_overrides(ctx):
     """Test environment variable overrides."""
-    # Test without override
-    assert ctx.getenv('TEST_VAR', 'default') == 'default'
-
-    # Test with override
+    # Setup env overrides
     ctx.override_envs({'TEST_VAR': 'overridden'})
-    assert ctx.getenv('TEST_VAR', 'default') == 'overridden'
+    assert 'TEST_VAR' in ctx.env_overrides
+    assert ctx.env_overrides['TEST_VAR'] == 'overridden'
 
-    # Test with existing env var
-    os.environ['TEST_VAR2'] = 'original'
-    assert ctx.getenv('TEST_VAR2') == 'original'
+    # Test adding more overrides
     ctx.override_envs({'TEST_VAR2': 'overridden2'})
-    assert ctx.getenv('TEST_VAR2') == 'overridden2'
+    assert 'TEST_VAR2' in ctx.env_overrides
+    assert ctx.env_overrides['TEST_VAR2'] == 'overridden2'
+    # Original override should still be present
+    assert ctx.env_overrides['TEST_VAR'] == 'overridden'
+
+
+def test_contextual_environ_getitem(ctx):
+    """Test ContextualEnviron __getitem__ functionality."""
+    # Create a ContextualEnviron with a simple dict as base environ
+    base_environ = {'BASE_VAR': 'base_value'}
+    env = context.ContextualEnviron(base_environ)
+
+    # Test getting a value from base environ
+    assert env['BASE_VAR'] == 'base_value'
+
+    # Test getting a value that doesn't exist should raise KeyError
+    with pytest.raises(KeyError):
+        _ = env['NON_EXISTENT']
+
+    # Test override with context
+    ctx.override_envs({'BASE_VAR': 'overridden_value'})
+    assert env['BASE_VAR'] == 'overridden_value'
+
+    # Test adding a new override
+    ctx.override_envs({'NEW_VAR': 'new_value'})
+    assert env['NEW_VAR'] == 'new_value'
+
+
+def test_contextual_environ_iter(ctx):
+    """Test ContextualEnviron __iter__ functionality."""
+    # Create a ContextualEnviron with a simple dict as base environ
+    base_environ = {'BASE_VAR1': 'value1', 'BASE_VAR2': 'value2'}
+    env = context.ContextualEnviron(base_environ)
+
+    # Without overrides, should iterate base environ
+    keys = set(env)
+    assert keys == {'BASE_VAR1', 'BASE_VAR2'}
+
+    # With overrides, should include both base and overridden vars
+    ctx.override_envs({'NEW_VAR': 'new_value', 'BASE_VAR1': 'override'})
+    keys = set(env)
+    assert keys == {'BASE_VAR1', 'BASE_VAR2', 'NEW_VAR'}
+
+
+def test_contextual_environ_set_del(ctx):
+    """Test ContextualEnviron set and delete operations."""
+    # Create a ContextualEnviron with a simple dict as base environ
+    base_environ = {'BASE_VAR': 'base_value'}
+    env = context.ContextualEnviron(base_environ)
+
+    # Set a new value in the base environ
+    env['NEW_VAR'] = 'direct_value'
+    assert base_environ['NEW_VAR'] == 'direct_value'
+
+    # Delete a value from base environ
+    del env['BASE_VAR']
+    assert 'BASE_VAR' not in base_environ
+
+    # Context overrides should take precedence over base
+    ctx.override_envs({'NEW_VAR': 'override_value'})
+    assert env['NEW_VAR'] == 'override_value'
+    assert base_environ['NEW_VAR'] == 'direct_value'
+
+
+def test_contextual_environ_methods(ctx):
+    """Test other ContextualEnviron methods."""
+    # Create a ContextualEnviron with a simple dict as base environ
+    base_environ = {'BASE_VAR': 'base_value'}
+    env = context.ContextualEnviron(base_environ)
+    ctx.override_envs({'BASE_VAR': 'overridden_value'})
+
+    copied = env.copy()
+    assert copied == {'BASE_VAR': 'overridden_value'}
+    assert copied is not base_environ
+
+    # Test setdefault
+    assert env.setdefault('BASE_VAR', 'default') == 'base_value'
+    assert env.setdefault('NEW_DEFAULT', 'default_value') == 'default_value'
+    assert base_environ['NEW_DEFAULT'] == 'default_value'
+
+
+def test_contextual_environ_subprocess(ctx):
+    """Test ContextualEnviron behavior with subprocesses."""
+    import subprocess
+    import sys
+
+    # Save original os.environ to restore it later
+    original_environ = os.environ
+
+    try:
+        # Create a ContextualEnviron and replace os.environ
+        base_environ = dict(os.environ)
+        contextual_env = context.ContextualEnviron(base_environ)
+        os.environ = contextual_env
+
+        # Set an environment variable override in the context
+        test_var_name = 'SKYPILOT_TEST_SUBPROCESS_VAR'
+        ctx.override_envs({test_var_name: 'initial_value'})
+
+        assert os.getenv(test_var_name) == 'initial_value'
+
+        print_envs = (f'import os; '
+                      f'import time; '
+                      f'print(os.getenv(\'{test_var_name}\', \'NOT_FOUND\')); '
+                      'time.sleep(1); '
+                      f'print(os.getenv(\'{test_var_name}\', \'NOT_FOUND\'))')
+
+        # Run subprocess and capture its output
+        proc = context.Popen([sys.executable, '-c', print_envs],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             text=True)
+        ctx.override_envs({test_var_name: 'updated_value'})
+        proc.wait()
+
+        output = proc.stdout.readlines()
+        assert len(output) == 2
+        # The subprocess should see the context-overridden env vars at spawn time
+        assert output[0].strip() == 'initial_value'
+        # The subprocess should not see the updated value after spawn
+        assert output[1].strip() == 'initial_value'
+
+        # Verify the environment variable is updated in current process
+        assert os.getenv(test_var_name) == 'updated_value'
+    finally:
+        # Restore original os.environ
+        os.environ = original_environ
 
 
 def test_output_stream(ctx):

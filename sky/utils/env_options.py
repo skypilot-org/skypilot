@@ -1,8 +1,7 @@
 """Global environment options for sky."""
 import enum
+import os
 from typing import Dict
-
-from sky.utils import context
 
 
 class Options(enum.Enum):
@@ -30,8 +29,8 @@ class Options(enum.Enum):
 
     def get(self) -> bool:
         """Check if an environment variable is set to True."""
-        return context.getenv(self.env_var,
-                              str(self.default)).lower() in ('true', '1')
+        return os.getenv(self.env_var,
+                         str(self.default)).lower() in ('true', '1')
 
     @property
     def env_key(self) -> str:

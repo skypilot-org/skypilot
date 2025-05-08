@@ -1,15 +1,14 @@
 """SkyPilot context for threads and coroutines."""
 
 import asyncio
+from collections.abc import Mapping
+from collections.abc import MutableMapping
 import contextvars
 import os
 import pathlib
+import subprocess
 import sys
-import typing
 from typing import Dict, Optional, TextIO
-
-# Capture the original os.getenv
-_os_getenv = os.getenv
 
 
 class Context(object):
@@ -57,7 +56,7 @@ class Context(object):
         self._canceled = asyncio.Event()
         self._log_file = None
         self._log_file_handle = None
-        self._env_overrides = {}
+        self.env_overrides = {}
 
     def cancel(self):
         """Cancel the context."""
@@ -98,12 +97,7 @@ class Context(object):
 
     def override_envs(self, envs: Dict[str, str]):
         for k, v in envs.items():
-            self._env_overrides[k] = v
-
-    def getenv(self, key: str, fallback: Optional[str] = None):
-        if key in self._env_overrides:
-            return self._env_overrides[key]
-        return _os_getenv(key, fallback)
+            self.env_overrides[k] = v
 
 
 _CONTEXT = contextvars.ContextVar('sky_context', default=None)
@@ -119,24 +113,117 @@ def get() -> Optional[Context]:
     return _CONTEXT.get()
 
 
-@typing.overload
-def getenv(env_var: str, default: str) -> str:
-    ...
+class ContextualEnviron(MutableMapping):
+    """Environment variables wrapper with contextual overrides.
+
+    An instance of ContextualEnviron will typically be used to replace
+    os.environ to make the envron access of current process contextual
+    aware.
+
+    Behavior of spawning a subprocess:
+    - The contexual overrides will not be applied to the subprocess by
+      default.
+    - When using env=os.environ to pass the environment variables to the
+      subprocess explicitly. The subprocess will inherit the contextual
+      environment variables at the time of the spawn, that is, it will not
+      see the updates to the environment variables after the spawn. Also,
+      os.environ of the subprocess will not be a ContextualEnviron unless
+      the subprocess hijacks os.environ explicitly.
+    - Optionally, context.Popen() can be used to automatically pass
+      os.environ with overrides to subprocess.
 
 
-@typing.overload
-def getenv(env_var: str, default: None = None) -> Optional[str]:
-    ...
+    Example:
+    1. Parent process:
+       # Hijack os.environ to be a ContextualEnviron
+       os.environ = ContextualEnviron(os.environ)
+       ctx = context.get()
+       ctx.override_envs({'FOO': 'BAR1'})
+       proc = subprocess.Popen(..., env=os.environ)
+       # Or use context.Popen instead
+       # proc = context.Popen(...)
+       ctx.override_envs({'FOO': 'BAR2'})
+    2. Subprocess:
+       assert os.environ['FOO'] == 'BAR1'
+       ctx = context.get()
+       # Override the contextual env var in the subprocess does not take
+       # effect since the os.environ is not hijacked.
+       ctx.override_envs({'FOO': 'BAR3'})
+       assert os.environ['FOO'] == 'BAR1'
+    """
+
+    def __init__(self, environ):
+        self._environ = environ
+
+    def __getitem__(self, key):
+        ctx = get()
+        if ctx is not None:
+            if key in ctx.env_overrides:
+                return ctx.env_overrides[key]
+        return self._environ[key]
+
+    def __iter__(self):
+        ctx = get()
+        if ctx is not None:
+            for key in ctx.env_overrides:
+                yield key
+            for key in self._environ:
+                # Deduplicate the keys
+                if key not in ctx.env_overrides:
+                    yield key
+        else:
+            return self._environ.__iter__()
+
+    def __len__(self):
+        return len(dict(self))
+
+    def __setitem__(self, key, value):
+        return self._environ.__setitem__(key, value)
+
+    def __delitem__(self, key):
+        return self._environ.__delitem__(key)
+
+    def __repr__(self):
+        return self._environ.__repr__()
+
+    def copy(self):
+        copied = self._environ.copy()
+        ctx = get()
+        if ctx is not None:
+            copied.update(ctx.env_overrides)
+        return copied
+
+    def setdefault(self, key, default=None):
+        return self._environ.setdefault(key, default)
+
+    def __ior__(self, other):
+        if not isinstance(other, Mapping):
+            return NotImplemented
+        self.update(other)
+        return self
+
+    def __or__(self, other):
+        if not isinstance(other, Mapping):
+            return NotImplemented
+        new = dict(self)
+        new.update(other)
+        return new
+
+    def __ror__(self, other):
+        if not isinstance(other, Mapping):
+            return NotImplemented
+        new = dict(other)
+        new.update(self)
+        return new
 
 
-def getenv(env_var: str, default: Optional[str] = None) -> Optional[str]:
-    ctx = get()
-    if ctx is not None:
-        value = ctx.getenv(env_var, default)
-    value = _os_getenv(env_var, default)
-    if env_var == 'AWS_PROFILE':
-        print(f'getenv: {env_var}, {value}')
-    return value
+class Popen(subprocess.Popen):
+
+    def __init__(self, *args, **kwargs):
+        env = kwargs.pop('env', None)
+        if env is None:
+            env = os.environ
+        super().__init__(*args, env=env, **kwargs)
 
 
 def initialize():

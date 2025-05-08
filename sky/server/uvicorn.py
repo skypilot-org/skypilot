@@ -5,18 +5,14 @@ server.
 """
 import functools
 import os
-import sys
 import threading
 from typing import Optional
 
 import uvicorn
 from uvicorn.supervisors import multiprocess
 
-from sky import sky_logging
-from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import subprocess_utils
-
-logger = sky_logging.init_logger(__name__)
 
 
 def run(config: uvicorn.Config):
@@ -44,14 +40,7 @@ def run(config: uvicorn.Config):
 
 def _run_server_process(server: uvicorn.Server, *args, **kwargs):
     """Run the server process with contextually aware."""
-    # Modify stdout and stderr of unvicorn process to be contextually aware,
-    # use setattr to bypass the TextIO type check.
-    setattr(sys, 'stdout', context.Stdout())
-    setattr(sys, 'stderr', context.Stderr())
-    # Hijack os.getenv with context.getenv to make env variables contextually
-    # aware.
-    setattr(os, 'getenv', context.getenv)
-    logger.info('Running server process with contextually aware.')
+    context_utils.hijack_sys_attrs()
     server.run(*args, **kwargs)
 
 
