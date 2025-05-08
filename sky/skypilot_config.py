@@ -101,15 +101,22 @@ ENV_VAR_GLOBAL_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}GLOBAL_CONFIG'
 # Environment variables for setting non-default project config files.
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
+# Environment variables for setting non-default workspace config files.
+ENV_VAR_WORKSPACE_CONFIG = (
+    f'{constants.SKYPILOT_ENV_VAR_PREFIX}WORKSPACE_CONFIG')
+
 # Path to the client config files.
 _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
+_WORKSPACE_CONFIG_PATH = '~/.sky/workspace.yaml'
 
 # The loaded config.
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
 _reload_config_lock = threading.Lock()
+
+_workspace_dict = config_utils.Config()
 
 
 def get_user_config_path() -> str:
@@ -139,8 +146,7 @@ def get_user_config() -> config_utils.Config:
 
     # load the user config file
     if os.path.exists(user_config_path):
-        user_config = parse_config_file(user_config_path)
-        _validate_config(user_config, user_config_path)
+        user_config = parse_and_validate_config_file(user_config_path)
     else:
         user_config = config_utils.Config()
     return user_config
@@ -168,11 +174,37 @@ def _get_project_config() -> config_utils.Config:
 
     # load the project config file
     if os.path.exists(project_config_path):
-        project_config = parse_config_file(project_config_path)
-        _validate_config(project_config, project_config_path)
+        project_config = parse_and_validate_config_file(project_config_path)
     else:
         project_config = config_utils.Config()
     return project_config
+
+
+def _get_workspace_config() -> config_utils.Config:
+    """Returns the workspace config."""
+    workspace_config_path = _get_config_file_path(ENV_VAR_WORKSPACE_CONFIG)
+    if workspace_config_path:
+        logger.debug('using workspace config file specified by '
+                     f'{ENV_VAR_WORKSPACE_CONFIG}: {workspace_config_path}')
+        workspace_config_path = os.path.expanduser(workspace_config_path)
+        if not os.path.exists(workspace_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_WORKSPACE_CONFIG} ({workspace_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_WORKSPACE_CONFIG}')
+    else:
+        logger.debug(
+            f'using default workspace config file: {_WORKSPACE_CONFIG_PATH}')
+        workspace_config_path = _WORKSPACE_CONFIG_PATH
+        workspace_config_path = os.path.expanduser(workspace_config_path)
+
+    if os.path.exists(workspace_config_path):
+        workspace_config = parse_workspace_config_file(workspace_config_path)
+    else:
+        workspace_config = config_utils.Config()
+    return workspace_config
 
 
 def get_server_config() -> config_utils.Config:
@@ -197,8 +229,7 @@ def get_server_config() -> config_utils.Config:
 
     # load the server config file
     if os.path.exists(server_config_path):
-        server_config = parse_config_file(server_config_path)
-        _validate_config(server_config, server_config_path)
+        server_config = parse_and_validate_config_file(server_config_path)
     else:
         server_config = config_utils.Config()
     return server_config
@@ -265,6 +296,18 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
         skip_none=False)
 
 
+def _validate_workspace_config(config: Dict[str, Any],
+                               config_source: str) -> None:
+    """Validates the workspace config."""
+    common_utils.validate_schema(
+        config,
+        schemas.get_workspace_schema(),
+        f'Invalid workspace config YAML from ({config_source}). See: '
+        'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+        'Error: ',
+        skip_none=False)
+
+
 def overlay_skypilot_config(
         original_config: Optional[config_utils.Config],
         override_configs: Optional[config_utils.Config]) -> config_utils.Config:
@@ -302,7 +345,7 @@ def _reload_config() -> None:
         _reload_config_as_client()
 
 
-def parse_config_file(config_path: str) -> config_utils.Config:
+def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     config = config_utils.Config()
     try:
         config_dict = common_utils.read_yaml(config_path)
@@ -316,6 +359,24 @@ def parse_config_file(config_path: str) -> config_utils.Config:
         _validate_config(config, config_path)
 
     logger.debug(f'Config syntax check passed for path: {config_path}')
+    return config
+
+
+def parse_workspace_config_file(config_path: str) -> config_utils.Config:
+    config = config_utils.Config()
+    try:
+        config_dict = common_utils.read_yaml(config_path)
+        config = config_utils.Config.from_dict(config_dict)
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'Config loaded from {config_path}:\n'
+                         f'{common_utils.dump_yaml_str(dict(config))}')
+    except yaml.YAMLError as e:
+        logger.error(f'Error in loading config file ({config_path}):', e)
+    if config:
+        _validate_workspace_config(config, config_path)
+
+    logger.debug(
+        f'Workspace config syntax check passed for path: {config_path}')
     return config
 
 
@@ -359,12 +420,12 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _dict = parse_config_file(config_path)
+    _dict = parse_and_validate_config_file(config_path)
     _loaded_config_path = config_path
 
 
 def _reload_config_as_server() -> None:
-    global _dict
+    global _dict, _workspace_dict
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
 
@@ -383,6 +444,8 @@ def _reload_config_as_server() -> None:
             f'server config: \n'
             f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
     _dict = overlaid_server_config
+
+    _workspace_dict = _get_workspace_config()
 
 
 def _reload_config_as_client() -> None:
@@ -461,6 +524,15 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    # TODO get the workspace from someplace in config
+    # workspace = config.get_nested(keys=('SOMEPLACE'), default_value='default')
+    workspace = 'default'
+    workspace_config = _workspace_dict.get_nested(keys=('profiles', workspace,
+                                                        'config'),
+                                                  default_value=None)
+    if workspace_config:
+        config = overlay_skypilot_config(original_config=config,
+                                         override_configs=workspace_config)
     try:
         common_utils.validate_schema(
             config,
@@ -506,7 +578,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
                     'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
-            parsed_config = parse_config_file(maybe_config_path)
+            parsed_config = parse_and_validate_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
             parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
