@@ -1170,9 +1170,12 @@ class Resources:
         specific_reservations = set(
             skypilot_config.get_nested(
                 (str(self.cloud).lower(), 'specific_reservations'), set()))
+
+        assert (self.cloud is not None and self.instance_type is not None and
+                self.region
+                is not None), ('Cloud, instance type, region must be specified')
         return self.cloud.get_reservations_available_resources(
-            self._instance_type, self._region, self._zone,
-            specific_reservations)
+            self.instance_type, self.region, self.zone, specific_reservations)
 
     def less_demanding_than(
         self,
@@ -1192,6 +1195,9 @@ class Resources:
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
+
+        assert other.cloud is not None, 'Other cloud must be specified'
+
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
@@ -1280,6 +1286,7 @@ class Resources:
         If a field in `blocked` is None, it should be considered as a wildcard
         for that field.
         """
+        assert self.cloud is not None, 'Cloud must be specified'
         is_matched = True
         if (blocked.cloud is not None and
                 not self.cloud.is_same_cloud(blocked.cloud)):
@@ -1318,7 +1325,7 @@ class Resources:
         use_spot = self.use_spot if self._use_spot_specified else None
 
         current_override_configs = self._cluster_config_overrides
-        if self._cluster_config_overrides is None:
+        if current_override_configs is None:
             current_override_configs = {}
         new_override_configs = override.pop('_cluster_config_overrides', {})
         overlaid_configs = skypilot_config.overlay_skypilot_config(

@@ -671,7 +671,7 @@ class Optimizer:
         plan: Dict[task_lib.Task, resources_lib.Resources],
     ) -> float:
         """Estimates the total cost of running the DAG by the plan."""
-        total_cost = 0
+        total_cost = 0.
         for node in topo_order:
             resources = plan[node]
             if node.time_estimator_func is None:
@@ -777,6 +777,9 @@ class Optimizer:
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
             cloud = resources.cloud
+            assert cloud is not None, 'Cloud must be specified'
+            assert (resources.instance_type is not None), \
+                'Instance type must be specified'
             vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
