@@ -9,8 +9,14 @@ idle_timeout_minutes: 60
 
 provider:
   type: external
-  module: sky.skylet.providers.fluffycloud.FluffyCloudNodeProvider
-  region: "{{region}}"
+  module: sky.provision.slurm
+
+  region: slurm
+
+  hostname: {{slurm_hostname}}
+  port: {{slurm_port}}
+  user: {{slurm_user}}
+  ssh_key: {{slurm_ssh_key}}
 
 auth:
   ssh_user: ubuntu

@@ -1,6 +1,5 @@
 """Slurm."""
 
-import json
 import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -168,7 +167,10 @@ class Slurm(clouds.Cloud):
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
-        # Parse ~/.slurm/config and get available SlurmctldHost
+
+        # Suppose 'test' is our target SlurmctldHost alias
+        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config_dict = ssh_config.lookup('test')
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -191,6 +193,11 @@ class Slurm(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
+            # TODO(jwj): Pass SSH config in a smarter way
+            'slurm_hostname': ssh_config_dict['hostname'],
+            'slurm_port': ssh_config_dict['port'],
+            'slurm_user': ssh_config_dict['user'],
+            'slurm_ssh_key': ssh_config_dict['identityfile'][0],
         }
 
         return deploy_vars
