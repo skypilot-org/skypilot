@@ -155,7 +155,6 @@ def normalize_tpu_accelerator_name(accelerator: str) -> str:
     return accelerator
 
 
-
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
