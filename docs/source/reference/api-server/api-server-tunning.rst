@@ -5,6 +5,8 @@ SkyPilot API Server Performance Best Practices
 
 This page describes performance best practices for remote SkyPilot API server in :ref:`team deployment <sky-api-server>`.
 
+.. _sky-api-server-resources-tuning:
+
 Tuning API server resources
 ---------------------------
 
