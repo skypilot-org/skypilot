@@ -38,6 +38,7 @@ logger = sky_logging.init_logger(__name__)
 EXTERNAL_LOCAL_ENV_VARS = [
     # Allow overriding the AWS authentication.
     'AWS_PROFILE',
+    'AWS_DEFAULT_PROFILE',
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
     'AWS_SESSION_TOKEN',
