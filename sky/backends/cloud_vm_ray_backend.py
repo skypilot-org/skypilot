@@ -1359,6 +1359,8 @@ class RetryingVmProvisioner(object):
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
 
+        assert to_provision.cloud is not None, (
+            to_provision, 'cloud should have been set by the optimizer.')
         # Optimization - check if user has non-zero quota for
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
@@ -2030,6 +2032,8 @@ class RetryingVmProvisioner(object):
                             f' that never expire or a service account.\033[0m')
                 logger.warning(warnings)
 
+        assert to_provision.cloud is not None, (
+            to_provision, 'cloud should have been set by the optimizer.')
         # Retrying launchable resources.
         while True:
             try:
@@ -2159,9 +2163,10 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
-            to_provision = task.best_resources
+            best_resources = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
-            assert to_provision is not None, task
+            assert best_resources is not None, task
+            to_provision = best_resources
         return config_dict
 
 

@@ -448,7 +448,7 @@ class Resources:
         return None
 
     @property
-    def accelerator_args(self) -> Optional[Dict[str, str]]:
+    def accelerator_args(self) -> Optional[Dict[str, Any]]:
         return self._accelerator_args
 
     @property
@@ -577,7 +577,7 @@ class Resources:
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, Union[int, float]]],
-        accelerator_args: Optional[Dict[str, str]],
+        accelerator_args: Optional[Dict[str, Any]],
     ) -> None:
         """Sets accelerators.
 
@@ -654,7 +654,7 @@ class Resources:
 
         self._accelerators: Optional[Dict[str, Union[int,
                                                      float]]] = accelerators
-        self._accelerator_args: Optional[Dict[str, str]] = accelerator_args
+        self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
