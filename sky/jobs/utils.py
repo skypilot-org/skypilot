@@ -13,7 +13,7 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -1000,9 +1000,20 @@ def format_job_table(
         raise ValueError('max_jobs is not supported when tasks have user info.')
 
     def get_hash(task):
+        job_id = task['job_id']
+
+        # Handle batch jobs.
+        # Note: old controllers may not have a parent_job_id column, so use
+        # .get() to avoid KeyErrors.
+        parent_job_id = task.get('parent_job_id')
+        # parent_job_id == -1 is a parent job. Any other value is a child job.
+        if parent_job_id is not None and parent_job_id != -1:
+            # Child job.
+            job_id = parent_job_id
+
         if tasks_have_k8s_user:
-            return (task['user'], task['job_id'])
-        return task['job_id']
+            return (task['user'], job_id)
+        return job_id
 
     for task in tasks:
         # The tasks within the same job_id are already sorted
@@ -1011,9 +1022,14 @@ def format_job_table(
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
     for job_tasks in jobs.values():
-        managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
-        if not managed_job_status.is_terminal():
-            status_counts[managed_job_status.value] += 1
+        managed_job_statuses = [_get_job_status_from_tasks(job_tasks)[0]]
+        if job_tasks[0].get('parent_job_id') is not None:
+            # This is a batch job - treat each task as a separate job for the
+            # count.
+            managed_job_statuses = [task['status'] for task in job_tasks]
+        for managed_job_status in managed_job_statuses:
+            if not managed_job_status.is_terminal():
+                status_counts[managed_job_status.value] += 1
 
     user_cols: List[str] = []
     if show_user:
@@ -1081,16 +1097,30 @@ def format_job_table(
         return user_values
 
     for job_hash, job_tasks in jobs.items():
-        if show_all:
-            schedule_state = job_tasks[0]['schedule_state']
-
+        # TODO(cooperc): Fix handling of batch job with only one task.
         if len(job_tasks) > 1:
+            # If this is a batch job, find the parent job.
+            parent_job = None
+            for task in job_tasks:
+                if task.get('parent_job_id') == -1:
+                    parent_job = task
+                    job_tasks.remove(task)
+                    break
+            # If parent_job is None, this is a pipeline, not a batch job.
+
+            # A representative task that we can pull info from.
+            # For batch jobs, this is the parent job.
+            # For pipelines, this is the first task.
+            default_task = (parent_job
+                            if parent_job is not None else job_tasks[0])
+
             # Aggregate the tasks into a new row in the table.
-            job_name = job_tasks[0]['job_name']
+            job_name = default_task['job_name']
             job_duration = 0
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
+            # TODO(cooperc): Fix for batch
             managed_job_status, current_task_id = _get_job_status_from_tasks(
                 job_tasks)
             for task in job_tasks:
@@ -1117,8 +1147,22 @@ def format_job_table(
             status_str = managed_job_status.colored_str()
             if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
+            if parent_job is not None:
+                # For batch jobs, aggregate the statuses of all of them.
+                batch_status_counts: DefaultDict[
+                    managed_job_state.ManagedJobStatus,
+                    int] = collections.defaultdict(int)
+                for child_job in job_tasks:
+                    batch_status_counts[child_job['status']] += 1
+                # Manually iterate through the statuses, rather than through the
+                # dict keys, so that they are in the right order.
+                status_str = ''
+                for status in list(managed_job_state.ManagedJobStatus):
+                    if batch_status_counts[status] > 0:
+                        status_str += (f'{batch_status_counts[status]}x '
+                                       f'{status.colored_str()} ')
 
-            user_values = get_user_column_values(job_tasks[0])
+            user_values = get_user_column_values(default_task)
 
             job_id = job_hash[1] if tasks_have_k8s_user else job_hash
             job_values = [
@@ -1135,11 +1179,18 @@ def format_job_table(
             ]
             if show_all:
                 failure_reason = job_tasks[current_task_id]['failure_reason']
+                schedule_state: str
+                if parent_job:
+                    # Each task has its own schedule state.
+                    schedule_state = '-'
+                else:
+                    schedule_state = default_task['schedule_state']
+
                 job_values.extend([
                     '-',
                     '-',
                     '-',
-                    job_tasks[0]['schedule_state'],
+                    schedule_state,
                     generate_details(failure_reason),
                 ])
             if tasks_have_k8s_user:
@@ -1153,9 +1204,14 @@ def format_job_table(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
+            job_id = task['job_id'] if len(job_tasks) == 1 else ' \u21B3'
+            task_id = task['task_id'] if len(job_tasks) > 1 else '-'
+            if task.get('parent_job_id') is not None:
+                # Child job. Show the job id in the task id column.
+                task_id = task['job_id']
             values = [
-                task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
-                task['task_id'] if len(job_tasks) > 1 else '-',
+                job_id,
+                task_id,
                 task['task_name'],
                 *user_values,
                 task['resources'],
@@ -1170,10 +1226,11 @@ def format_job_table(
                 task['status'].colored_str(),
             ]
             if show_all:
+                schedule_state = task['schedule_state']
                 # schedule_state is only set at the job level, so if we have
-                # more than one task, only display on the aggregated row.
-                schedule_state = (task['schedule_state']
-                                  if len(job_tasks) == 1 else '-')
+                # a pipeline, only display on the aggregated row.
+                if len(job_tasks) > 1 and task.get('parent_job_id') is None:
+                    schedule_state = '-'
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
@@ -1235,7 +1292,7 @@ class ManagedJobCodeGen:
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
             # For backward compatibility, since all_users is not supported
-            # before #4787. Assume th
+            # before #4787.
             # TODO(cooperc): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids})
         else:
@@ -1283,11 +1340,27 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
+    def set_pending(cls,
+                    job_id: int,
+                    managed_job_dag: 'dag_lib.Dag',
+                    parent_job_id: Optional[int] = None) -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_info({job_id}, {dag_name!r})
+            # Since we only call this during job submission, we expect the
+            # remote skypilot wheel to be up to date, so users should not
+            # hit it. We include the check here for completeness.
+            # TODO(cooperc): Remove this before 0.12.0.
+            if managed_job_version < 4:
+                if {parent_job_id is not None}:
+                    raise RuntimeError(
+                        'parent_job_id argument is not supported for managed '
+                        f'jobs version {{managed_job_version}}.')
+                # parent_job_id was added in version 4.
+                managed_job_state.set_job_info({job_id}, {dag_name!r})
+            else:
+                managed_job_state.set_job_info({job_id}, {dag_name!r},
+                                               parent_job_id={parent_job_id!r})
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
@@ -1296,6 +1369,19 @@ class ManagedJobCodeGen:
                 managed_job_state.set_pending({job_id}, {task_id},
                                   {task.name!r}, {resources_str!r})
                 """)
+        if parent_job_id == -1:
+            code += textwrap.dedent(f"""\
+                # Since we only call this during job submission, we expect the
+                # remote skypilot wheel to be up to date, so users should not
+                # hit it. We include the check here for completeness.
+                # TODO(cooperc): Remove this before 0.12.0.
+                if managed_job_version < 4:
+                    raise RuntimeError(
+                        'Batch jobs are not supported for managed jobs version '
+                        f'{{managed_job_version}}.')
+                managed_job_state.set_parent_job({job_id})
+                """)
+
         return cls._build(code)
 
     @classmethod

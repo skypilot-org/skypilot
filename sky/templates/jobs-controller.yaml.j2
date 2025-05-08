@@ -64,6 +64,9 @@ run: |
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
+  # TODO(cooperc): If job submission gets interrupted, the job will be stuck on
+  # the controller in INACTIVE schedule_state. We need to gracefully handle this
+  # case.
   python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
     --env-file {{remote_env_file_path}}

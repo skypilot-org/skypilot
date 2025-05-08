@@ -29,6 +29,17 @@ logger = sky_logging.init_logger(__name__)
 # tasks of a managed job (called spot for legacy reason, as it is generalized
 # from the previous managed spot jobs). All tasks of the same job will have the
 # same `spot_job_id`.
+#
+# There are two types of jobs that can have multiple tasks:
+# 1. Pipeline jobs: Tasks run sequentially, one after another. Each task is a
+#    row in the spot table with the same spot_job_id but different task_id.
+# 2. Batch jobs: Tasks run in parallel. Each task is actually a separate job
+#    (with its own spot_job_id) that has its parent_job_id set to the batch
+#    job's spot_job_id. This is done for compatibility and implementation
+#    reasons, but from the user's perspective, these are still "tasks" of the
+#    batch job. The user specifies these with --num-tasks in the CLI, and they
+#    appear as tasks under the main job in the job queue and dashboard.
+#
 # The `job_name` column is now deprecated. It now holds the task's name, i.e.,
 # the same content as the `task_name` column.
 # The `job_id` is now not really a job id, but a only a unique
@@ -118,7 +129,8 @@ def create_table(cursor, conn):
         controller_pid INTEGER DEFAULT NULL,
         dag_yaml_path TEXT,
         env_file_path TEXT,
-        user_hash TEXT)""")
+        user_hash TEXT,
+        parent_job_id INTEGER DEFAULT NULL)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -133,6 +145,11 @@ def create_table(cursor, conn):
                                  'TEXT')
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'user_hash', 'TEXT')
+
+    # For batch jobs, this points to the parent batch job's spot_job_id.
+    # For pipeline jobs and regular jobs, this is NULL.
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'parent_job_id',
+                                 'INTEGER DEFAULT NULL')
 
     conn.commit()
 
@@ -190,6 +207,7 @@ columns = [
     'dag_yaml_path',
     'env_file_path',
     'user_hash',
+    'parent_job_id',
 ]
 
 
@@ -380,14 +398,22 @@ class ManagedJobScheduleState(enum.Enum):
 
 
 # === Status transition functions ===
-def set_job_info(job_id: int, name: str):
+def set_job_info(job_id: int, name: str, parent_job_id: Optional[int] = None):
+    """Set job information in the database.
+
+    For batch jobs, this function is used to create both the parent batch job
+    (with parent_job_id=-1) and its child jobs (with parent_job_id set to
+    the batch job's ID). The child jobs will appear as "tasks" to the user,
+    even though they are technically separate jobs under the hood.
+    """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO job_info
-            (spot_job_id, name, schedule_state)
-            VALUES (?, ?, ?)""",
-            (job_id, name, ManagedJobScheduleState.INACTIVE.value))
+            (spot_job_id, name, schedule_state, parent_job_id)
+            VALUES (?, ?, ?, ?)""",
+            (job_id, name, ManagedJobScheduleState.INACTIVE.value,
+             parent_job_id))
 
 
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
@@ -400,6 +426,19 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
             VALUES (?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
              ManagedJobStatus.PENDING.value))
+
+
+def set_parent_job(job_id: int):
+    """Update the parent job status so that it will not be scheduled."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE job_info SET schedule_state=(?) WHERE spot_job_id=(?)""",
+            (ManagedJobScheduleState.DONE.value, job_id))
+        cursor.execute(
+            """\
+            UPDATE spot SET status=(?) WHERE spot_job_id=(?)""",
+            (ManagedJobStatus.SUCCEEDED.value, job_id))
 
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,

@@ -153,7 +153,8 @@ def maybe_schedule_next_jobs() -> None:
 
                 if current_state == state.ManagedJobScheduleState.WAITING:
                     # The job controller has not been started yet. We must start
-                    # it.
+                    # it. Warning: if this crashes, the job will be stuck
+                    # LAUNCHING. TODO(cooperc): Handle this gracefully.
 
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
