@@ -779,34 +779,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        del zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'SCPError:' in x.strip())
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, SCPError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('scp'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _ibm_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -1105,6 +1077,21 @@ class FailoverCloudErrorHandlerV2:
         if isinstance(error, exceptions.InvalidCloudCredentials):
             _add_to_blocked_resources(
                 blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
+    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'SCP handler error: {error}')
+        # Block SCP if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.SCP()))
         else:
             FailoverCloudErrorHandlerV2._default_handler(
                 blocked_resources, launchable_resources, region, zones, error)
@@ -4237,29 +4224,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
-
-        elif terminate and isinstance(cloud, clouds.SCP):
-            # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.scp import node_provider
-            config['provider']['cache_stopped_nodes'] = not terminate
-            provider = node_provider.SCPNodeProvider(config['provider'],
-                                                     cluster_name_on_cloud)
-            try:
-                if not os.path.exists(provider.metadata.path):
-                    raise node_provider.SCPError(
-                        'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-                        'Metadata file does not exist.')
-
-                with open(provider.metadata.path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                    node_id = next(iter(metadata.values())).get(
-                        'creation', {}).get('virtualServerId', None)
-                    provider.terminate_node(node_id)
-                returncode = 0
-            except node_provider.SCPError as e:
-                returncode = 1
-                stdout = ''
-                stderr = str(e)
 
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
