@@ -79,6 +79,7 @@ and allows you to associate them with cluster nodes through labels, taints and t
 .. note::
 
     To learn more about ResourceFlavor, see:
+
     - `Kueue Resource Flavor <https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/>`_
     - `Cluster Queue Flavors and Resources <https://kueue.sigs.k8s.io/docs/concepts/cluster_queue/#flavors-and-resources>`_
 
