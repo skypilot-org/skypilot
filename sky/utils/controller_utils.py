@@ -301,7 +301,13 @@ def _get_cloud_dependencies_installation_commands(
                 '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
-                'kubectl /usr/local/bin/kubectl))')
+                'kubectl /usr/local/bin/kubectl)) && '
+                'sudo tee /usr/local/bin/kube-exec-auth-wrapper.sh > /dev/null <<\'EOF\'\n'  # pylint: disable=line-too-long
+                '#!/bin/sh\n'
+                'export PATH="$HOME/skypilot-runtime/bin:$PATH"\n'
+                'exec "$@"\n'
+                'EOF\n&& '
+                'sudo chmod +x /usr/local/bin/kube-exec-auth-wrapper.sh')
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
