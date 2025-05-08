@@ -999,6 +999,11 @@ class GCP(clouds.Cloud):
             return 'dryrun-project-id'
         # pylint: disable=import-outside-toplevel
         from google import auth  # type: ignore
+        config_project_id = skypilot_config.get_nested(('gcp', 'project_id'),
+                                                       None)
+        logger.info(f'config_project_id: {config_project_id}')
+        if config_project_id:
+            return config_project_id
         _, project_id = auth.default()
         if project_id is None:
             raise exceptions.CloudUserIdentityError(

@@ -809,6 +809,9 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'project_id': {
+                    'type': 'string',
+                },
                 'prioritize_reservations': {
                     'type': 'boolean',
                 },
