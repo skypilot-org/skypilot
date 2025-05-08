@@ -276,7 +276,7 @@ def _get_cloud_dependencies_installation_commands(
                 # of command execution is critical.
                 commands.append(
                     '(command -v gke-gcloud-auth-plugin &>/dev/null || '
-                    '(gcloud components install gke-gcloud-auth-plugin --quiet && '  # pylint: disable=line-too-long
+                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null && '  # pylint: disable=line-too-long
                     'sudo find ~/google-cloud-sdk -name \'gke-gcloud-auth-plugin\' -type f -exec ln -s {} /usr/local/bin/gke-gcloud-auth-plugin \;))')  # pylint: disable=line-too-long,anomalous-backslash-in-string
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
