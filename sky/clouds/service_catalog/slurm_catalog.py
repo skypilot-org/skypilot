@@ -325,6 +325,7 @@ def list_accelerators_realtime(
 
     return final_qtys_map, dict(total_capacity), dict(total_available)
 
+
 def validate_region_zone(
     region_name: Optional[str],
     zone_name: Optional[str],
