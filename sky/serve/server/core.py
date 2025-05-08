@@ -298,12 +298,12 @@ def up(
                 'Did not get endpoint for controller.')
             # Already checked by validate_service_task
             assert task.service is not None
-            if socket_endpoint.startswith('http://') or socket_endpoint.startswith('https://'):
+            if socket_endpoint.startswith(
+                    'http://') or socket_endpoint.startswith('https://'):
                 endpoint = socket_endpoint
             else:
                 protocol = 'http' if task.service.tls_credential is None else 'https'
                 endpoint = f'{protocol}://{socket_endpoint}'
-
 
         logger.info(
             f'{fore.CYAN}Service name: '
