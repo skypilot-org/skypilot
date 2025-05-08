@@ -748,6 +748,8 @@ class Cloud:
                     return False
             return True
 
+        assert resources.instance_type is not None, \
+            'Instance type must be specified'
         acc_from_instance_type = cls.get_accelerators_from_instance_type(
             resources.instance_type)
         if not _equal_accelerators(resources.accelerators,
