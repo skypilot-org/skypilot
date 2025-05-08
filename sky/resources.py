@@ -203,10 +203,10 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._image_id: Union[Optional[Dict[Optional[str], str]],
-                              str] = image_id
         if isinstance(image_id, str):
-            self._image_id = {self._region: image_id.strip()}
+            self._image_id: Optional[Dict[Optional[str], str]] = {
+                self._region: image_id.strip()
+            }
         elif isinstance(image_id, dict):
             if None in image_id:
                 self._image_id = {self._region: image_id[None].strip()}
@@ -215,6 +215,8 @@ class Resources:
                     k.strip() if k is not None else k: v.strip()
                     for k, v in image_id.items()
                 }
+        else:
+            self._image_id = image_id
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
@@ -232,7 +234,7 @@ class Resources:
             if isinstance(ports, tuple):
                 ports = list(ports)
             if not isinstance(ports, list):
-                ports = [ports]
+                ports = [str(ports)]
             ports = resources_utils.simplify_ports(
                 [str(port) for port in ports])
             if not ports:
@@ -254,7 +256,7 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
-        self._cached_repr = None
+        self._cached_repr: Optional[str] = None
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -460,7 +462,8 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
+    def job_recovery(
+            self) -> Optional[Union[Dict[str, Optional[Union[str, int]]], str]]:
         return self._job_recovery
 
     @property
@@ -468,11 +471,11 @@ class Resources:
         return self._disk_size
 
     @property
-    def image_id(self) -> Optional[Dict[str, str]]:
+    def image_id(self) -> Optional[Dict[Optional[str], str]]:
         return self._image_id
 
     @property
-    def disk_tier(self) -> resources_utils.DiskTier:
+    def disk_tier(self) -> Optional[resources_utils.DiskTier]:
         return self._disk_tier
 
     @property
@@ -649,8 +652,9 @@ class Resources:
                                     'Cannot specify instance type (got '
                                     f'{self.instance_type!r}) for TPU VM.')
 
-        self._accelerators = accelerators
-        self._accelerator_args = accelerator_args
+        self._accelerators: Optional[Dict[str, Union[int,
+                                                     float]]] = accelerators
+        self._accelerator_args: Optional[Dict[str, str]] = accelerator_args
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
