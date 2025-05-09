@@ -653,8 +653,6 @@ The fields specified outside of ``any_of`` will be used as the default values fo
 
 ``any_of`` means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
 
-Note: accelerators under ``any_of`` cannot be a list or set.
-
 Example:
 
 .. code-block:: yaml
@@ -678,8 +676,6 @@ If specified, SkyPilot will failover through the candidate resources with the sp
 The fields specified outside of ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``ordered`` will override the default values.
 
 ``ordered`` means that SkyPilot will failover through the candidate resources with the specified order.
-
-Note: accelerators under ``ordered`` cannot be a list or set.
 
 Example:
 
