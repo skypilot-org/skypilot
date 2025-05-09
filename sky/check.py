@@ -31,16 +31,10 @@ def check_capabilities(
     clouds: Optional[Iterable[str]] = None,
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
 ) -> Dict[str, List[sky_cloud.CloudCapability]]:
-    quiet = False
-    verbose = True
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
     echo('Checking credentials to enable clouds for SkyPilot.')
-    echo(f'Capabilities: {capabilities}')
-    echo(f'Clouds: {clouds}')
-    echo(f'Quiet: {quiet}')
-    echo(f'Verbose: {verbose}')
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
@@ -96,7 +90,6 @@ def check_capabilities(
         if cloud_disabled:
             echo(f'Disabling {cloud} according to the workspace config.')
             config_allowed_cloud_names.remove(cloud)
-    echo(f'workspace config: {skypilot_config.get_active_workspace()}')
     # Use disallowed_cloud_names for logging the clouds that will be disabled
     # because they are not included in allowed_clouds in config.yaml.
     disallowed_cloud_names = [

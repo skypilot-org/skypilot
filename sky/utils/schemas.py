@@ -1043,6 +1043,8 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
+    allowed_workspace_names = list(service_catalog.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_regex = '|'.join(allowed_workspace_names)
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -1051,7 +1053,7 @@ def get_config_schema():
             'type': 'object',
             'additionalProperties': False,
             'patternProperties': {
-                '^[a-z]+$': {
+                allowed_workspace_regex: {
                     'type': 'object',
                     'properties': {
                         'disabled': {
