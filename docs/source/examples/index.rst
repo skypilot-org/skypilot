@@ -45,7 +45,7 @@ We welcome contributions from the community. Instructions below:
    4. Go to the appropriate subdir under Examples and add your example.
 
       - For example, if you want to add to "Examples / Serving":
-      - ``cd docs/source/examples/serving; ln -s ../generated-examples/my-llm.md``.
+      - ``cd docs/source/examples/serving; ln -s ../../generated-examples/my-llm.md``.
       - Add a heading for your example to the TOC in the index.rst file.
       - ``git add index.rst my-llm.md``
 
