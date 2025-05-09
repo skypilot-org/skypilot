@@ -31,6 +31,8 @@ import {
   BookDocIcon,
   TickIcon,
 } from '@/components/elements/icons';
+import { RotateCwIcon } from 'lucide-react';
+import { useMobile } from '@/hooks/useMobile';
 
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
@@ -48,127 +50,130 @@ export function Workspaces() {
   const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =
     useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
-          await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
+  const isMobile = useMobile();
 
-        console.log(
-          '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
-          fetchedWorkspacesConfig
-        );
-        setRawWorkspacesData(fetchedWorkspacesConfig);
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
+        await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
 
-        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-        console.log(
-          '[Workspaces Debug] configuredWorkspaceNames:',
-          configuredWorkspaceNames
-        );
+      console.log(
+        '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
+        fetchedWorkspacesConfig
+      );
+      setRawWorkspacesData(fetchedWorkspacesConfig);
 
-        const clusterNameToWorkspace = {};
-        clustersResponse.forEach((c) => {
-          clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
+      const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+      console.log(
+        '[Workspaces Debug] configuredWorkspaceNames:',
+        configuredWorkspaceNames
+      );
+
+      const clusterNameToWorkspace = {};
+      clustersResponse.forEach((c) => {
+        clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
+      });
+
+      let totalRunningClusters = 0;
+      const workspaceStatsAggregator = {};
+
+      if (configuredWorkspaceNames.length > 0) {
+        configuredWorkspaceNames.forEach((wsName) => {
+          workspaceStatsAggregator[wsName] = {
+            name: wsName,
+            totalClusterCount: 0,
+            runningClusterCount: 0,
+            managedJobsCount: 0,
+            clouds: new Set(),
+          };
         });
-
-        let totalRunningClusters = 0;
-        const workspaceStatsAggregator = {};
-
-        if (configuredWorkspaceNames.length > 0) {
-          configuredWorkspaceNames.forEach((wsName) => {
-            workspaceStatsAggregator[wsName] = {
-              name: wsName,
-              totalClusterCount: 0,
-              runningClusterCount: 0,
-              managedJobsCount: 0,
-              clouds: new Set(),
-            };
-          });
-        }
-
-        clustersResponse.forEach((cluster) => {
-          const wsName = cluster.workspace || 'default';
-          if (
-            configuredWorkspaceNames.length > 0 &&
-            !workspaceStatsAggregator[wsName]
-          ) {
-            if (!workspaceStatsAggregator[wsName]) {
-              workspaceStatsAggregator[wsName] = {
-                name: wsName,
-                totalClusterCount: 0,
-                runningClusterCount: 0,
-                managedJobsCount: 0,
-                clouds: new Set(),
-              };
-            }
-          } else if (!workspaceStatsAggregator[wsName]) {
-            workspaceStatsAggregator[wsName] = {
-              name: wsName,
-              totalClusterCount: 0,
-              runningClusterCount: 0,
-              managedJobsCount: 0,
-              clouds: new Set(),
-            };
-          }
-
-          workspaceStatsAggregator[wsName].totalClusterCount++;
-          if (cluster.status === 'RUNNING') {
-            workspaceStatsAggregator[wsName].runningClusterCount++;
-            totalRunningClusters++;
-          }
-          if (cluster.cloud) {
-            workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
-          }
-        });
-
-        setGlobalTotalClusters(clustersResponse.length);
-        setGlobalRunningClusters(totalRunningClusters);
-
-        const jobs = managedJobsResponse.jobs || [];
-        jobs.forEach((job) => {
-          const jobClusterName =
-            job.cluster_name || (job.resources && job.resources.cluster_name);
-          if (jobClusterName) {
-            const wsName = clusterNameToWorkspace[jobClusterName];
-            if (wsName && workspaceStatsAggregator[wsName]) {
-              workspaceStatsAggregator[wsName].managedJobsCount++;
-            }
-          }
-        });
-
-        setGlobalManagedJobs(jobs.length);
-
-        let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
-          (ws) => ({
-            ...ws,
-            clouds: Array.from(ws.clouds).sort(),
-          })
-        );
-
-        if (configuredWorkspaceNames.length > 0) {
-          finalWorkspaceDetails = finalWorkspaceDetails.filter((ws) =>
-            configuredWorkspaceNames.includes(ws.name)
-          );
-        }
-
-        finalWorkspaceDetails.sort((a, b) => a.name.localeCompare(b.name));
-
-        console.log(
-          '[Workspaces Debug] finalWorkspaceDetails before setting state:',
-          finalWorkspaceDetails
-        );
-
-        setWorkspaceDetails(finalWorkspaceDetails);
-      } catch (error) {
-        console.error('Error fetching comprehensive workspace data:', error);
-        setWorkspaceDetails([]);
-        setGlobalRunningClusters(0);
-        setGlobalTotalClusters(0);
-        setGlobalManagedJobs(0);
       }
-      setLoading(false);
-    };
+
+      clustersResponse.forEach((cluster) => {
+        const wsName = cluster.workspace || 'default';
+        if (
+          configuredWorkspaceNames.length > 0 &&
+          !workspaceStatsAggregator[wsName]
+        ) {
+          if (!workspaceStatsAggregator[wsName]) {
+            workspaceStatsAggregator[wsName] = {
+              name: wsName,
+              totalClusterCount: 0,
+              runningClusterCount: 0,
+              managedJobsCount: 0,
+              clouds: new Set(),
+            };
+          }
+        } else if (!workspaceStatsAggregator[wsName]) {
+          workspaceStatsAggregator[wsName] = {
+            name: wsName,
+            totalClusterCount: 0,
+            runningClusterCount: 0,
+            managedJobsCount: 0,
+            clouds: new Set(),
+          };
+        }
+        
+        workspaceStatsAggregator[wsName].totalClusterCount++;
+        if (cluster.status === 'RUNNING') {
+          workspaceStatsAggregator[wsName].runningClusterCount++;
+          totalRunningClusters++;
+        }
+        if (cluster.cloud) {
+          workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
+        }
+      });
+
+      setGlobalTotalClusters(clustersResponse.length);
+      setGlobalRunningClusters(totalRunningClusters);
+
+      const jobs = managedJobsResponse.jobs || [];
+      jobs.forEach((job) => {
+        const jobClusterName =
+          job.cluster_name || (job.resources && job.resources.cluster_name);
+        if (jobClusterName) {
+          const wsName = clusterNameToWorkspace[jobClusterName];
+          if (wsName && workspaceStatsAggregator[wsName]) {
+            workspaceStatsAggregator[wsName].managedJobsCount++;
+          }
+        }
+      });
+
+      setGlobalManagedJobs(jobs.length);
+      
+      let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
+        (ws) => ({
+          ...ws,
+          clouds: Array.from(ws.clouds).sort(),
+        })
+      );
+
+      if (configuredWorkspaceNames.length > 0) {
+        finalWorkspaceDetails = finalWorkspaceDetails.filter((ws) =>
+          configuredWorkspaceNames.includes(ws.name)
+        );
+      }
+
+      finalWorkspaceDetails.sort((a, b) => a.name.localeCompare(b.name));
+
+      console.log(
+        '[Workspaces Debug] finalWorkspaceDetails before setting state:',
+        finalWorkspaceDetails
+      );
+
+      setWorkspaceDetails(finalWorkspaceDetails);
+    } catch (error) {
+      console.error('Error fetching comprehensive workspace data:', error);
+      setWorkspaceDetails([]);
+      setGlobalRunningClusters(0);
+      setGlobalTotalClusters(0);
+      setGlobalManagedJobs(0);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -202,6 +207,10 @@ export function Workspaces() {
     setIsAllWorkspacesModalOpen(false);
   };
 
+  const handleRefresh = () => {
+    fetchData();
+  };
+
   const preStyle = {
     backgroundColor: '#f5f5f5',
     padding: '16px',
@@ -211,7 +220,7 @@ export function Workspaces() {
     wordBreak: 'normal',
   };
 
-  if (loading) {
+  if (loading && workspaceDetails.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
@@ -230,11 +239,26 @@ export function Workspaces() {
             size="sm"
             onClick={handleShowAllWorkspacesConfig}
             className="ml-4 px-2 py-1 text-xs"
-            disabled={
-              !rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0
-            }
+            disabled={loading || !rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0}
           >
             View All Configs
+          </Button>
+        </div>
+        <div className="flex items-center">
+          {loading && (
+            <div className="flex items-center mr-2">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-xs">Refreshing...</span>
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
           </Button>
         </div>
       </div>
