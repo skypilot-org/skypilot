@@ -84,12 +84,17 @@ def check_capabilities(
     ])
 
     # filter out the clouds that are disabled in the workspace config
+    workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
         cloud_config = skypilot_config.get_workspace_cloud(cloud)
         cloud_disabled = cloud_config.get('disabled', False)
         if cloud_disabled:
-            echo(f'Disabling {cloud} according to the workspace config.')
-            config_allowed_cloud_names.remove(cloud)
+            workspace_disabled_clouds.append(cloud)
+    config_allowed_cloud_names = [
+        c for c in config_allowed_cloud_names
+        if c not in workspace_disabled_clouds
+    ]
+
     # Use disallowed_cloud_names for logging the clouds that will be disabled
     # because they are not included in allowed_clouds in config.yaml.
     disallowed_cloud_names = [

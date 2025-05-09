@@ -1001,7 +1001,6 @@ class GCP(clouds.Cloud):
         from google import auth  # type: ignore
         config_project_id = skypilot_config.get_workspace_cloud('gcp').get(
             'project_id', None)
-        logger.info(f'config_project_id: {config_project_id}')
         if config_project_id:
             return config_project_id
         _, project_id = auth.default()
