@@ -139,8 +139,7 @@ def get_user_config() -> config_utils.Config:
 
     # load the user config file
     if os.path.exists(user_config_path):
-        user_config = parse_config_file(user_config_path)
-        _validate_config(user_config, user_config_path)
+        user_config = parse_and_validate_config_file(user_config_path)
     else:
         user_config = config_utils.Config()
     return user_config
@@ -168,8 +167,7 @@ def _get_project_config() -> config_utils.Config:
 
     # load the project config file
     if os.path.exists(project_config_path):
-        project_config = parse_config_file(project_config_path)
-        _validate_config(project_config, project_config_path)
+        project_config = parse_and_validate_config_file(project_config_path)
     else:
         project_config = config_utils.Config()
     return project_config
@@ -197,8 +195,7 @@ def get_server_config() -> config_utils.Config:
 
     # load the server config file
     if os.path.exists(server_config_path):
-        server_config = parse_config_file(server_config_path)
-        _validate_config(server_config, server_config_path)
+        server_config = parse_and_validate_config_file(server_config_path)
     else:
         server_config = config_utils.Config()
     return server_config
@@ -230,6 +227,25 @@ def get_nested(keys: Tuple[str, ...],
         override_configs,
         allowed_override_keys=constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK,
         disallowed_override_keys=None)
+
+
+def get_workspace_cloud(cloud: str) -> config_utils.Config:
+    """Returns the workspace config."""
+    current_workspace = get_active_workspace()
+    if current_workspace is None:
+        return config_utils.Config()
+    clouds = _dict.get_nested(keys=(
+        'workspaces',
+        current_workspace,
+    ),
+                              default_value=None)
+    if clouds is None:
+        return config_utils.Config()
+    return clouds.get(cloud.lower(), config_utils.Config())
+
+
+def get_active_workspace() -> str:
+    return _dict.get_nested(keys=('active_workspace',), default_value='default')
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -302,7 +318,7 @@ def _reload_config() -> None:
         _reload_config_as_client()
 
 
-def parse_config_file(config_path: str) -> config_utils.Config:
+def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     config = config_utils.Config()
     try:
         config_dict = common_utils.read_yaml(config_path)
@@ -359,7 +375,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _dict = parse_config_file(config_path)
+    _dict = parse_and_validate_config_file(config_path)
     _loaded_config_path = config_path
 
 
@@ -461,6 +477,12 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    workspace = config.get_nested(keys=('active_workspace',),
+                                  default_value=None)
+    if workspace and workspace not in get_nested(keys=('workspaces',),
+                                                 default_value={}):
+        raise ValueError(f'Workspace {workspace} does not exist. '
+                         'Please check your config and try again.')
     try:
         common_utils.validate_schema(
             config,
@@ -506,7 +528,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
                     'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
-            parsed_config = parse_config_file(maybe_config_path)
+            parsed_config = parse_and_validate_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
             parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)

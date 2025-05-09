@@ -1041,6 +1041,43 @@ def get_config_schema():
         }
     }
 
+    workspace_schema = {'type': 'string'}
+
+    allowed_workspace_names = list(service_catalog.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_regex = '|'.join(allowed_workspace_names)
+    workspaces_schema = {
+        'type': 'object',
+        'required': [],
+        # each key is a workspace name
+        'additionalProperties': {
+            'type': 'object',
+            'additionalProperties': False,
+            'patternProperties': {
+                allowed_workspace_regex: {
+                    'type': 'object',
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                },
+            },
+            'properties': {
+                'gcp': {
+                    'type': 'object',
+                    'properties': {
+                        'project_id': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                },
+            },
+        },
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -1063,6 +1100,8 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'active_workspace': workspace_schema,
+            'workspaces': workspaces_schema,
             **cloud_configs,
         },
     }
