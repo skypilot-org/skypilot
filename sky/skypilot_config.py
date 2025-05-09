@@ -116,7 +116,7 @@ _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
 _reload_config_lock = threading.Lock()
 
-_workspace_dict = config_utils.Config()
+_workspace = config_utils.Config()
 
 
 def get_user_config_path() -> str:
@@ -180,7 +180,7 @@ def _get_project_config() -> config_utils.Config:
     return project_config
 
 
-def _get_workspace_config() -> config_utils.Config:
+def _get_workspace_config(workspace: Optional[str]) -> config_utils.Config:
     """Returns the workspace config."""
     workspace_config_path = _get_config_file_path(ENV_VAR_WORKSPACE_CONFIG)
     if workspace_config_path:
@@ -204,7 +204,21 @@ def _get_workspace_config() -> config_utils.Config:
         workspace_config = parse_workspace_config_file(workspace_config_path)
     else:
         workspace_config = config_utils.Config()
-    return workspace_config
+    if workspace is None:
+        workspace = 'default'
+
+    workspace_list = workspace_config.get_nested(keys=(workspace,),
+                                                 default_value=None)
+    selected_workspace = config_utils.Config()
+    for workspace_item in workspace_list:
+        if isinstance(workspace_item, str):
+            selected_workspace.set_nested(keys=(workspace_item,),
+                                          value=config_utils.Config())
+        elif isinstance(workspace_item, dict):
+            for key in list(workspace_item.keys()):
+                selected_workspace.set_nested(keys=(key,),
+                                              value=workspace_item[key])
+    return selected_workspace
 
 
 def get_server_config() -> config_utils.Config:
@@ -261,6 +275,11 @@ def get_nested(keys: Tuple[str, ...],
         override_configs,
         allowed_override_keys=constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK,
         disallowed_override_keys=None)
+
+
+def get_workspace_cloud(cloud: str) -> config_utils.Config:
+    """Returns the workspace config."""
+    return _workspace.get_nested(keys=(cloud,), default_value=None)
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -425,7 +444,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
 
 
 def _reload_config_as_server() -> None:
-    global _dict, _workspace_dict
+    global _dict
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
 
@@ -444,8 +463,6 @@ def _reload_config_as_server() -> None:
             f'server config: \n'
             f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
     _dict = overlaid_server_config
-
-    _workspace_dict = _get_workspace_config()
 
 
 def _reload_config_as_client() -> None:
@@ -494,7 +511,7 @@ def loaded() -> bool:
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
-    global _dict, _config_overridden
+    global _dict, _workspace, _config_overridden
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
@@ -525,14 +542,9 @@ def override_skypilot_config(
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     # TODO get the workspace from someplace in config
-    # workspace = config.get_nested(keys=('SOMEPLACE'), default_value='default')
-    workspace = 'default'
-    workspace_config = _workspace_dict.get_nested(keys=('profiles', workspace,
-                                                        'config'),
-                                                  default_value=None)
-    if workspace_config:
-        config = overlay_skypilot_config(original_config=config,
-                                         override_configs=workspace_config)
+    workspace = config.get('workspace', None)
+    _workspace = _get_workspace_config(workspace)
+    logger.info(f'workspace: {_workspace}')
     try:
         common_utils.validate_schema(
             config,
