@@ -3,65 +3,105 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircularProgress } from '@mui/material';
-import Link from 'next/link';
+import { ServerIcon, BriefcaseIcon, CloudIcon, BookDocIcon } from '@/components/elements/icons';
 
 export function Workspaces() {
-  const [workspaceData, setWorkspaceData] = useState([]);
+  const [workspaceDetails, setWorkspaceDetails] = useState([]);
+  const [globalRunningClusters, setGlobalRunningClusters] = useState(0);
+  const [globalTotalClusters, setGlobalTotalClusters] = useState(0);
+  const [globalManagedJobs, setGlobalManagedJobs] = useState(0);
   const [loading, setLoading] = useState(true);
-
   const router = useRouter();
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const clusters = await getClusters();
-        const counts = {};
-        clusters.forEach(cluster => {
-          const workspaceName = cluster.workspace || 'default';
-          counts[workspaceName] = (counts[workspaceName] || 0) + 1;
+        const [clustersResponse, managedJobsResponse] = await Promise.all([
+          getClusters(),
+          getManagedJobs(),
+        ]);
+
+        const clusterNameToWorkspace = {};
+        clustersResponse.forEach(c => {
+          clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
         });
-        const data = Object.entries(counts).map(([name, clusterCount]) => ({
-          name,
-          clusterCount,
-        })).sort((a, b) => a.name.localeCompare(b.name)); // Sort by workspace name
-        setWorkspaceData(data);
+
+        let totalRunningClusters = 0;
+        const workspaceStatsAggregator = {};
+
+        clustersResponse.forEach(cluster => {
+          const wsName = cluster.workspace || 'default';
+          if (!workspaceStatsAggregator[wsName]) {
+            workspaceStatsAggregator[wsName] = {
+              name: wsName,
+              totalClusterCount: 0,
+              runningClusterCount: 0,
+              managedJobsCount: 0,
+              clouds: new Set(),
+            };
+          }
+          workspaceStatsAggregator[wsName].totalClusterCount++;
+          if (cluster.status === 'RUNNING') {
+            workspaceStatsAggregator[wsName].runningClusterCount++;
+            totalRunningClusters++;
+          }
+          if (cluster.cloud) {
+            workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
+          }
+        });
+        
+        setGlobalTotalClusters(clustersResponse.length);
+        setGlobalRunningClusters(totalRunningClusters);
+        
+        const jobs = managedJobsResponse.jobs || [];
+        jobs.forEach(job => {
+          const jobClusterName = job.cluster_name || (job.resources && job.resources.cluster_name);
+          if (jobClusterName) {
+            const wsName = clusterNameToWorkspace[jobClusterName];
+            if (wsName && workspaceStatsAggregator[wsName]) {
+              workspaceStatsAggregator[wsName].managedJobsCount++;
+            }
+          }
+        });
+        
+        setGlobalManagedJobs(jobs.length);
+
+        const finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(ws => ({
+          ...ws,
+          clouds: Array.from(ws.clouds).sort(),
+        })).sort((a,b) => a.name.localeCompare(b.name));
+
+        setWorkspaceDetails(finalWorkspaceDetails);
+
       } catch (error) {
-        console.error('Error fetching workspace data:', error);
-        // Optionally set an error state here to display to the user
+        console.error('Error fetching comprehensive workspace data:', error);
+        setWorkspaceDetails([]);
+        setGlobalRunningClusters(0);
+        setGlobalTotalClusters(0);
+        setGlobalManagedJobs(0);
       }
       setLoading(false);
     };
     fetchData();
   }, []);
 
+  const handleEditWorkspace = (workspaceName) => {
+    router.push(`/workspaces/${encodeURIComponent(workspaceName)}`);
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500">Loading workspaces...</span>
+        <span className="ml-2 text-gray-500">Loading workspace data...</span>
       </div>
     );
   }
-
-  if (workspaceData.length === 0) {
-    return (
-      <div className="text-center py-10">
-        <p className="text-lg text-gray-600">No workspaces found.</p>
-        <p className="text-sm text-gray-500 mt-2">
-          Create a cluster to see its workspace here.
-        </p>
-      </div>
-    );
-  }
-
-  const handleEditWorkspace = (workspaceName) => {
-    // Navigate to the dynamic workspace page
-    router.push(`/workspaces/${encodeURIComponent(workspaceName)}`);
-  };
 
   return (
     <div>
@@ -70,29 +110,89 @@ export function Workspaces() {
           <span className="text-sky-blue leading-none">Workspaces</span>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {workspaceData.map(ws => (
-          <Card key={ws.name}>
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold">{ws.name}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-gray-600">
-                Clusters: <span className="font-medium">{ws.clusterCount}</span>
-              </p>
-            </CardContent>
-            <CardFooter className="flex justify-end">
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => handleEditWorkspace(ws.name)}
-              >
-                Details
-              </Button>
-            </CardFooter>
-          </Card>
-        ))}
+
+      <div className="bg-sky-50 p-4 rounded-lg shadow mb-6">
+        <div className="flex flex-col sm:flex-row justify-around items-center">
+          <div className="p-2">
+            <div className="flex items-center">
+              <BookDocIcon className="w-5 h-5 mr-2 text-sky-600" />
+              <span className="text-sm text-gray-600">Workspaces:</span>
+              <span className="ml-1 text-xl font-semibold text-sky-700">{workspaceDetails.length}</span>
+            </div>
+          </div>
+          <div className="p-2">
+            <div className="flex items-center">
+              <ServerIcon className="w-5 h-5 mr-2 text-sky-600" />
+              <span className="text-sm text-gray-600">Clusters (Running / Total):</span>
+              <span className="ml-1 text-xl font-semibold text-sky-700">
+                {globalRunningClusters} / {globalTotalClusters}
+              </span>
+            </div>
+          </div>
+          <div className="p-2">
+            <div className="flex items-center">
+              <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600" />
+              <span className="text-sm text-gray-600">Managed Jobs:</span>
+              <span className="ml-1 text-xl font-semibold text-sky-700">{globalManagedJobs}</span>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {workspaceDetails.length === 0 && !loading ? (
+        <div className="text-center py-10">
+          <p className="text-lg text-gray-600">No workspaces found.</p>
+          <p className="text-sm text-gray-500 mt-2">
+            Create a cluster to see its workspace here.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {workspaceDetails.map(ws => (
+            <Card key={ws.name}>
+              <CardHeader>
+                <CardTitle className="text-base font-medium">Workspace: <span className="font-semibold">{ws.name}</span></CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm">
+                <div className="py-2 flex items-center justify-between">
+                  <div className="flex items-center text-gray-600">
+                    <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+                    <span>Clusters (Running / Total)</span>
+                  </div>
+                  <span className="font-normal text-gray-800">
+                    {ws.runningClusterCount} / {ws.totalClusterCount}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between border-t border-gray-100">
+                  <div className="flex items-center text-gray-600">
+                    <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+                    <span>Managed Jobs</span>
+                  </div>
+                  <span className="font-medium text-gray-800">{ws.managedJobsCount}</span>
+                </div>
+                {ws.clouds.length > 0 && (
+                  <div className="py-2 flex items-center justify-between border-t border-gray-100">
+                    <div className="flex items-center text-gray-600">
+                      <CloudIcon className="w-4 h-4 mr-2 text-gray-500" />
+                      <span>Enabled Clouds</span>
+                    </div>
+                    <span className="font-medium text-gray-800">{ws.clouds.join(', ')}</span>
+                  </div>
+                )}
+              </CardContent>
+              <CardFooter className="flex justify-end pt-3 border-t border-gray-100">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => handleEditWorkspace(ws.name)}
+                >
+                  Details
+                </Button>
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 } 
