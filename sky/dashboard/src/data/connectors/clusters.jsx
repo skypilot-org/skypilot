@@ -43,6 +43,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         resources_str: cluster.resources_str,
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
+        workspace: cluster.workspace,
         jobs: [],
         events: [
           {

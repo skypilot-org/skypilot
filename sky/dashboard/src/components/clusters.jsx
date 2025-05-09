@@ -20,6 +20,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { getClusters } from '@/data/connectors/clusters';
+import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -51,19 +52,39 @@ export function Clusters() {
   const isMobile = useMobile();
 
   useEffect(() => {
-    const fetchWorkspaces = async () => {
-      const allClusters = await getClusters();
-      // Use 'default' for clusters with no/empty workspace
-      const uniqueWorkspaces = [
-        ...new Set(
-          allClusters
-            .map((cluster) => cluster.workspace || 'default')
-            .filter((ws) => ws)
-        ),
-      ];
-      setWorkspaces(uniqueWorkspaces.sort());
+    const fetchFilterData = async () => {
+      try {
+        // Fetch configured workspaces for the filter dropdown
+        const fetchedWorkspacesConfig = await getWorkspaces();
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+
+        // Fetch all clusters to see if 'default' workspace is implicitly used
+        const allClusters = await getClusters();
+        const uniqueClusterWorkspaces = [
+          ...new Set(
+            allClusters
+              .map((cluster) => cluster.workspace || 'default')
+              .filter((ws) => ws)
+          ),
+        ];
+
+        // Combine configured workspaces with any actively used 'default' workspace
+        const finalWorkspaces = new Set(configuredWorkspaceNames);
+        if (uniqueClusterWorkspaces.includes('default') && !finalWorkspaces.has('default')) {
+          // Add 'default' if it's used by clusters but not in configured list
+          // This ensures 'default' appears if relevant, even if not explicitly in skypilot config
+        }
+        // Ensure all unique cluster workspaces are in the list, especially 'default'
+        uniqueClusterWorkspaces.forEach(wsName => finalWorkspaces.add(wsName));
+
+
+        setWorkspaces(Array.from(finalWorkspaces).sort());
+      } catch (error) {
+        console.error("Error fetching data for workspace filter:", error);
+        setWorkspaces(['default']); // Fallback or error state
+      }
     };
-    fetchWorkspaces();
+    fetchFilterData();
   }, []);
 
   const handleRefresh = () => {
@@ -340,12 +361,7 @@ export function ClusterTable({
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
                     <TableCell>
-                      <Link
-                        href={`/workspaces/${encodeURIComponent(item.workspace || 'default')}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {item.workspace || 'default'}
-                      </Link>
+                      {item.workspace || 'default'}
                     </TableCell>
                     <TableCell>{item.resources_str}</TableCell>
                     <TableCell>{item.region}</TableCell>
