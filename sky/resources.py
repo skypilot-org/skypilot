@@ -599,9 +599,6 @@ class Resources:
                             raise ValueError(parse_error)
                     try:
                         num = float(splits[1])
-                        assert num.is_integer(), (
-                            f'Number of accelerators must be an integer, '
-                            f'got {num}')
                         accelerators = {splits[0]: int(num)}
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
