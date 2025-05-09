@@ -10,10 +10,11 @@ By default, the SkyServe controller runs as a single instance (either a VM or a 
 
 To enhance resilience and ensure controller plane continuity, SkyServe offers a high availability mode for its controller. When enabled, the controller leverages the automatic recovery feature of Kubernetes Deployments to automatically recover from failures.
 
-Benefits of high availability controller:
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Automatic Controller Recovery:** The controller can automatically restart after crashes or node failures.
-* **Control Plane Continuity:** Minimizes downtime for the SkyServe control plane, ensuring that management operations for your services can continue with minimal interruption.
+High availability mode for the SkyServe controller offers several key advantages:
+
+* **Automated Recovery:** The controller automatically restarts via Kubernetes Deployments if it encounters crashes or node failures.
+* **Enhanced Control Plane Stability:** Ensures the SkyServe control plane remains operational with minimal disruption to service management capabilities.
+* **Persistent Controller State:** Critical controller state is stored on persistent storage (via PVCs), ensuring it survives pod restarts and node failures.
 
 Prerequisites
 -------------
@@ -63,22 +64,48 @@ Configuration details
 ---------------------
 Besides the main ``serve.controller.high_availability: true`` flag, you can customize high availability behavior further:
 
-.. raw:: html
+*   **Controller Resources** (``serve.controller.resources``):
+    As usual, you can specify ``cloud`` (must be Kubernetes), ``region``, ``cpus``, etc.
+    The ``disk_size`` here directly determines the size of the PersistentVolumeClaim
+    created for the high availability controller.
 
-   <ul>
-   <li><strong>Controller Resources (<code>serve.controller.resources</code>):</strong> As usual, you can specify <code>cloud</code> (must be Kubernetes), <code>region</code>, <code>cpus</code>, etc. The <code>disk_size</code> here directly determines the size of the PersistentVolumeClaim created for the high availability controller.</li>
-   <li><strong>Kubernetes Storage Class (<code>kubernetes.high_availability.storage_class_name</code> - Optional):</strong> If your Kubernetes cluster has specific storage classes defined (e.g., for different performance tiers like SSD vs HDD, or specific features like backup), you can specify which one to use for the controller's PVC. This is configured under the <code>kubernetes</code> section in <code>config.yaml</code>:</li>
-   </ul>
+    For example, to set the controller's disk size (which determines the PVC size
+    in high availability mode when ``serve.controller.high_availability`` is true):
 
-.. code-block:: yaml
+    .. code-block:: yaml
+        :emphasize-lines: 4
 
-    kubernetes:
-      # ... other kubernetes settings ...
-      high_availability:
-        # Optional: Specify the StorageClass name for the controller's PVC
-        storage_class_name: <your-storage-class-name> # e.g., premium-ssd
+        serve:
+          controller:
+            resources:
+              disk_size: 100     # Example: 100Gi for the PVC
+              cloud: kubernetes  # Must be kubernetes for HA controller
+              # cpus: 2+         # Other optional resources
+            high_availability: true # Must be true for HA mode
 
-**Purpose:** Different storage classes offer varying performance (IOPS, throughput), features (snapshots, backups), and costs. If your cluster provides multiple options and you have specific requirements for the controller's storage (e.g., needing faster disk I/O or a particular backup strategy), you can specify a storage class. If omitted, the default storage class configured in your Kubernetes cluster will be used.
+*   **Kubernetes Storage Class** (``kubernetes.high_availability.storage_class_name`` - Optional):
+    If your Kubernetes cluster has specific storage classes defined (e.g., for different
+    performance tiers like SSD vs HDD, or specific features like backup), you can specify
+    which one to use for the controller's PVC. This is configured under the
+    ``kubernetes`` section in ``config.yaml``.
+
+    To specify a storage class for the controller's PVC:
+
+    .. code-block:: yaml
+
+        kubernetes:
+          # ... other kubernetes settings ...
+          high_availability:
+            # Optional: Specify the StorageClass name for the controller's PVC
+            storage_class_name: <your-storage-class-name> # e.g., premium-ssd
+
+    .. note::
+        Different storage classes offer varying performance (IOPS, throughput),
+        features (snapshots, backups), and costs. If your cluster provides multiple
+        options and you have specific requirements for the controller's storage
+        (e.g., needing faster disk I/O or a particular backup strategy), you can
+        specify a storage class. If omitted, the default storage class configured
+        in your Kubernetes cluster will be used.
 
 Important considerations
 ------------------------
