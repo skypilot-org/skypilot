@@ -82,6 +82,15 @@ def check_capabilities(
         get_cloud_tuple(c)[0] for c in skypilot_config.get_nested((
             'allowed_clouds',), get_all_clouds())
     ])
+
+    # filter out the clouds that are disabled in the workspace config
+    for cloud in config_allowed_cloud_names:
+        cloud_config = skypilot_config.get_workspace_cloud(cloud)
+        cloud_disabled = cloud_config.get('disabled', False)
+        if cloud_disabled:
+            echo(f'Disabling {cloud} according to the workspace config.')
+            config_allowed_cloud_names.remove(cloud)
+
     # Use disallowed_cloud_names for logging the clouds that will be disabled
     # because they are not included in allowed_clouds in config.yaml.
     disallowed_cloud_names = [
@@ -140,14 +149,16 @@ def check_capabilities(
             if not cloud.startswith('Cloudflare')
         }
         previously_enabled_clouds_set = {
-            repr(cloud)
-            for cloud in global_user_state.get_cached_enabled_clouds(capability)
+            (repr(cloud)
+             for cloud in global_user_state.get_cached_enabled_clouds(
+                 capability, skypilot_config.get_workspace()))
         }
         enabled_clouds_for_capability = (config_allowed_clouds_set & (
             (previously_enabled_clouds_set | enabled_clouds_set) -
             disabled_clouds_set))
         global_user_state.set_enabled_clouds(
-            list(enabled_clouds_for_capability), capability)
+            list(enabled_clouds_for_capability), capability,
+            skypilot_config.get_workspace())
         all_enabled_clouds = all_enabled_clouds.union(
             enabled_clouds_for_capability)
     disallowed_clouds_hint = None
@@ -234,7 +245,7 @@ def get_cached_enabled_clouds_or_refresh(
             raise_if_no_cloud_access is set to True.
     """
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        capability)
+        capability, skypilot_config.get_workspace())
     if not cached_enabled_clouds:
         try:
             check_capability(sky_cloud.CloudCapability.COMPUTE, quiet=True)
@@ -244,7 +255,7 @@ def get_cached_enabled_clouds_or_refresh(
             # raise_if_no_cloud_access is set to True.
             pass
         cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-            capability)
+            capability, skypilot_config.get_workspace())
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(

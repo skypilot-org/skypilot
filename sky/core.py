@@ -17,6 +17,7 @@ from sky import global_user_state
 from sky import models
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
@@ -1004,7 +1005,8 @@ def storage_delete(name: str) -> None:
 @usage_lib.entrypoint
 def enabled_clouds() -> List[clouds.Cloud]:
     return global_user_state.get_cached_enabled_clouds(
-        sky_cloud.CloudCapability.COMPUTE)
+        sky_cloud.CloudCapability.COMPUTE,
+        workspace=skypilot_config.get_workspace())
 
 
 @usage_lib.entrypoint

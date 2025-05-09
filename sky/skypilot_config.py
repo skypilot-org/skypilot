@@ -241,12 +241,11 @@ def get_workspace_cloud(cloud: str) -> config_utils.Config:
                               default_value=None)
     if clouds is None:
         return config_utils.Config()
-    for candidate_cloud in clouds:
-        if isinstance(candidate_cloud, str) and candidate_cloud == cloud:
-            return config_utils.Config()
-        elif isinstance(candidate_cloud, dict) and cloud in candidate_cloud:
-            return candidate_cloud[cloud]
-    return config_utils.Config()
+    return clouds.get(cloud.lower(), config_utils.Config())
+
+
+def get_workspace() -> str:
+    return _dict.get_nested(keys=('workspace',), default_value='default')
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -478,7 +477,7 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    # TODO (syang) update the allowed_clouds here
+
     try:
         common_utils.validate_schema(
             config,

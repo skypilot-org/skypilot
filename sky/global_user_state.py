@@ -802,11 +802,12 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_cached_enabled_clouds(
-        cloud_capability: 'cloud.CloudCapability') -> List['clouds.Cloud']:
+def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
+                              workspace: str) -> List['clouds.Cloud']:
 
-    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
-                              (_get_capability_key(cloud_capability),))
+    rows = _DB.cursor.execute(
+        'SELECT value FROM config WHERE key = ?',
+        (_get_enabled_clouds_key(cloud_capability, workspace),))
     ret = []
     for (value,) in rows:
         ret = json.loads(value)
@@ -827,15 +828,17 @@ def get_cached_enabled_clouds(
 
 
 def set_enabled_clouds(enabled_clouds: List[str],
-                       cloud_capability: 'cloud.CloudCapability') -> None:
-    _DB.cursor.execute(
-        'INSERT OR REPLACE INTO config VALUES (?, ?)',
-        (_get_capability_key(cloud_capability), json.dumps(enabled_clouds)))
+                       cloud_capability: 'cloud.CloudCapability',
+                       workspace: str) -> None:
+    _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
+                       (_get_enabled_clouds_key(cloud_capability, workspace),
+                        json.dumps(enabled_clouds)))
     _DB.conn.commit()
 
 
-def _get_capability_key(cloud_capability: 'cloud.CloudCapability') -> str:
-    return _ENABLED_CLOUDS_KEY_PREFIX + cloud_capability.value
+def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
+                            workspace: str) -> str:
+    return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
 
 
 def add_or_update_storage(storage_name: str,
