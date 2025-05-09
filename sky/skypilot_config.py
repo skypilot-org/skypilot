@@ -101,22 +101,15 @@ ENV_VAR_GLOBAL_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}GLOBAL_CONFIG'
 # Environment variables for setting non-default project config files.
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
-# Environment variables for setting non-default workspace config files.
-ENV_VAR_WORKSPACE_CONFIG = (
-    f'{constants.SKYPILOT_ENV_VAR_PREFIX}WORKSPACE_CONFIG')
-
 # Path to the client config files.
 _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
-_WORKSPACE_CONFIG_PATH = '~/.sky/workspace.yaml'
 
 # The loaded config.
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
 _reload_config_lock = threading.Lock()
-
-_workspace = config_utils.Config()
 
 
 def get_user_config_path() -> str:
@@ -180,47 +173,6 @@ def _get_project_config() -> config_utils.Config:
     return project_config
 
 
-def _get_workspace_config(workspace: Optional[str]) -> config_utils.Config:
-    """Returns the workspace config."""
-    workspace_config_path = _get_config_file_path(ENV_VAR_WORKSPACE_CONFIG)
-    if workspace_config_path:
-        logger.debug('using workspace config file specified by '
-                     f'{ENV_VAR_WORKSPACE_CONFIG}: {workspace_config_path}')
-        workspace_config_path = os.path.expanduser(workspace_config_path)
-        if not os.path.exists(workspace_config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    'Config file specified by env var '
-                    f'{ENV_VAR_WORKSPACE_CONFIG} ({workspace_config_path!r}) '
-                    'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_WORKSPACE_CONFIG}')
-    else:
-        logger.debug(
-            f'using default workspace config file: {_WORKSPACE_CONFIG_PATH}')
-        workspace_config_path = _WORKSPACE_CONFIG_PATH
-        workspace_config_path = os.path.expanduser(workspace_config_path)
-
-    if os.path.exists(workspace_config_path):
-        workspace_config = parse_workspace_config_file(workspace_config_path)
-    else:
-        workspace_config = config_utils.Config()
-    if workspace is None:
-        workspace = 'default'
-
-    workspace_list = workspace_config.get_nested(keys=(workspace,),
-                                                 default_value=None)
-    selected_workspace = config_utils.Config()
-    for workspace_item in workspace_list:
-        if isinstance(workspace_item, str):
-            selected_workspace.set_nested(keys=(workspace_item,),
-                                          value=config_utils.Config())
-        elif isinstance(workspace_item, dict):
-            for key in list(workspace_item.keys()):
-                selected_workspace.set_nested(keys=(key,),
-                                              value=workspace_item[key])
-    return selected_workspace
-
-
 def get_server_config() -> config_utils.Config:
     """Returns the server config."""
     # find the server config file
@@ -279,7 +231,22 @@ def get_nested(keys: Tuple[str, ...],
 
 def get_workspace_cloud(cloud: str) -> config_utils.Config:
     """Returns the workspace config."""
-    return _workspace.get_nested(keys=(cloud,), default_value=None)
+    current_workspace = _dict.get('workspace', None)
+    if current_workspace is None:
+        return config_utils.Config()
+    clouds = _dict.get_nested(keys=(
+        'workspaces',
+        current_workspace,
+    ),
+                              default_value=None)
+    if clouds is None:
+        return config_utils.Config()
+    for candidate_cloud in clouds:
+        if isinstance(candidate_cloud, str) and candidate_cloud == cloud:
+            return config_utils.Config()
+        elif isinstance(candidate_cloud, dict) and cloud in candidate_cloud:
+            return candidate_cloud[cloud]
+    return config_utils.Config()
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -310,18 +277,6 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
         config,
         schemas.get_config_schema(),
         f'Invalid config YAML from ({config_source}). See: '
-        'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
-        'Error: ',
-        skip_none=False)
-
-
-def _validate_workspace_config(config: Dict[str, Any],
-                               config_source: str) -> None:
-    """Validates the workspace config."""
-    common_utils.validate_schema(
-        config,
-        schemas.get_workspace_schema(),
-        f'Invalid workspace config YAML from ({config_source}). See: '
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
@@ -378,24 +333,6 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
         _validate_config(config, config_path)
 
     logger.debug(f'Config syntax check passed for path: {config_path}')
-    return config
-
-
-def parse_workspace_config_file(config_path: str) -> config_utils.Config:
-    config = config_utils.Config()
-    try:
-        config_dict = common_utils.read_yaml(config_path)
-        config = config_utils.Config.from_dict(config_dict)
-        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-            logger.debug(f'Config loaded from {config_path}:\n'
-                         f'{common_utils.dump_yaml_str(dict(config))}')
-    except yaml.YAMLError as e:
-        logger.error(f'Error in loading config file ({config_path}):', e)
-    if config:
-        _validate_workspace_config(config, config_path)
-
-    logger.debug(
-        f'Workspace config syntax check passed for path: {config_path}')
     return config
 
 
@@ -511,7 +448,7 @@ def loaded() -> bool:
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
-    global _dict, _workspace, _config_overridden
+    global _dict, _config_overridden
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
@@ -541,10 +478,7 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    # TODO get the workspace from someplace in config
-    workspace = config.get('workspace', None)
-    _workspace = _get_workspace_config(workspace)
-    logger.info(f'workspace: {_workspace}')
+    # TODO (syang) update the allowed_clouds here
     try:
         common_utils.validate_schema(
             config,

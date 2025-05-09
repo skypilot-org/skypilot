@@ -1043,6 +1043,42 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
+    workspaces_schema = {
+        'type': 'object',
+        'required': [],
+        # each key is a workspace name
+        'additionalProperties': {
+            'type': 'array',
+            'items': {
+                'anyOf': [
+                    {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            # TODO (syang) add more properties
+                            'gcp': {
+                                'type': 'object',
+                                'properties': {
+                                    'project_id': {
+                                        'type': 'string'
+                                    },
+                                    'disabled': {
+                                        'type': 'boolean'
+                                    }
+                                },
+                            },
+                        },
+                    },
+                    {
+                        'type': 'string',
+                        'case_insensitive_enum': list(
+                            service_catalog.ALL_CLOUDS) + ['cloudflare']
+                    },
+                ],
+            }
+        },
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -1066,45 +1102,7 @@ def get_config_schema():
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
             'workspace': workspace_schema,
+            'workspaces': workspaces_schema,
             **cloud_configs,
-        },
-    }
-
-
-def get_workspace_schema():
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
-
-    return {
-        '$schema': 'https://json-schema.org/draft/2020-12/schema',
-        'type': 'object',
-        'required': [],
-        # each key is a workspace name
-        'additionalProperties': {
-            'type': 'array',
-            'items': {
-                'anyOf': [
-                    {
-                        'type': 'object',
-                        'additionalProperties': False,
-                        'properties': {
-                            # TODO (syang) add more properties
-                            'gcp': {
-                                'type': 'object',
-                                'properties': {
-                                    'project_id': {
-                                        'type': 'string'
-                                    }
-                                },
-                            },
-                        },
-                    },
-                    {
-                        'type': 'string',
-                        'case_insensitive_enum': list(
-                            service_catalog.ALL_CLOUDS) + ['cloudflare']
-                    },
-                ],
-            }
         },
     }
