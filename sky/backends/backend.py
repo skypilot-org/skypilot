@@ -2,7 +2,6 @@
 import typing
 from typing import Dict, Generic, Optional, Tuple
 
-from sky import resources
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import rich_utils
@@ -10,6 +9,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky import task as task_lib
     from sky.data import storage as storage_lib
 
@@ -39,7 +39,7 @@ class Backend(Generic[_ResourceHandleType]):
     # --- APIs ---
     def check_resources_fit_cluster(
             self, handle: _ResourceHandleType,
-            task: 'task_lib.Task') -> Optional[resources.Resources]:
+            task: 'task_lib.Task') -> Optional['resources.Resources']:
         """Check whether resources of the task are satisfied by cluster."""
         raise NotImplementedError
 
