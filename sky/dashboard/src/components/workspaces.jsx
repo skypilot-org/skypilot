@@ -7,7 +7,7 @@ import { getManagedJobs } from '@/data/connectors/jobs';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircularProgress } from '@mui/material';
-import { ServerIcon, BriefcaseIcon, CloudIcon, BookDocIcon } from '@/components/elements/icons';
+import { ServerIcon, BriefcaseIcon, CloudIcon, BookDocIcon, TickIcon } from '@/components/elements/icons';
 
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
@@ -153,7 +153,7 @@ export function Workspaces() {
               <CardHeader>
                 <CardTitle className="text-base font-medium">Workspace: <span className="font-semibold">{ws.name}</span></CardTitle>
               </CardHeader>
-              <CardContent className="text-sm">
+              <CardContent className="text-sm pb-2">
                 <div className="py-2 flex items-center justify-between">
                   <div className="flex items-center text-gray-600">
                     <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
@@ -168,18 +168,23 @@ export function Workspaces() {
                     <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
                     <span>Managed Jobs</span>
                   </div>
-                  <span className="font-medium text-gray-800">{ws.managedJobsCount}</span>
+                  <span className="font-normal text-gray-800">{ws.managedJobsCount}</span>
                 </div>
-                {ws.clouds.length > 0 && (
-                  <div className="py-2 flex items-center justify-between border-t border-gray-100">
-                    <div className="flex items-center text-gray-600">
-                      <CloudIcon className="w-4 h-4 mr-2 text-gray-500" />
-                      <span>Enabled Clouds</span>
-                    </div>
-                    <span className="font-medium text-gray-800">{ws.clouds.join(', ')}</span>
-                  </div>
-                )}
+                
               </CardContent>
+              
+              <div className="px-6 pb-3 text-sm border-t border-gray-100 pt-3">
+                <h4 className="mb-1 text-xs text-gray-500 uppercase tracking-wider">Enabled Infra</h4>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {ws.clouds.map(cloud => (
+                    <div key={cloud} className="flex items-center text-gray-700">
+                      <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+                      <span>{cloud}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            
               <CardFooter className="flex justify-end pt-3 border-t border-gray-100">
                 <Button 
                   variant="outline" 
