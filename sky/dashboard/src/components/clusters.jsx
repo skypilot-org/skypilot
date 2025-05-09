@@ -69,27 +69,18 @@ export function Clusters() {
   return (
     <Layout highlighted="clusters">
       <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
+        <div className="text-base flex items-center">
           <Link
             href="/clusters"
             className="text-sky-blue hover:underline leading-none"
           >
             Sky Clusters
           </Link>
-        </div>
-        <div className="flex items-center">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
           <Select
             value={workspaceFilter}
             onValueChange={setWorkspaceFilter}
           >
-            <SelectTrigger className="h-8 w-48 mr-2 text-sm">
-              {/* Show "All Workspaces" if current filter is ALL_WORKSPACES_VALUE, otherwise show the filter value */}
+            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE ? 'All Workspaces' : workspaceFilter}
               </SelectValue>
@@ -103,6 +94,14 @@ export function Clusters() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="flex items-center">
+          {loading && (
+            <div className="flex items-center mr-2">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500">Loading...</span>
+            </div>
+          )}
           <Button
             variant="ghost"
             onClick={handleRefresh}
@@ -278,6 +277,12 @@ export function ClusterTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('workspace')}
+              >
+                Workspace{getSortDirection('workspace')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources_str')}
               >
                 Resources{getSortDirection('resources_str')}
@@ -302,7 +307,7 @@ export function ClusterTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -327,6 +332,14 @@ export function ClusterTable({
                       </Link>
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <Link 
+                        href={`/workspaces/${encodeURIComponent(item.workspace || 'default')}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.workspace || 'default'}
+                      </Link>
+                    </TableCell>
                     <TableCell>{item.resources_str}</TableCell>
                     <TableCell>{item.region}</TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
@@ -344,7 +357,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters
