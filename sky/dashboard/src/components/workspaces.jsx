@@ -114,7 +114,7 @@ export function Workspaces() {
             clouds: new Set(),
           };
         }
-        
+
         workspaceStatsAggregator[wsName].totalClusterCount++;
         if (cluster.status === 'RUNNING') {
           workspaceStatsAggregator[wsName].runningClusterCount++;
@@ -141,7 +141,7 @@ export function Workspaces() {
       });
 
       setGlobalManagedJobs(jobs.length);
-      
+
       let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
         (ws) => ({
           ...ws,
@@ -239,7 +239,11 @@ export function Workspaces() {
             size="sm"
             onClick={handleShowAllWorkspacesConfig}
             className="ml-4 px-2 py-1 text-xs"
-            disabled={loading || !rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0}
+            disabled={
+              loading ||
+              !rawWorkspacesData ||
+              Object.keys(rawWorkspacesData).length === 0
+            }
           >
             View All Configs
           </Button>
