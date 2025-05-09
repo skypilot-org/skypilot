@@ -1,0 +1,139 @@
+#!/bin/bash
+set -e
+
+# Check docker is installed
+command -v {{ docker_cmd }} > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "{{ docker_cmd }} is not installed. Installing..."
+  # Add current user to docker group if needed
+  id -nG $USER | grep -qw docker || sudo usermod -aG docker $USER > /dev/null 2>&1
+  
+  TIMEOUT=600
+  START_TIME=$(date +%s)
+  while ! command -v {{ docker_cmd }} > /dev/null 2>&1; do
+    CURRENT_TIME=$(date +%s)
+    if [ $((CURRENT_TIME - START_TIME)) -gt $TIMEOUT ]; then
+      echo "{{ docker_cmd }} installation timed out after 10 minutes."
+      exit 1
+    fi
+    echo "Waiting for {{ docker_cmd }} to be installed..."
+    sleep 5
+  done
+fi
+
+# Function to wait for Docker daemon to be ready
+wait_for_docker_daemon() {
+  local cmd="$1"
+  local max_retries=6  # 30 seconds (5s * 6)
+  local retry_count=0
+  local output=""
+  
+  while [ $retry_count -lt $max_retries ]; do
+    output=$(eval "$cmd" 2>&1) || true
+    
+    if ! echo "$output" | grep -q "permission denied while trying to connect to the Docker daemon socket" && \
+       ! echo "$output" | grep -q "Is the docker daemon running?"; then
+      # Docker daemon is ready
+      echo "$output"
+      return 0
+    fi
+    
+    echo "Failed to connect to docker daemon. It might be initializing, retrying in 5 seconds..."
+    sleep 5
+    retry_count=$((retry_count + 1))
+  done
+  
+  echo "Failed to connect to docker daemon after $((max_retries * 5)) seconds."
+  echo "$output"
+  return 1
+}
+
+# Check if the container exists but is stopped
+if [[ "$(wait_for_docker_daemon "{{ docker_cmd }} inspect -f \"{{{{ .State.Running }}}}\" {{ container_name }} 2>/dev/null || echo \"no such object\"")" == "false" ]]; then
+  # Container exists but is stopped
+  wait_for_docker_daemon "{{ docker_cmd }} start {{ container_name }}"
+  {{ docker_cmd }} exec {{ container_name }} /bin/bash -c "sudo service ssh start"
+  echo "Container started and SSH service enabled."
+  {{ docker_cmd }} exec {{ container_name }} /bin/bash -c "whoami"
+  exit 0
+fi
+
+# Docker login if user specified a private docker registry
+{% if docker_login_config %}
+{{ docker_cmd }} login --username {{ docker_login_config.username }} \
+  --password {{ docker_login_config.password }} \
+  {{ docker_login_config.server }}
+{% endif %}
+
+# Pull the docker image
+{% if pull_before_run %}
+{{ docker_cmd }} pull {{ specific_image }}
+{% else %}
+{{ docker_cmd }} image inspect {{ specific_image }} 1> /dev/null 2>&1 || \
+  {{ docker_cmd }} pull {{ specific_image }}
+{% endif %}
+
+# Check if container is already running
+if [[ "$({{ docker_cmd }} inspect -f "{{{{ .State.Running }}}}" {{ container_name }} 2>/dev/null || echo "no such object")" == "true" ]]; then
+  RUNNING_IMAGE=$({{ docker_cmd }} inspect -f "{{{{ .Config.Image }}}}" {{ container_name }})
+  if [[ "${RUNNING_IMAGE}" != "{{ specific_image }}" ]]; then
+    echo "Container with name {{ container_name }} is running image ${RUNNING_IMAGE} instead of {{ specific_image }} (which was provided in the YAML)"
+  fi
+else
+  # Edit docker config first to avoid disconnecting the container
+  # from GPUs when a systemctl command is called. This is a known
+  # issue with nvidia container toolkit:
+  # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
+  { which jq || sudo apt update && sudo apt install -y jq; } && \
+  { [ -f /etc/docker/daemon.json ] || echo "{}" | sudo tee /etc/docker/daemon.json; \
+  sudo jq '.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]' \
+  /etc/docker/daemon.json > /tmp/daemon.json; \
+  sudo mv /tmp/daemon.json /etc/docker/daemon.json; \
+  sudo systemctl restart docker; } || true
+
+  # Start the docker container
+  {{ start_command }}
+fi
+
+# SkyPilot: Setup Commands.
+# TODO(zhwu): the following setups should be aligned with the kubernetes
+# pod setup, like provision.kubernetes.instance::_set_env_vars_in_pods
+# TODO(tian): These setup commands assumed that the container is
+# debian-based. We should make it more general.
+# Most of docker images are using root as default user, so we set an
+# alias for sudo to empty string, therefore any sudo in the following
+# commands won't fail.
+# Disable apt-get from asking user input during installation.
+# see https://askubuntu.com/questions/909277 
+{{ docker_cmd }} exec {{ container_name }} /bin/bash -c \
+  'echo "{{ alias_sudo_cmd }}" >> ~/.bashrc; \
+   echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;'
+
+# Install dependencies inside the docker container
+{{ docker_cmd }} exec {{ container_name }} /bin/bash -c \
+  'sudo apt-get update; \
+   sudo apt-get -o DPkg::Options::="--force-confnew" install -y \
+   rsync curl wget patch openssh-server python3-pip fuse;'
+
+# Copy local authorized_keys to docker container.
+# Stop and disable jupyter service. This is to avoid port conflict on
+# 8080 if we use default deep learning image in GCP, and 8888 if we use
+# default deep learning image in Azure.
+# Azure also has a jupyterhub service running on 8081, so we stop and
+# disable that too.
+# Copy local authorized_keys to docker container and manage services
+rsync -e "{{ docker_cmd }} exec -i" -avz ~/.ssh/authorized_keys \
+  {{ default_container_name }}:/tmp/host_ssh_authorized_keys
+sudo systemctl stop jupyter > /dev/null 2>&1 || true
+sudo systemctl disable jupyter > /dev/null 2>&1 || true
+sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
+sudo systemctl disable jupyterhub > /dev/null 2>&1 || true
+
+# Configure SSH inside the docker container
+{{ docker_cmd }} exec {{ container_name }} /bin/bash -c \
+  'sudo sed -i "s/#Port 22/Port {{ port }}/" /etc/ssh/sshd_config; \
+   mkdir -p ~/.ssh; \
+   cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys; \
+   sudo service ssh start; \
+   sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile; \
+   {{ setup_env_vars_cmd }}'

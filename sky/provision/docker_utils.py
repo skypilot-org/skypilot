@@ -1,10 +1,14 @@
 """Initialize docker containers on a remote node."""
 
 import dataclasses
+import os
 import shlex
 import time
 from typing import Any, Dict, List
 
+import jinja2
+
+import sky
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import command_runner
@@ -18,9 +22,10 @@ logger = sky_logging.init_logger(__name__)
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-    'export -p > ~/container_env_var.sh && '
-    '$(prefix_cmd) '
-    'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;')
+    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
+    '~/container_env_var.sh && '
+    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
+)
 
 # Docker daemon may not be ready when the machine is firstly started. The error
 # message starts with the following string. We should wait for a while and retry
@@ -31,6 +36,8 @@ DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
 DOCKER_SOCKET_NOT_READY_STR = ('Is the docker daemon running?')
 
 _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
+
+_DOCKER_INIT_TEMPLATE_NAME = 'docker_init.sh.j2'
 
 
 @dataclasses.dataclass
@@ -155,6 +162,9 @@ class DockerInitializer:
              wait_for_docker_daemon: bool = False,
              separate_stderr: bool = False,
              log_err_when_fail: bool = True) -> str:
+        now = time.time()
+
+        logger.info(f'Running command: {cmd} in {run_env}')
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -202,6 +212,7 @@ class DockerInitializer:
             stderr=stdout + stderr,
             # Print out the error message if the command failed.
             stream_logs=log_err_when_fail)
+        logger.info(f'Running command: {cmd} in {run_env} finished in {time.time() - now} seconds')
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -450,3 +461,68 @@ class DockerInitializer:
                            wait_for_docker_daemon=True)
         return ('false' in output.lower() and
                 'no such object' not in output.lower())
+
+    def initialize_sh(self) -> str:
+        """Initialize docker container on a remote node."""
+        # Initialize template
+        template_path = os.path.join(sky.__root_dir__, 'templates',
+                                     _DOCKER_INIT_TEMPLATE_NAME)
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(
+                f'Template "{_DOCKER_INIT_TEMPLATE_NAME}" does not exist.')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            template = fin.read()
+        j2_template = jinja2.Template(template)
+
+        # Prepare template variables
+        specific_image = self.docker_config['image']
+        docker_login_config = None
+        if 'docker_login_config' in self.docker_config:
+            docker_login_config = DockerLoginConfig(
+                **self.docker_config['docker_login_config'])
+            specific_image = docker_login_config.format_image(specific_image)
+        
+        # Prepare docker run options and start command
+        user_docker_run_options = self.docker_config.get('run_options', [])
+        run_options = self._configure_runtime(
+            self._auto_configure_shm(user_docker_run_options))
+        
+        start_command = docker_start_cmds(
+            specific_image,
+            self.container_name,
+            run_options,
+            self.docker_cmd,
+        )
+        
+        # Render the template with all variables
+        script = j2_template.render(
+            docker_cmd=self.docker_cmd,
+            container_name=self.container_name,
+            docker_login_config=docker_login_config,
+            specific_image=specific_image,
+            pull_before_run=self.docker_config.get('pull_before_run', True),
+            start_command=start_command,
+            alias_sudo_cmd=command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD,
+            default_container_name=constants.DEFAULT_DOCKER_CONTAINER_NAME,
+            port=constants.DEFAULT_DOCKER_PORT,
+            setup_env_vars_cmd=SETUP_ENV_VARS_CMD,
+        )
+
+        logger.info(f'Starting container {self.container_name} with image '
+                f'{specific_image}')
+        rc, stdout, stderr = self.runner.run(
+            script,
+            require_outputs=True,
+            stream_logs=False,
+            log_path=self.log_path)
+        subprocess_utils.handle_returncode(
+            rc,
+            script,
+            error_msg='Failed to run docker initialization script.',
+            stderr=stdout + stderr,
+            stream_logs=True)
+        
+        # SkyPilot: End of Setup Commands.
+        docker_user = self._run('whoami', run_env='docker')
+        self.initialized = True
+        return docker_user

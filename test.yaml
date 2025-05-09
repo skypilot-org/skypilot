@@ -1,0 +1,14 @@
+resources:
+  cloud: gcp
+  accelerators: L4:1
+  image_id: docker:us-docker.pkg.dev/deeplearning-platform-release/gcr.io/base-cu124.py310
+
+
+run: |
+  nvidia-smi
+
+config:
+  gcp:
+    managed_instance_group:
+      run_duration: 28800
+      provision_timeout: 1800
