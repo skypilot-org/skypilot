@@ -13,8 +13,17 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CircularProgress, Modal, Box, Typography, IconButton } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
+import { CircularProgress } from '@mui/material';
+import yaml from 'js-yaml';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose
+} from '@/components/ui/dialog';
 import {
   ServerIcon,
   BriefcaseIcon,
@@ -31,11 +40,12 @@ export function Workspaces() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // State for the modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedWorkspaceConfig, setSelectedWorkspaceConfig] = useState(null);
-  // State to store the raw fetched workspace configurations
+  const [modalDisplayTitleName, setModalDisplayTitleName] = useState('');
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+
+  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -48,7 +58,7 @@ export function Workspaces() {
         ]);
 
         console.log('[Workspaces Debug] Raw fetchedWorkspacesConfig:', fetchedWorkspacesConfig);
-        setRawWorkspacesData(fetchedWorkspacesConfig); // Corrected: fetchedWorkspacesConfig
+        setRawWorkspacesData(fetchedWorkspacesConfig);
 
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
         console.log('[Workspaces Debug] configuredWorkspaceNames:', configuredWorkspaceNames);
@@ -150,33 +160,39 @@ export function Workspaces() {
 
   const handleShowWorkspaceDetails = (workspaceName) => {
     if (rawWorkspacesData && rawWorkspacesData[workspaceName]) {
-      setSelectedWorkspaceConfig(rawWorkspacesData[workspaceName]);
+      setSelectedWorkspaceConfig({ [workspaceName]: rawWorkspacesData[workspaceName] });
+      setModalDisplayTitleName(workspaceName);
       setIsModalOpen(true);
     } else {
       console.error(`Configuration not found for workspace: ${workspaceName}`);
-      // Optionally: show a toast notification if config is missing
     }
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setSelectedWorkspaceConfig(null);
+    setModalDisplayTitleName('');
   };
 
-  // Style for the modal
-  const modalStyle = {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: '80%',
-    maxWidth: 600,
-    bgcolor: 'background.paper',
-    border: '2px solid #000',
-    boxShadow: 24,
-    p: 4,
-    maxHeight: '90vh',
-    overflowY: 'auto',
+  const handleShowAllWorkspacesConfig = () => {
+    if (rawWorkspacesData && Object.keys(rawWorkspacesData).length > 0) {
+      setIsAllWorkspacesModalOpen(true);
+    } else {
+      console.warn('Raw workspaces data is not available or empty.');
+    }
+  };
+
+  const handleCloseAllWorkspacesModal = () => {
+    setIsAllWorkspacesModalOpen(false);
+  };
+
+  const preStyle = {
+    backgroundColor: '#f5f5f5',
+    padding: '16px',
+    borderRadius: '8px',
+    overflowX: 'auto',
+    whiteSpace: 'pre',
+    wordBreak: 'normal',
   };
 
   if (loading) {
@@ -193,6 +209,15 @@ export function Workspaces() {
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <span className="text-sky-blue leading-none">Workspaces</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleShowAllWorkspacesConfig}
+            className="ml-4 px-2 py-1 text-xs"
+            disabled={!rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0}
+          >
+            View All Configs
+          </Button>
         </div>
       </div>
 
@@ -242,8 +267,8 @@ export function Workspaces() {
           {workspaceDetails.map((ws) => (
             <Card key={ws.name}>
               <CardHeader>
-                <CardTitle className="text-base font-medium">
-                  Workspace: <span className="font-semibold">{ws.name}</span>
+                <CardTitle className="text-base font-normal">
+                  <span className="font-semibold">Workspace:</span> {ws.name}
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-sm pb-2">
@@ -299,28 +324,38 @@ export function Workspaces() {
       )}
 
       {selectedWorkspaceConfig && (
-        <Modal
-          open={isModalOpen}
-          onClose={handleCloseModal}
-          aria-labelledby="workspace-config-modal-title"
-          aria-describedby="workspace-config-modal-description"
-        >
-          <Box sx={modalStyle}>
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography id="workspace-config-modal-title" variant="h6" component="h2">
-                Workspace Configuration: {selectedWorkspaceConfig.name || Object.keys(rawWorkspacesData).find(key => rawWorkspacesData[key] === selectedWorkspaceConfig)}
-              </Typography>
-              <IconButton onClick={handleCloseModal} aria-label="close">
-                <CloseIcon />
-              </IconButton>
-            </Box>
-            <Typography id="workspace-config-modal-description" sx={{ mt: 2 }} component="div">
-              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {JSON.stringify(selectedWorkspaceConfig, null, 2)}
+        <Dialog open={isModalOpen} onOpenChange={handleCloseModal}>
+          <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl w-full max-h-[90vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="pr-10">
+                Workspace:
+                <span className="font-normal"> {modalDisplayTitleName}</span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-grow overflow-y-auto py-4">
+              <pre style={preStyle}>
+                {yaml.dump(selectedWorkspaceConfig, { indent: 2 })}
               </pre>
-            </Typography>
-          </Box>
-        </Modal>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {rawWorkspacesData && (
+        <Dialog open={isAllWorkspacesModalOpen} onOpenChange={handleCloseAllWorkspacesModal}>
+          <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl w-full max-h-[90vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="pr-10">
+                All Workspaces Configuration
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-grow overflow-y-auto py-4">
+              <pre style={preStyle}>
+                {yaml.dump(rawWorkspacesData, { indent: 2 })}
+              </pre>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
