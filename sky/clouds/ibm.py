@@ -175,7 +175,7 @@ class IBM(clouds.Cloud):
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -208,6 +208,8 @@ class IBM(clouds.Cloud):
         assert not r.use_spot, \
             'IBM does not currently support spot instances in this framework'
 
+        assert r.instance_type is not None, (
+            resources, 'instance_type should have been set by the optimizer.')
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
