@@ -619,8 +619,9 @@ def get_controller_resources(
                                                         {None: {None}})
 
         # Filter regions if controller_resources_to_use.region is specified.
-        filtered_regions = ({controller_region} if controller_region is not None
-                            else set(str(k) for k in regions.keys()))
+        filtered_regions: Set[Optional[str]] = ({
+            controller_region
+        } if controller_region is not None else set(regions.keys()))
 
         for region in filtered_regions:
             zones = regions.get(region, {None})
