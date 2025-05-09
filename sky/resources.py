@@ -718,10 +718,10 @@ class Resources:
                     else:
                         table = log_utils.create_table(['Cloud', 'Hint'])
                         table.add_row(['-----', '----'])
-                        for cloud_str, error in cloud_to_errors.items():
+                        for cloud_msg, error in cloud_to_errors.items():
                             reason_str = '\n'.join(textwrap.wrap(
                                 str(error), 80))
-                            table.add_row([cloud_str, reason_str])
+                            table.add_row([cloud_msg, reason_str])
                         hint = table.get_string()
                     raise ValueError(
                         f'Invalid (region {self._region!r}, zone '
