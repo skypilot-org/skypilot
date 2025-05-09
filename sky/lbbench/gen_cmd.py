@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import tempfile
-from typing import List
+from typing import List, Optional
 
 from sky.lbbench import utils
 
@@ -35,6 +35,7 @@ raw_describes = [
     'sky_walk_ll',
     'sky_walk_rr',
     'sky_walk_ch',
+    'gke_gateway', # ADDED: GKE support
 ]
 raw_presents = [
     'SGL',
@@ -61,6 +62,7 @@ raw_presents = [
     'SkyWalk/LL',
     'SkyWalk/RR',
     'SkyWalk/CH',
+    'GKE Gateway', # ADDED: GKE support
 ]
 
 enabled_systems = [
@@ -80,7 +82,9 @@ enabled_systems = [
     13,  # selective pushing for both lb and replica. with least load.
     14,  # selective pushing for both lb and replica. with round robin.
     15,  # selective pushing for both lb and replica. with consistent hashing.
+    16, # gke_gateway
 ]
+
 enabled_systems = [6, 7, 15]
 # enabled_systems = [15]
 
@@ -101,12 +105,20 @@ def _get_head_ip_for_cluster(cluster: str) -> str:
     raise ValueError(f'Cluster {cluster} not found')
 
 
-def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
-    if index < len(utils.single_lb_clusters):
+def _get_endpoint_for_traffic(index: int, sns_item: Optional[str], gke_endpoint: Optional[str] = None) -> str:
+    if index == 16:  # gke_gateway is at index 16 in all_systems
+        if gke_endpoint:
+            if not gke_endpoint.startswith(('http://', 'https://')):
+                return f'http://{gke_endpoint}'
+            return gke_endpoint
+        return 'http://34.117.239.237:80'  # Default GKE endpoint
+
+    if index < len(utils.single_lb_clusters): # Covers indices 0, 1 usually
         cluster = utils.single_lb_clusters[index]
         cluster_ip = _get_head_ip_for_cluster(cluster)
         port = 9001 if index == 0 else 9002
         return f'{cluster_ip}:{port}'
+
     global sn2st
     if sn2st is None:
         sn2st = {s['name']: s for s in utils.sky_serve_status()}
@@ -114,7 +126,6 @@ def _get_endpoint_for_traffic(index: int, sns: List[str]) -> str:
     if sns[idx_in_sns] not in sn2st:
         raise ValueError(f'Service {sns[idx_in_sns]} not found')
     return sn2st[sns[idx_in_sns]]['endpoint']
-
 
 def _region_cluster_name(r: str) -> str:
     return f'llmc-{r}'
@@ -129,13 +140,14 @@ def main():
     parser.add_argument('--regions', type=str, default=None, nargs='+')
     parser.add_argument('--region-to-args', type=str, default=None)
     parser.add_argument('--reload-client', action='store_true')
+    parser.add_argument('--gke-endpoint', type=str, default='34.117.239.237:80', help='GKE Gateway endpoint (IP:port)')
+    
     args = parser.parse_args()
     sns = args.service_names
     if len(sns) != len(describes):
         raise ValueError(f'Expected {len(describes)} service names for '
                          f'{", ".join(describes)}')
 
-    endpoints = [_get_endpoint_for_traffic(i, sns) for i in enabled_systems]
     print(endpoints)
     if any('None' in e for e in endpoints):
         raise ValueError('Some endpoints are not found')
