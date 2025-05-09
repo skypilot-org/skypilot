@@ -1048,34 +1048,31 @@ def get_config_schema():
         'required': [],
         # each key is a workspace name
         'additionalProperties': {
-            'type': 'array',
-            'items': {
-                'anyOf': [
-                    {
-                        'type': 'object',
-                        'additionalProperties': False,
-                        'properties': {
-                            # TODO (syang) add more properties
-                            'gcp': {
-                                'type': 'object',
-                                'properties': {
-                                    'project_id': {
-                                        'type': 'string'
-                                    },
-                                    'disabled': {
-                                        'type': 'boolean'
-                                    }
-                                },
-                            },
+            'type': 'object',
+            'additionalProperties': False,
+            'patternProperties': {
+                '^[a-z]+$': {
+                    'type': 'object',
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                },
+            },
+            'properties': {
+                'gcp': {
+                    'type': 'object',
+                    'properties': {
+                        'project_id': {
+                            'type': 'string'
                         },
+                        'disabled': {
+                            'type': 'boolean'
+                        }
                     },
-                    {
-                        'type': 'string',
-                        'case_insensitive_enum': list(
-                            service_catalog.ALL_CLOUDS) + ['cloudflare']
-                    },
-                ],
-            }
+                },
+            },
         },
     }
 
