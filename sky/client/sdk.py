@@ -111,16 +111,21 @@ def check(clouds: Optional[Tuple[str]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def enabled_clouds() -> server_common.RequestId:
+def enabled_clouds(workspace: Optional[str] = None) -> server_common.RequestId:
     """Gets the enabled clouds.
 
+    Args:
+        workspace: The workspace to get the enabled clouds for. If None, the
+        active workspace will be used.
+    
     Returns:
         The request ID of the enabled clouds request.
 
     Request Returns:
         A list of enabled clouds in string format.
     """
-    response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
+    response = requests.post(f'{server_common.get_server_url()}/enabled_clouds',
+                            json=json.loads(payloads.EnabledCloudsRequestBody(workspace=workspace).model_dump_json()),
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 

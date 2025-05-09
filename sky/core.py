@@ -1003,10 +1003,12 @@ def storage_delete(name: str) -> None:
 # = Catalog Observe =
 # ===================
 @usage_lib.entrypoint
-def enabled_clouds() -> List[clouds.Cloud]:
+def enabled_clouds(workspace: Optional[str] = None) -> List[clouds.Cloud]:
+    if workspace is None:
+        workspace = skypilot_config.get_active_workspace()
     return global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE,
-        workspace=skypilot_config.get_active_workspace())
+        workspace=workspace)
 
 
 @usage_lib.entrypoint

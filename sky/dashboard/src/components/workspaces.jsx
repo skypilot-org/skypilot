@@ -4,7 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getWorkspaces } from '@/data/connectors/workspaces';
+import {
+  getWorkspaces,
+  getEnabledClouds,
+} from '@/data/connectors/workspaces';
 import {
   Card,
   CardContent,
@@ -55,8 +58,15 @@ export function Workspaces() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
-        await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
+      const [
+        fetchedWorkspacesConfig,
+        clustersResponse,
+        managedJobsResponse,
+      ] = await Promise.all([
+        getWorkspaces(),
+        getClusters(),
+        getManagedJobs(),
+      ]);
 
       console.log(
         '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
@@ -69,6 +79,20 @@ export function Workspaces() {
         '[Workspaces Debug] configuredWorkspaceNames:',
         configuredWorkspaceNames
       );
+
+      const enabledCloudsPromises = configuredWorkspaceNames.map((wsName) =>
+        getEnabledClouds(wsName)
+      );
+      const enabledCloudsForAllWorkspacesArray = await Promise.all(
+        enabledCloudsPromises
+      );
+
+      const enabledCloudsMap = {};
+      configuredWorkspaceNames.forEach((wsName, index) => {
+        enabledCloudsMap[wsName] = enabledCloudsForAllWorkspacesArray[index];
+      });
+
+      console.log('[Workspaces Debug] Enabled clouds by workspace:', enabledCloudsMap);
 
       const clusterNameToWorkspace = {};
       clustersResponse.forEach((c) => {
@@ -143,10 +167,13 @@ export function Workspaces() {
       setGlobalManagedJobs(jobs.length);
 
       let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
-        (ws) => ({
-          ...ws,
-          clouds: Array.from(ws.clouds).sort(),
-        })
+        (ws) => {
+          const workspaceSpecificEnabledClouds = enabledCloudsMap[ws.name] || [];
+          return {
+            ...ws,
+            clouds: Array.isArray(workspaceSpecificEnabledClouds) ? workspaceSpecificEnabledClouds.sort() : [],
+          };
+        }
       );
 
       if (configuredWorkspaceNames.length > 0) {
@@ -338,7 +365,7 @@ export function Workspaces() {
                 </div>
               </CardContent>
 
-              <div className="px-6 pb-3 text-sm border-t border-gray-100 pt-3">
+              <div className="px-6 pb-3 text-sm pt-3">
                 <h4 className="mb-1 text-xs text-gray-500 uppercase tracking-wider">
                   Enabled Infra
                 </h4>
@@ -355,7 +382,7 @@ export function Workspaces() {
                 </div>
               </div>
 
-              <CardFooter className="flex justify-end pt-3 border-t border-gray-100">
+              <CardFooter className="flex justify-end pt-3">
                 <Button
                   variant="outline"
                   size="sm"
