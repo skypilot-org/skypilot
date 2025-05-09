@@ -302,7 +302,8 @@ def up(
                     'http://') or socket_endpoint.startswith('https://'):
                 endpoint = socket_endpoint
             else:
-                protocol = 'http' if task.service.tls_credential is None else 'https'
+                protocol = 'http' if task.service.tls_credential is None \
+                    else 'https'
                 endpoint = f'{protocol}://{socket_endpoint}'
 
         logger.info(
