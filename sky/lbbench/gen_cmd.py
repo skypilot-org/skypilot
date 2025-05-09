@@ -65,7 +65,7 @@ raw_presents = [
     'GKE Gateway', # ADDED: GKE support
 ]
 
-all_systems = [
+enabled_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
     2,  # vanilla least load
@@ -82,7 +82,7 @@ all_systems = [
     13,  # selective pushing for both lb and replica. with least load.
     14,  # selective pushing for both lb and replica. with round robin.
     15,  # selective pushing for both lb and replica. with consistent hashing.
-    16, # gke_gateway # ADDED
+    16, # gke_gateway
 ]
 
 enabled_systems = [6, 7, 15]
@@ -106,7 +106,6 @@ def _get_head_ip_for_cluster(cluster: str) -> str:
 
 
 def _get_endpoint_for_traffic(index: int, sns_item: Optional[str], gke_endpoint: Optional[str] = None) -> str:
-    # ADDED: GKE handling logic
     if index == 16:  # gke_gateway is at index 16 in all_systems
         if gke_endpoint:
             if not gke_endpoint.startswith(('http://', 'https://')):
@@ -142,7 +141,6 @@ def main():
     parser.add_argument('--region-to-args', type=str, default=None)
     parser.add_argument('--reload-client', action='store_true')
     parser.add_argument('--gke-endpoint', type=str, default='34.117.239.237:80', help='GKE Gateway endpoint (IP:port)')
-    parser.add_argument('--run-systems', type=int, nargs='+', default=None, help='Indices of systems from all_systems to run (e.g., 0 1 16). Default uses hardcoded filter [6,7,15].')
     
     args = parser.parse_args()
     sns = args.service_names
