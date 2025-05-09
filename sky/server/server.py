@@ -220,6 +220,7 @@ async def get_workspace_config(request: fastapi.Request) -> None:
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
+
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,

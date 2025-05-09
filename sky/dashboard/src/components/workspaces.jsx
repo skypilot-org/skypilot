@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose
+  DialogClose,
 } from '@/components/ui/dialog';
 import {
   ServerIcon,
@@ -45,23 +45,27 @@ export function Workspaces() {
   const [modalDisplayTitleName, setModalDisplayTitleName] = useState('');
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
 
-  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] = useState(false);
+  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =
+    useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] = await Promise.all([
-          getWorkspaces(),
-          getClusters(),
-          getManagedJobs(),
-        ]);
+        const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
+          await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
 
-        console.log('[Workspaces Debug] Raw fetchedWorkspacesConfig:', fetchedWorkspacesConfig);
+        console.log(
+          '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
+          fetchedWorkspacesConfig
+        );
         setRawWorkspacesData(fetchedWorkspacesConfig);
 
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-        console.log('[Workspaces Debug] configuredWorkspaceNames:', configuredWorkspaceNames);
+        console.log(
+          '[Workspaces Debug] configuredWorkspaceNames:',
+          configuredWorkspaceNames
+        );
 
         const clusterNameToWorkspace = {};
         clustersResponse.forEach((c) => {
@@ -72,7 +76,7 @@ export function Workspaces() {
         const workspaceStatsAggregator = {};
 
         if (configuredWorkspaceNames.length > 0) {
-          configuredWorkspaceNames.forEach(wsName => {
+          configuredWorkspaceNames.forEach((wsName) => {
             workspaceStatsAggregator[wsName] = {
               name: wsName,
               totalClusterCount: 0,
@@ -85,7 +89,10 @@ export function Workspaces() {
 
         clustersResponse.forEach((cluster) => {
           const wsName = cluster.workspace || 'default';
-          if (configuredWorkspaceNames.length > 0 && !workspaceStatsAggregator[wsName]) {
+          if (
+            configuredWorkspaceNames.length > 0 &&
+            !workspaceStatsAggregator[wsName]
+          ) {
             if (!workspaceStatsAggregator[wsName]) {
               workspaceStatsAggregator[wsName] = {
                 name: wsName,
@@ -104,7 +111,7 @@ export function Workspaces() {
               clouds: new Set(),
             };
           }
-          
+
           workspaceStatsAggregator[wsName].totalClusterCount++;
           if (cluster.status === 'RUNNING') {
             workspaceStatsAggregator[wsName].runningClusterCount++;
@@ -131,19 +138,26 @@ export function Workspaces() {
         });
 
         setGlobalManagedJobs(jobs.length);
-        
-        let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map((ws) => ({
-          ...ws,
-          clouds: Array.from(ws.clouds).sort(),
-        }));
+
+        let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
+          (ws) => ({
+            ...ws,
+            clouds: Array.from(ws.clouds).sort(),
+          })
+        );
 
         if (configuredWorkspaceNames.length > 0) {
-            finalWorkspaceDetails = finalWorkspaceDetails.filter(ws => configuredWorkspaceNames.includes(ws.name));
+          finalWorkspaceDetails = finalWorkspaceDetails.filter((ws) =>
+            configuredWorkspaceNames.includes(ws.name)
+          );
         }
 
         finalWorkspaceDetails.sort((a, b) => a.name.localeCompare(b.name));
 
-        console.log('[Workspaces Debug] finalWorkspaceDetails before setting state:', finalWorkspaceDetails);
+        console.log(
+          '[Workspaces Debug] finalWorkspaceDetails before setting state:',
+          finalWorkspaceDetails
+        );
 
         setWorkspaceDetails(finalWorkspaceDetails);
       } catch (error) {
@@ -160,7 +174,9 @@ export function Workspaces() {
 
   const handleShowWorkspaceDetails = (workspaceName) => {
     if (rawWorkspacesData && rawWorkspacesData[workspaceName]) {
-      setSelectedWorkspaceConfig({ [workspaceName]: rawWorkspacesData[workspaceName] });
+      setSelectedWorkspaceConfig({
+        [workspaceName]: rawWorkspacesData[workspaceName],
+      });
       setModalDisplayTitleName(workspaceName);
       setIsModalOpen(true);
     } else {
@@ -214,7 +230,9 @@ export function Workspaces() {
             size="sm"
             onClick={handleShowAllWorkspacesConfig}
             className="ml-4 px-2 py-1 text-xs"
-            disabled={!rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0}
+            disabled={
+              !rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0
+            }
           >
             View All Configs
           </Button>
@@ -342,7 +360,10 @@ export function Workspaces() {
       )}
 
       {rawWorkspacesData && (
-        <Dialog open={isAllWorkspacesModalOpen} onOpenChange={handleCloseAllWorkspacesModal}>
+        <Dialog
+          open={isAllWorkspacesModalOpen}
+          onOpenChange={handleCloseAllWorkspacesModal}
+        >
           <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl w-full max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="pr-10">
