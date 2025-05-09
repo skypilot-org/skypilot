@@ -182,9 +182,10 @@ class Resources:
             if isinstance(job_recovery, str):
                 job_recovery = {'strategy': job_recovery}
             if 'strategy' not in job_recovery:
-                job_recovery['strategy'] = 'none'
+                strategy_name = None
+            else:
+                strategy_name = job_recovery['strategy']
 
-            strategy_name = job_recovery['strategy']
             if strategy_name == 'none':
                 self._job_recovery = None
             else:
