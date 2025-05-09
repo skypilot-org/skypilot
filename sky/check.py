@@ -31,10 +31,16 @@ def check_capabilities(
     clouds: Optional[Iterable[str]] = None,
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
 ) -> Dict[str, List[sky_cloud.CloudCapability]]:
+    quiet = False
+    verbose = True
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
     echo('Checking credentials to enable clouds for SkyPilot.')
+    echo(f'Capabilities: {capabilities}')
+    echo(f'Clouds: {clouds}')
+    echo(f'Quiet: {quiet}')
+    echo(f'Verbose: {verbose}')
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
@@ -148,14 +154,17 @@ def check_capabilities(
             cloud for cloud in config_allowed_cloud_names
             if not cloud.startswith('Cloudflare')
         }
+        echo(f'workspace config: {skypilot_config.get_workspace()}')
         previously_enabled_clouds_set = {
             (repr(cloud)
              for cloud in global_user_state.get_cached_enabled_clouds(
                  capability, skypilot_config.get_workspace()))
         }
+        echo(f'Previously enabled clouds: {previously_enabled_clouds_set}')
         enabled_clouds_for_capability = (config_allowed_clouds_set & (
             (previously_enabled_clouds_set | enabled_clouds_set) -
             disabled_clouds_set))
+        echo(f'Enabled clouds for capability: {enabled_clouds_for_capability}')
         global_user_state.set_enabled_clouds(
             list(enabled_clouds_for_capability), capability,
             skypilot_config.get_workspace())
