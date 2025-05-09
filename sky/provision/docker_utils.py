@@ -242,8 +242,9 @@ class DockerInitializer:
                 # enough), or the image server is public.
                 # For the former case, gcloud should be available, and latter
                 # should be fine to fail the following command.
-                self._run('gcloud auth configure-docker '
-                          f'{docker_login_config.server} || true')
+                self._run(
+                    'gcloud auth configure-docker '
+                    f'{docker_login_config.server} --quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
