@@ -11,6 +11,12 @@ In this example, we explore a use case where two teams share one Kubernetes clus
 - Each team would like to host their own SkyPilot API server to submit jobs to.
 - Each team would like to have their own job queue with independent quota and priority.
 
+By setting up Kueue with multiple SkyPilot servers, you will be able to:
+
+- Give each team access to their own SkyPilot API server.
+- Give each team their own job queue with independent quota, priority and preemption.
+- Give teams ability to borrow quotas from other teams, if desired.
+
 The example below walks through the steps to set up SkyPilot API servers and Kueue in the following architecture:
 
 .. image:: ../../../images/examples/k8s-with-kueue/final-architecture.svg
@@ -69,6 +75,61 @@ two namespaces are created: ``team1`` and ``team2``.
 
     kubectl create namespace team1
     kubectl create namespace team2
+
+Deploy SkyPilot API servers
+---------------------------
+
+In this example, two SkyPilot API servers are deployed to the cluster so that each team interacts with their own SkyPilot API server.
+
+You can deploy a SkyPilot API on kubernetes following the steps in :ref:`Kubernetes Deployment Guide <sky-api-server-deploy>`.
+
+However, since we are deploying two API servers on the same cluster, we need to modify the deployment to share the same ingress.
+
+If the following command is used to deploy the SkyPilot API server on ``team1`` namespace:
+
+.. code-block:: bash
+
+  NAMESPACE=team1
+  RELEASE_NAME=skypilot-team1
+  WEB_USERNAME=team1-user
+  # Replace with your password to configure the password for the API server
+  WEB_PASSWORD=team1-password
+  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+    --namespace $NAMESPACE \
+    --create-namespace \
+    --set ingress.authCredentials=$AUTH_STRING
+
+The command to deploy ``team2`` namespace is similar, except the last two lines are added to share the same ingress as ``team1``:
+
+.. code-block:: bash
+
+  NAMESPACE=team2
+  RELEASE_NAME=skypilot-team2
+  WEB_USERNAME=team2-user
+  # Replace with your password to configure the password for the API server
+  WEB_PASSWORD=team2-password
+  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+    --namespace $NAMESPACE \
+    --create-namespace \
+    --set ingress.authCredentials=$AUTH_STRING \
+    --set ingress-nginx.enabled=false \
+    --set ingress.path=/team2
+
+| In this setup, if ``team1``'s API server endpoint as determined by :ref:`this command <sky-get-api-server-url>` is
+| ``http://team1-user:team1-password@1.1.1.1``
+
+| Then ``team2``'s API server endpoint is
+| ``http://team2-user:team2-password@1.1.1.1/team2``
+
+By default, each SkyPilot API server is granted permissions to use its hosting Kubernetes cluster
+and will launch tasks in the same namespace as the API server.
+
+.. image:: ../../../images/examples/k8s-with-kueue/api-servers.svg
+   :alt: API servers deployment
+   :width: 80%
+   :align: center
 
 Create a Kueue resource flavor
 ------------------------------
@@ -324,61 +385,6 @@ To create the cluster and local queues above, save the snippet to ``kueue-two-cl
     - `cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_
     - `fair sharing <https://kueue.sigs.k8s.io/docs/concepts/preemption/#fair-sharing>`_
 
-
-Deploy SkyPilot API servers
----------------------------
-
-In this example, two SkyPilot API servers are deployed to the cluster so that each team interacts with their own SkyPilot API server.
-
-You can deploy a SkyPilot API on kubernetes following the steps in :ref:`Kubernetes Deployment Guide <sky-api-server-deploy>`.
-
-However, since we are deploying two API servers on the same cluster, we need to modify the deployment to share the same ingress.
-
-If the following command is used to deploy the SkyPilot API server on ``team1`` namespace:
-
-.. code-block:: bash
-
-  NAMESPACE=team1
-  RELEASE_NAME=skypilot-team1
-  WEB_USERNAME=team1-user
-  # Replace with your password to configure the password for the API server
-  WEB_PASSWORD=team1-password
-  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING
-
-The command to deploy ``team2`` namespace is similar, except the last two lines are added to share the same ingress as ``team1``:
-
-.. code-block:: bash
-
-  NAMESPACE=team2
-  RELEASE_NAME=skypilot-team2
-  WEB_USERNAME=team2-user
-  # Replace with your password to configure the password for the API server
-  WEB_PASSWORD=team2-password
-  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING \
-    --set ingress-nginx.enabled=false \
-    --set ingress.path=/team2
-
-| In this setup, if ``team1``'s API server endpoint as determined by :ref:`this command <sky-get-api-server-url>` is
-| ``http://team1-user:team1-password@1.1.1.1``
-
-| Then ``team2``'s API server endpoint is
-| ``http://team2-user:team2-password@1.1.1.1/team2``
-
-By default, each SkyPilot API server is granted permissions to use its hosting Kubernetes cluster
-and will launch tasks in the same namespace as the API server.
-
-.. image:: ../../../images/examples/k8s-with-kueue/api-servers.svg
-   :alt: API servers deployment
-   :width: 80%
-   :align: center
 
 Configure SkyPilot API server to use Kueue
 ------------------------------------------
