@@ -3087,9 +3087,13 @@ def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str) -> bool:
         if current_command:
             # Strip the path and keep only the executable name
             executable = os.path.basename(current_command)
-            if executable != current_command:
-                exec_info['command'] = executable
-                updated = True
+            exec_info['command'] = constants.SKY_K8S_EXEC_AUTH_WRAPPER
+            exec_args = exec_info.setdefault('args', [])
+            exec_args.insert(0, executable)
+            updated = True
+            # if executable != current_command:
+            #     exec_info['command'] = executable
+            #     updated = True
 
     with open(output_path, 'w', encoding='utf-8') as file:
         yaml.safe_dump(config, file)
