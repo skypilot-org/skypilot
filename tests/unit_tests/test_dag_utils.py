@@ -42,8 +42,6 @@ def test_jobs_recovery_fill_default_values():
     assert len(resources) == 1
     assert resources[0].job_recovery['strategy'].lower(
     ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
-    import sys
-    print(resources[0].job_recovery, file=sys.stderr, flush=True)
     assert resources[0].job_recovery['max_restarts_on_errors'] == 3
 
     task_str = textwrap.dedent(f"""\
