@@ -193,9 +193,7 @@ export function TopBar() {
           </div>
 
           {/* Separator Re-added */}
-          {!isMobile && (
-            <span className="text-gray-300 px-1">|</span>
-          )}
+          {!isMobile && <span className="text-gray-300 px-1">|</span>}
 
           {/* Workspaces Link */}
           <Link

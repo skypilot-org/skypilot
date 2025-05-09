@@ -54,7 +54,13 @@ export function Clusters() {
     const fetchWorkspaces = async () => {
       const allClusters = await getClusters();
       // Use 'default' for clusters with no/empty workspace
-      const uniqueWorkspaces = [...new Set(allClusters.map(cluster => (cluster.workspace || 'default')).filter(ws => ws))];
+      const uniqueWorkspaces = [
+        ...new Set(
+          allClusters
+            .map((cluster) => cluster.workspace || 'default')
+            .filter((ws) => ws)
+        ),
+      ];
       setWorkspaces(uniqueWorkspaces.sort());
     };
     fetchWorkspaces();
@@ -76,18 +82,19 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
-          <Select
-            value={workspaceFilter}
-            onValueChange={setWorkspaceFilter}
-          >
+          <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
             <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm">
               <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE ? 'All Workspaces' : workspaceFilter}
+                {workspaceFilter === ALL_WORKSPACES_VALUE
+                  ? 'All Workspaces'
+                  : workspaceFilter}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>All Workspaces</SelectItem>
-              {workspaces.map(ws => (
+              <SelectItem value={ALL_WORKSPACES_VALUE}>
+                All Workspaces
+              </SelectItem>
+              {workspaces.map((ws) => (
                 <SelectItem key={ws} value={ws}>
                   {ws}
                 </SelectItem>
@@ -177,7 +184,7 @@ export function ClusterTable({
     let filteredData = data;
     // Filter if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
     if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
-      filteredData = data.filter(item => {
+      filteredData = data.filter((item) => {
         const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
         return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
       });
@@ -333,7 +340,7 @@ export function ClusterTable({
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
                     <TableCell>
-                      <Link 
+                      <Link
                         href={`/workspaces/${encodeURIComponent(item.workspace || 'default')}`}
                         className="text-blue-600 hover:underline"
                       >

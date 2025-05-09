@@ -4,10 +4,23 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { getWorkspaceConfig } from '@/data/connectors/workspaces';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircularProgress } from '@mui/material';
-import { ServerIcon, BriefcaseIcon, CloudIcon, BookDocIcon, TickIcon } from '@/components/elements/icons';
+import {
+  ServerIcon,
+  BriefcaseIcon,
+  CloudIcon,
+  BookDocIcon,
+  TickIcon,
+} from '@/components/elements/icons';
 
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
@@ -21,22 +34,47 @@ export function Workspaces() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [clustersResponse, managedJobsResponse] = await Promise.all([
+        const [workspaceConfig, clustersResponse, managedJobsResponse] = await Promise.all([
+          getWorkspaceConfig(),
           getClusters(),
           getManagedJobs(),
         ]);
 
+        const configuredWorkspaceNames = Object.keys(workspaceConfig);
+
         const clusterNameToWorkspace = {};
-        clustersResponse.forEach(c => {
+        clustersResponse.forEach((c) => {
           clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
         });
 
         let totalRunningClusters = 0;
         const workspaceStatsAggregator = {};
 
-        clustersResponse.forEach(cluster => {
+        if (configuredWorkspaceNames.length > 0) {
+          configuredWorkspaceNames.forEach(wsName => {
+            workspaceStatsAggregator[wsName] = {
+              name: wsName,
+              totalClusterCount: 0,
+              runningClusterCount: 0,
+              managedJobsCount: 0,
+              clouds: new Set(),
+            };
+          });
+        }
+
+        clustersResponse.forEach((cluster) => {
           const wsName = cluster.workspace || 'default';
-          if (!workspaceStatsAggregator[wsName]) {
+          if (configuredWorkspaceNames.length > 0 && !workspaceStatsAggregator[wsName]) {
+            if (!workspaceStatsAggregator[wsName]) {
+              workspaceStatsAggregator[wsName] = {
+                name: wsName,
+                totalClusterCount: 0,
+                runningClusterCount: 0,
+                managedJobsCount: 0,
+                clouds: new Set(),
+              };
+            }
+          } else if (!workspaceStatsAggregator[wsName]) {
             workspaceStatsAggregator[wsName] = {
               name: wsName,
               totalClusterCount: 0,
@@ -45,6 +83,7 @@ export function Workspaces() {
               clouds: new Set(),
             };
           }
+          
           workspaceStatsAggregator[wsName].totalClusterCount++;
           if (cluster.status === 'RUNNING') {
             workspaceStatsAggregator[wsName].runningClusterCount++;
@@ -54,13 +93,14 @@ export function Workspaces() {
             workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
           }
         });
-        
+
         setGlobalTotalClusters(clustersResponse.length);
         setGlobalRunningClusters(totalRunningClusters);
-        
+
         const jobs = managedJobsResponse.jobs || [];
-        jobs.forEach(job => {
-          const jobClusterName = job.cluster_name || (job.resources && job.resources.cluster_name);
+        jobs.forEach((job) => {
+          const jobClusterName =
+            job.cluster_name || (job.resources && job.resources.cluster_name);
           if (jobClusterName) {
             const wsName = clusterNameToWorkspace[jobClusterName];
             if (wsName && workspaceStatsAggregator[wsName]) {
@@ -68,16 +108,21 @@ export function Workspaces() {
             }
           }
         });
-        
-        setGlobalManagedJobs(jobs.length);
 
-        const finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(ws => ({
+        setGlobalManagedJobs(jobs.length);
+        
+        let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map((ws) => ({
           ...ws,
           clouds: Array.from(ws.clouds).sort(),
-        })).sort((a,b) => a.name.localeCompare(b.name));
+        }));
+
+        if (configuredWorkspaceNames.length > 0) {
+            finalWorkspaceDetails = finalWorkspaceDetails.filter(ws => configuredWorkspaceNames.includes(ws.name));
+        }
+
+        finalWorkspaceDetails.sort((a, b) => a.name.localeCompare(b.name));
 
         setWorkspaceDetails(finalWorkspaceDetails);
-
       } catch (error) {
         console.error('Error fetching comprehensive workspace data:', error);
         setWorkspaceDetails([]);
@@ -117,13 +162,17 @@ export function Workspaces() {
             <div className="flex items-center">
               <BookDocIcon className="w-5 h-5 mr-2 text-sky-600" />
               <span className="text-sm text-gray-600">Workspaces:</span>
-              <span className="ml-1 text-xl font-semibold text-sky-700">{workspaceDetails.length}</span>
+              <span className="ml-1 text-xl font-semibold text-sky-700">
+                {workspaceDetails.length}
+              </span>
             </div>
           </div>
           <div className="p-2">
             <div className="flex items-center">
               <ServerIcon className="w-5 h-5 mr-2 text-sky-600" />
-              <span className="text-sm text-gray-600">Clusters (Running / Total):</span>
+              <span className="text-sm text-gray-600">
+                Clusters (Running / Total):
+              </span>
               <span className="ml-1 text-xl font-semibold text-sky-700">
                 {globalRunningClusters} / {globalTotalClusters}
               </span>
@@ -133,7 +182,9 @@ export function Workspaces() {
             <div className="flex items-center">
               <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600" />
               <span className="text-sm text-gray-600">Managed Jobs:</span>
-              <span className="ml-1 text-xl font-semibold text-sky-700">{globalManagedJobs}</span>
+              <span className="ml-1 text-xl font-semibold text-sky-700">
+                {globalManagedJobs}
+              </span>
             </div>
           </div>
         </div>
@@ -148,10 +199,12 @@ export function Workspaces() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {workspaceDetails.map(ws => (
+          {workspaceDetails.map((ws) => (
             <Card key={ws.name}>
               <CardHeader>
-                <CardTitle className="text-base font-medium">Workspace: <span className="font-semibold">{ws.name}</span></CardTitle>
+                <CardTitle className="text-base font-medium">
+                  Workspace: <span className="font-semibold">{ws.name}</span>
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-sm pb-2">
                 <div className="py-2 flex items-center justify-between">
@@ -168,26 +221,32 @@ export function Workspaces() {
                     <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
                     <span>Managed Jobs</span>
                   </div>
-                  <span className="font-normal text-gray-800">{ws.managedJobsCount}</span>
+                  <span className="font-normal text-gray-800">
+                    {ws.managedJobsCount}
+                  </span>
                 </div>
-                
               </CardContent>
-              
+
               <div className="px-6 pb-3 text-sm border-t border-gray-100 pt-3">
-                <h4 className="mb-1 text-xs text-gray-500 uppercase tracking-wider">Enabled Infra</h4>
+                <h4 className="mb-1 text-xs text-gray-500 uppercase tracking-wider">
+                  Enabled Infra
+                </h4>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {ws.clouds.map(cloud => (
-                    <div key={cloud} className="flex items-center text-gray-700">
+                  {ws.clouds.map((cloud) => (
+                    <div
+                      key={cloud}
+                      className="flex items-center text-gray-700"
+                    >
                       <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
                       <span>{cloud}</span>
                     </div>
                   ))}
                 </div>
               </div>
-            
+
               <CardFooter className="flex justify-end pt-3 border-t border-gray-100">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => handleEditWorkspace(ws.name)}
                 >
@@ -200,4 +259,4 @@ export function Workspaces() {
       )}
     </div>
   );
-} 
+}
