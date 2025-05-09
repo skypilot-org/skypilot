@@ -18,6 +18,7 @@ import uuid
 
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import registry
@@ -69,7 +70,8 @@ def create_table(cursor, conn):
         cluster_ever_up INTEGER DEFAULT 0,
         status_updated_at INTEGER DEFAULT null,
         config_hash TEXT DEFAULT null,
-        user_hash TEXT DEFAULT null)""")
+        user_hash TEXT DEFAULT null,
+        workspace TEXT DEFAULT 'default')""")
 
     # Table for Cluster History
     # usage_intervals: List[Tuple[int, int]]
@@ -163,6 +165,13 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'user_hash',
                                  'TEXT DEFAULT null')
+
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'clusters',
+                                 'workspace',
+                                 'TEXT DEFAULT \'default\'',
+                                 value_to_replace_existing_entries='default')
     conn.commit()
 
 
@@ -241,6 +250,7 @@ def add_or_update_cluster(cluster_name: str,
         usage_intervals.append((cluster_launched_at, None))
 
     user_hash = common_utils.get_user_hash()
+    workspace = skypilot_config.get_current_workspace()
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -251,7 +261,7 @@ def add_or_update_cluster(cluster_name: str,
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner, cluster_hash, '
         'storage_mounts_metadata, cluster_ever_up, status_updated_at, '
-        'config_hash, user_hash) '
+        'config_hash, user_hash, workspace) '
         'VALUES ('
         # name
         '?, '
@@ -294,8 +304,9 @@ def add_or_update_cluster(cluster_name: str,
         # config_hash
         'COALESCE(?, (SELECT config_hash FROM clusters WHERE name=?)),'
         # user_hash: keep original user_hash if it exists
-        'COALESCE('
-        '(SELECT user_hash FROM clusters WHERE name=?), ?)'
+        'COALESCE((SELECT user_hash FROM clusters WHERE name=?), ?),'
+        # keep original workspace if it exists
+        'COALESCE((SELECT workspace FROM clusters WHERE name=?), ?)'
         ')',
         (
             # name
@@ -335,6 +346,9 @@ def add_or_update_cluster(cluster_name: str,
             # user_hash
             cluster_name,
             user_hash,
+            # workspace
+            cluster_name,
+            workspace,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -676,7 +690,7 @@ def get_cluster_from_name(
     rows = _DB.cursor.execute(
         'SELECT name, launched_at, handle, last_use, status, autostop, '
         'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
-        'cluster_ever_up, status_updated_at, config_hash, user_hash '
+        'cluster_ever_up, status_updated_at, config_hash, user_hash, workspace '
         'FROM clusters WHERE name=(?)', (cluster_name,)).fetchall()
     for row in rows:
         # Explicitly specify the number of fields to unpack, so that
@@ -684,7 +698,7 @@ def get_cluster_from_name(
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
-         status_updated_at, config_hash, user_hash) = row
+         status_updated_at, config_hash, user_hash, workspace) = row
         user_hash = _get_user_hash_or_current_user(user_hash)
         # TODO: use namedtuple instead of dict
         record = {
@@ -705,6 +719,7 @@ def get_cluster_from_name(
             'user_hash': user_hash,
             'user_name': get_user(user_hash).name,
             'config_hash': config_hash,
+            'workspace': workspace,
         }
         return record
     return None
@@ -714,13 +729,13 @@ def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select name, launched_at, handle, last_use, status, autostop, '
         'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
-        'cluster_ever_up, status_updated_at, config_hash, user_hash '
+        'cluster_ever_up, status_updated_at, config_hash, user_hash, workspace '
         'from clusters order by launched_at desc').fetchall()
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
-         status_updated_at, config_hash, user_hash) = row
+         status_updated_at, config_hash, user_hash, workspace) = row
         user_hash = _get_user_hash_or_current_user(user_hash)
         # TODO: use namedtuple instead of dict
         record = {
@@ -741,6 +756,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'user_hash': user_hash,
             'user_name': get_user(user_hash).name,
             'config_hash': config_hash,
+            'workspace': workspace,
         }
 
         records.append(record)

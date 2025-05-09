@@ -559,3 +559,9 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     _dict = overlay_skypilot_config(original_config=_dict,
                                     override_configs=parsed_config)
     return parsed_config
+
+
+# TODO Replace this with whatever syang cooks up
+def get_current_workspace() -> str:
+    """Returns the current active workspace."""
+    return get_nested(('workspace',), default_value='default')

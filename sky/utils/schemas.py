@@ -1093,6 +1093,10 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            # TODO Replace this with whatever syang cooks up
+            'workspace': {
+                'type': 'string',
+            },
             'jobs': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,

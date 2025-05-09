@@ -61,13 +61,9 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     status_columns = [
         StatusColumn('NAME', _get_name),
-    ]
-    if show_user:
-        status_columns.append(StatusColumn('USER', _get_user_name))
-        status_columns.append(
-            StatusColumn('USER_ID', _get_user_hash, show_by_default=False))
-
-    status_columns += [
+        StatusColumn('USER', _get_user_name, show_by_default=show_user),
+        StatusColumn('USER_ID', _get_user_hash, show_by_default=False),
+        StatusColumn('WORKSPACE', _get_workspace, show_by_default=False),
         StatusColumn('LAUNCHED', _get_launched),
         StatusColumn('RESOURCES',
                      _get_resources,
@@ -222,6 +218,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # exist in those cases.
 _get_name = (lambda cluster_record: cluster_record['name'])
 _get_user_hash = (lambda cluster_record: cluster_record['user_hash'])
+_get_workspace = (lambda cluster_record: cluster_record['workspace'])
 _get_user_name = (lambda cluster_record: cluster_record.get('user_name', '-'))
 _get_launched = (lambda cluster_record: log_utils.readable_time_duration(
     cluster_record['launched_at']))
