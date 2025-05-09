@@ -282,6 +282,15 @@ def _get_cloud_dependencies_installation_commands(
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
                             f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+            if clouds.cloud_in_iterable(clouds.Kubernetes(), enabled_clouds):
+                # Install gke-gcloud-auth-plugin used for exec-auth with GKE.
+                # We install the plugin here instead of the next elif branch
+                # because gcloud is required to install the plugin, so the order
+                # of command execution is critical.
+                commands.append(
+                    '(command -v gke-gcloud-auth-plugin &>/dev/null || '
+                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null && '  # pylint: disable=line-too-long
+                    'sudo find ~/google-cloud-sdk -name \'gke-gcloud-auth-plugin\' -type f -exec ln -s {} /usr/local/bin/gke-gcloud-auth-plugin \;))')  # pylint: disable=line-too-long,anomalous-backslash-in-string
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -305,7 +314,9 @@ def _get_cloud_dependencies_installation_commands(
                 '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
-                'kubectl /usr/local/bin/kubectl))')
+                'kubectl /usr/local/bin/kubectl)) && '
+                f'echo -e \'#!/bin/bash\\nexport PATH="{constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # pylint: disable=line-too-long
+                f'sudo chmod +x /usr/local/bin/{constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # pylint: disable=line-too-long
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(

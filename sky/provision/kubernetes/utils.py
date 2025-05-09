@@ -1540,11 +1540,12 @@ def is_kubeconfig_exec_auth(
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = context_obj['name']
         exec_msg = ('exec-based authentication is used for '
-                    f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues with autodown or when running '
+                    f'Kubernetes context {ctx_name!r}. '
+                    'Make sure that the corresponding cloud provider is '
+                    'also enabled through `sky check` (e.g.: GCP for GKE). '
                     'Managed Jobs or SkyServe controller on Kubernetes. '
-                    'To fix, configure SkyPilot to create a service account '
-                    'for running pods by setting the following in '
+                    'Alternatively, configure SkyPilot to create a service '
+                    'account for running pods by setting the following in '
                     '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
@@ -2808,8 +2809,14 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
-    if context == kubernetes.in_cluster_context_name():
-        # If the context (also used as the region) is in-cluster, we need to
+    local_credentials = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS
+    use_local_credentials = (
+        local_credentials.value == skypilot_config.get_nested(
+            ('kubernetes', 'remote_identity'), None))
+    if (not use_local_credentials and
+            context == kubernetes.in_cluster_context_name()):
+        # If the context (also used as the region) is in-cluster, and we are
+        # not using local credentials (in which there is no service role)
         # we need to use in-cluster auth by setting the context to None.
         context = None
     return context
@@ -3071,3 +3078,38 @@ def _get_kubeconfig_path() -> str:
                          'config file path with $KUBECONFIG. Current '
                          f'path(s) are {kubeconfig_path}.')
     return kubeconfig_path
+
+
+def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str) -> bool:
+    """Strip path information from exec plugin commands in a kubeconfig file.
+    Will create a new kubeconfig file under <output_path> regardless of
+    whether a change has been made
+    Args:
+        kubeconfig_path (str): Path to the input kubeconfig file
+        output_path (str): Path where the potentially modified kubeconfig file
+          will be saved
+    Returns: whether config was updated, for logging purposes
+    """
+    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+
+    updated = False
+    for user in config.get('users', []):
+        exec_info = user.get('user', {}).get('exec', {})
+        current_command = exec_info.get('command', '')
+
+        if current_command:
+            # Strip the path and keep only the executable name
+            executable = os.path.basename(current_command)
+            exec_info['command'] = constants.SKY_K8S_EXEC_AUTH_WRAPPER
+            exec_args = exec_info.setdefault('args', [])
+            exec_args.insert(0, executable)
+            updated = True
+            # if executable != current_command:
+            #     exec_info['command'] = executable
+            #     updated = True
+
+    with open(output_path, 'w', encoding='utf-8') as file:
+        yaml.safe_dump(config, file)
+
+    return updated
