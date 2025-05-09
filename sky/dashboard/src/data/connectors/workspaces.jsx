@@ -71,22 +71,35 @@ export async function getWorkspaces() {
 
     const resultData = await resultResponse.json();
 
+    // Log the entire resultData object to inspect its structure
+    console.log('[Connector Debug] Full resultData from /api/get:', resultData);
+
     // Step 4: Check task status and return the actual workspace data
     if (resultData.status === 'FAILED') {
       const errorMessage = resultData.error || (resultData.result && resultData.result.error) || 'Unknown error during task execution';
       throw new Error(`Fetching workspace data failed for request ID ${requestId}: ${errorMessage}`);
     }
     
-    if (resultData.status !== 'SUCCESSFUL' && resultData.status !== 'COMPLETED') {
-        // Add a log for unexpected statuses that aren't explicitly 'FAILED'
-        // as /api/get is expected to wait until terminal state.
-        console.warn(`Received unexpected status '${resultData.status}' for request ID ${requestId}. Proceeding with result if available.`);
+    // The server.py api_get returns the result in `return_value` for SUCCEEDED tasks.
+    // The `return_value` is a JSON string that needs to be parsed.
+    let workspaceData = {};
+    if (resultData.status === 'SUCCEEDED' && resultData.return_value) {
+      try {
+        workspaceData = JSON.parse(resultData.return_value);
+        console.log('Successfully parsed workspace data from return_value:', workspaceData);
+      } catch (parseError) {
+        console.error('Failed to parse workspace data from return_value:', parseError, 'Raw return_value:', resultData.return_value);
+        throw new Error(`Failed to parse workspace data for request ID ${requestId}: ${parseError.message}`);
+      }
+    } else if (resultData.result) {
+      // Fallback or handling for other successful statuses if they use .result (though SUCCEEDED uses return_value)
+      console.warn(`Using resultData.result as fallback for status ${resultData.status}`);
+      workspaceData = resultData.result; 
     }
 
-    // The resultData.result should contain the workspace configuration object.
-    // Example: { "ws1": {...}, "ws2": {...} } or just {}
-    console.log('Successfully fetched workspace data:', resultData.result);
-    return resultData.result || {};
+    // This log is kept for consistency but workspaceData is the more accurate variable now
+    console.log('Effectively fetched workspace data (to be returned):', workspaceData);
+    return workspaceData || {}; // Return the parsed data or an empty object
   } catch (error) {
     console.error('Failed to fetch workspaces (in getWorkspaces function):', error.message, error.stack);
     throw error; // Re-throw to allow UI to handle it

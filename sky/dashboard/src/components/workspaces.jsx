@@ -13,7 +13,8 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CircularProgress } from '@mui/material';
+import { CircularProgress, Modal, Box, Typography, IconButton } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import {
   ServerIcon,
   BriefcaseIcon,
@@ -30,6 +31,12 @@ export function Workspaces() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  // State for the modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedWorkspaceConfig, setSelectedWorkspaceConfig] = useState(null);
+  // State to store the raw fetched workspace configurations
+  const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -41,6 +48,7 @@ export function Workspaces() {
         ]);
 
         console.log('[Workspaces Debug] Raw fetchedWorkspacesConfig:', fetchedWorkspacesConfig);
+        setRawWorkspacesData(fetchedWorkspacesConfig); // Corrected: fetchedWorkspacesConfig
 
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
         console.log('[Workspaces Debug] configuredWorkspaceNames:', configuredWorkspaceNames);
@@ -140,8 +148,35 @@ export function Workspaces() {
     fetchData();
   }, []);
 
-  const handleEditWorkspace = (workspaceName) => {
-    router.push(`/workspaces/${encodeURIComponent(workspaceName)}`);
+  const handleShowWorkspaceDetails = (workspaceName) => {
+    if (rawWorkspacesData && rawWorkspacesData[workspaceName]) {
+      setSelectedWorkspaceConfig(rawWorkspacesData[workspaceName]);
+      setIsModalOpen(true);
+    } else {
+      console.error(`Configuration not found for workspace: ${workspaceName}`);
+      // Optionally: show a toast notification if config is missing
+    }
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedWorkspaceConfig(null);
+  };
+
+  // Style for the modal
+  const modalStyle = {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '80%',
+    maxWidth: 600,
+    bgcolor: 'background.paper',
+    border: '2px solid #000',
+    boxShadow: 24,
+    p: 4,
+    maxHeight: '90vh',
+    overflowY: 'auto',
   };
 
   if (loading) {
@@ -253,7 +288,7 @@ export function Workspaces() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleEditWorkspace(ws.name)}
+                  onClick={() => handleShowWorkspaceDetails(ws.name)}
                 >
                   Details
                 </Button>
@@ -261,6 +296,31 @@ export function Workspaces() {
             </Card>
           ))}
         </div>
+      )}
+
+      {selectedWorkspaceConfig && (
+        <Modal
+          open={isModalOpen}
+          onClose={handleCloseModal}
+          aria-labelledby="workspace-config-modal-title"
+          aria-describedby="workspace-config-modal-description"
+        >
+          <Box sx={modalStyle}>
+            <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Typography id="workspace-config-modal-title" variant="h6" component="h2">
+                Workspace Configuration: {selectedWorkspaceConfig.name || Object.keys(rawWorkspacesData).find(key => rawWorkspacesData[key] === selectedWorkspaceConfig)}
+              </Typography>
+              <IconButton onClick={handleCloseModal} aria-label="close">
+                <CloseIcon />
+              </IconButton>
+            </Box>
+            <Typography id="workspace-config-modal-description" sx={{ mt: 2 }} component="div">
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {JSON.stringify(selectedWorkspaceConfig, null, 2)}
+              </pre>
+            </Typography>
+          </Box>
+        </Modal>
       )}
     </div>
   );
