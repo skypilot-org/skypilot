@@ -6,14 +6,14 @@ High Availability Controller
 
 Overview
 --------
-By default, the SkyServe controller runs as a single instance (either a VM or a Kubernetes Pod). If this instance fails due to node issues, pod crashes, or other unexpected events, the service endpoint becomes unavailable until the controller is manually recovered or relaunched.
+By default, the SkyServe controller runs as a single instance (either a VM or a Kubernetes Pod). If this instance fails due to node issues, pod crashes, or other unexpected events, the controller plane becomes unavailable, impacting service management capabilities until the controller is manually recovered or relaunched.
 
-To enhance resilience and ensure service continuity, SkyServe offers a high availability mode for its controller. When enabled, the controller leverages the automatic recovery feature of Kubernetes Deployments to automatically recover from failures.
+To enhance resilience and ensure controller plane continuity, SkyServe offers a high availability mode for its controller. When enabled, the controller leverages the automatic recovery feature of Kubernetes Deployments to automatically recover from failures.
 
 Benefits of high availability controller:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Automatic Recovery:** The controller and load balancer can automatically restart after crashes or node failures.
-* **Service Continuity:** Minimizes downtime for your served applications.
+* **Automatic Controller Recovery:** The controller can automatically restart after crashes or node failures.
+* **Control Plane Continuity:** Minimizes downtime for the SkyServe control plane, ensuring that management operations for your services can continue with minimal interruption.
 
 Prerequisites
 -------------
@@ -29,20 +29,12 @@ How to enable high availability mode
 To enable high availability for the SkyServe controller, set the ``high_availability`` flag to ``true`` within the ``serve.controller`` section of your :ref:`SkyPilot configuration <config-yaml>`:
 
 .. code-block:: yaml
-    :emphasize-lines: 8,11
+    :emphasize-lines: 5,6
 
     serve:
-      # NOTE: these settings only take effect for a *new* SkyServe controller,
-      # not if you have an existing one (even if stopped).
       controller:
-        # --- Controller Resources ---
-        # Optional: Specify resources like cloud, region, cpus, disk_size
         resources:
           cloud: kubernetes  # High availability mode requires Kubernetes
-          # region: <your-k8s-region> # Optional
-          cpus: 2+           # Optional, example value
-          # disk_size: 100     # Optional, example value (affects PVC size in high availability mode)
-
         # --- Enable high availability ---
         high_availability: true
 
@@ -63,7 +55,7 @@ The high availability implementation relies on standard Kubernetes mechanisms to
 * **Seamless Continuation:** When a new pod starts after a failure, it automatically reconnects to existing resources and continues operations without manual intervention.
 
 .. note::
-    While the controller recovers automatically, the service endpoint, managed by the load balancer (which currently runs alongside the controller), may experience a brief downtime during the recovery process. Decoupling the load balancer from the controller for even higher availability is under active development.
+    While the controller itself recovers automatically, the service endpoint availability is primarily managed by the load balancer. Currently, the load balancer runs alongside the controller. If the node hosting both fails, the service endpoint may experience a brief downtime during the recovery process. Decoupling the load balancer from the controller for even higher availability is under active development (see `GitHub PR #4362 <https://github.com/skypilot-org/skypilot/pull/4362>`_). Once decoupled, if the controller pod/node fails, an independently running load balancer could continue to hold incoming traffic and route it to healthy service replicas, further improving service endpoint uptime during controller failures.
 
 The entire recovery process is handled transparently by SkyPilot and Kubernetes, requiring no action from users when failures occur.
 
