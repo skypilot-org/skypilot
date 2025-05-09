@@ -255,6 +255,11 @@ def optimize(
                              cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
+def workspaces() -> server_common.RequestId:
+    """Gets the workspaces."""
+    response = requests.get(f'{server_common.get_server_url()}/workspaces',
+                            cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
