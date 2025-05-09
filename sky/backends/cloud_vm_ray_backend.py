@@ -2431,6 +2431,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+        assert self.launched_resources.cloud is not None, (
+            self.launched_resources,
+            'cloud should have been set by the optimizer.')
         updated_to_skypilot_provisioner_after_provisioned = (
             self.launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
@@ -3148,6 +3151,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
             cloud = handle.launched_resources.cloud
+            assert cloud is not None, (
+                'cloud should have been set by the optimizer.')
             if not (cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
@@ -3253,6 +3258,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert here that all storage_mounts are MOUNT mode.
         """
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
+            assert handle.launched_resources.cloud is not None, (
+                handle.launched_resources,
+                'cloud should have been set by the optimizer.')
             controller_utils.replace_skypilot_config_path_in_file_mounts(
                 handle.launched_resources.cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
@@ -4154,6 +4162,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
+        assert cloud is not None, 'cloud should have been set by the optimizer.'
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
@@ -4366,6 +4375,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if handle.cluster_yaml is not None:
                 try:
                     cloud = handle.launched_resources.cloud
+                    assert cloud is not None, (
+                        'cloud should have been set by the optimizer.')
                     config = common_utils.read_yaml(handle.cluster_yaml)
                     cloud.check_features_are_supported(
                         handle.launched_resources,
@@ -4705,6 +4716,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
                                                            requested_ports_set)
             to_provision = handle.launched_resources
+            assert (to_provision is not None and
+                    to_provision.cloud is not None), (
+                        to_provision,
+                        'to_provision should have been set by the optimizer.')
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:

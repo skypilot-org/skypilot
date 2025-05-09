@@ -605,7 +605,7 @@ def write_cluster_config(
     # other cases, we exclude the cloud from credential file uploads after
     # running required checks.
     assert cluster_name is not None
-    excluded_clouds = set()
+    excluded_clouds_list: List[clouds.Cloud] = []
     remote_identity_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
@@ -638,9 +638,9 @@ def write_cluster_config(
         if isinstance(cloud, clouds.Kubernetes):
             if skypilot_config.get_nested(
                 ('kubernetes', 'allowed_contexts'), None) is None:
-                excluded_clouds.add(cloud)
+                excluded_clouds_list.append(cloud)
         else:
-            excluded_clouds.add(cloud)
+            excluded_clouds_list.append(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
         remote_identity_config = skypilot_config.get_nested(
@@ -648,9 +648,10 @@ def write_cluster_config(
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds.add(cloud_obj)
+                excluded_clouds_list.append(cloud_obj)
 
-    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        set(excluded_clouds_list))
 
     private_key_path, _ = auth.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
@@ -1557,6 +1558,7 @@ def check_owner_identity(cluster_name: str) -> None:
         return
 
     cloud = handle.launched_resources.cloud
+    assert cloud is not None, 'cloud should have been set by the optimizer.'
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
     if user_identities is None:
@@ -1721,6 +1723,7 @@ def check_can_clone_disk_and_override_task(
 
     new_task_resources = []
     original_cloud = handle.launched_resources.cloud
+    assert original_cloud is not None, 'cloud should have been set by the optimizer.'
     original_cloud.check_features_are_supported(
         handle.launched_resources,
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
@@ -1739,7 +1742,7 @@ def check_can_clone_disk_and_override_task(
             continue
         has_cloud_met = True
 
-        override_param = {}
+        override_param: Dict[str, Any] = {}
         if task_resources.cloud is None:
             override_param['cloud'] = original_cloud
         if task_resources.region is None:
@@ -1933,7 +1936,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
-
+    assert handle.launched_resources.cloud is not None, (
+        handle.launched_resources,
+        'cloud should have been set by the optimizer.')
     if (not node_statuses and handle.launched_resources.cloud.STATUS_VERSION >=
             clouds.StatusVersion.SKYPILOT):
         # Note: launched_at is set during sky launch, even on an existing
@@ -2467,7 +2472,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -2967,6 +2972,7 @@ def get_endpoints(cluster: str,
 
     launched_resources = handle.launched_resources
     cloud = launched_resources.cloud
+    assert cloud is not None, 'cloud should have been set by the optimizer.'
     try:
         cloud.check_features_are_supported(
             launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -2982,6 +2988,9 @@ def get_endpoints(cluster: str,
                                              head_ip=handle.head_ip,
                                              provider_config=config['provider'])
 
+    assert handle.launched_resources.cloud is not None, (
+        handle.launched_resources,
+        'cloud should have been set by the optimizer.')
     # Validation before returning the endpoints
     if port is not None:
         # If the requested endpoint was not to be exposed
