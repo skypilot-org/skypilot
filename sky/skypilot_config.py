@@ -561,12 +561,6 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-# TODO Replace this with whatever syang cooks up
-def get_current_workspace() -> str:
-    """Returns the current active workspace."""
-    return get_nested(('workspace',), default_value='default')
-
-
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     workspaces = get_nested(('workspaces',), default_value={})
