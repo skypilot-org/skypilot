@@ -5,7 +5,7 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import Link from 'next/link';
@@ -30,6 +30,15 @@ import {
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
+const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
 
 export function Clusters() {
   const [loading, setLoading] = useState(false);
@@ -37,7 +46,19 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
+  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE); // Default to ALL_WORKSPACES_VALUE
+  const [workspaces, setWorkspaces] = useState([]);
   const isMobile = useMobile();
+
+  useEffect(() => {
+    const fetchWorkspaces = async () => {
+      const allClusters = await getClusters();
+      // Use 'default' for clusters with no/empty workspace
+      const uniqueWorkspaces = [...new Set(allClusters.map(cluster => (cluster.workspace || 'default')).filter(ws => ws))];
+      setWorkspaces(uniqueWorkspaces.sort());
+    };
+    fetchWorkspaces();
+  }, []);
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
@@ -63,6 +84,25 @@ export function Clusters() {
               <span className="ml-2 text-gray-500">Loading...</span>
             </div>
           )}
+          <Select
+            value={workspaceFilter}
+            onValueChange={setWorkspaceFilter}
+          >
+            <SelectTrigger className="h-8 w-48 mr-2 text-sm">
+              {/* Show "All Workspaces" if current filter is ALL_WORKSPACES_VALUE, otherwise show the filter value */}
+              <SelectValue placeholder="Filter by workspace...">
+                {workspaceFilter === ALL_WORKSPACES_VALUE ? 'All Workspaces' : workspaceFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_WORKSPACES_VALUE}>All Workspaces</SelectItem>
+              {workspaces.map(ws => (
+                <SelectItem key={ws} value={ws}>
+                  {ws}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="ghost"
             onClick={handleRefresh}
@@ -78,6 +118,7 @@ export function Clusters() {
         refreshInterval={10000}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        workspaceFilter={workspaceFilter}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -108,6 +149,7 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  workspaceFilter,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -133,8 +175,16 @@ export function ClusterTable({
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    let filteredData = data;
+    // Filter if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
+    if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
+      filteredData = data.filter(item => {
+        const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
+        return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
+      });
+    }
+    return sortData(filteredData, sortConfig.key, sortConfig.direction);
+  }, [data, sortConfig, workspaceFilter]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
