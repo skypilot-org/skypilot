@@ -26,6 +26,7 @@ class Options(enum.Enum):
     DO_PUSHING_TO_REPLICA = ('DO_PUSHING_TO_REPLICA', False)
     USE_V2_STEALING = ('USE_V2_STEALING', False)
     DISABLE_SELECTIVE_PUSHING = ('DISABLE_SELECTIVE_PUSHING', False)
+    DISABLE_LEAST_LOAD_IN_PREFIX = ('DISABLE_LEAST_LOAD_IN_PREFIX', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         self.env_var = env_var

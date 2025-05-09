@@ -17,6 +17,7 @@ OAIChatHistory = List[Dict[str, str]]
 single_lb_clusters = [
     'sgl-router',
     'sgl-router-pull',
+    'sgl-router-no-fallback',
     'vanilla-least-load',
     'global-least-load',
     'consistent-hashing',

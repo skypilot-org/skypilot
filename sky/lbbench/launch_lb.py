@@ -59,6 +59,9 @@ def _run_cmd(cmd: str):
 policy_and_extra_args = [
     (None, None),
     ('prefix_tree', None),
+    ('prefix_tree', {
+        'DISABLE_LEAST_LOAD_IN_PREFIX': 'true'
+    }),
     ('least_load', {
         'DISABLE_SELECTIVE_PUSHING': 'true'
     }),

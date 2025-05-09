@@ -13,6 +13,7 @@ from sky.lbbench import utils
 raw_describes = [
     'sgl',
     'sky_sgl_enhanced',
+    'sky_sgl_disable_least_load_fallback',
     'sky_vanilla_least_load',
     'sky_least_load_enhanced',
     'sky_consistent_hashing',
@@ -34,11 +35,14 @@ raw_describes = [
     'sky_walk_prefix',
     'sky_walk_ll',
     'sky_walk_rr',
-    'sky_walk_ch',
+    # 'sky_walk_ch',
+    'sky_walk_ch_synthesize',
+    'sky_walk_prefix_enhanced',
 ]
 raw_presents = [
     'SGL',
     'SGL+SelPush',
+    'SGLNoLLFallback',
     'LL',
     'LL+SelPush',
     # 'ConsistentHashing',
@@ -61,27 +65,30 @@ raw_presents = [
     'SkyWalk/LL',
     'SkyWalk/RR',
     'SkyWalk/CH',
+    'SkyWalk/PrefixEnahnced',
 ]
 
 enabled_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
-    2,  # vanilla least load
-    3,  # global least load
-    4,  # consistent hashing
-    5,  # consistent hashing with selective pushing
-    6,  # round robin
-    7,  # rr with selective pushing
-    8,  # sky pulling in lb, pulling in replica, but workload stealing
-    9,  # sky pulling in lb, pulling in replica, but steal small #requests
-    10,  # sky pushing in lb, pulling in replica
-    11,  # sky pushing in lb, pushing in replica
-    12,  # selective pushing for both lb and replica. with prefix tree.
-    13,  # selective pushing for both lb and replica. with least load.
-    14,  # selective pushing for both lb and replica. with round robin.
-    15,  # selective pushing for both lb and replica. with consistent hashing.
+    2,  # sgl router no least load fallback
+    3,  # vanilla least load
+    4,  # global least load
+    5,  # consistent hashing
+    6,  # consistent hashing with selective pushing
+    7,  # round robin
+    8,  # rr with selective pushing
+    9,  # sky pulling in lb, pulling in replica, but workload stealing
+    10,  # sky pulling in lb, pulling in replica, but steal small #requests
+    11,  # sky pushing in lb, pulling in replica
+    12,  # sky pushing in lb, pushing in replica
+    13,  # selective pushing for both lb and replica. with prefix tree.
+    14,  # selective pushing for both lb and replica. with least load.
+    15,  # selective pushing for both lb and replica. with round robin.
+    16,  # selective pushing for both lb and replica. with consistent hashing.
+    17,  # same with 12 but disable least load fallback for < 50% match.
 ]
-enabled_systems = [6, 7, 15]
+enabled_systems = [16]
 # enabled_systems = [15]
 
 describes = [raw_describes[i] for i in enabled_systems]

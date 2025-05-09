@@ -374,6 +374,10 @@ class PrefixTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         self.tree = prefix_tree.PrefixTree()
         self.config = PrefixTreeConfig()
         self.load_balancing_enabled: bool = False
+        self.least_load_fallback: bool = True
+
+    def disbale_least_load_fallback(self) -> None:
+        self.least_load_fallback = False
 
     def enable_load_balancing(self) -> None:
         self.load_balancing_enabled = True
@@ -431,7 +435,7 @@ class PrefixTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         logger.debug(f'Matched rate: {matched_rate} for request {text[:100]}.')
         if cache_threshold is None:
             cache_threshold = self.config.cache_threshold
-        if matched_rate > cache_threshold:
+        if not self.least_load_fallback or matched_rate > cache_threshold:
             # TODO(tian): Hack. Fix this.
             return_matched_rate = kwargs.get('return_matched_rate', False)
             if return_matched_rate:
