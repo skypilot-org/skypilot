@@ -682,7 +682,8 @@ def terminate_instances(
         else:
             for instance in instances:
                 instance.modify_attribute(Groups=[default_sg.id])
-                logger.info(f'Moved instance {instance.id} to '
+                logger.info(f'Moved instance {instance.id} with cluster '
+                            f'name {cluster_name_on_cloud} to '
                             'default security group.')
     instances.terminate()
     if skip_cleanup_sg:

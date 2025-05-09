@@ -7,8 +7,23 @@ import sky
 
 OAIChatHistory = List[Dict[str, str]]
 
-sky_sgl_enhanced_cluster = 'sgl-router-pull'
-sgl_cluster = 'sgl-router'
+# sgl_cluster = 'sgl-router'
+# sky_sgl_enhanced_cluster = 'sgl-router-pull'
+# vanilla_least_load_cluster = 'vanilla-least-load'
+# global_least_load_cluster = 'global-least-load'
+# consistent_hashing_cluster = 'consistent-hashing'
+# consistent_hashing_enhanced_cluster = 'consistent-hashing-enhanced'
+
+single_lb_clusters = [
+    'sgl-router',
+    'sgl-router-pull',
+    'vanilla-least-load',
+    'global-least-load',
+    'consistent-hashing',
+    'consistent-hashing-enhanced',
+    'round-robin',
+    'round-robin-enhanced',
+]
 
 
 def sky_serve_status() -> List[Dict[str, Any]]:

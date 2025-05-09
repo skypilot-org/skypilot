@@ -1538,6 +1538,7 @@ def _handle_services_request(
             endpoint = service_records[0]['endpoint']
             msg = '-' if endpoint is None else endpoint
         else:
+            service_records.sort(key=lambda x: x['name'])
             msg = serve_lib.format_service_table(service_records, show_all)
             service_not_found_msg = ''
             if service_names is not None:

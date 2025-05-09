@@ -4,13 +4,22 @@ import argparse
 import multiprocessing
 import shlex
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from sky.lbbench import gen_cmd
 from sky.lbbench import utils
 
+enabled_systems = [
+    i for i in gen_cmd.enabled_systems if i < len(utils.single_lb_clusters)
+]
+describes = [gen_cmd.raw_describes[i] for i in enabled_systems]
 
-def _prepare_sky_sgl_enhanced_cmd(st: Dict[str, Any],
-                                  ct: List[Dict[str, Any]]) -> str:
+
+def _prepare_sky_global_lb(st: Dict[str, Any],
+                           ct: List[Dict[str, Any]],
+                           cluster_name: str,
+                           policy: str,
+                           extra_envs: Optional[Dict[str, str]] = None) -> str:
     ip = None
     for c in ct:
         if c['name'].startswith('sky-serve-controller'):
@@ -19,17 +28,25 @@ def _prepare_sky_sgl_enhanced_cmd(st: Dict[str, Any],
     if ip is None:
         raise ValueError('SkyServe controller not found')
     controller_port = st['controller_port']
-    return (f'sky launch -c {utils.sky_sgl_enhanced_cluster} -d --fast '
+    envs = {
+        'IP': ip,
+        'PORT': controller_port,
+        'POLICY': policy,
+    }
+    if extra_envs is not None:
+        envs.update(extra_envs)
+    envs_str = ' '.join([f'--env {k}={v}' for k, v in envs.items()])
+    return (f'sky launch -c {cluster_name} -d --fast '
             '-y examples/serve/external-lb/global-sky-lb.yaml '
-            f'--env IP={ip} --env PORT={controller_port}')
+            f'{envs_str}')
 
 
-def _prepare_sgl_cmd(st: Dict[str, Any]) -> str:
+def _prepare_sgl_cmd(st: Dict[str, Any], cluster_name: str) -> str:
     worker_urls = []
     for r in st['replica_info']:
         worker_urls.append(r['endpoint'])
     worker_urls_str = shlex.quote(' '.join(worker_urls))
-    return (f'sky launch -c {utils.sgl_cluster} -d --fast '
+    return (f'sky launch -c {cluster_name} -d --fast '
             '-y examples/serve/external-lb/router.yaml '
             f'--env WORKER_URLS={worker_urls_str}')
 
@@ -39,35 +56,72 @@ def _run_cmd(cmd: str):
     subprocess.run(cmd, shell=True, check=True)
 
 
-def main():
+policy_and_extra_args = [
+    (None, None),
+    ('prefix_tree', None),
+    ('least_load', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('least_load', None),
+    ('consistent_hashing', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('consistent_hashing', None),
+    ('round_robin', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('round_robin', None),
+]
+
+
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--service-names', type=str, nargs='+', required=True)
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != 2:
-        raise ValueError('Expected 2 service names for '
-                         'sgl, sky-sgl-enhanced')
+    if len(sns) != len(enabled_systems):
+        raise ValueError(f'Expected {len(enabled_systems)} service names for '
+                         f'{", ".join(describes)}')
     print(sns)
     all_st = utils.sky_serve_status()
     ct = utils.sky_status()
     sn2st = {s['name']: s for s in all_st}
-    sgl_cmd = _prepare_sgl_cmd(sn2st[sns[0]])
-    sky_sgl_enhanced_cmd = _prepare_sky_sgl_enhanced_cmd(sn2st[sns[1]], ct)
-    print(sgl_cmd)
-    print(sky_sgl_enhanced_cmd)
+
+    def _get_single_cmd(idx: int) -> str:
+        idx_in_sns = enabled_systems.index(idx)
+        cluster_name = utils.single_lb_clusters[idx]
+        if idx == 0:
+            return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]], cluster_name)
+        if idx < len(utils.single_lb_clusters):
+            policy, extra_envs = policy_and_extra_args[idx]
+            assert policy is not None
+            return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
+                                          cluster_name, policy, extra_envs)
+        raise ValueError(f'Invalid index: {idx}')
+
+    commands = [_get_single_cmd(i) for i in enabled_systems]
+    for cmd in commands:
+        print(cmd)
     input('Press Enter to launch LBs...')
-    commands = [sky_sgl_enhanced_cmd, sgl_cmd]
-    processes = []
+
+    processes: List[multiprocessing.Process] = []
     for cmd in commands:
         process = multiprocessing.Process(target=_run_cmd, args=(cmd,))
         processes.append(process)
         process.start()
     for process in processes:
         process.join()
+
+    logs = [
+        f'sky logs {cluster_name}\n'
+        for i, cluster_name in enumerate(utils.single_lb_clusters)
+        if i in enabled_systems
+    ]
+
     print('Both load balancers have been launched successfully. '
           'Check status with: \n'
-          f'sky logs {utils.sgl_cluster}\n'
-          f'sky logs {utils.sky_sgl_enhanced_cluster}\n')
+          f'{"=" * 70}\n'
+          f'{"".join(logs)}')
 
 
 if __name__ == '__main__':

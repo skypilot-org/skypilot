@@ -41,6 +41,7 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
     e2e_latencies = []
     total_input_tokens = 0
     total_cached_tokens = 0
+    rp(f'num metrics: {len(oai.global_metrics)=}')
     for m in oai.global_metrics:
         if (m.ttft is None or m.e2e_latency is None or m.input_tokens is None or
                 m.output_tokens is None or m.cached_tokens is None):

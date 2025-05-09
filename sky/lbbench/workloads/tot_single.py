@@ -9,12 +9,15 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import Any, Awaitable, Dict, List, Union
+from typing import Any, Awaitable, Coroutine, Dict, List, Union
 
 from rich import print as rp
 
+from sky.adaptors import common as adaptors_common
 from sky.lbbench import oai
 from sky.lbbench import utils
+
+xxhash = adaptors_common.LazyImport('xxhash')
 
 dataset_link = 'https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl'  # pylint: disable=line-too-long
 
@@ -24,6 +27,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--num-branches', type=int, default=2)
     parser.add_argument('--duration', type=float, default=10)
     parser.add_argument('--seed', type=str, default='default')
+    parser.add_argument('--disable-parallel', action='store_true')
 
 
 def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
@@ -32,6 +36,7 @@ def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
         'num-branches': args.num_branches,
         'duration': args.duration,
         'seed': args.seed,
+        'disable-parallel': args.disable_parallel,
     }
 
 
@@ -52,123 +57,105 @@ async def _dummy_start() -> utils.OAIChatHistory:
 
 
 async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
-                       duration: float,
-                       real_user: str) -> List[utils.OAIChatHistory]:
-    del uid
+                       duration: float, real_user: str, num_users: int,
+                       disable_parallel: bool) -> List[utils.OAIChatHistory]:
     prompts = [
         PROPOSE_PLAN_PROMPT.format(question=question), EXECUTE_PLAN_PROMPT,
         REFLECT_PLAN_PROMPT, FINAL_ANSWER_PROMPT
     ]
-    tasks: List[asyncio.Task[Union[utils.OAIChatHistory, Exception]]] = [
-        asyncio.create_task(_dummy_start())
-    ]
+    tasks: List[Coroutine[Any, Any, Union[utils.OAIChatHistory,
+                                          Exception]]] = [_dummy_start()]
     results: List[utils.OAIChatHistory] = []
-    while tasks:
+    # current_task: Optional[asyncio.Task[Union[utils.OAIChatHistory,
+    #                                           Exception]]] = None
+    current_tasks: List[asyncio.Task[Union[utils.OAIChatHistory,
+                                           Exception]]] = []
+    # while tasks or current_task is not None:
+    while tasks or current_tasks:
         if time.time() - tic > duration:
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
-            #       f'[START CANCEL] User {uid} '
-            #       f'cancelling {len(tasks)} tasks')
+            len_cancelled = len(tasks) + len(current_tasks)
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}][START CANCEL] '
+                  f'User {uid} cancelling {len_cancelled} tasks')
             for task in tasks:
-                task.cancel()
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
-            #       f'[END CANCEL] User {uid} '
-            #       f'cancelled {len(tasks)} tasks')
+                task.close()
+            for current_task in current_tasks:
+                current_task.cancel()
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}][END CANCEL] '
+                  f'User {uid} cancelled {len_cancelled} tasks')
             return results
-        st_wait = time.time()
-        # print(f'[{tic:.1f}][{st_wait - tic:.3f}][START WAIT] User {uid} '
-        #       f'len tasks: {len(tasks)}')
-        # Check every 10 seconds.
-        timeout = min(10, duration - (time.time() - tic))
-        try:
-            done, pending = await asyncio.wait_for(asyncio.wait(
-                tasks, return_when=asyncio.FIRST_COMPLETED, timeout=timeout),
-                                                   timeout=timeout)
-        except asyncio.TimeoutError:
-            continue
-            # done, pending = [], tasks
-        ed_wait = time.time()
-        # print(f'[{tic:.1f}][{ed_wait - tic:.3f}]'
-        #       f'[END WAIT] User {uid} elapsed: '
-        #       f'{ed_wait - st_wait:.3f}, timeout: {timeout:.3f}, '
-        #       f'len done: {len(done)}, len pending: {len(pending)}')
-        if ed_wait - st_wait > timeout + 2:
-            print('>>> event-loop blocked for', ed_wait - st_wait, 's',
-                  len(done), len(pending), '        ', len(asyncio.all_tasks()))
-            # print(">>> loop time:", asyncio.get_running_loop().time(),
-            #     " wall:", time.perf_counter())
-            # import traceback
-            # for t in asyncio.all_tasks():
-            #     print('='*100, t, t.get_coro())
-            #     if not t.done():
-            #         traceback.print_stack(t.get_stack()[-1])
-        tasks = list(pending)
-        for task in done:
-            s = task.result()
-            if isinstance(s, Exception):
+
+        while tasks:
+            if disable_parallel and len(current_tasks) > 0:
+                break
+            task = tasks.pop(0)
+            current_task = asyncio.create_task(task)
+            current_tasks.append(current_task)
+
+        i = 0
+        while i < len(current_tasks):
+            current_task = current_tasks[i]
+            if not current_task.done():
+                i += 1
                 continue
-            # st_copy = time.time()
+
+            s = await current_task
+            current_tasks.pop(i)
+            if isinstance(s, Exception):
+                print(s)
+                continue
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}] User {uid} '
+                  f'done one task, {len(s)=}')
+
             s = copy.deepcopy(s)
-            # ed_copy = time.time()
-            # print(f'[{tic:.1f}][{ed_copy - tic:.3f}]'
-            #       f'[COPY] User {uid} elapsed: '
-            #       f'{ed_copy - st_copy:.3f}')
             if len(s) == len(prompts) * 2 or time.time() - tic > duration:
                 results.append(s)
                 continue
             prompt = prompts[len(s) // 2]
             s.append(utils.get_one_round('user', prompt))
+
             for _ in range(num_branches):
+                # hash_key = xxhash.xxh64(
+                #     json.dumps(s)[:100], seed=0).intdigest()
                 call_llm_coro = oai.call_chat_completion_async(
                     s,
                     temperature=temp,
-                    max_tokens=256,
+                    max_tokens=512,
                     uid=real_user,
                     stop=None,
                     tic=tic,
-                    duration=duration)
-                tasks.append(asyncio.create_task(call_llm_coro))
+                    duration=duration,
+                    hash_key=f'{real_user}-{uid}',
+                    # hash_key=f'{real_user}-{uid // (num_users // 5)}',
+                    # hash_key=str(hash_key),
+                )
+                tasks.append(call_llm_coro)
+
+        await asyncio.sleep(0.1)
+
     return results
 
 
 async def _user_task(tic: float, uid: int, questions: List[str],
-                     num_branches: int, duration: float,
-                     real_user: str) -> List[utils.OAIChatHistory]:
-    # time_to_sleep = uid * 10
-    # rp(f'User {uid}: sleep for {time_to_sleep} seconds to start')
-    # rp(f'User {uid}: {len(questions)} questions in total')
-    # await asyncio.sleep(time_to_sleep)
-    # rp(f'User {uid}: start sending requests')
-    # tic = time.time()
-    # tasks = []
+                     num_branches: int, duration: float, real_user: str,
+                     num_users: int,
+                     disable_parallel: bool) -> List[utils.OAIChatHistory]:
     results = []
-    cnt = 0
     iteration_cnt = 0
     while True:
         iteration_cnt += 1
+        cnt = 0
         for question in questions:
             cnt += 1
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
-            #       f'[START] User {uid} question {cnt} '
-            #       f'iteration {iteration_cnt}', flush=True)
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}][START] User {uid} '
+                  f'question {cnt} iteration {iteration_cnt}')
             result = await _tree_search(uid, question, num_branches, tic,
-                                        duration, real_user)
-            # print(f'[{tic:.1f}][{time.time() - tic:.3f}]'
-            #       f'[END] User {uid} question {cnt} '
-            #       f'iteration {iteration_cnt}', flush=True)
+                                        duration, real_user, num_users,
+                                        disable_parallel)
+            print(f'[{tic:.1f}][{time.time() - tic:.3f}][END] User {uid} '
+                  f'question {cnt} iteration {iteration_cnt}')
             results.extend(result)
             if time.time() - tic > duration:
                 return results
-    # for i, task in enumerate(asyncio.as_completed(tasks)):
-    #     result = await task
-    #     if isinstance(result, Exception):
-    #         rp(f'User {uid} FAILED: {result}.'
-    #            f'  Traceback: {traceback.format_exc()}')
-    #         continue
-    #     results.extend(result)
-    #     progress = f'({i+1}/{len(questions)})'
-    #     rp(f'User {uid}: {progress:^8} questions completed. '
-    #        f'Latency: {time.time() - tic:.3f}')
-    # return results
 
 
 def download_dataset(dp: str) -> None:
@@ -211,5 +198,6 @@ def launch_user_tasks(
     return [
         asyncio.create_task(
             _user_task(tic, uid, questions, args.num_branches, args.duration,
-                       seed)) for uid, questions in uid2questions.items()
+                       seed, num_users, args.disable_parallel))
+        for uid, questions in uid2questions.items()
     ]

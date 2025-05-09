@@ -399,6 +399,11 @@ class SkyServiceSpec:
                 f'Certfile: {self.tls_credential.certfile}')
 
     def __repr__(self) -> str:
+        ext_lb_policies = {}
+        if self.external_load_balancers is not None:
+            for lb in self.external_load_balancers:
+                ext_lb_policies[lb['resources']
+                                ['region']] = lb['load_balancing_policy']
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
@@ -406,7 +411,8 @@ class SkyServiceSpec:
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
             TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
-            Load Balancing Policy:            {self.load_balancing_policy}
+            Meta Load Balancing Policy:       {self.load_balancing_policy}
+            External Load Balancing Policy:   {json.dumps(ext_lb_policies)}
         """)
 
     @property

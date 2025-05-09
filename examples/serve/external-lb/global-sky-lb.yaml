@@ -5,6 +5,8 @@ name: load-balancer
 envs:
   IP:
   PORT:
+  POLICY:
+  DISABLE_SELECTIVE_PUSHING: false
 
 resources:
   # TODO(tian): Hack. We should figure out the optimal resources.
@@ -28,6 +30,6 @@ run: |
   python -u -m sky.serve.load_balancer \
     --controller-addr http://$IP:$PORT \
     --load-balancer-port 9002 \
-    --load-balancing-policy prefix_tree \
-    --meta-load-balancing-policy prefix_tree \
+    --load-balancing-policy $POLICY \
+    --meta-load-balancing-policy $POLICY \
     --region global
