@@ -242,9 +242,6 @@ you can provide the registry authentication details using :ref:`task environment
         We support private GCP Artifact Registry (GCR) with a service account key.
         See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_.
 
-        .. .. note::
-
-        ..     If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if ``SKYPILOT_DOCKER_*`` environment variables are not set.
 
         .. code-block:: yaml
 
@@ -255,6 +252,17 @@ you can provide the registry authentication details using :ref:`task environment
             SKYPILOT_DOCKER_USERNAME: _json_key
             SKYPILOT_DOCKER_PASSWORD: <gcp-service-account-key>
             SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
+
+        .. note::
+
+            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if the following is set:
+
+            .. code-block:: yaml
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: ""
+                SKYPILOT_DOCKER_PASSWORD: ""
+                SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
 
         Or, you can use ``sky launch`` with the ``--env`` flag to pass the service account key:
 
