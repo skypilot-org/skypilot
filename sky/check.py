@@ -156,9 +156,9 @@ def check_capabilities(
         }
         echo(f'workspace config: {skypilot_config.get_workspace()}')
         previously_enabled_clouds_set = {
-            (repr(cloud)
-             for cloud in global_user_state.get_cached_enabled_clouds(
-                 capability, skypilot_config.get_workspace()))
+            repr(cloud)
+            for cloud in global_user_state.get_cached_enabled_clouds(
+                capability, skypilot_config.get_workspace())
         }
         echo(f'Previously enabled clouds: {previously_enabled_clouds_set}')
         enabled_clouds_for_capability = (config_allowed_clouds_set & (
