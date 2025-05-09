@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getWorkspaceConfig } from '@/data/connectors/workspaces';
+import { getWorkspaces } from '@/data/connectors/workspaces';
 import {
   Card,
   CardContent,
@@ -34,13 +34,16 @@ export function Workspaces() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [workspaceConfig, clustersResponse, managedJobsResponse] = await Promise.all([
-          getWorkspaceConfig(),
+        const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] = await Promise.all([
+          getWorkspaces(),
           getClusters(),
           getManagedJobs(),
         ]);
 
-        const configuredWorkspaceNames = Object.keys(workspaceConfig);
+        console.log('[Workspaces Debug] Raw fetchedWorkspacesConfig:', fetchedWorkspacesConfig);
+
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+        console.log('[Workspaces Debug] configuredWorkspaceNames:', configuredWorkspaceNames);
 
         const clusterNameToWorkspace = {};
         clustersResponse.forEach((c) => {
@@ -121,6 +124,8 @@ export function Workspaces() {
         }
 
         finalWorkspaceDetails.sort((a, b) => a.name.localeCompare(b.name));
+
+        console.log('[Workspaces Debug] finalWorkspaceDetails before setting state:', finalWorkspaceDetails);
 
         setWorkspaceDetails(finalWorkspaceDetails);
       } catch (error) {

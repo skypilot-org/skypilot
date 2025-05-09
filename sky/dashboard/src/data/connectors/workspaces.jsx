@@ -1,45 +1,94 @@
-import { API_URL } from './constants';
+import { ENDPOINT } from './constants';
 
-export async function getWorkspaceConfig() {
+export async function getWorkspaces() {
   try {
-    const response = await fetch(`${API_URL}/workspace_config`);
-    if (!response.ok) {
-      throw new Error(`Error fetching workspace config: ${response.statusText}`);
+    // Step 1: Call the /workspaces endpoint to schedule the task
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces`);
+    if (!scheduleResponse.ok) {
+      throw new Error(`Error scheduling getWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`);
     }
-    const data = await response.json();
-    // The backend returns an object where keys are request IDs.
-    // We need to find the most recent successful request for 'workspace_config'.
-    // Assuming the response is an object of request payloads,
-    // and each payload has a 'status' and 'result' (if successful).
-    // The actual result is nested under request_task.result.
-    // This logic might need adjustment based on the exact structure returned by api_get for this endpoint.
+
+    // Step 2: Get the request_id from the response headers or body
+    let requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+
+    if (!requestId) {
+      console.warn(
+        'X-Skypilot-Request-ID header not found in /workspaces response. Attempting to find request_id in response body as a fallback.'
+      );
+      try {
+        // .json() consumes the response body. If this fails or doesn't find requestId,
+        // we can't try reading the body again for other purposes.
+        const scheduleData = await scheduleResponse.json();
+        if (scheduleData && scheduleData.request_id) {
+          requestId = scheduleData.request_id; // Correctly assign to requestId
+          console.log('Found request_id in /workspaces response body (fallback):', requestId);
+        } else {
+          // If not in header AND not in body after attempting fallback.
+          throw new Error(
+            'X-Skypilot-Request-ID header not found AND request_id not found in parsed response body from /workspaces.'
+          );
+        }
+      } catch (e) {
+        // This catch handles errors from scheduleResponse.json() or the explicit throw above.
+        const errorMessage = e.message || 'Error processing fallback for request_id from /workspaces response body.';
+        console.error('Error in /workspaces request_id fallback logic:', errorMessage);
+        throw new Error(
+          `X-Skypilot-Request-ID header not found, and fallback to read request_id from body failed: ${errorMessage}`
+        );
+      }
+    }
+
+    // Step 2.5: Validate that we have a requestId before proceeding
+    if (!requestId) {
+      // This error indicates a critical failure in obtaining the request_id.
+      throw new Error(
+        'Failed to obtain X-Skypilot-Request-ID from /workspaces response (checked header and attempted body fallback, but ID is still missing).'
+      );
+    }
+
+    // Step 3: Poll the /api/get endpoint with the request_id.
+    console.log(`Fetching workspace data with request_id: ${requestId}`);
+    const resultResponse = await fetch(`${ENDPOINT}/api/get?request_id=${requestId}`);
+    if (!resultResponse.ok) {
+      let errorDetail = `Error fetching workspace data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+      try {
+        const errorData = await resultResponse.json();
+        if (errorData && errorData.detail) {
+          let innerDetail = errorData.detail;
+          try {
+            const parsedDetail = JSON.parse(innerDetail);
+            if (parsedDetail && parsedDetail.error) {
+              innerDetail = parsedDetail.error;
+            } else if (parsedDetail && parsedDetail.result && parsedDetail.result.error) {
+              innerDetail = parsedDetail.result.error;
+            }
+          } catch (parseErr) { /* Inner detail is not JSON, use as is */ }
+          errorDetail = `Error fetching workspace data for request ID ${requestId}: ${innerDetail}`;
+        }
+      } catch (e) { /* ignore error parsing errorData */ }
+      throw new Error(errorDetail);
+    }
+
+    const resultData = await resultResponse.json();
+
+    // Step 4: Check task status and return the actual workspace data
+    if (resultData.status === 'FAILED') {
+      const errorMessage = resultData.error || (resultData.result && resultData.result.error) || 'Unknown error during task execution';
+      throw new Error(`Fetching workspace data failed for request ID ${requestId}: ${errorMessage}`);
+    }
     
-    // Find the latest successful request_task containing the workspace config data.
-    // The server.py uses executor.schedule_request, which means the response from /api/v1/workspace_config
-    // will immediately return, and we need to poll /api/get/{request_id} for the actual result.
-    // For simplicity here, we'll assume the initial response from /workspace_config 
-    // directly contains the data or a way to get it.
-    // If it's an async operation, the frontend would typically poll /api/get/{request_id}
-    // as shown in other parts of SkyPilot's server interactions.
-    // Given the current server.py, func=skypilot_config.get_workspace_config is scheduled,
-    // and the client is expected to use /api/get.
-    // However, the dashboard usually fetches data more directly.
-    // Let's assume for now the dashboard connector simplifies this,
-    // or there's a direct way to get the config.
-    // The server returns the result of func directly if it's a short schedule.
-    // server.py: func=skypilot_config.get_workspace_config, schedule_type=requests_lib.ScheduleType.SHORT
-    // This means the result should be available via /api/get/{request_id} fairly quickly.
-    // The FastAPI endpoint for /workspace_config itself doesn't return the data directly, it schedules.
-    // The dashboard's getClusters/getManagedJobs also seem to hit endpoints that schedule,
-    // but their connectors directly parse the result from the initial fetch.
-    // This implies the actual data might be embedded or that these connectors handle polling.
-    
-    // For now, let's assume `data` from fetch is the actual result from `skypilot_config.get_workspace_config()`.
-    // This function returns get_nested(('workspaces',), default_value={})
-    // So, data should be an object like: { "ws1": {details...}, "ws2": {details...} } or just {}
-    return data.result || {}; // Accessing data.result based on typical SkyPilot API responses for scheduled tasks
+    if (resultData.status !== 'SUCCESSFUL' && resultData.status !== 'COMPLETED') {
+        // Add a log for unexpected statuses that aren't explicitly 'FAILED'
+        // as /api/get is expected to wait until terminal state.
+        console.warn(`Received unexpected status '${resultData.status}' for request ID ${requestId}. Proceeding with result if available.`);
+    }
+
+    // The resultData.result should contain the workspace configuration object.
+    // Example: { "ws1": {...}, "ws2": {...} } or just {}
+    console.log('Successfully fetched workspace data:', resultData.result);
+    return resultData.result || {};
   } catch (error) {
-    console.error('Failed to fetch workspace config:', error);
-    throw error;
+    console.error('Failed to fetch workspaces (in getWorkspaces function):', error.message, error.stack);
+    throw error; // Re-throw to allow UI to handle it
   }
 } 

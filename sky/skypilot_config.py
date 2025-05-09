@@ -569,4 +569,7 @@ def get_current_workspace() -> str:
 
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
-    return get_nested(('workspaces',), default_value={})
+    workspaces = get_nested(('workspaces',), default_value={})
+    if 'default' not in workspaces:
+        workspaces['default'] = {}
+    return workspaces
