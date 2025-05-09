@@ -600,7 +600,8 @@ class Resources:
                             raise ValueError(parse_error)
                     try:
                         num = float(splits[1])
-                        accelerators = {splits[0]: int(num)}
+                        num = int(num) if num.is_integer() else num
+                        accelerators = {splits[0]: num}
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
