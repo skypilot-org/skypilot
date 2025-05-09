@@ -538,7 +538,7 @@ class SCPClient:
                 continue
         return
 
-    def get_virtual_server_info(self, instance_id):
+    def get_instance_info(self, instance_id):
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{instance_id}'
         return self._get(url=url, contents_key=None)
 

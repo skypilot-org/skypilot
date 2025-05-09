@@ -45,7 +45,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         head_instance_id = _get_head_instance_id(stopped_instances)
         scp_utils.SCPClient().start_instance(head_instance_id)
         while True:
-            instance_info = scp_utils.SCPClient().get_virtual_server_info(
+            instance_info = scp_utils.SCPClient().get_instance_info(
                 head_instance_id)
             if instance_info['virtualServerState'] == 'RUNNING':
                 break
@@ -66,7 +66,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     instance_id = None
     vpc_subnets = _get_or_create_vpc_subnets(zone_id)
     for vpc, subnets in vpc_subnets.items():
-        sg_id = _config_security_group(zone_id, vpc)
+        sg_id = _create_security_group(zone_id, vpc)
         if sg_id is None:
             continue
         try:
@@ -180,13 +180,13 @@ def _get_vcp_subnets(zone_id):
     ]
 
     igw_contents = scp_utils.SCPClient().get_internet_gateway()
-    vps_with_igw = [
+    vpc_with_igw = [
         item['vpcId']
         for item in igw_contents
         if item['internetGatewayState'] == 'ATTACHED'
     ]
 
-    vpc_list = [vpc for vpc in vpc_list if vpc in vps_with_igw]
+    vpc_list = [vpc for vpc in vpc_list if vpc in vpc_with_igw]
 
     subnet_contents = scp_utils.SCPClient().get_subnets()
 
@@ -203,7 +203,7 @@ def _get_vcp_subnets(zone_id):
     return vpc_subnets
 
 
-def _config_security_group(zone_id, vpc):
+def _create_security_group(zone_id, vpc):
     sg_name = 'sky' + ''.join(random.choices(string.ascii_lowercase, k=8))
 
     undo_func_stack = []
@@ -229,7 +229,7 @@ def _config_security_group(zone_id, vpc):
 
         return sg_id
     except Exception as e:  # pylint: disable=broad-except
-        _undo_funcs(undo_func_stack)
+        _undo_functions(undo_func_stack)
         logger.error(f'security group creation error: {e}')
         return None
 
@@ -248,7 +248,7 @@ def _delete_security_group(sg_id):
             break
 
 
-def _undo_funcs(undo_func_list):
+def _undo_functions(undo_func_list):
     while undo_func_list:
         func = undo_func_list.pop()
         func()
@@ -270,7 +270,7 @@ def _create_instance_sequence(vpc, instance_config):
 
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'instance creation error: {e}')
-        _undo_funcs(undo_func_stack)
+        _undo_functions(undo_func_stack)
         return None
 
 
@@ -380,8 +380,7 @@ def _create_instance(instance_config):
     instance_id = response.get('resourceId', None)
     while True:
         time.sleep(10)
-        instance_info = scp_utils.SCPClient().get_virtual_server_info(
-            instance_id)
+        instance_info = scp_utils.SCPClient().get_instance_info(instance_id)
         if instance_info['virtualServerState'] == 'RUNNING':
             break
     return instance_id, instance_info['ip']
@@ -400,7 +399,7 @@ def stop_instances(
             instance_id = instance['virtualServerId']
             scp_utils.SCPClient().stop_instance(instance_id)
             while True:
-                instance_info = scp_utils.SCPClient().get_virtual_server_info(
+                instance_info = scp_utils.SCPClient().get_instance_info(
                     instance_id)
                 time.sleep(2)
                 if instance_info['virtualServerState'] == 'STOPPED':
@@ -419,7 +418,7 @@ def terminate_instances(
         if instance['virtualServerName'] == cluster_name_on_cloud:
             try:
                 instance_id = instance['virtualServerId']
-                instance_info = scp_utils.SCPClient().get_virtual_server_info(
+                instance_info = scp_utils.SCPClient().get_instance_info(
                     instance_id)
                 vpc_id = instance_info['vpcId']
                 sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
@@ -506,7 +505,7 @@ def open_ports(
 
     for instance in instances:
         if instance['virtualServerName'] == cluster_name_on_cloud:
-            instance_info = scp_utils.SCPClient().get_virtual_server_info(
+            instance_info = scp_utils.SCPClient().get_instance_info(
                 instance['virtualServerId'])
             sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
             scp_utils.SCPClient().add_new_security_group_rule(
@@ -553,7 +552,7 @@ def cleanup_ports(  # pylint: disable=pointless-string-statement
 
     for instance in instances:
         if instance['virtualServerName'] == cluster_name_on_cloud:
-            instance_info = scp_utils.SCPClient().get_virtual_server_info(
+            instance_info = scp_utils.SCPClient().get_instance_info(
                 instance['virtualServerId'])
             vpc_id = instance_info['vpcId']
             firewall_id = _get_firewall_id(vpc_id)

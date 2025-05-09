@@ -10,7 +10,7 @@ def bootstrap_instances(
         region: str, cluster_name: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """Bootstraps instances for the given cluster."""
-    del cluster_name  # unused
+    del cluster_name
 
     node_cfg = config.node_config
     zone_id = _get_zone_id(region)
@@ -25,7 +25,7 @@ def bootstrap_instances(
     docker_cfg['serviceZoneId'] = zone_id
     docker_cfg['serverType'] = node_cfg['InstanceType']
     docker_cfg['contractId'] = 'None'
-    initial_script = _get_vm_init_script(ssh_public_key)
+    initial_script = _get_init_script(ssh_public_key)
     docker_cfg['initialScript'] = initial_script
 
     miscellaneous = {
@@ -59,7 +59,7 @@ def _get_zone_id(region_name: str):
     return zone_dict[region_name]
 
 
-def _get_vm_init_script(ssh_public_key: str):
+def _get_init_script(ssh_public_key: str):
     init_script_content = _get_default_config_cmd() + _get_ssh_key_gen_cmd(
         ssh_public_key)
     init_script_content_string = f'"{init_script_content}"'
