@@ -5,6 +5,9 @@ max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
+# The docker password could be a GCP service account key, which is a JSON string
+# that may contain newlines. We need indent(6) to make sure the lines
+# after the first line are properly indented.
 {%- if docker_image is not none %}
 docker:
   image: {{docker_image}}
@@ -19,9 +22,6 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      # The password could be a GCP service account key, which is a JSON string
-      # that may contain newlines. We need indent(6) to make sure the lines
-      # after the first line are properly indented.
       {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
