@@ -240,7 +240,7 @@ you can provide the registry authentication details using :ref:`task environment
         :sync: gcp-artifact-registry-tab
 
         We support private GCP Artifact Registry (GCR) with a service account key.
-        See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_.
+        See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_. Note that the ``SKYPILOT_DOCKER_USERNAME`` needs to be set to ``_json_key``.
 
 
         .. code-block:: yaml
@@ -253,9 +253,16 @@ you can provide the registry authentication details using :ref:`task environment
             SKYPILOT_DOCKER_PASSWORD: <gcp-service-account-key>
             SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
 
+        Or, you can use ``sky launch`` with the ``--env`` flag to pass the service account key:
+
+        .. code-block:: bash
+
+          sky launch sky.yaml \
+            --env SKYPILOT_DOCKER_PASSWORD="$(cat ~/gcp-key.json)"
+
         .. note::
 
-            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if the following is set:
+            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
 
             .. code-block:: yaml
 
@@ -264,12 +271,6 @@ you can provide the registry authentication details using :ref:`task environment
                 SKYPILOT_DOCKER_PASSWORD: ""
                 SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
 
-        Or, you can use ``sky launch`` with the ``--env`` flag to pass the service account key:
-
-        .. code-block:: bash
-
-          sky launch sky.yaml \
-            --env SKYPILOT_DOCKER_PASSWORD="$(cat ~/gcp-key.json)"
 
     .. tab-item:: NVIDIA Container Registry (NGC)
         :sync: nvidia-container-registry-tab

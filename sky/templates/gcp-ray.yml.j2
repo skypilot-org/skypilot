@@ -19,6 +19,9 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
+      # The password could be a GCP service account key, which is a JSON string
+      # that may contain newlines. We need indent(6) to make sure the lines
+      # after the first line are properly indented.
       {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
