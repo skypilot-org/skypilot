@@ -250,7 +250,7 @@ def add_or_update_cluster(cluster_name: str,
         usage_intervals.append((cluster_launched_at, None))
 
     user_hash = common_utils.get_user_hash()
-    workspace = skypilot_config.get_current_workspace()
+    workspace = skypilot_config.get_active_workspace()
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
