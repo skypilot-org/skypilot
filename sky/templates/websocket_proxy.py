@@ -78,6 +78,11 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
                              websocket: ClientConnection):
     try:
         while True:
+            # Read at most BUFFER_SIZE bytes, this not affect
+            # responsiveness since it will return as soon as
+            # there is at least one byte.
+            # The BUFFER_SIZE is chosen to be large enough to improve
+            # throughput. 
             data = await reader.read(BUFFER_SIZE)
             if not data:
                 break
