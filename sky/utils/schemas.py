@@ -1098,7 +1098,7 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
-            'workspace': workspace_schema,
+            'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
             **cloud_configs,
         },

@@ -1006,7 +1006,7 @@ def storage_delete(name: str) -> None:
 def enabled_clouds() -> List[clouds.Cloud]:
     return global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE,
-        workspace=skypilot_config.get_workspace())
+        workspace=skypilot_config.get_active_workspace())
 
 
 @usage_lib.entrypoint

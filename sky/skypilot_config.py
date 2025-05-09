@@ -231,7 +231,7 @@ def get_nested(keys: Tuple[str, ...],
 
 def get_workspace_cloud(cloud: str) -> config_utils.Config:
     """Returns the workspace config."""
-    current_workspace = _dict.get('workspace', None)
+    current_workspace = get_active_workspace()
     if current_workspace is None:
         return config_utils.Config()
     clouds = _dict.get_nested(keys=(
@@ -244,8 +244,8 @@ def get_workspace_cloud(cloud: str) -> config_utils.Config:
     return clouds.get(cloud.lower(), config_utils.Config())
 
 
-def get_workspace() -> str:
-    return _dict.get_nested(keys=('workspace',), default_value='default')
+def get_active_workspace() -> str:
+    return _dict.get_nested(keys=('active_workspace',), default_value='default')
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -477,7 +477,7 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-
+    # TODO error out if workspace does not exist
     try:
         common_utils.validate_schema(
             config,
