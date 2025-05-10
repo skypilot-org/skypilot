@@ -636,6 +636,7 @@ def autostop(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
     cloud = handle.launched_resources.cloud
+    assert cloud is not None, handle
     # Check if autostop/autodown is required and supported
     if not is_cancel:
         try:

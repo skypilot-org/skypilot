@@ -1011,6 +1011,7 @@ class GCP(clouds.Cloud):
     def _check_instance_type_accelerators_combination(
             resources: 'resources.Resources') -> None:
         assert resources.is_launchable(), resources
+        assert resources.instance_type is not None, 'Instance type must be specified'
         service_catalog.check_accelerator_attachable_to_host(
             resources.instance_type, resources.accelerators, resources.zone,
             'gcp')

@@ -11,7 +11,8 @@ import collections
 import enum
 import math
 import typing
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
+                    Union)
 
 from typing_extensions import assert_never
 
@@ -302,7 +303,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -747,6 +748,8 @@ class Cloud:
                     return False
             return True
 
+        assert resources.instance_type is not None, \
+            'Instance type must be specified'
         acc_from_instance_type = cls.get_accelerators_from_instance_type(
             resources.instance_type)
         if not _equal_accelerators(resources.accelerators,

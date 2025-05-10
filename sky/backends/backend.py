@@ -37,8 +37,9 @@ class Backend(Generic[_ResourceHandleType]):
     ResourceHandle = ResourceHandle  # pylint: disable=invalid-name
 
     # --- APIs ---
-    def check_resources_fit_cluster(self, handle: _ResourceHandleType,
-                                    task: 'task_lib.Task') -> None:
+    def check_resources_fit_cluster(
+            self, handle: _ResourceHandleType,
+            task: 'task_lib.Task') -> Optional['resources.Resources']:
         """Check whether resources of the task are satisfied by cluster."""
         raise NotImplementedError
 

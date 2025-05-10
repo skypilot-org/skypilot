@@ -162,12 +162,13 @@ class Vast(clouds.Cloud):
         del zones, dryrun, cluster_name, num_nodes  # unused
 
         r = resources
+        assert r.instance_type is not None, 'Instance type must be specified'
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
         if r.image_id is None:
-            image_id = 'vastai/base:0.0.2'
+            image_id: Optional[str] = 'vastai/base:0.0.2'
         elif r.extract_docker_image() is not None:
             image_id = r.extract_docker_image()
         else:

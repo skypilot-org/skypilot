@@ -165,7 +165,8 @@ def _with_docker_login_config(
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
         # Already checked in extract_docker_image
-        assert len(resources.image_id) == 1, resources.image_id
+        assert resources.image_id is not None and len(
+            resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
@@ -775,7 +776,7 @@ class Task:
         for _, storage_obj in self.storage_mounts.items():
             if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 for r in self.resources:
-                    r.requires_fuse = True
+                    r.set_requires_fuse(True)
                 break
 
         return self
@@ -931,7 +932,7 @@ class Task:
             self.storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
             for r in self.resources:
-                r.requires_fuse = False
+                r.set_requires_fuse(False)
             return self
         for target, storage_obj in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
@@ -956,7 +957,7 @@ class Task:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:
-                    r.requires_fuse = True
+                    r.set_requires_fuse(True)
         # Storage source validation is done in Storage object
         self.storage_mounts = storage_mounts
         return self
@@ -1234,13 +1235,14 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config = {}
+        tmp_resource_config: Union[Dict[str, Union[str, int]],
+                                   Dict[str, List[Dict[str, Union[str, int]]]]]
         if len(self.resources) > 1:
             resource_list = []
             for r in self.resources:
                 resource_list.append(r.to_yaml_config())
             key = 'ordered' if isinstance(self.resources, list) else 'any_of'
-            tmp_resource_config[key] = resource_list
+            tmp_resource_config = {key: resource_list}
         else:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 
