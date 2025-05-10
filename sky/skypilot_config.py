@@ -478,8 +478,8 @@ def override_skypilot_config(
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     workspace = config.get_nested(keys=('active_workspace',),
-                                  default_value=None)
-    if workspace and workspace not in get_nested(keys=('workspaces',),
+                                  default_value='default')
+    if workspace != 'default' and workspace not in get_nested(keys=('workspaces',),
                                                  default_value={}):
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Please check your config and try again.')
