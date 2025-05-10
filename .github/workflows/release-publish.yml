@@ -114,6 +114,7 @@ jobs:
     uses: ./.github/workflows/docker-build.yaml
     with:
       package_name: 'skypilot'
+      version: ${{ needs.extract-version.outputs.version }}
     secrets: inherit
 
   cleanup-branches:
