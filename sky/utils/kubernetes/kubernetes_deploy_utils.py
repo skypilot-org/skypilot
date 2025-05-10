@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -19,6 +19,81 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None, kubeconfig_path: Optional[str] = None):
+    """Deploy a Kubernetes cluster on SSH targets.
+    
+    This function reads ~/.sky/ssh_targets.yaml and uses it to deploy a 
+    Kubernetes cluster on the specified machines.
+    
+    Args:
+        cleanup: Whether to clean up the cluster instead of deploying.
+        cluster_name: Name of the cluster in ssh_targets.yaml to use.
+            If None, the first cluster in the file will be used.
+        kubeconfig_path: Path to save the Kubernetes configuration file.
+            If None, the default ~/.kube/config will be used.
+    """
+    # Prepare command to call deploy_remote_cluster.py script
+    path_to_package = os.path.dirname(__file__)
+    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+    
+    deploy_command = [sys.executable, up_script_path]
+    
+    if cleanup:
+        deploy_command.append('--cleanup')
+    
+    if cluster_name:
+        deploy_command.extend(['--cluster', cluster_name])
+    
+    if kubeconfig_path:
+        deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
+    
+    # Setup logging paths
+    run_timestamp = sky_logging.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'ssh_up.log')
+    
+    if cleanup:
+        msg_str = 'Cleaning up SSH cluster...'
+    else:
+        msg_str = 'Deploying SSH cluster...'
+    
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(msg_str,
+                                     log_path=log_path,
+                                     is_local=True)):
+        returncode, _, stderr = log_lib.run_with_log(
+            cmd=deploy_command,
+            log_path=log_path,
+            require_outputs=True,
+            stream_logs=True, # TODO: Fixme to False after we fix the logging
+            line_processor=log_utils.SkyRemoteUpLineProcessor(
+                log_path=log_path, is_local=True),
+            cwd=cwd)
+    
+    if returncode == 0:
+        success = True
+    else:
+        with ux_utils.print_exception_no_traceback():
+            log_hint = ux_utils.log_path_hint(log_path, is_local=True)
+            raise RuntimeError('Failed to deploy SSH cluster. '
+                               f'Full log: {log_hint}'
+                               f'\nError: {stderr}')
+    
+    if success:
+        if cleanup:
+            logger.info(
+                ux_utils.finishing_message(
+                    '🎉 SSH cluster cleaned up successfully.',
+                    log_path=log_path,
+                    is_local=True))
+        else:
+            logger.info(
+                ux_utils.finishing_message(
+                    '🎉 SSH cluster deployed successfully.',
+                    log_path=log_path,
+                    is_local=True))
 
 
 def deploy_remote_cluster(ip_list: List[str],
@@ -45,10 +120,16 @@ def deploy_remote_cluster(ip_list: List[str],
         key_file.flush()
         os.chmod(key_file.name, 0o600)
 
-        # TODO: Should change this to directly invoke the python module
-        deploy_command = [sys.executable, up_script_path, ip_file.name, ssh_user, key_file.name]
+        # Use the legacy mode command line arguments for backward compatibility
+        deploy_command = [
+            sys.executable, up_script_path, 
+            '--ips-file', ip_file.name, 
+            '--user', ssh_user, 
+            '--ssh-key', key_file.name
+        ]
+        
         if context_name is not None:
-            deploy_command.append(context_name)
+            deploy_command.extend(['--context-name', context_name])
         if password is not None:
             deploy_command.extend(['--password', password])
         if cleanup:
