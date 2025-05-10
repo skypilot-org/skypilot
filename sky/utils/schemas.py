@@ -966,7 +966,9 @@ def get_config_schema():
         'nebius': {
             'type': 'object',
             'required': [],
-            'properties': {},
+            'properties': {
+                **_NETWORK_CONFIG_SCHEMA,
+            },
             'additionalProperties': {
                 'type': 'object',
                 'required': [],
