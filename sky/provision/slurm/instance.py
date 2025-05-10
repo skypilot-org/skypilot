@@ -1,15 +1,11 @@
 """Slurm instance provisioning."""
 
 import collections
-import copy
-from multiprocessing import pool
 import re
-import tempfile
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
-from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.gcp import instance_utils
@@ -147,11 +143,12 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     # Resume any stopped worker nodes or create new ones.
     # Use sbatch to submit a long-running job.
+    slurmctld_host = provider_config['hostname']
     runner = command_runner.SSHCommandRunner(
-                    (provider_config['hostname'], provider_config['port']),
-                    provider_config['user'],
-                    provider_config['ssh_key'],
-                    disable_control_master=True)
+        (slurmctld_host, provider_config['port']),
+        provider_config['user'],
+        provider_config['ssh_key'],
+        disable_control_master=True)
 
     provision_script = """#!/bin/bash
 #SBATCH --job-name=interactive-bash
@@ -163,31 +160,32 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 sleep 1000000000
 """
     # with tempfile.NamedTemporaryFile(mode='w+', delete=True) as f:
-    with open("./provision.sh", "w") as f:
+    with open('./provision.sh', 'w') as f:
         f.write(provision_script)
         src_path = f.name
         logger.critical(src_path)
-    tgt_path = "/tmp/provision.sh"
+    tgt_path = '/tmp/provision.sh'
     runner.rsync(src_path, tgt_path, up=True)
-    returncode, stdout, stderr = runner.run(f'sbatch {tgt_path}',
-                                            require_outputs=True)
-    if returncode == 0:
+    rc, stdout, stderr = runner.run(f'sbatch {tgt_path}', require_outputs=True)
+    # logger.critical(f"\n\n[RUN INSTANCE] {returncode} {stdout} {stderr}\n\n")
+    if rc == 0:
         logger.info(stdout)
-
-    
+    provision_job_id = stdout.split(' ')[-1]
 
     # Wait until the instance is running.
 
+    # Handle instance identifiers.
+    head_instance_id = f'{slurmctld_host}-{provision_job_id}'
+    created_instance_ids = [head_instance_id]
 
-    return common.ProvisionRecord(
-        provider_name='slurm',
-        region=region,
-        zone=None,
-        cluster_name=cluster_name_on_cloud,
-        head_instance_id=head_instance_id,
-        resumed_instance_ids=resumed_instance_ids,
-        created_instance_ids=created_instance_ids
-    )
+    assert head_instance_id is not None, 'head_instance_id is None'
+    return common.ProvisionRecord(provider_name='slurm',
+                                  region=region,
+                                  zone=None,
+                                  cluster_name=cluster_name_on_cloud,
+                                  head_instance_id=head_instance_id,
+                                  resumed_instance_ids=[],
+                                  created_instance_ids=created_instance_ids)
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -211,55 +209,38 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    """See sky/provision/__init__.py"""
     del region
     assert provider_config is not None, cluster_name_on_cloud
-    zone = provider_config['availability_zone']
-    project_id = provider_config['project_id']
-    label_filters = {
-        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
-    }
 
-    handlers: List[Type[instance_utils.GCPInstance]] = [
-        instance_utils.GCPComputeInstance
-    ]
-    use_tpu_vms = provider_config.get('_has_tpus', False)
-    if use_tpu_vms:
-        handlers.append(instance_utils.GCPTPUVMInstance)
+    slurmctld_host = provider_config['hostname']
+    ssh_user = provider_config['user']
+    ssh_port = provider_config['port']
+    runner = command_runner.SSHCommandRunner((slurmctld_host, ssh_port),
+                                             ssh_user,
+                                             provider_config['ssh_key'],
+                                             disable_control_master=True)
+    rc, stdout, stderr = runner.run(
+        f'squeue -u {ssh_user} -t running | awk "NR=2 {{print $1}}"',
+        require_outputs=True)
 
-    handler_to_instances = _filter_instances(
-        handlers,
-        project_id,
-        zone,
-        label_filters,
-        lambda h: [h.RUNNING_STATE],
-    )
+    # TODO(jwj): Filter out the running instances and get the head instance id.
+    provision_job_id = stdout
+    head_instance_id = f'{slurmctld_host}-{provision_job_id}'
+
     instances: Dict[str, List[common.InstanceInfo]] = {}
-    for res, insts in handler_to_instances.items():
-        with pool.ThreadPool() as p:
-            inst_info = p.starmap(res.get_instance_info,
-                                  [(project_id, zone, inst) for inst in insts])
-        instances.update(zip(insts, inst_info))
-
-    head_instances = _filter_instances(
-        handlers,
-        project_id,
-        zone,
-        {
-            **label_filters, provision_constants.TAG_RAY_NODE_KIND: 'head'
-        },
-        lambda h: [h.RUNNING_STATE],
-    )
-    head_instance_id = None
-    for insts in head_instances.values():
-        if insts and insts[0]:
-            head_instance_id = insts[0]
-            break
+    instances[head_instance_id] = [
+        common.InstanceInfo(instance_id=head_instance_id,
+                            internal_ip=slurmctld_host,
+                            external_ip=slurmctld_host,
+                            ssh_port=ssh_port,
+                            tags={'test': 'test'})
+    ]
 
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
-        provider_name='gcp',
+        ssh_user=ssh_user,
+        provider_name='slurm',
         provider_config=provider_config,
     )
 
