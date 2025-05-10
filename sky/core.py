@@ -1007,8 +1007,7 @@ def enabled_clouds(workspace: Optional[str] = None) -> List[clouds.Cloud]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     return global_user_state.get_cached_enabled_clouds(
-        sky_cloud.CloudCapability.COMPUTE,
-        workspace=workspace)
+        sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
 
 
 @usage_lib.entrypoint
