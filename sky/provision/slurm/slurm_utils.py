@@ -162,6 +162,12 @@ def slurm_node_info() -> List[Dict[str, Any]]:
     try:
         node_list = slurm_catalog.get_slurm_node_info_list()
     except (RuntimeError, exceptions.NotSupportedError) as e:
-        logger.warning(f'Could not retrieve Slurm node info: {e}')
+        logger.debug(f'Could not retrieve Slurm node info: {e}')
         return []
     return node_list
+
+
+def get_all_partitions() -> List[str]:
+    """Gets all partitions in the Slurm cluster."""
+    node_list = slurm_node_info()
+    return [node['partition'] for node in node_list]

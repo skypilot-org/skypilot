@@ -5,6 +5,7 @@ from typing import Dict, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
+from sky.provision.slurm import slurm_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -57,3 +58,12 @@ class Slurm(clouds.Cloud):
         return resources_utils.FeasibleResources(resources_list=[],
                                                  fuzzy_candidate_list=[],
                                                  hint=None)
+
+    def validate_region_zone(
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        all_partitions = slurm_utils.get_all_partitions()
+        if region not in all_partitions:
+            raise ValueError(f'Region {region} is not supported. '
+                             f'Supported regions: {all_partitions}')
+        return region, zone
