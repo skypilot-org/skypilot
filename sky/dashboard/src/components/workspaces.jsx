@@ -247,6 +247,76 @@ export function Workspaces() {
     wordBreak: 'normal',
   };
 
+  // Define the description component here
+  const WorkspaceConfigDescription = ({ workspaceName, config }) => {
+    // config is an object like { gcp: { disabled: true } } or { gcp: { project_id: '...' } } or {}
+    if (!config) return null;
+
+    const isDefault = workspaceName === 'default';
+    const isEmptyConfig = Object.keys(config).length === 0;
+
+    if (isDefault && isEmptyConfig) {
+      return (
+        <p className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+          Workspace 'default' can use all accessible infrastructure.
+        </p>
+      );
+    }
+
+    const descriptions = [];
+    for (const cloud in config) {
+      const cloudConfig = config[cloud];
+      const cloudNameUpper = cloud.toUpperCase();
+
+      if (cloudConfig && cloudConfig.disabled === true) {
+        descriptions.push(
+          <span key={`${cloud}-disabled`} className="block">
+            {cloudNameUpper} is explicitly disabled.
+          </span>
+        );
+      } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
+        let detail = "";
+        if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
+          detail = ` (Project ID: ${cloudConfig.project_id})`;
+        } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) { 
+          // Example, can be expanded
+          detail = ` (Region: ${cloudConfig.region})`;
+        }
+        descriptions.push(
+          <span key={`${cloud}-enabled`} className="block">
+            {cloudNameUpper}{detail} is enabled.
+          </span>
+        );
+      } else if (cloudConfig && Object.keys(cloudConfig).length === 0) {
+        descriptions.push(
+          <span key={`${cloud}-default-enabled`} className="block">
+            {cloudNameUpper} is enabled (using default settings).
+          </span>
+        );
+      }
+    }
+
+    if (descriptions.length > 0) {
+      return (
+        <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
+          {descriptions}
+          <p className="mt-2 text-gray-500 italic">
+            Other accessible infrastructure are enabled. See <code className="text-sky-blue">ENABLED INFRA</code>.
+          </p>
+        </div>
+      );
+    }
+
+    if (!isDefault && isEmptyConfig) {
+       return (
+        <p className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+          This workspace has no specific cloud resource configurations and can use all accessible infrastructure.
+        </p>
+      );
+    }
+    return null;
+  };
+
   if (loading && workspaceDetails.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -366,7 +436,7 @@ export function Workspaces() {
               </CardContent>
 
               <div className="px-6 pb-3 text-sm pt-3">
-                <h4 className="mb-1 text-xs text-gray-500 uppercase tracking-wider">
+                <h4 className="mb-2 text-xs text-gray-500 uppercase tracking-wider">
                   Enabled Infra
                 </h4>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -406,6 +476,12 @@ export function Workspaces() {
               </DialogTitle>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto py-4">
+              {selectedWorkspaceConfig && modalDisplayTitleName && rawWorkspacesData && rawWorkspacesData[modalDisplayTitleName] && (
+                <WorkspaceConfigDescription
+                  workspaceName={modalDisplayTitleName}
+                  config={rawWorkspacesData[modalDisplayTitleName]}
+                />
+              )}
               <pre style={preStyle}>
                 {yaml.dump(selectedWorkspaceConfig, { indent: 2 })}
               </pre>

@@ -104,7 +104,7 @@ export function Clusters() {
             Sky Clusters
           </Link>
           <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
-            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm">
+            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
                   ? 'All Workspaces'
@@ -361,7 +361,9 @@ export function ClusterTable({
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
                     <TableCell>
-                      {item.workspace || 'default'}
+                      <Link href="/workspaces" className="text-blue-600 hover:underline">
+                        {item.workspace || 'default'}
+                      </Link>
                     </TableCell>
                     <TableCell>{item.resources_str}</TableCell>
                     <TableCell>{item.region}</TableCell>
