@@ -62,6 +62,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.client import sdk
 from sky.clouds import service_catalog
+from sky.commands import ssh
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -6000,6 +6001,10 @@ def api_info():
                f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
 
+
+# Add this to the end of the file, with the other cli.group registrations
+
+cli.add_command(ssh.ssh)
 
 def main():
     return cli()
