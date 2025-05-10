@@ -16,8 +16,6 @@ def bootstrap_instances(
     zone_id = _get_zone_id(region)
     node_cfg['zone_id'] = zone_id
 
-    authentication_cfg = config.authentication_config
-    ssh_user = authentication_cfg['ssh_user']
     ssh_public_key = node_cfg['AuthorizedKey']
 
     docker_cfg = config.docker_config
@@ -28,13 +26,10 @@ def bootstrap_instances(
     initial_script = _get_init_script(ssh_public_key)
     docker_cfg['initialScript'] = initial_script
 
+    key_pair_id = _get_key_pair_id()
     miscellaneous = {
         'deletionProtectionEnabled': False,
-        'dnsEnabled': True,
-        'osAdmin': {
-            'osUserId': ssh_user,
-            'osUserPassword': 'default!@&$351!'
-        },
+        'keyPairId': key_pair_id,
         'blockStorage': {
             'blockStorageName': 'skystorage',
             'diskSize': node_cfg['diskSize'],
@@ -91,3 +86,10 @@ def _get_default_config_cmd():
     for cmd in cmd_list:
         res += cmd + '; '
     return res
+
+
+def _get_key_pair_id():
+    key_pairs = scp_utils.SCPClient().get_key_pairs()
+    if key_pairs['totalCount'] == 0:
+        raise RuntimeError('create key pair')
+    return key_pairs['contents'][0]['keyPairId']
