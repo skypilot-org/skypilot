@@ -45,3 +45,6 @@ class Slurm(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> registry.Dict[str, str]:
         return {}
+    
+    def instance_type_exists(self, instance_type: str) -> bool:
+        return False
