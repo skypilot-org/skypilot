@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import sys
@@ -18,6 +19,7 @@ import zipfile
 
 import aiofiles
 import fastapi
+from fastapi import staticfiles
 from fastapi.middleware import cors
 import starlette.middleware.base
 
@@ -166,8 +168,36 @@ class InternalDashboardPrefixMiddleware(
         return await call_next(request)
 
 
+class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
+                                  ):
+    """Middleware to add cache control headers to static files."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/_next'):
+            response = await call_next(request)
+            response.headers['Cache-Control'] = 'max-age=86400'
+            return response
+        return await call_next(request)
+
+
+class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to check the path of requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/'):
+            # If the requested path is not relative to the expected directory,
+            # then the user is attempting path traversal, so deny the request.
+            parent = pathlib.Path('/dashboard')
+            request_path = pathlib.Path(posixpath.normpath(request.url.path))
+            if not _is_relative_to(request_path, parent):
+                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(PathCleanMiddleware)
+app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -181,6 +211,16 @@ app.add_middleware(
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+# Serve static files from the dashboard directory
+if not os.path.exists(server_constants.DASHBOARD_NEXT_DIR):
+    logger.warning(
+        f'Dashboard directory {server_constants.DASHBOARD_NEXT_DIR} does '
+        f'not exist. Create it for the dashboard static files mount.')
+    os.makedirs(server_constants.DASHBOARD_NEXT_DIR, exist_ok=True)
+app.mount(
+    '/dashboard/_next',
+    staticfiles.StaticFiles(directory=server_constants.DASHBOARD_NEXT_DIR),
+    name='dashboard')
 
 
 @app.post('/check')
@@ -1125,25 +1165,28 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
-# Add a route to serve static files
-@app.get('/{full_path:path}')
-async def serve_static_or_dashboard(full_path: str):
-    """Serves static files for any unmatched routes.
+@app.get('/dashboard/{full_path:path}')
+async def serve_dashboard(full_path: str):
+    """Serves the Next.js dashboard application.
 
-    Handles the /dashboard prefix from Next.js configuration.
+    Args:
+        full_path: The path requested by the client.
+        e.g. /clusters, /jobs
+
+    Returns:
+        FileResponse for static files or index.html for client-side routing.
+
+    Raises:
+        HTTPException: If the path is invalid or file not found.
     """
-    # Check if the path starts with 'dashboard/' and remove it if it does
-    if full_path.startswith('dashboard/'):
-        full_path = full_path[len('dashboard/'):]
-
-    # Try to serve the file directly from the out directory first
+    # Try to serve the file directly e.g. /skypilot.svg,
+    # /favicon.ico, and /videos, etc.
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
-    # If file not found, serve the index.html for client-side routing.
-    # For example, the non-matched arbitrary route (/ or /test) from
-    # client will be redirected to the index.html.
+    # Serve index.html for client-side routing
+    # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
@@ -1152,6 +1195,12 @@ async def serve_static_or_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+# Redirect the root path to dashboard
+@app.get('/')
+async def root():
+    return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
 if __name__ == '__main__':
