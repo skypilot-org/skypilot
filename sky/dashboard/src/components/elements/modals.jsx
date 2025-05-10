@@ -100,9 +100,14 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                 </Card>
               </div>
               <div>
-                <h3 className="text-sm font-medium">
+                <h3 className="text-sm font-medium mb-2 my-2">
                   Connect with VSCode/Cursor
                 </h3>
+                <Card className="p-3 bg-gray-50">
+                  <pre className="text-sm">
+                    <code>code --remote ssh-remote+{cluster}</code>
+                  </pre>
+                </Card>
                 <div
                   className={`relative ${isMobile ? '-mt-5' : '-mt-10'}`}
                   style={{ paddingBottom: '75%' }}
