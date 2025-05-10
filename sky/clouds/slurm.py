@@ -6,6 +6,7 @@ from typing import Dict, Optional, Tuple
 from sky import clouds
 from sky import sky_logging
 from sky.utils import registry
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -45,6 +46,14 @@ class Slurm(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> registry.Dict[str, str]:
         return {}
-    
+
     def instance_type_exists(self, instance_type: str) -> bool:
         return False
+
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> 'resources_utils.FeasibleResources':
+        """Returns no feasible resources, as clusters is not supported yet."""
+        return resources_utils.FeasibleResources(resources_list=[],
+                                                 fuzzy_candidate_list=[],
+                                                 hint=None)
