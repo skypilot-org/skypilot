@@ -518,3 +518,8 @@ class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
+
+
+class EnabledCloudsRequestBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None

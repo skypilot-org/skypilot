@@ -29,6 +29,7 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
@@ -196,14 +197,26 @@ async def check(request: fastapi.Request,
     )
 
 
-@app.get('/enabled_clouds')
-async def enabled_clouds(request: fastapi.Request) -> None:
+@app.post('/enabled_clouds')
+async def enabled_clouds(request: fastapi.Request, enabled_clouds_body: payloads.EnabledCloudsRequestBody) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(),
+        request_body=enabled_clouds_body,
         func=core.enabled_clouds,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.get('/workspaces')
+async def get_workspace_config(request: fastapi.Request) -> None:
+    """Gets workspace config on the server."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='workspaces',
+        request_body=payloads.RequestBody(),
+        func=skypilot_config.get_workspaces,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 

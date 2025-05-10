@@ -559,3 +559,11 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     _dict = overlay_skypilot_config(original_config=_dict,
                                     override_configs=parsed_config)
     return parsed_config
+
+
+def get_workspaces() -> Dict[str, Any]:
+    """Returns the workspace config."""
+    workspaces = get_nested(('workspaces',), default_value={})
+    if 'default' not in workspaces:
+        workspaces['default'] = {}
+    return workspaces
