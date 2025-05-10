@@ -639,7 +639,7 @@ class Kubernetes(clouds.Cloud):
             resource_list = []
             for instance_type in instance_list:
                 r = resources.copy(
-                    cloud=Kubernetes(),
+                    cloud=self.__class__(),
                     instance_type=instance_type,
                     accelerators=None,
                 )

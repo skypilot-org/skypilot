@@ -777,6 +777,7 @@ class Optimizer:
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
             cloud = resources.cloud
+            print(f'cloud: {cloud}, instance: {resources.instance_type}')
             vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
@@ -850,11 +851,19 @@ class Optimizer:
                 'accelerators': f'{resources.accelerators}',
                 'use_spot': resources.use_spot
             }
+
+            # Handle special case for Kubernetes and SSH clouds
             if isinstance(resources.cloud, clouds.Kubernetes):
-                # Region for Kubernetes is the context name, i.e. different
-                # Kubernetes clusters. We add region to the key to show all the
-                # Kubernetes clusters in the optimizer table for better UX.
-                resource_key_dict['region'] = resources.region
+                # Check if it's actually an SSH cloud by class name
+                if resources.cloud.__class__.__name__ == 'SSH':
+                    # For SSH clouds, include region in key to distinguish different SSH clusters
+                    resource_key_dict[
+                        'cloud'] = 'SSH'  # Force the cloud name to be SSH
+                    resource_key_dict['region'] = resources.region
+                else:
+                    # For regular Kubernetes, keep existing behavior
+                    resource_key_dict['region'] = resources.region
+
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.

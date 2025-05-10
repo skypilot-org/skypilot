@@ -227,7 +227,7 @@ def main():
         ssh_user = head_host['user']
         ssh_key = head_host['identity_file']
         password = head_host['password']
-        context_name = args.context_name if args.context_name != 'default' else cluster_name
+        context_name = args.context_name if args.context_name != 'default' else 'ssh-' + cluster_name # TODO: This is a hack to uniquely identify the SSH contexts in the global kubeconfig. Remove once we move to a different kubeconfig file.
     
     # Ensure SSH key is expanded for paths with ~ (home directory)
     ssh_key = os.path.expanduser(ssh_key)
