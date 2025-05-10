@@ -395,25 +395,47 @@ run: |
   if [ -z "$CONTROLLER_IP" ]; then
     if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
       # On primary controller, create a script that will be used to mount NFS on worker nodes
-      cat > /tmp/mount_nfs.sh << EOF
+      cat > /tmp/mount_nfs.sh << 'EOF'
   #!/bin/bash
-  # Idempotent mount script
+  # Idempotent mount script with retries
   sudo mkdir -p /mnt
+
+  # Function to attempt mount with retries
+  mount_with_retry() {
+      local max_attempts=5
+      local attempt=1
+      local wait_time=10  # seconds between attempts
+      
+      while [ $attempt -le $max_attempts ]; do
+          echo "Mount attempt $attempt of $max_attempts..."
+          if sudo mount ${PRIMARY_IP}:/mnt /mnt; then
+              echo "NFS mount successful on attempt $attempt"
+              return 0
+          else
+              echo "Mount attempt $attempt failed, waiting $wait_time seconds..."
+              sleep $wait_time
+              attempt=$((attempt + 1))
+          fi
+      done
+      
+      echo "Failed to mount NFS after $max_attempts attempts"
+      return 1
+  }
 
   # Check if already mounted
   if ! mount | grep -q " on /mnt type nfs"; then
-    echo "Mounting NFS share..."
-    sudo mount ${PRIMARY_IP}:/mnt /mnt
+      echo "Mounting NFS share..."
+      mount_with_retry
   else
-    echo "NFS share already mounted"
+      echo "NFS share already mounted"
   fi
 
   # Check if already in fstab
   if ! grep -q "${PRIMARY_IP}:/mnt /mnt nfs" /etc/fstab; then
-    echo "Adding NFS mount to fstab..."
-    echo "${PRIMARY_IP}:/mnt /mnt nfs defaults 0 0" | sudo tee -a /etc/fstab
+      echo "Adding NFS mount to fstab..."
+      echo "${PRIMARY_IP}:/mnt /mnt nfs defaults 0 0" | sudo tee -a /etc/fstab
   else
-    echo "NFS mount already in fstab"
+      echo "NFS mount already in fstab"
   fi
   EOF
       chmod +x /tmp/mount_nfs.sh
