@@ -192,6 +192,7 @@ def _get_cluster_config_template(cloud):
         clouds.DO: 'do-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.SSH: 'kubernetes-ray.yml.j2',  # SSH cloud uses the same template as Kubernetes
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
