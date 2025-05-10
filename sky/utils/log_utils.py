@@ -190,7 +190,7 @@ class SkyLocalUpLineProcessor(LineProcessor):
 
 
 class SkyRemoteUpLineProcessor(LineProcessor):
-    """A processor for deploy_remote_cluster.sh log lines."""
+    """A processor for deploy_remote_cluster.py log lines."""
 
     def __init__(self, log_path: str, is_local: bool):
         self.log_path = log_path

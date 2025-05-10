@@ -2,6 +2,7 @@
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 from typing import List, Optional
 
@@ -28,7 +29,7 @@ def deploy_remote_cluster(ip_list: List[str],
                           password: Optional[str] = None):
     success = False
     path_to_package = os.path.dirname(__file__)
-    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.sh')
+    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
 
@@ -44,17 +45,14 @@ def deploy_remote_cluster(ip_list: List[str],
         key_file.flush()
         os.chmod(key_file.name, 0o600)
 
-        deploy_command = (f'{up_script_path} {ip_file.name} '
-                          f'{ssh_user} {key_file.name}')
+        # TODO: Should change this to directly invoke the python module
+        deploy_command = [sys.executable, up_script_path, ip_file.name, ssh_user, key_file.name]
         if context_name is not None:
-            deploy_command += f' {context_name}'
+            deploy_command.append(context_name)
         if password is not None:
-            deploy_command += f' --password {password}'
+            deploy_command.extend(['--password', password])
         if cleanup:
-            deploy_command += ' --cleanup'
-
-        # Convert the command to a format suitable for subprocess
-        deploy_command = shlex.split(deploy_command)
+            deploy_command.append('--cleanup')
 
         # Setup logging paths
         run_timestamp = sky_logging.get_run_timestamp()
