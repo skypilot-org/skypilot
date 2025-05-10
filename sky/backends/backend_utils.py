@@ -605,7 +605,7 @@ def write_cluster_config(
     # other cases, we exclude the cloud from credential file uploads after
     # running required checks.
     assert cluster_name is not None
-    excluded_clouds_list: List[clouds.Cloud] = []
+    excluded_clouds: Set[clouds.Cloud] = set()
     remote_identity_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
@@ -638,9 +638,9 @@ def write_cluster_config(
         if isinstance(cloud, clouds.Kubernetes):
             if skypilot_config.get_nested(
                 ('kubernetes', 'allowed_contexts'), None) is None:
-                excluded_clouds_list.append(cloud)
+                excluded_clouds.add(cloud)
         else:
-            excluded_clouds_list.append(cloud)
+            excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
         remote_identity_config = skypilot_config.get_nested(
@@ -648,10 +648,9 @@ def write_cluster_config(
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds_list.append(cloud_obj)
+                excluded_clouds.add(cloud_obj)
 
-    credentials = sky_check.get_cloud_credential_file_mounts(
-        set(excluded_clouds_list))
+    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     private_key_path, _ = auth.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}

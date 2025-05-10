@@ -89,7 +89,7 @@ class StrategyExecutor:
             name = job_recovery.pop(
                 'strategy', registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
             assert name is None or isinstance(name, str), (
-                'The job recovery strategy name must be a string or None')
+                name, 'The job recovery strategy name must be a string or None')
             job_recovery_name: Optional[str] = name
             max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
                                                       0)
