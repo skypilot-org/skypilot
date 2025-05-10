@@ -606,3 +606,18 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
         request_task.set_error(e)
+
+
+def set_request_succeeded(request_id: str, result: Any) -> None:
+    """Set a request to succeeded and populate the result."""
+    with update_request(request_id) as request_task:
+        assert request_task is not None, request_id
+        request_task.status = RequestStatus.SUCCEEDED
+        request_task.set_return_value(result)
+
+
+def set_request_cancelled(request_id: str) -> None:
+    """Set a request to cancelled."""
+    with update_request(request_id) as request_task:
+        assert request_task is not None, request_id
+        request_task.status = RequestStatus.CANCELLED

@@ -208,8 +208,11 @@ def kill_children_processes(parent_pids: Optional[Union[
             kill_process_with_grace_period(child, force=force)
 
 
-def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
-                                               psutil.Process],
+GenericProcess = Union[multiprocessing.Process, psutil.Process,
+                       subprocess.Popen]
+
+
+def kill_process_with_grace_period(proc: GenericProcess,
                                    force: bool = False,
                                    grace_period: int = 10) -> None:
     """Kill a process with SIGTERM and wait for it to exit.
@@ -222,6 +225,9 @@ def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
     """
     if isinstance(proc, psutil.Process):
         alive = proc.is_running
+        wait = proc.wait
+    elif isinstance(proc, subprocess.Popen):
+        alive = lambda: proc.poll() is None
         wait = proc.wait
     else:
         alive = proc.is_alive
