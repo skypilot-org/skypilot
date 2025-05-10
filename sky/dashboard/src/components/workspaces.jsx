@@ -258,7 +258,7 @@ export function Workspaces() {
     if (isDefault && isEmptyConfig) {
       return (
         <p className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
-          Workspace 'default' can use all accessible infrastructure.
+          Workspace &apos;default&apos; can use all accessible infrastructure.
         </p>
       );
     }

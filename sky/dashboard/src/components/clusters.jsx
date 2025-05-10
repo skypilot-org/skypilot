@@ -104,7 +104,7 @@ export function Clusters() {
             Sky Clusters
           </Link>
           <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
-            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0">
+            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
                   ? 'All Workspaces'
