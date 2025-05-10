@@ -67,7 +67,7 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
             cmd=deploy_command,
             log_path=log_path,
             require_outputs=True,
-            stream_logs=True, # TODO: Fixme to False after we fix the logging
+            stream_logs=False, # TODO: Fixme to False after we fix the logging
             line_processor=log_utils.SkyRemoteUpLineProcessor(
                 log_path=log_path, is_local=True),
             cwd=cwd)
