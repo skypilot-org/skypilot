@@ -225,7 +225,7 @@ export async function getEnabledClouds(workspaceName = null) {
         if (errorData && errorData.detail) {
           let innerDetail = errorData.detail;
           // attempt to parse further for more specific error
-           try {
+          try {
             const parsedDetail = JSON.parse(innerDetail);
             if (parsedDetail && parsedDetail.error) {
               innerDetail = parsedDetail.error;
@@ -236,15 +236,22 @@ export async function getEnabledClouds(workspaceName = null) {
             ) {
               innerDetail = parsedDetail.result.error;
             }
-          } catch (parseErr) { /* Inner detail is not JSON, use as is */ }
+          } catch (parseErr) {
+            /* Inner detail is not JSON, use as is */
+          }
           errorDetail = `Error fetching enabled_clouds data for request ID ${requestId}: ${innerDetail}`;
         }
-      } catch (e) { /* ignore error parsing errorData */ }
+      } catch (e) {
+        /* ignore error parsing errorData */
+      }
       throw new Error(errorDetail);
     }
 
     const resultData = await resultResponse.json();
-    console.log('[Connector Debug] Full resultData from /api/get for enabled_clouds:', resultData);
+    console.log(
+      '[Connector Debug] Full resultData from /api/get for enabled_clouds:',
+      resultData
+    );
 
     if (resultData.status === 'FAILED') {
       const errorMessage =
@@ -284,7 +291,7 @@ export async function getEnabledClouds(workspaceName = null) {
       // Assuming result might contain the data directly if not in return_value
       enabledCloudsData = resultData.result;
     }
-    
+
     // Ensure it returns an array
     return Array.isArray(enabledCloudsData) ? enabledCloudsData : [];
   } catch (error) {
@@ -295,4 +302,4 @@ export async function getEnabledClouds(workspaceName = null) {
     );
     throw error; // Re-throw to allow UI to handle it
   }
-} 
+}

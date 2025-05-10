@@ -70,17 +70,21 @@ export function Clusters() {
 
         // Combine configured workspaces with any actively used 'default' workspace
         const finalWorkspaces = new Set(configuredWorkspaceNames);
-        if (uniqueClusterWorkspaces.includes('default') && !finalWorkspaces.has('default')) {
+        if (
+          uniqueClusterWorkspaces.includes('default') &&
+          !finalWorkspaces.has('default')
+        ) {
           // Add 'default' if it's used by clusters but not in configured list
           // This ensures 'default' appears if relevant, even if not explicitly in skypilot config
         }
         // Ensure all unique cluster workspaces are in the list, especially 'default'
-        uniqueClusterWorkspaces.forEach(wsName => finalWorkspaces.add(wsName));
-
+        uniqueClusterWorkspaces.forEach((wsName) =>
+          finalWorkspaces.add(wsName)
+        );
 
         setWorkspaces(Array.from(finalWorkspaces).sort());
       } catch (error) {
-        console.error("Error fetching data for workspace filter:", error);
+        console.error('Error fetching data for workspace filter:', error);
         setWorkspaces(['default']); // Fallback or error state
       }
     };
@@ -361,7 +365,10 @@ export function ClusterTable({
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
                     <TableCell>
-                      <Link href="/workspaces" className="text-blue-600 hover:underline">
+                      <Link
+                        href="/workspaces"
+                        className="text-blue-600 hover:underline"
+                      >
                         {item.workspace || 'default'}
                       </Link>
                     </TableCell>

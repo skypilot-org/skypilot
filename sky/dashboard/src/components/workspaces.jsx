@@ -4,10 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import {
-  getWorkspaces,
-  getEnabledClouds,
-} from '@/data/connectors/workspaces';
+import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import {
   Card,
   CardContent,
@@ -58,15 +55,8 @@ export function Workspaces() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [
-        fetchedWorkspacesConfig,
-        clustersResponse,
-        managedJobsResponse,
-      ] = await Promise.all([
-        getWorkspaces(),
-        getClusters(),
-        getManagedJobs(),
-      ]);
+      const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
+        await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
 
       console.log(
         '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
@@ -92,7 +82,10 @@ export function Workspaces() {
         enabledCloudsMap[wsName] = enabledCloudsForAllWorkspacesArray[index];
       });
 
-      console.log('[Workspaces Debug] Enabled clouds by workspace:', enabledCloudsMap);
+      console.log(
+        '[Workspaces Debug] Enabled clouds by workspace:',
+        enabledCloudsMap
+      );
 
       const clusterNameToWorkspace = {};
       clustersResponse.forEach((c) => {
@@ -168,10 +161,13 @@ export function Workspaces() {
 
       let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
         (ws) => {
-          const workspaceSpecificEnabledClouds = enabledCloudsMap[ws.name] || [];
+          const workspaceSpecificEnabledClouds =
+            enabledCloudsMap[ws.name] || [];
           return {
             ...ws,
-            clouds: Array.isArray(workspaceSpecificEnabledClouds) ? workspaceSpecificEnabledClouds.sort() : [],
+            clouds: Array.isArray(workspaceSpecificEnabledClouds)
+              ? workspaceSpecificEnabledClouds.sort()
+              : [],
           };
         }
       );
@@ -275,16 +271,17 @@ export function Workspaces() {
           </span>
         );
       } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
-        let detail = "";
+        let detail = '';
         if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
           detail = ` (Project ID: ${cloudConfig.project_id})`;
-        } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) { 
+        } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
           // Example, can be expanded
           detail = ` (Region: ${cloudConfig.region})`;
         }
         descriptions.push(
           <span key={`${cloud}-enabled`} className="block">
-            {cloudNameUpper}{detail} is enabled.
+            {cloudNameUpper}
+            {detail} is enabled.
           </span>
         );
       } else if (cloudConfig && Object.keys(cloudConfig).length === 0) {
@@ -301,16 +298,18 @@ export function Workspaces() {
         <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
           {descriptions}
           <p className="mt-2 text-gray-500 italic">
-            Other accessible infrastructure are enabled. See <code className="text-sky-blue">ENABLED INFRA</code>.
+            Other accessible infrastructure are enabled. See{' '}
+            <code className="text-sky-blue">ENABLED INFRA</code>.
           </p>
         </div>
       );
     }
 
     if (!isDefault && isEmptyConfig) {
-       return (
+      return (
         <p className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
-          This workspace has no specific cloud resource configurations and can use all accessible infrastructure.
+          This workspace has no specific cloud resource configurations and can
+          use all accessible infrastructure.
         </p>
       );
     }
@@ -476,12 +475,15 @@ export function Workspaces() {
               </DialogTitle>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto py-4">
-              {selectedWorkspaceConfig && modalDisplayTitleName && rawWorkspacesData && rawWorkspacesData[modalDisplayTitleName] && (
-                <WorkspaceConfigDescription
-                  workspaceName={modalDisplayTitleName}
-                  config={rawWorkspacesData[modalDisplayTitleName]}
-                />
-              )}
+              {selectedWorkspaceConfig &&
+                modalDisplayTitleName &&
+                rawWorkspacesData &&
+                rawWorkspacesData[modalDisplayTitleName] && (
+                  <WorkspaceConfigDescription
+                    workspaceName={modalDisplayTitleName}
+                    config={rawWorkspacesData[modalDisplayTitleName]}
+                  />
+                )}
               <pre style={preStyle}>
                 {yaml.dump(selectedWorkspaceConfig, { indent: 2 })}
               </pre>

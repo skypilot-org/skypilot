@@ -12,7 +12,7 @@ If you install SkyPilot from source, before starting the API server, run the fol
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install 18 
+nvm install 18
 nvm use 18
 ```
 
