@@ -1080,6 +1080,10 @@ Example:
 .. code-block:: yaml
 
     nebius:
+        :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+        :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+          eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+          eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
         # Region-specific configuration
         eu-north1:
             # Project identifier for this region
@@ -1102,8 +1106,7 @@ Should instances be assigned private IPs only? (optional).
 Set to ``true`` to use private IPs to communicate between the local client and
 any SkyPilot nodes. This requires the networking stack be properly set up.
 
-This flag is typically set together with ``vpc_name`` above and
-``ssh_proxy_command`` below.
+This flag is typically set together with ``ssh_proxy_command`` below.
 
 Default: ``false``.
 
