@@ -11,11 +11,19 @@ on:
           - 'skypilot-nightly'
           - 'skypilot'
         default: 'skypilot-nightly'
+      version:
+        description: 'SkyPilot version to build (optional, uses latest from PyPI if not specified)'
+        required: false
+        type: string
   workflow_call:
     inputs:
       package_name:
         description: 'SkyPilot PyPI package name'
         required: true
+        type: string
+      version:
+        description: 'SkyPilot version to build (optional, uses latest from PyPI if not specified)'
+        required: false
         type: string
     outputs:
       version:
@@ -28,7 +36,7 @@ on:
         required: true
 
 jobs:
-  
+
   build:
     runs-on: ubuntu-latest
     outputs:
@@ -40,13 +48,19 @@ jobs:
       - name: Find the release version
         id: version
         run: |
-          # Fetch package info from PyPI
-          echo "Fetching package info for ${{ inputs.package_name }}"
-          PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
-          # Parse JSON and get the latest version
-          LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
-          echo "Latest version found: $LATEST_VERSION"
-          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          if [ -n "${{ inputs.version }}" ]; then
+            # Use the provided version
+            echo "Using provided version: ${{ inputs.version }}"
+            echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Fetch package info from PyPI
+            echo "Fetching package info for ${{ inputs.package_name }}"
+            PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
+            # Parse JSON and get the latest version
+            LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+            echo "Latest version found: $LATEST_VERSION"
+            echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          fi
           cat $GITHUB_OUTPUT
 
       - name: Update Dockerfile version

@@ -18,7 +18,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         all_users: allUsers,
       }),
     });
-    const id = response.headers.get('x-request-id');
+    const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -230,7 +230,7 @@ export async function handleJobAction(action, jobId, cluster) {
         body: JSON.stringify(requestBody),
       });
 
-      const id = response.headers.get('x-request-id');
+      const id = response.headers.get('X-Skypilot-Request-ID');
       const finalResponse = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
 
       // Check the status code of the final response
