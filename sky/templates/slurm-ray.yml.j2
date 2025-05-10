@@ -20,7 +20,9 @@ provider:
 
 auth:
   ssh_user: ubuntu
-  ssh_private_key: {{ssh_private_key}}
+  # TODO(jwj): Modify this tmp workaround.
+  # ssh_private_key: {{ssh_private_key}}
+  ssh_private_key: {{slurm_ssh_key}}
 
 available_node_types:
   ray_head_default:
