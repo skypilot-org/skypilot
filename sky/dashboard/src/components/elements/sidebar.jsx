@@ -17,6 +17,8 @@ import {
   GitHubIcon,
   SlackIcon,
   CommentFeedbackIcon,
+  DocumentIcon,
+  BookDocIcon,
 } from '@/components/elements/icons';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
@@ -155,7 +157,7 @@ export function TopBar() {
 
         {/* Navigation links - reduce spacing on mobile */}
         <div
-          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-6'} ${isMobile ? 'mr-2' : 'mr-6'}`}
+          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-4'} ${isMobile ? 'mr-2' : 'mr-6'}`}
         >
           <Link
             href="/clusters"
@@ -175,6 +177,7 @@ export function TopBar() {
             {!isMobile && <span>Jobs</span>}
           </Link>
 
+          {/* Services Link/Placeholder */}
           <div
             className={`inline-flex items-center ${isMobile ? 'px-2 py-1' : 'px-1 pt-1'} text-gray-400`}
           >
@@ -188,6 +191,19 @@ export function TopBar() {
               </>
             )}
           </div>
+
+          {/* Separator Re-added */}
+          {!isMobile && <span className="text-gray-300 px-1">|</span>}
+
+          {/* Workspaces Link */}
+          <Link
+            href="/workspaces"
+            className={getLinkClasses('/workspaces')}
+            prefetch={false}
+          >
+            <BookDocIcon className="w-4 h-4" />
+            {!isMobile && <span>Workspaces</span>}
+          </Link>
         </div>
 
         {/* External links - now shows only icons on mobile */}

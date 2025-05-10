@@ -9,4 +9,4 @@ import sky
 def test_enabled_clouds_empty():
     # In test environment, no cloud should be enabled.
     assert sky.global_user_state.get_cached_enabled_clouds(
-        sky.clouds.cloud.CloudCapability.COMPUTE) == []
+        sky.clouds.cloud.CloudCapability.COMPUTE, workspace='default') == []
