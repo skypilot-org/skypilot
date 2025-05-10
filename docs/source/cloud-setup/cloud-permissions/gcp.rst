@@ -453,10 +453,10 @@ modify it automatically).
 How it works
 ^^^^^^^^^^^^
 1. ``sky launch`` creates VMs **without external IPs**.
-2. When SkyPilot needs SSH, it runs the **IAP proxy command** shown above.
-   ``gcloud compute start-iap-tunnel`` binds a local port and transparently
-   forwards it through Google’s edge to the VM’s private address.
-3. SSH connects to *localhost*, but packets travel over the authenticated IAP
+2. When connecting to the instance, ``ssh`` uses the **IAP proxy command** shown above.
+   ``gcloud compute start-iap-tunnel`` transparently
+   forwards the connection through Google’s edge to the VM’s private address.
+3. SSH packets travel over the authenticated IAP
    tunnel—no public ingress is ever exposed.
 
 Troubleshooting
@@ -522,122 +522,3 @@ An alternative to setting up cloud NAT for instances that need to access the pub
       use_internal_ips: true
       vpc_name: my-vpc-name
       force_enable_external_ips: true
-
-
-.. _gcp-iap-tunneling:
-
-Connecting over IAP tunneling
------------------------------
-When your SkyPilot clusters are provisioned **without external IP addresses**
-(```gcp.use_internal_ips: true```), you still need a secure path for SSH (and
-any TCP) traffic from your laptop to the VM’s *private* address.
-`Identity-Aware Proxy (IAP) TCP forwarding
-<https://cloud.google.com/iap/docs/using-tcp-forwarding>`__ solves this:
-Google’s edge opens an authenticated tunnel and forwards traffic to the VM
-inside the VPC—no public IP or VPN required.
-
-SkyPilot supports the **IP-based** flavour of IAP tunneling (sometimes called
-“*destination-group* tunneling”).  The per-instance variant is *not* supported
-because SkyPilot’s SSH proxy command receives only an IP, not the GCE instance
-name required for that mode.
-
-Prerequisites
-~~~~~~~~~~~~~
-* Your project has IAP TCP forwarding **enabled**
-  (``gcloud services enable iap.googleapis.com``).
-* All SkyPilot VMs are launched with **internal IPs**
-  (``gcp.use_internal_ips: true`` in :ref:`config yaml <config-yaml>`).
-* Each region you use has a **Cloud NAT** gateway so the VMs can reach the
-  Internet to install packages.
-* Users that will run ``sky launch`` have **IAP tunnel permissions**—the
-  simplest is the predefined ``roles/iap.tunnelResourceAccessor`` on the
-  destination group resource (or project-wide).
-
-Step-by-step (per region)
-~~~~~~~~~~~~~~~~~~~~~~~~~
-The script below automates the entire setup for one region/VPC; run it once per
-region you plan to use, or adapt it into Terraform/Cloud Build, etc.
-
-.. code-block:: bash
-
-    #!/usr/bin/env bash
-    # Set the region and VPC you will use with SkyPilot.
-    REGION=us-east1        # change as needed
-    VPC=default            # change if using a custom VPC
-
-    #######################################################################
-    # 1. Ensure a Cloud NAT gateway exists (required for internal-IP VMs) #
-    #######################################################################
-    nat_gateway_exists=false
-    for router in $(gcloud compute routers list                     \
-                      --regions="$REGION" --format='get(name)'); do
-      if gcloud compute routers nats list                            \
-             --router="$router" --region="$REGION" --format='value(name)' \
-             | grep -q .; then
-        nat_gateway_exists=true
-      fi
-    done
-
-    if [ "$nat_gateway_exists" = false ]; then
-      gcloud compute routers create nat-router \
-        --network="$VPC" --region="$REGION"
-      gcloud compute routers nats create nat-config \
-        --router=nat-router --router-region="$REGION" \
-        --nat-all-subnet-ip-ranges --auto-allocate-nat-external-ips
-    fi
-
-    #######################################################################
-    # 2. Create an IAP TCP *destination group* for the VPC subnet CIDR    #
-    #######################################################################
-    # Discover the subnet range for this VPC + region.
-    CIDR=$(gcloud compute networks subnets list        \
-             --network="$VPC" --regions="$REGION"      \
-             --format='value(ipCidrRange)')
-    # One dest-group per region is enough, even if you have many subnets.
-    gcloud iap tcp dest-groups create "internal-vpc-$VPC" \
-        --region="$REGION" --ip-range-list="$CIDR"
-
-    #######################################################################
-    # 3. Tell the user what to add to ~/.sky/config.yaml                  #
-    #######################################################################
-    cat <<EOF
-
-    Add (or update) the following in ~/.sky/config.yaml:
-
-        gcp:
-          use_internal_ips: true
-          ssh_proxy_command:
-            $REGION: gcloud compute start-iap-tunnel %h %p \
-                      --listen-on-stdin \
-                      --region=$REGION \
-                      --network=$VPC \
-                      --dest-group=internal-vpc-$VPC
-
-    EOF
-
-After running the script you can **either** edit ``~/.sky/config.yaml`` by hand
-with the printed snippet or let the script append it for you (add your own
-``yq`` logic if desired).
-
-What happens at runtime?
-~~~~~~~~~~~~~~~~~~~~~~~~
-#. ``sky launch`` starts VMs with only private addresses.
-#. When SkyPilot needs an SSH connection it executes the configured
-   ``ssh_proxy_command``.
-   The command above silently opens **stdin-bound** IAP tunnel
-   ``localhost:PORT → VM-internal-ip:22``.
-#. ``ssh`` (invoked by SkyPilot) connects to *localhost*, but the traffic is
-   transparently forwarded through IAP to the target VM—no public ingress
-   needed.
-
-Troubleshooting
-~~~~~~~~~~~~~~~
-* **Permission denied** when creating the tunnel → Verify the caller has
-  ``roles/iap.tunnelResourceAccessor`` (or a custom role with
-  ``iap.tunnelDestGroupAccessor``) **on the destination group**.
-* **Instance has no Internet** → Confirm the Cloud NAT gateway is in *the same
-  region* as the VM’s subnet and that egress rule ``--nat-all-subnet-ip-ranges``
-  is enabled.
-* **Multiple VPCs or bespoke subnets** → Create one destination group per
-  *region × CIDR* that SkyPilot uses and map each region to the right group in
-  ``ssh_proxy_command``.
