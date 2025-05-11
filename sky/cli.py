@@ -3488,10 +3488,10 @@ def show_gpus(
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs
         if len(realtime_gpu_infos) > 1:
-            total_realtime_gpu_table = log_utils.create_table(
-                ['GPU', '#GPUS'])
+            total_realtime_gpu_table = log_utils.create_table(['GPU', '#GPUS'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row([gpu, f'{stats[1]} of {stats[0]} free'])
+                total_realtime_gpu_table.add_row(
+                    [gpu, f'{stats[1]} of {stats[0]} free'])
         else:
             total_realtime_gpu_table = None
 
@@ -3520,7 +3520,8 @@ def show_gpus(
                     acc_type = '-'
                 node_table.add_row([
                     context_name, node_name, acc_type,
-                    f'{available} of {node_info.total["accelerator_count"]} free'
+                    f'{available} of {node_info.total["accelerator_count"]} '
+                    'free'
                 ])
 
         k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
