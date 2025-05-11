@@ -104,10 +104,27 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                   Connect with VSCode/Cursor
                 </h3>
                 <Card className="p-3 bg-gray-50">
-                  <pre className="text-sm">
-                    <code>code --remote ssh-remote+{cluster}</code>
-                  </pre>
+                  <div className="flex items-center justify-between">
+                    <pre className="text-sm">
+                      <code>code --remote ssh-remote+{cluster}</code>
+                    </pre>
+                    <Tooltip content="Copy command">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigator.clipboard.writeText(`code --remote ssh-remote+${cluster}`)}
+                        className="h-8 w-8 rounded-full"
+                      >
+                        <CopyIcon className="h-4 w-4" />
+                      </Button>
+                    </Tooltip>
+                  </div>
                 </Card>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium">
+                  Or use the GUI to connect
+                </h3>
                 <div
                   className={`relative ${isMobile ? '-mt-5' : '-mt-10'}`}
                   style={{ paddingBottom: '75%' }}
