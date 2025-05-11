@@ -16,12 +16,40 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 ### Installing SkyPilot for development
 
+Follow the steps below to set up a local development environment for contributing to SkyPilot.
+
+#### Create a conda environment
+To avoid package conflicts, create and activate a clean conda environment:
 ```bash
-# SkyPilot requires python >= 3.7.
-# You can just install the dependencies for
-# certain clouds, e.g., ".[aws,azure,gcp,lambda]"
+# SkyPilot requires 3.7 <= python <= 3.11.
+conda create -y -n sky python=3.10
+conda activate sky
+```
+
+#### Install SkyPilot
+To install SkyPilot, please fork [skypilot-org/skypilot](https://github.com/skypilot-org/skypilot) to your GitHub account and run:
+```bash
+# Clone your forked repo
+git clone https://github.com/<your-github-username>/skypilot.git
+
+# Set upstream to keep in sync with the official repo
+cd skypilot
+git remote add upstream https://github.com/skypilot-org/skypilot.git
+
+# Install SkyPilot in editable mode
 pip install -e ".[all]"
+# Alternatively, install specific cloud support only:
+# pip install -e ".[aws,azure,gcp,lambda]"
+
+# Install development dependencies
 pip install -r requirements-dev.txt
+```
+
+#### (Optional) Install `pre-commit`
+You can also install `pre-commit` hooks to help automatically format your code on commit:
+```bash
+pip install pre-commit
+pre-commit install
 ```
 
 ### Testing

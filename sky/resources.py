@@ -18,6 +18,7 @@ from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -27,6 +28,10 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
+
+RESOURCE_CONFIG_ALIASES = {
+    'gpus': 'accelerators',
+}
 
 
 class Resources:
@@ -1290,6 +1295,22 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
+
+        current_override_configs = self._cluster_config_overrides
+        if self._cluster_config_overrides is None:
+            current_override_configs = {}
+        new_override_configs = override.pop('_cluster_config_overrides', {})
+        overlaid_configs = skypilot_config.overlay_skypilot_config(
+            original_config=config_utils.Config(current_override_configs),
+            override_configs=new_override_configs,
+        )
+        override_configs = config_utils.Config()
+        for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+            elem = overlaid_configs.get_nested(key, None)
+            if elem is not None:
+                override_configs.set_nested(key, elem)
+
+        override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1315,8 +1336,7 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
-            _cluster_config_overrides=override.pop(
-                '_cluster_config_overrides', self._cluster_config_overrides),
+            _cluster_config_overrides=override_configs,
         )
         assert not override
         return resources
@@ -1349,12 +1369,46 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
 
+    @staticmethod
+    def _apply_resource_config_aliases(
+            config: Optional[Dict[str, Any]]) -> None:
+        """Mutatively applies overriding aliases to the passed in config.
+
+        Note: Nested aliases are not supported.
+        The preferred way to support nested aliases would be to cast
+        the parsed resource config dictionary to a config_utils.Config object
+        and use the get_, set_, and pop_ nested methods accordingly.
+        However, this approach comes at a significant memory cost as get_
+        and pop_nested create deep copies of the config.
+        """
+        if not config:
+            return
+
+        for alias, canonical in RESOURCE_CONFIG_ALIASES.items():
+            if alias in config:
+                if canonical in config:
+                    raise exceptions.InvalidSkyPilotConfigError(
+                        f'Cannot specify both {alias} '
+                        f'and {canonical} in config.')
+                config[canonical] = config[alias]
+                del config[alias]
+
     @classmethod
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
         if config is None:
             return {Resources()}
+
+        Resources._apply_resource_config_aliases(config)
+        anyof = config.get('any_of')
+        if anyof is not None and isinstance(anyof, list):
+            for anyof_config in anyof:
+                Resources._apply_resource_config_aliases(anyof_config)
+        ordered = config.get('ordered')
+        if ordered is not None and isinstance(ordered, list):
+            for ordered_config in ordered:
+                Resources._apply_resource_config_aliases(ordered_config)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
@@ -1653,7 +1707,7 @@ class Resources:
             # multiple contexts, we now set the region to the context name.
             # Since we do not have information on which context the cluster
             # was run in, we default it to the current active context.
-            legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
+            legacy_region = 'kubernetes'
             original_cloud = state.get('_cloud', None)
             original_region = state.get('_region', None)
             if (isinstance(original_cloud, clouds.Kubernetes) and

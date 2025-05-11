@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import colorama
 
 from sky.serve import constants
-from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
@@ -335,11 +334,6 @@ def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
      _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
-    if load_balancing_policy is None:
-        # This entry in database was added in #4439, and it will always be set
-        # to a str value. If it is None, it means it is an legacy entry and is
-        # using the legacy default policy.
-        load_balancing_policy = lb_policies.LEGACY_DEFAULT_POLICY
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -485,6 +479,14 @@ def total_number_provisioning_replicas() -> int:
     return provisioning_count
 
 
+def get_replicas_at_status(
+    service_name: str,
+    status: ReplicaStatus,
+) -> List['replica_managers.ReplicaInfo']:
+    replicas = get_replica_infos(service_name)
+    return [replica for replica in replicas if replica.status == status]
+
+
 # === Version functions ===
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""
@@ -555,3 +557,36 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+
+def get_latest_version(service_name: str) -> Optional[int]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT MAX(version) FROM version_specs
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+    if not rows or rows[0][0] is None:
+        return None
+    return rows[0][0]
+
+
+def get_service_controller_port(service_name: str) -> int:
+    """Gets the controller port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT controller_port FROM services WHERE name = ?',
+                       (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f'Service {service_name} does not exist.')
+        return row[0]
+
+
+def get_service_load_balancer_port(service_name: str) -> int:
+    """Gets the load balancer port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT load_balancer_port FROM services WHERE name = ?',
+                       (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f'Service {service_name} does not exist.')
+        return row[0]

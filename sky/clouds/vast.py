@@ -29,6 +29,8 @@ class Vast(clouds.Cloud):
             ('Opening ports is currently not supported on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Vast.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported on Vast.'),
     }
     #
     # Vast doesn't have a max cluster name limit. This number

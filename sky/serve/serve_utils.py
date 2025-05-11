@@ -13,7 +13,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -79,6 +79,38 @@ class ServiceComponent(enum.Enum):
     CONTROLLER = 'controller'
     LOAD_BALANCER = 'load_balancer'
     REPLICA = 'replica'
+
+
+@dataclasses.dataclass
+class ServiceComponentTarget:
+    """Represents a target service component with an optional replica ID.
+    """
+    component: ServiceComponent
+    replica_id: Optional[int] = None
+
+    def __init__(self,
+                 component: Union[str, ServiceComponent],
+                 replica_id: Optional[int] = None):
+        if isinstance(component, str):
+            component = ServiceComponent(component)
+        self.component = component
+        self.replica_id = replica_id
+
+    def __post_init__(self):
+        """Validate that replica_id is only provided for REPLICA component."""
+        if (self.component
+                == ServiceComponent.REPLICA) != (self.replica_id is None):
+            raise ValueError(
+                'replica_id must be specified if and only if component is '
+                'REPLICA.')
+
+    def __hash__(self) -> int:
+        return hash((self.component, self.replica_id))
+
+    def __str__(self) -> str:
+        if self.component == ServiceComponent.REPLICA:
+            return f'{self.component.value}-{self.replica_id}'
+        return self.component.value
 
 
 class UserSignal(enum.Enum):

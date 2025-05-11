@@ -17,6 +17,8 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
+import jsonschema
+
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -28,12 +30,10 @@ from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     import jinja2
-    import jsonschema
     import psutil
     import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
-    jsonschema = adaptors_common.LazyImport('jsonschema')
     psutil = adaptors_common.LazyImport('psutil')
     yaml = adaptors_common.LazyImport('yaml')
 
@@ -66,7 +66,7 @@ def get_usage_run_id() -> str:
     return str(uuid.uuid4())
 
 
-def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
     try:
@@ -80,7 +80,7 @@ def generate_user_hash() -> str:
     """Generates a unique user-machine specific hash."""
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    if not _is_valid_user_hash(user_hash):
+    if not is_valid_user_hash(user_hash):
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
@@ -93,7 +93,7 @@ def get_user_hash() -> str:
     hostname changes causing a new user hash to be generated.
     """
     user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-    if _is_valid_user_hash(user_hash):
+    if is_valid_user_hash(user_hash):
         assert user_hash is not None
         return user_hash
 
@@ -102,7 +102,7 @@ def get_user_hash() -> str:
         with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
-        if _is_valid_user_hash(user_hash):
+        if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()

@@ -19,9 +19,11 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -30,9 +32,9 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.skylet import events
-import sky.skypilot_config
 from sky.utils import common_utils
 
 
@@ -53,12 +55,12 @@ def test_minimal(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -101,11 +103,11 @@ def test_launch_fast(generic_cloud: str):
         'test_launch_fast',
         [
             # First launch to create the cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Second launch to test fast launch - should not reprovision
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
@@ -127,7 +129,6 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
-@pytest.mark.no_nebius
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -137,7 +138,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -151,12 +152,49 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             # FIXME(aylei): this can be flaky, sleep longer for now.
             f'sleep 60',
             # Launch again. Do full output validation - we expect the cluster to re-launch
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# We override the AWS config to force the cluster to relaunch, so only run the
+# test on AWS.
+@pytest.mark.aws
+def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
+    name = smoke_tests_utils.get_cluster_name()
+    tmp_config_path = tmp_path / 'sky.yaml'
+    test = smoke_tests_utils.Test(
+        'test_launch_fast_with_cluster_changes',
+        [
+            # Initial launch
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+
+            # Launch again - setup and provisioning should be skipped
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            ' echo "$s" && '
+            # Validate that cluster was not re-launched.
+            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+            # Validate that setup was not re-run.
+            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            f'sky logs {name} 2 --status',
+
+            # Copy current config as a base.
+            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
+            # Set config override. This should change the cluster yaml, forcing reprovision/setup
+            f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
+            # Launch and do full output validation. Setup/provisioning should be run.
+            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 3 --status',
+            f'sky status -r {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -358,6 +396,17 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
         dummy_task = sky.Task()
         job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
         assert job_id_dummy is None
+        # Check the cluster status from the dashboard
+        cluster_exist = False
+        status_request_id = (
+            smoke_tests_utils.get_dashboard_cluster_status_request_id())
+        status_response = (
+            smoke_tests_utils.get_response_from_request_id(status_request_id))
+        for cluster in status_response:
+            if cluster['name'] == name:
+                cluster_exist = True
+                break
+        assert cluster_exist
     finally:
         sky.get(sky.down(name))
 
@@ -365,7 +414,6 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
-@pytest.mark.no_nebius  # Nebius Autodown and Autostop not supported.
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
@@ -392,7 +440,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 def test_jobs_launch_and_logs(generic_cloud: str):
     # Use the context manager
-    with sky.skypilot_config.override_skypilot_config(
+    with skypilot_config.override_skypilot_config(
             smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
         name = smoke_tests_utils.get_cluster_name()
         task = sky.Task(run="echo start job; sleep 30; echo end job")
@@ -401,6 +449,17 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
         job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
         assert handle is not None
+        # Check the job status from the dashboard
+        queue_request_id = (
+            smoke_tests_utils.get_dashboard_jobs_queue_request_id())
+        queue_response = (
+            smoke_tests_utils.get_response_from_request_id(queue_request_id))
+        job_exist = False
+        for job in queue_response:
+            if job['job_id'] == job_id:
+                job_exist = True
+                break
+        assert job_exist
         try:
             with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
                 sky.jobs.tail_logs(job_id=job_id, output_stream=f)
@@ -682,8 +741,10 @@ def test_kubernetes_context_failover(unreachable_context):
                 'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
-                # H100 should not in the current context
-                '! sky show-gpus --cloud kubernetes | grep H100',
+                # H100 should not be in the current context
+                f'! sky show-gpus --cloud kubernetes --region {context} | grep H100',
+                # H100 should be displayed as long as it is available in one of the contexts
+                'sky show-gpus --cloud kubernetes | grep H100',
                 f'sky launch -y -c {name}-1 --cpus 1 echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
@@ -716,7 +777,7 @@ def test_kubernetes_context_failover(unreachable_context):
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
-                'SKYPILOT_CONFIG': f.name,
+                skypilot_config.ENV_VAR_SKYPILOT_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
                     sky.server.common.get_server_url()
             },
@@ -767,22 +828,28 @@ def test_launch_and_exec_async(generic_cloud: str):
 def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test('cancel_launch_and_exec_async', [
-        f'sky launch -c {name} -y --cloud {generic_cloud} --async',
-        (f's=$(sky exec {name} echo --async) && '
-         'echo "$s" && '
-         'logs_cmd=$(echo "$s" | grep "Check logs with" | '
-         'sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
-         'echo "Extracted logs command: $logs_cmd" && '
-         f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT, sky.ClusterStatus.UP], 30)} && '
-         f'sky down -y {name} && '
-         'log_output=$(eval $logs_cmd || true) && '
-         'echo "===logs===" && echo "$log_output" && '
-         'echo "$log_output" | grep "cancelled"'),
-    ],
-                                  teardown=f'sky down -y {name}',
-                                  timeout=smoke_tests_utils.get_timeout(
-                                      generic_cloud))
+
+    wait_cmd = smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+        name, [sky.ClusterStatus.INIT], 30)
+    # This test need cluster to be in INIT state, so that job will be cancelled,
+    # so we need to reduce the waiting time for the cluster to avoid it goes to UP state
+    wait_cmd = wait_cmd.replace('sleep 10', 'sleep 1')
+    test = smoke_tests_utils.Test(
+        'cancel_launch_and_exec_async', [
+            f'sky launch -c {name} -y --cloud {generic_cloud} --async',
+            (f's=$(sky exec {name} echo --async) && '
+             'echo "$s" && '
+             'logs_cmd=$(echo "$s" | grep "Check logs with" | '
+             'sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
+             'echo "Extracted logs command: $logs_cmd" && '
+             f'{wait_cmd} && '
+             f'sky down -y {name} && '
+             'log_output=$(eval $logs_cmd || true) && '
+             'echo "===logs===" && echo "$log_output" && '
+             'echo "$log_output" | grep "cancelled"'),
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud))
     smoke_tests_utils.run_one_test(test)
 
 
@@ -809,3 +876,258 @@ def test_cli_exit_codes(generic_cloud: str):
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.lambda_cloud
+def test_lambda_cloud_open_ports():
+    """Test Lambda Cloud open ports functionality.
+
+    It tests the functionality by opening both a single port and a port range,
+    verifying that both types of rules are created successfully. It also tests
+    that consecutive individual ports are properly merged into a single range rule.
+    """
+    # Test ports and port ranges
+    single_port = '12345'
+    single_port_int = int(single_port)
+    port_range = '5000-5010'
+    port_range_start = 5000
+    port_range_end = 5010
+
+    # Consecutive ports that should be merged
+    consecutive_ports = ['6000', '6001', '6002']
+    consecutive_start = 6000
+    consecutive_end = 6002
+
+    # Store initial rules to avoid modifying rules that existed before the test
+    initial_rules = []
+    lambda_client = None
+
+    from sky.provision.lambda_cloud import instance
+    from sky.provision.lambda_cloud import lambda_utils
+
+    try:
+        # Initialize Lambda Cloud client
+        lambda_client = lambda_utils.LambdaCloudClient()
+
+        # Check if our test method exists - if not, test will be skipped
+        if not hasattr(lambda_client, 'list_firewall_rules') or not hasattr(
+                lambda_client, 'create_firewall_rule'):
+            pytest.skip(
+                'LambdaCloudClient doesn\'t have required firewall rule methods'
+            )
+
+        # Skip test for us-south-1 region where firewall rules are not supported
+        if any('us-south-1' in str(rule)
+               for rule in lambda_client.list_catalog().values()):
+            # Check if our current region is us-south-1
+            instances = lambda_client.list_instances()
+            for inst in instances:
+                if inst.get('region', {}).get('name') == 'us-south-1':
+                    pytest.skip(
+                        'Firewall rules not supported in us-south-1 region')
+
+        # Get initial rules for debugging and tracking purposes
+        initial_rules = lambda_client.list_firewall_rules()
+        print(f'Initial firewall rules count: {len(initial_rules)}')
+
+        # Print example rule structure for debugging
+        if initial_rules:
+            print(f'Example rule structure: {initial_rules[0]}')
+
+        # 1. Test opening a single port
+        print(f'Opening single port {single_port}')
+        instance.open_ports('smoke-test-cluster', [single_port])
+        print(f'Successfully called open_ports for single port {single_port}')
+
+        # 2. Test opening a port range
+        print(f'Opening port range {port_range}')
+        instance.open_ports('smoke-test-cluster', [port_range])
+        print(f'Successfully called open_ports for port range {port_range}')
+
+        # 3. Test opening consecutive ports to verify merging
+        print(f'Opening consecutive ports {", ".join(consecutive_ports)}')
+        instance.open_ports('smoke-test-cluster', consecutive_ports)
+        print('Successfully called open_ports for consecutive ports '
+              f'{", ".join(consecutive_ports)}')
+
+        # Verify rules were created by getting current rules
+        current_rules = lambda_client.list_firewall_rules()
+        print(f'Rules after adding our test ports: {len(current_rules)}')
+
+        # Basic verification that rules were added
+        # (should have at least as many rules as before)
+        assert len(current_rules) >= len(
+            initial_rules), 'No new rules were added'
+
+        # 4. Verify consecutive ports were merged into a range
+        merged_range_found = False
+        for rule in current_rules:
+            if (rule.get('protocol') == 'tcp' and rule.get('port_range') and
+                    len(rule.get('port_range')) == 2 and
+                    rule.get('port_range')[0] == consecutive_start and
+                    rule.get('port_range')[1] == consecutive_end):
+
+                # Check that it's our auto-generated rule
+                description = rule.get('description', '')
+                if 'SkyPilot auto-generated' in description:
+                    merged_range_found = True
+                    print('Found merged port range rule: TCP '
+                          f'{consecutive_start}-{consecutive_end}')
+                    break
+
+        # Make sure port merging worked - now with a hard assertion
+        assert merged_range_found, (
+            f'Ports {consecutive_ports} were not merged into a single range '
+            f'rule {consecutive_start}-{consecutive_end}. '
+            'Port rule merging is not working as expected.')
+
+    except Exception as e:
+        import traceback
+        print(f'Error in test: {e}')
+        print(traceback.format_exc())
+        pytest.fail(f'Error testing Lambda Cloud open_ports: {str(e)}')
+
+    finally:
+        # Clean up the test ports we created, being careful to preserve
+        # pre-existing rules
+        if lambda_client is None:
+            print('Lambda client not initialized, skipping cleanup')
+        elif not initial_rules:
+            print('No initial rules were recorded, skipping cleanup for safety')
+        else:
+            try:
+                # We need to clean up manually since instance.cleanup_ports
+                # intentionally skips cleanup for Lambda Cloud (as firewall
+                # rules are global to the account)
+
+                # Get all current rules
+                current_rules = lambda_client.list_firewall_rules()
+
+                # Create a set of "fingerprints" for initial rules for faster
+                # comparison.
+                # Use a tuple of (protocol, source_network, port_range) as a
+                # fingerprint.
+                initial_rule_fingerprints = set()
+                for rule in initial_rules:
+                    # Convert port_range to a tuple so it can be hashed
+                    port_range_tuple = tuple(rule.get(
+                        'port_range', [])) if rule.get('port_range') else None
+                    fingerprint = (rule.get('protocol'),
+                                   rule.get('source_network'), port_range_tuple)
+                    initial_rule_fingerprints.add(fingerprint)
+
+                # Identify rules that match our test ports and weren't in the
+                # initial set.
+                rules_to_remove = []
+                for rule in current_rules:
+                    # Create fingerprint for this rule
+                    port_range_tuple = tuple(rule.get(
+                        'port_range', [])) if rule.get('port_range') else None
+                    fingerprint = (rule.get('protocol'),
+                                   rule.get('source_network'), port_range_tuple)
+
+                    # Skip rules that existed before our test
+                    if fingerprint in initial_rule_fingerprints:
+                        continue
+
+                    # Description check (all our rules should have SkyPilot in
+                    # description).
+                    description = rule.get('description', '')
+                    if 'SkyPilot auto-generated' not in description:
+                        continue
+
+                    # Check if this rule matches our single test port
+                    if (rule.get('protocol') == 'tcp' and
+                            rule.get('port_range') and
+                            len(rule.get('port_range')) == 2 and
+                            rule.get('port_range')[0] == single_port_int and
+                            rule.get('port_range')[1] == single_port_int):
+                        rules_to_remove.append(rule)
+                        print(f'Found test single port rule to clean up: '
+                              f'TCP {single_port_int}')
+
+                    # Check if this rule matches our port range
+                    elif (rule.get('protocol') == 'tcp' and
+                          rule.get('port_range') and
+                          len(rule.get('port_range')) == 2 and
+                          rule.get('port_range')[0] == port_range_start and
+                          rule.get('port_range')[1] == port_range_end):
+                        rules_to_remove.append(rule)
+                        print(f'Found test port range rule to clean up: '
+                              f'TCP {port_range_start}-{port_range_end}')
+
+                    # Check if this rule matches our consecutive ports
+                    # (either merged or individual)
+                    elif (rule.get('protocol') == 'tcp' and
+                          rule.get('port_range') and
+                          len(rule.get('port_range')) == 2):
+                        port_start = rule.get('port_range')[0]
+                        port_end = rule.get('port_range')[1]
+
+                        # Check if it's the merged range
+                        if (port_start == consecutive_start and
+                                port_end == consecutive_end):
+                            rules_to_remove.append(rule)
+                            print(
+                                f'Found merged consecutive ports rule to clean up: '
+                                f'TCP {consecutive_start}-{consecutive_end}')
+
+                        # Check if it's an individual port from our consecutive
+                        # range.
+                        elif (port_start == port_end and consecutive_start <=
+                              port_start <= consecutive_end):
+                            rules_to_remove.append(rule)
+                            print(f'Found individual consecutive port rule to '
+                                  f'clean up: TCP {port_start}')
+
+                if rules_to_remove:
+                    print(f'Cleaning up {len(rules_to_remove)} test firewall '
+                          'rule(s)')
+
+                    # Build rule list without our test rules
+                    api_rules = []
+                    for rule in current_rules:
+                        # Check if this rule should be removed
+                        should_remove = False
+                        for rule_to_remove in rules_to_remove:
+                            if (rule.get('protocol')
+                                    == rule_to_remove.get('protocol') and
+                                    rule.get('source_network')
+                                    == rule_to_remove.get('source_network') and
+                                    rule.get('port_range')
+                                    == rule_to_remove.get('port_range')):
+                                should_remove = True
+                                break
+
+                        # Skip if this rule should be removed
+                        if should_remove:
+                            continue
+
+                        if rule.get('protocol') and rule.get('source_network'):
+                            api_rule = {
+                                'protocol': rule.get('protocol'),
+                                'source_network': rule.get('source_network'),
+                                'description': rule.get('description', '')
+                            }
+
+                            # Add port_range for non-icmp protocols
+                            if rule.get('protocol') != 'icmp' and rule.get(
+                                    'port_range'):
+                                api_rule['port_range'] = rule.get('port_range')
+
+                            api_rules.append(api_rule)
+
+                    # Update the rules without our test rule(s)
+                    data = json.dumps({'data': api_rules})
+                    lambda_utils._try_request_with_backoff(
+                        'put',
+                        f'{lambda_utils.API_ENDPOINT}/firewall-rules',
+                        data=data,
+                        headers=lambda_client.headers,
+                    )
+                    print('Cleanup completed successfully')
+                else:
+                    print('No matching new rules found to clean up')
+            except Exception as e:
+                print(f'Warning: Failed to clean up test firewall rule: {e}')
+                # Don't fail the test if cleanup fails

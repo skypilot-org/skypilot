@@ -55,6 +55,12 @@ Below is the configuration syntax and some example values.  See details under ea
       - cloud: gcp
         accelerators: H100
 
+    :ref:`ordered <yaml-spec-resources-ordered>`:
+      - cloud: aws
+        region: us-east-1
+      - cloud: aws
+        region: us-west-2
+
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
   :ref:`envs <yaml-spec-envs>`:
@@ -78,6 +84,10 @@ Below is the configuration syntax and some example values.  See details under ea
     echo "Begin run."
     python train.py
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
+  :ref:`config <yaml-spec-config>`:
+    kubernetes:
+      provision_timeout: 600
 
 Fields
 ----------
@@ -639,12 +649,9 @@ Candidate resources (optional).
 
 If specified, SkyPilot will only use these candidate resources to launch the cluster.
 
-The fields specified outside of ``any_of``, ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of``, ``ordered`` will override the default values.
+The fields specified outside of ``any_of`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of`` will override the default values.
 
-- ``any_of``: means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
-- ``ordered``: means that SkyPilot will failover through the candidate resources with the specified order.
-
-Note: accelerators under ``any_of`` and ``ordered`` cannot be a list or set.
+``any_of`` means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
 
 Example:
 
@@ -658,7 +665,19 @@ Example:
       - cloud: gcp
         accelerators: H100
 
-OR
+.. _yaml-spec-resources-ordered:
+
+``resources.ordered``
+~~~~~~~~~~~~~~~~~~~~~~
+Ordered candidate resources (optional).
+
+If specified, SkyPilot will failover through the candidate resources with the specified order.
+
+The fields specified outside of ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``ordered`` will override the default values.
+
+``ordered`` means that SkyPilot will failover through the candidate resources with the specified order.
+
+Example:
 
 .. code-block:: yaml
 
@@ -668,7 +687,6 @@ OR
         region: us-east-1
       - cloud: aws
         region: us-west-2
-
 
 .. _yaml-spec-resources-job-recovery:
 
@@ -776,7 +794,7 @@ Example:
       source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
       store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'oci', or 'ibm'; default: None. Optional.
       persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
-      mode: MOUNT  # Either MOUNT or COPY. Defaults to MOUNT. Optional.
+      mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
@@ -862,35 +880,28 @@ OR
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
+.. _yaml-spec-config:
 .. _task-yaml-experimental:
 
-Global config overrides
----------------------------
+``config``
+~~~~~~~~~~
 
-To override the :ref:`global configs <config-yaml>` in ``~/.sky/config.yaml`` at a task level:
+:ref:`Advanced configuration options <config-client-job-task-yaml>` to apply to the task.
+
+Example:
 
 .. code-block:: yaml
 
-  experimental:
-    # Override the configs in ~/.sky/config.yaml from a task level.
-    #
-    # The following fields can be overridden. Please refer to docs of Advanced
-    # Configuration for more details of those fields:
-    # https://docs.skypilot.co/en/latest/reference/config.html
-    config_overrides:
-      docker:
-        run_options: ...
-      kubernetes:
-        pod_config: ...
-        provision_timeout: ...
-      gcp:
-        managed_instance_group: ...
-      nvidia_gpus:
-        disable_ecc: ...
-
-.. note::
-
-  Experimental features and APIs may be changed or removed in the future.
+  config:
+    docker:
+      run_options: ...
+    kubernetes:
+      pod_config: ...
+      provision_timeout: ...
+    gcp:
+      managed_instance_group: ...
+    nvidia_gpus:
+      disable_ecc: ...
 
 .. _service-yaml-spec:
 

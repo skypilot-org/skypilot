@@ -23,11 +23,13 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import collections
 import copy
 import datetime
 import functools
 import getpass
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
@@ -35,7 +37,8 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
+                    Union)
 
 import click
 import colorama
@@ -53,6 +56,7 @@ from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -86,6 +90,8 @@ from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
     import types
+
+    import prettytable
 
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
@@ -134,49 +140,51 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-        # During the failover, even though a cluster does not exist, the handle
-        # can still exist in the record, and we check for credentials to avoid
-        # updating the SSH config for non-existent clusters.
-        if (handle is not None and handle.cached_external_ips is not None and
-                'credentials' in record):
-            credentials = record['credentials']
-            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                # Replace the proxy command to proxy through the SkyPilot API
-                # server with websocket.
-                key_path = (
-                    cluster_utils.SSHConfigHelper.generate_local_key_file(
-                        handle.cluster_name, credentials))
-                # Instead of directly use websocket_proxy.py, we add an
-                # additional proxy, so that ssh can use the head pod in the
-                # cluster to jump to worker pods.
-                proxy_command = (
-                    f'ssh -tt -i {key_path} '
-                    '-o StrictHostKeyChecking=no '
-                    '-o UserKnownHostsFile=/dev/null '
-                    '-o IdentitiesOnly=yes '
-                    '-W %h:%p '
-                    f'{handle.ssh_user}@127.0.0.1 '
-                    '-o ProxyCommand='
-                    # TODO(zhwu): write the template to a temp file, don't use
-                    # the one in skypilot repo, to avoid changing the file when
-                    # updating skypilot.
-                    f'\'{sys.executable} {sky.__root_dir__}/templates/'
-                    f'websocket_proxy.py '
-                    f'{server_common.get_server_url().split("://")[1]} '
-                    f'{handle.cluster_name}\'')
-                credentials['ssh_proxy_command'] = proxy_command
-            cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name,
-                handle.cached_external_ips,
-                credentials,
-                handle.cached_external_ssh_ports,
-                handle.docker_user,
-                handle.ssh_user,
-            )
-        else:
+
+        if not (handle is not None and handle.cached_external_ips is not None
+                and 'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
             cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
+            continue
+
+        # During the failover, even though a cluster does not exist, the handle
+        # can still exist in the record, and we check for credentials to avoid
+        # updating the SSH config for non-existent clusters.
+        credentials = record['credentials']
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            # Replace the proxy command to proxy through the SkyPilot API
+            # server with websocket.
+            key_path = (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                handle.cluster_name, credentials))
+            # Instead of directly use websocket_proxy.py, we add an
+            # additional proxy, so that ssh can use the head pod in the
+            # cluster to jump to worker pods.
+            proxy_command = (
+                f'ssh -tt -i {key_path} '
+                '-o StrictHostKeyChecking=no '
+                '-o UserKnownHostsFile=/dev/null '
+                '-o IdentitiesOnly=yes '
+                '-W \'[%h]:%p\' '
+                f'{handle.ssh_user}@127.0.0.1 '
+                '-o ProxyCommand='
+                # TODO(zhwu): write the template to a temp file, don't use
+                # the one in skypilot repo, to avoid changing the file when
+                # updating skypilot.
+                f'\'{sys.executable} {sky.__root_dir__}/templates/'
+                f'websocket_proxy.py '
+                f'{server_common.get_server_url()} '
+                f'{handle.cluster_name}\'')
+            credentials['ssh_proxy_command'] = proxy_command
+
+        cluster_utils.SSHConfigHelper.add_cluster(
+            handle.cluster_name,
+            handle.cached_external_ips,
+            credentials,
+            handle.cached_external_ssh_ports,
+            handle.docker_user,
+            handle.ssh_user,
+        )
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -186,14 +194,15 @@ def _get_cluster_records_and_set_ssh_config(
     # removing clusters, because SkyPilot has no idea whether to remove
     # ssh config of a cluster from another user.
     clusters_exists = set(record['name'] for record in cluster_records)
+    clusters_to_remove: Set[str] = set()
     if clusters is not None:
-        for cluster in clusters:
-            if cluster not in clusters_exists:
-                cluster_utils.SSHConfigHelper.remove_cluster(cluster)
+        clusters_to_remove = set(clusters) - clusters_exists
     elif all_users:
-        for cluster_name in cluster_utils.SSHConfigHelper.list_cluster_names():
-            if cluster_name not in clusters_exists:
-                cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
+        clusters_to_remove = set(cluster_utils.SSHConfigHelper.
+                                 list_cluster_names()) - clusters_exists
+
+    for cluster_name in clusters_to_remove:
+        cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
 
     return cluster_records
 
@@ -272,6 +281,50 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     for (key, value) in env_list:
         env_dict[key] = value
     return list(env_dict.items())
+
+
+def config_option(expose_value: bool):
+    """A decorator for the --config option.
+
+    This decorator is used to parse the --config option.
+
+    Any overrides specified in the command line will be applied to the skypilot
+    config before the decorated function is called.
+
+    If expose_value is True, the decorated function will receive the parsed
+    config overrides as 'config_override' parameter.
+
+    Args:
+        expose_value: Whether to expose the value of the option to the decorated
+            function.
+    """
+
+    def preprocess_config_options(ctx, param, value):
+        del ctx  # Unused.
+        param.name = 'config_override'
+        try:
+            if len(value) == 0:
+                return None
+            else:
+                # Apply the config overrides to the skypilot config.
+                return skypilot_config.apply_cli_config(value)
+        except ValueError as e:
+            raise click.BadParameter(f'{str(e)}') from e
+
+    def return_option_decorator(func):
+        return click.option(
+            '--config',
+            required=False,
+            type=str,
+            multiple=True,
+            expose_value=expose_value,
+            callback=preprocess_config_options,
+            help=('Path to a config file or a comma-separated '
+                  'list of key-value pairs '
+                  '(e.g. "nested.key1=val1,another.key2=val2").'),
+        )(func)
+
+    return return_option_decorator
 
 
 _COMMON_OPTIONS = [
@@ -626,7 +679,8 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None,
+        config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -687,6 +741,8 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if config_override:
+        override_params['_cluster_config_overrides'] = config_override
     return override_params
 
 
@@ -789,6 +845,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -822,7 +879,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
                                                   field_to_ignore)
@@ -1006,6 +1064,7 @@ def cli():
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=False,
                 type=str,
@@ -1135,7 +1194,8 @@ def launch(
         no_setup: bool,
         clone_disk_from: Optional[str],
         fast: bool,
-        async_call: bool):
+        async_call: bool,
+        config_override: Optional[Dict[str, Any]] = None):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1177,6 +1237,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        config_override=config_override,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1241,6 +1302,7 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('cluster',
                 required=False,
                 type=str,
@@ -1269,15 +1331,29 @@ def launch(
                     _COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(cluster: Optional[str], cluster_option: Optional[str],
-         entrypoint: Tuple[str, ...], detach_run: bool, name: Optional[str],
-         cloud: Optional[str], region: Optional[str], zone: Optional[str],
-         workdir: Optional[str], gpus: Optional[str], ports: Tuple[str],
-         instance_type: Optional[str], num_nodes: Optional[int],
-         use_spot: Optional[bool], image_id: Optional[str],
-         env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-         disk_tier: Optional[str], async_call: bool):
+def exec(cluster: Optional[str],
+         cluster_option: Optional[str],
+         entrypoint: Tuple[str, ...],
+         detach_run: bool,
+         name: Optional[str],
+         cloud: Optional[str],
+         region: Optional[str],
+         zone: Optional[str],
+         workdir: Optional[str],
+         gpus: Optional[str],
+         ports: Tuple[str],
+         instance_type: Optional[str],
+         num_nodes: Optional[int],
+         use_spot: Optional[bool],
+         image_id: Optional[str],
+         env_file: Optional[Dict[str, str]],
+         env: List[Tuple[str, str]],
+         cpus: Optional[str],
+         memory: Optional[str],
+         disk_size: Optional[int],
+         disk_tier: Optional[str],
+         async_call: bool,
+         config_override: Optional[Dict[str, Any]] = None):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1370,6 +1446,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
         disk_tier=disk_tier,
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
+        config_override=config_override,
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -1653,6 +1730,7 @@ def _show_endpoint(query_clusters: Optional[List[str]],
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -1945,6 +2023,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--all',
               '-a',
               default=False,
@@ -2015,6 +2094,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2076,6 +2156,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option(
     '--sync-down',
     '-s',
@@ -2213,6 +2294,7 @@ def logs(
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2316,6 +2398,7 @@ def cancel(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2383,6 +2466,7 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2495,6 +2579,7 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2740,6 +2825,7 @@ def start(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -3062,10 +3148,15 @@ def _down_or_stop_clusters(
                 'Letting --all take effect.')
         # We should not remove controllers when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a controller.
+
+        # do not select already stopped clusters for stop command.
+        # stopped clusters are still included for down or autostop commands.
         names = [
             record['name']
             for record in all_clusters
             if controller_utils.Controllers.from_name(record['name']) is None
+            and (down or idle_minutes_to_autostop is not None or
+                 record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
 
     clusters = names
@@ -3173,6 +3264,7 @@ def _down_or_stop_clusters(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
@@ -3213,6 +3305,7 @@ def check(clouds: Tuple[str], verbose: bool):
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
@@ -3280,12 +3373,8 @@ def show_gpus(
     * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
       on a single node.
 
-    * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
-      Kubernetes cluster.
-
-    * ``TOTAL_FREE_GPUS`` (Kubernetes only): Number of currently free GPUs
-      in the Kubernetes cluster. This is fetched in real-time and may change
-      when other users are using the cluster.
+    * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
+      in the Kubernetes cluster.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -3323,25 +3412,25 @@ def show_gpus(
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
-    def _get_kubernetes_realtime_gpu_table(
-            context: Optional[str] = None,
-            name_filter: Optional[str] = None,
-            quantity_filter: Optional[int] = None):
+    def _get_kubernetes_realtime_gpu_tables(
+        context: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
+               Optional['prettytable.PrettyTable'], List[Tuple[
+                   str, 'models.KubernetesNodesInfo']]]:
         if quantity_filter:
             qty_header = 'QTY_FILTER'
-            free_header = 'FILTERED_FREE_GPUS'
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
-            free_header = 'TOTAL_FREE_GPUS'
-        realtime_gpu_table = log_utils.create_table(
-            ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-        realtime_gpu_availability_list = sdk.stream_and_get(
+
+        realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_kubernetes_gpu_availability(
                 context=context,
                 name_filter=name_filter,
                 quantity_filter=quantity_filter))
-        if not realtime_gpu_availability_list:
-            err_msg = 'No GPUs found in Kubernetes cluster. '
+        if not realtime_gpu_availability_lists:
+            err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check '
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
@@ -3349,44 +3438,131 @@ def show_gpus(
                     gpu_info_msg += (' with requested quantity'
                                      f' {quantity_filter}')
                 err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in Kubernetes cluster. ')
+                           'in any allowed Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
-        for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
-            gpu_availability = models.RealtimeGpuAvailability(
-                *realtime_gpu_availability)
-            available_qty = (gpu_availability.available
-                             if gpu_availability.available != -1 else
-                             no_permissions_str)
-            realtime_gpu_table.add_row([
-                gpu_availability.gpu,
-                _list_to_str(gpu_availability.counts),
-                gpu_availability.capacity,
-                available_qty,
-            ])
-        return realtime_gpu_table
+        realtime_gpu_infos = []
+        total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
+            lambda: [0, 0])
+        all_nodes_info = []
 
-    # TODO(zhwu): this needs to run on remote server.
-    def _get_kubernetes_node_info_table(context: Optional[str]):
+        if realtime_gpu_availability_lists:
+            if len(realtime_gpu_availability_lists[0]) != 2:
+                # TODO(kyuds): for backwards compatibility, as we add new
+                # context to the API server response in #5362. Remove this after
+                # 0.10.0.
+                realtime_gpu_availability_lists = [
+                    (context, realtime_gpu_availability_lists)
+                ]
+            for (ctx, availability_list) in realtime_gpu_availability_lists:
+                realtime_gpu_table = log_utils.create_table(
+                    ['GPU', qty_header, 'UTILIZATION'])
+                for realtime_gpu_availability in sorted(availability_list):
+                    gpu_availability = models.RealtimeGpuAvailability(
+                        *realtime_gpu_availability)
+                    available_qty = (gpu_availability.available
+                                     if gpu_availability.available != -1 else
+                                     no_permissions_str)
+                    realtime_gpu_table.add_row([
+                        gpu_availability.gpu,
+                        _list_to_str(gpu_availability.counts),
+                        f'{available_qty} of {gpu_availability.capacity} free',
+                    ])
+                    gpu = gpu_availability.gpu
+                    capacity = gpu_availability.capacity
+                    # we want total, so skip permission denied.
+                    available = max(gpu_availability.available, 0)
+                    if capacity > 0:
+                        total_gpu_info[gpu][0] += capacity
+                        total_gpu_info[gpu][1] += available
+                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                # Collect node info for this context
+                nodes_info = sdk.stream_and_get(
+                    sdk.kubernetes_node_info(context=ctx))
+                all_nodes_info.append((ctx, nodes_info))
+
+        # display an aggregated table for all contexts
+        # if there are more than one contexts with GPUs
+        if len(realtime_gpu_infos) > 1:
+            total_realtime_gpu_table = log_utils.create_table(
+                ['GPU', 'UTILIZATION'])
+            for gpu, stats in total_gpu_info.items():
+                total_realtime_gpu_table.add_row(
+                    [gpu, f'{stats[1]} of {stats[0]} free'])
+        else:
+            total_realtime_gpu_table = None
+
+        return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
+
+    def _format_kubernetes_node_info_combined(
+            contexts_info: List[Tuple[str,
+                                      'models.KubernetesNodesInfo']]) -> str:
         node_table = log_utils.create_table(
-            ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+            ['CONTEXT', 'NODE', 'GPU', 'UTILIZATION'])
 
         no_permissions_str = '<no permissions>'
-        node_info_dict = sdk.stream_and_get(
-            sdk.kubernetes_node_info(context=context))
-        for node_name, node_info in node_info_dict.items():
-            available = node_info.free[
-                'accelerators_available'] if node_info.free[
-                    'accelerators_available'] != -1 else no_permissions_str
-            node_table.add_row([
-                node_name, node_info.accelerator_type,
-                node_info.total['accelerator_count'], available
-            ])
-        return node_table
+        hints = []
+
+        for context, nodes_info in contexts_info:
+            context_name = context if context else 'default'
+            if nodes_info.hint:
+                hints.append(f'{context_name}: {nodes_info.hint}')
+
+            for node_name, node_info in nodes_info.node_info_dict.items():
+                available = node_info.free[
+                    'accelerators_available'] if node_info.free[
+                        'accelerators_available'] != -1 else no_permissions_str
+                acc_type = node_info.accelerator_type
+                if acc_type is None:
+                    acc_type = '-'
+                node_table.add_row([
+                    context_name, node_name, acc_type,
+                    f'{available} of {node_info.total["accelerator_count"]} '
+                    'free'
+                ])
+
+        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        if hints:
+            k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
+
+        return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                f'{k8s_per_node_acc_message}'
+                f'{colorama.Style.RESET_ALL}\n'
+                f'{node_table.get_string()}')
+
+    def _format_kubernetes_realtime_gpu(
+            total_table: 'prettytable.PrettyTable',
+            k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
+            all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            show_node_info: bool) -> Generator[str, None, None]:
+        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+               'Kubernetes GPUs'
+               f'{colorama.Style.RESET_ALL}')
+        # print total table
+        if total_table is not None:
+            yield '\n'
+            yield from total_table.get_string()
+
+        # print individual infos.
+        for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+            yield '\n'
+            # Print context header separately
+            if ctx:
+                context_str = f'Context: {ctx}'
+            else:
+                context_str = 'Default Context'
+            yield (
+                f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
+            )
+            yield from k8s_realtime_table.get_string()
+
+        if show_node_info:
+            yield '\n'
+            yield _format_kubernetes_node_info_combined(all_nodes_info)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3420,8 +3596,7 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
-                        context)
+                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3429,27 +3604,13 @@ def show_gpus(
                     k8s_messages += str(e)
                 else:
                     print_section_titles = True
-                    context_str = f'(Context: {context})' if context else ''
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs {context_str}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_realtime_table.get_string()
-                    k8s_node_table = _get_kubernetes_node_info_table(context)
-                    yield '\n\n'
-                    # TODO(Doyoung): Update the message with the multi-host TPU
-                    # support.
-                    k8s_per_node_acc_message = (
-                        'Kubernetes per node accelerator availability ')
-                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
-                            context):
-                        k8s_per_node_acc_message += (
-                            '(Note: Multi-host TPUs are detected and excluded '
-                            'from the display as multi-host TPUs are not '
-                            'supported.)')
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'{k8s_per_node_acc_message}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_node_table.get_string()
+
+                    yield from _format_kubernetes_realtime_gpu(
+                        total_table,
+                        k8s_realtime_infos,
+                        all_nodes_info,
+                        show_node_info=True)
+
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3538,17 +3699,20 @@ def show_gpus(
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
-            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
-                k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
-                    name_filter=name, quantity_filter=quantity)
-                yield from k8s_realtime_table.get_string()
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region, name_filter=name, quantity_filter=quantity)
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
-                yield str(e)
+                yield common_utils.format_exception(e, use_bracket=True)
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3684,6 +3848,7 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -3702,6 +3867,7 @@ def storage_ls(verbose: bool):
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('names',
                 required=False,
                 type=str,
@@ -3786,6 +3952,7 @@ def jobs():
 
 
 @jobs.command('launch', cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -3843,6 +4010,7 @@ def jobs_launch(
     detach_run: bool,
     yes: bool,
     async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3883,6 +4051,7 @@ def jobs_launch(
         disk_tier=disk_tier,
         ports=ports,
         job_recovery=job_recovery,
+        config_override=config_override,
     )
 
     if not isinstance(task_or_dag, sky.Dag):
@@ -3920,6 +4089,7 @@ def jobs_launch(
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -4036,6 +4206,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4110,6 +4281,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4174,10 +4346,19 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
     managed_jobs.dashboard()
+
+
+@cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
+@usage_lib.entrypoint
+def dashboard() -> None:
+    """Starts the dashboard for skypilot."""
+    sdk.dashboard()
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -4303,6 +4484,7 @@ def _generate_task_with_service(
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_yaml',
                 required=True,
                 type=str,
@@ -4414,6 +4596,7 @@ def serve_up(
 # TODO(MaoZiming): Expose mix replica traffic option to user.
 # Currently, we do not mix traffic from old and new replicas.
 @serve.command('update', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_name', required=True, type=str)
 @click.argument('service_yaml',
                 required=True,
@@ -4514,6 +4697,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -4639,6 +4823,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -4752,6 +4937,7 @@ def serve_down(
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -4768,8 +4954,14 @@ def serve_down(
               default=False,
               required=False,
               help='Show the load balancer logs of this service.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down logs to the local machine. Can be combined with '
+              '--controller, --load-balancer, or a replica ID to narrow scope.')
 @click.argument('service_name', required=True, type=str)
-@click.argument('replica_id', required=False, type=int)
+@click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
@@ -4778,9 +4970,13 @@ def serve_logs(
     follow: bool,
     controller: bool,
     load_balancer: bool,
-    replica_id: Optional[int],
+    replica_ids: Tuple[int, ...],
+    sync_down: bool,
 ):
-    """Tail the log of a service.
+    """Tail or sync down logs of a service.
+
+    Logs can be tailed from one target (controller, load balancer, or a single
+    replica) or synced down from multiple targets simultaneously.
 
     Example:
 
@@ -4794,27 +4990,89 @@ def serve_logs(
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
+        \b
+        # Sync down all logs of the service (controller, LB, all replicas)
+        sky serve logs [SERVICE_NAME] --sync-down
+        \b
+        # Sync down controller logs and logs for replicas 1 and 3
+        sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
-    have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
-    if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
-        raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified.')
+    chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
-        target_component = serve_lib.ServiceComponent.CONTROLLER
-    elif load_balancer:
-        target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    else:
-        # Already checked that num_flags == 1.
-        assert replica_id is not None
-        target_component = serve_lib.ServiceComponent.REPLICA
+        chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
+    if load_balancer:
+        chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
+    # replica_ids contains the specific replica IDs provided by the user.
+    # If it's not empty, it implies the user wants replica logs.
+    if replica_ids:
+        chosen_components.add(serve_lib.ServiceComponent.REPLICA)
+
+    if sync_down:
+        # For sync-down, multiple targets are allowed.
+        # If no specific components/replicas are mentioned, sync all.
+        # Note: Multiple replicas or targets can only be specified when
+        # using --sync-down.
+        targets_to_sync = list(chosen_components)
+        if not targets_to_sync and not replica_ids:
+            # Default to all components if nothing specific is requested
+            targets_to_sync = [
+                serve_lib.ServiceComponent.CONTROLLER,
+                serve_lib.ServiceComponent.LOAD_BALANCER,
+                serve_lib.ServiceComponent.REPLICA,
+            ]
+
+        timestamp = sky_logging.get_run_timestamp()
+        log_dir = (pathlib.Path(constants.SKY_LOGS_DIRECTORY) / 'service' /
+                   f'{service_name}_{timestamp}').expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        with rich_utils.client_status(
+                ux_utils.spinner_message('Downloading service logs...')):
+            serve_lib.sync_down_logs(service_name,
+                                     local_dir=str(log_dir),
+                                     targets=targets_to_sync,
+                                     replica_ids=list(replica_ids))
+        style = colorama.Style
+        fore = colorama.Fore
+        logger.info(f'{fore.CYAN}Service {service_name} logs: '
+                    f'{log_dir}{style.RESET_ALL}')
+        return
+
+    # Tailing requires exactly one target.
+    num_targets = len(chosen_components)
+    # If REPLICA component is chosen, len(replica_ids) must be 1 for tailing.
+    if serve_lib.ServiceComponent.REPLICA in chosen_components:
+        if len(replica_ids) != 1:
+            raise click.UsageError(
+                'Can only tail logs from a single replica at a time. '
+                'Provide exactly one REPLICA_ID or use --sync-down '
+                'to download logs from multiple replicas.')
+        # If replica is chosen and len is 1, num_targets effectively counts it.
+        # We need to ensure no other component (controller/LB) is selected.
+        if num_targets > 1:
+            raise click.UsageError(
+                'Can only tail logs from one target at a time (controller, '
+                'load balancer, or a single replica). Use --sync-down '
+                'to download logs from multiple sources.')
+    elif num_targets == 0:
+        raise click.UsageError(
+            'Specify a target to tail: --controller, --load-balancer, or '
+            'a REPLICA_ID.')
+    elif num_targets > 1:
+        raise click.UsageError(
+            'Can only tail logs from one target at a time. Use --sync-down '
+            'to download logs from multiple sources.')
+
+    # At this point, we have exactly one target for tailing.
+    assert len(chosen_components) == 1
+    assert len(replica_ids) in [0, 1]
+    target_component = chosen_components.pop()
+    target_replica_id: Optional[int] = replica_ids[0] if replica_ids else None
+
     try:
         serve_lib.tail_logs(service_name,
                             target=target_component,
-                            replica_id=replica_id,
+                            replica_id=target_replica_id,
                             follow=follow)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
@@ -4865,6 +5123,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -4910,27 +5169,28 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_launch(
-        entrypoint: str,
-        benchmark: str,
-        name: Optional[str],
-        workdir: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        gpus: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        cpus: Optional[str],
-        memory: Optional[str],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        ports: Tuple[str],
-        idle_minutes_to_autostop: Optional[int],
-        yes: bool,
-        async_call: bool,  # pylint: disable=unused-argument
+    entrypoint: str,
+    benchmark: str,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    ports: Tuple[str],
+    idle_minutes_to_autostop: Optional[int],
+    yes: bool,
+    async_call: bool,  # pylint: disable=unused-argument
+    config_override: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Benchmark a task on different resources.
 
@@ -5039,7 +5299,8 @@ def benchmark_launch(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             config_override=config_override)
     _pop_and_ignore_fields_in_override_params(
         override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)
@@ -5104,6 +5365,7 @@ def benchmark_launch(
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def benchmark_ls() -> None:
     """List the benchmark history."""
@@ -5167,6 +5429,7 @@ def benchmark_ls() -> None:
 
 
 @bench.command('show', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmark', required=True, type=str)
 # TODO(woosuk): Add --all option to show all the collected information
 # (e.g., setup time, warmup steps, total steps, etc.).
@@ -5292,6 +5555,7 @@ def benchmark_show(benchmark: str) -> None:
 
 
 @bench.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmark', required=True, type=str)
 @click.option(
     '--exclude',
@@ -5334,6 +5598,7 @@ def benchmark_down(
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmarks', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5468,6 +5733,7 @@ def local():
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
@@ -5523,6 +5789,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(async_call: bool):
@@ -5538,6 +5805,7 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--deploy',
               type=bool,
               is_flag=True,
@@ -5570,6 +5838,7 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool):
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
@@ -5577,6 +5846,7 @@ def api_stop():
 
 
 @api.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_id', required=False, type=str)
 @click.option('--server-logs',
               is_flag=True,
@@ -5616,6 +5886,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5657,6 +5928,7 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 
 @api.command('status', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all-status',
               '-a',
@@ -5700,6 +5972,7 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
 
 
 @api.command('login', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--endpoint',
               '-e',
               required=False,
@@ -5711,6 +5984,7 @@ def api_login(endpoint: Optional[str]):
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_info():
     """Shows the SkyPilot API server URL."""
@@ -5718,11 +5992,13 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
                f'commit: {api_server_info["commit"]}, '
                f'version: {api_server_info["version"]}\n'
-               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user_name} ({user_hash})')
+               f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
 
 
 def main():

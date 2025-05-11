@@ -18,6 +18,11 @@ file_mounts:
   /mount_public_azure:
     source: https://azureopendatastorage.blob.core.windows.net/nyctlc
     mode: MOUNT
+  
+  # Multiple mount points for Azure
+  /mount_public_azure_2:
+    source: https://azureopendatastorage.blob.core.windows.net/nyctlc
+    mode: MOUNT
   {% endif %}
 
   # Mounting private buckets in COPY mode with a source dir
@@ -60,6 +65,7 @@ run: |
   {% endif %}
   {% if include_azure_mount | default(True) %}
   ls -ltr /mount_public_azure/green
+  ls -ltr /mount_public_azure_2/green
   {% endif %}
 
   # Check private bucket contents

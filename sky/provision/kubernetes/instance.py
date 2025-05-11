@@ -17,6 +17,7 @@ from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -32,20 +33,51 @@ logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
+TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
+
+
+def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
+    return {TAG_RAY_CLUSTER_NAME: cluster_name}
+
+
+def _is_head(pod) -> bool:
+    return pod.metadata.labels.get(constants.TAG_RAY_NODE_KIND) == 'head'
 
 
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
-    head_pod_name = None
-    for pod_name, pod in pods.items():
-        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
-            head_pod_name = pod_name
-            break
-    return head_pod_name
+    return next((pod_name for pod_name, pod in pods.items() if _is_head(pod)),
+                None)
 
 
-def head_service_selector(cluster_name: str) -> Dict[str, str]:
-    """Selector for Operator-configured head service."""
+def _get_pvc_name(cluster_name: str, volume_name: str) -> str:
+    return f'{cluster_name}-{volume_name}'
+
+
+def _get_deployment_name(cluster_name: str) -> str:
+    return f'{cluster_name}-deployment'
+
+
+def _head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
+
+
+def is_high_availability_cluster_by_kubectl(
+        cluster_name: str,
+        context: Optional[str] = None,
+        namespace: Optional[str] = None) -> bool:
+    """Check if a cluster is a high availability controller by calling
+    `kubectl get deployment`.
+    """
+    try:
+        deployment_list = kubernetes.apps_api(
+            context).list_namespaced_deployment(
+                namespace,
+                label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
+    except kubernetes.api_exception():
+        return False
+    # It is a high availability cluster if there is at least one deployment
+    # matching the label selector.
+    return bool(deployment_list.items)
 
 
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
@@ -162,12 +194,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     raise config_lib.KubernetesError(
                         _lack_resource_msg('memory', pod,
                                            details=event_message))
-                if 'Insufficient smarter-devices/fuse' in event_message:
-                    raise config_lib.KubernetesError(
-                        'Something went wrong with FUSE device daemonset.'
-                        ' Try restarting your FUSE pods by running '
-                        '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
-                        f' Full error: {event_message}')
+                # TODO(aylei): after switching from smarter-device-manager to
+                # fusermount-server, we need a new way to check whether the
+                # fusermount-server daemonset is ready.
                 gpu_lf_keys = [
                     key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     for key in lf.get_label_keys()
@@ -387,13 +416,11 @@ def _run_function_with_retries(func: Callable,
                                max_retries: int = _MAX_RETRIES,
                                retry_delay: int = 5) -> Any:
     """Runs a function with retries on Kubernetes errors.
-
     Args:
         func: Function to retry
         operation_name: Name of the operation for logging
         max_retries: Maximum number of retry attempts
         retry_delay: Delay between retries in seconds
-
     Raises:
         The last exception encountered if all retries fail.
     """
@@ -412,30 +439,23 @@ def _run_function_with_retries(func: Callable,
 @timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
-
     This step is run in the pod right after it is created and before the
     SkyPilot runtime is setup.
-
     This step includes three key steps:
-
     1. Privilege check: Checks if the default user has sufficient privilege
     to set up the kubernetes instance pod.
     2. SSH setup: Sets up SSH for the pod instance.
     3. Environment variable setup to populate k8s env vars in the pod.
-
     Make sure commands used in these methods are generic and work
     on most base images. E.g., do not use Python, since that may not
     be installed by default.
-
     If you run any apt commands, be sure to check if the lock is available.
     It is possible the `apt update` run in the pod container args may still
     be running.
-
     Args:
         namespace (str): Kubernetes namespace.
         context (Optional[str]): Kubernetes context.
         new_nodes (List): List of new pod instances.
-
     Raises:
         config_lib.KubernetesError: If user privileges are insufficient or
           setup fails.
@@ -650,6 +670,56 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             raise e
 
 
+def _create_persistent_volume_claim(namespace: str, context: Optional[str],
+                                    pvc_spec: Dict[str, Any]) -> None:
+    """Creates a persistent volume claim for SkyServe controller."""
+    try:
+        kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
+            name=pvc_spec['metadata']['name'], namespace=namespace)
+        return
+    except kubernetes.api_exception() as e:
+        if e.status != 404:  # Not found
+            raise
+
+    kubernetes.core_api(context).create_namespaced_persistent_volume_claim(
+        namespace=namespace, body=pvc_spec)
+
+
+@timeline.event
+def _wait_for_deployment_pod(context,
+                             namespace,
+                             deployment,
+                             timeout=60) -> List:
+    label_selector = ','.join([
+        f'{key}={value}'
+        for key, value in deployment.spec.selector.match_labels.items()
+    ])
+    target_replicas = deployment.spec.replicas
+    deployment_name = deployment.metadata.name
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        # Refresh the deployment status
+        deployment = kubernetes.apps_api(
+            context).read_namespaced_deployment_status(deployment_name,
+                                                       namespace)
+        if (deployment.status and
+                deployment.status.ready_replicas is not None and
+                deployment.status.ready_replicas >= target_replicas):
+            pods = kubernetes.core_api(context).list_namespaced_pod(
+                namespace, label_selector=label_selector).items
+            return pods
+
+        ready_replicas = (deployment.status.ready_replicas
+                          if deployment.status is not None else 0)
+        logger.debug(f'Waiting for deployment {deployment_name!r} to be ready. '
+                     f'Ready replicas: {ready_replicas}/{target_replicas}')
+        time.sleep(2)
+
+    raise TimeoutError(
+        f'Timeout: Deployment {deployment_name!r} did not become '
+        'ready.')
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -658,9 +728,16 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
-    tags = {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-    }
+
+    to_create_deployment = 'deployment_spec' in pod_spec
+    if to_create_deployment:
+        deployment_spec = pod_spec.pop('deployment_spec')
+        pvc_spec = pod_spec.pop('pvc_spec')
+        assert len(pod_spec['spec']['containers']) == 1, (
+            'Only one container is supported for deployment')
+
+    tags = ray_tag_filter(cluster_name_on_cloud)
+
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
         pod_spec['metadata']['labels'].update(tags)
@@ -737,16 +814,15 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
-    created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
-    def _create_pod_thread(i: int):
+    def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         if head_pod_name is None and i == 0:
             # First pod should be head if no head exists
             pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
-            head_selector = head_service_selector(cluster_name_on_cloud)
+            head_selector = _head_service_selector(cluster_name_on_cloud)
             pod_spec_copy['metadata']['labels'].update(head_selector)
             pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
@@ -762,26 +838,31 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # are not available, we still want to be able to schedule worker
             # pods on larger nodes which may be able to fit multiple SkyPilot
             # "nodes".
-            pod_spec_copy['spec']['affinity'] = {
-                'podAntiAffinity': {
-                    # Set as a soft constraint
-                    'preferredDuringSchedulingIgnoredDuringExecution': [{
-                        # Max weight to avoid scheduling on the
-                        # same physical node unless necessary.
-                        'weight': 100,
-                        'podAffinityTerm': {
-                            'labelSelector': {
-                                'matchExpressions': [{
-                                    'key': TAG_SKYPILOT_CLUSTER_NAME,
-                                    'operator': 'In',
-                                    'values': [cluster_name_on_cloud]
-                                }]
-                            },
-                            'topologyKey': 'kubernetes.io/hostname'
-                        }
-                    }]
+            pod_spec_config = config_utils.Config(pod_spec_copy['spec'].get(
+                'affinity', {}))
+            existing_rules = pod_spec_config.get_nested(
+                ('podAntiAffinity',
+                 'preferredDuringSchedulingIgnoredDuringExecution'), [])
+            existing_rules.append({
+                # Max weight to avoid scheduling on the
+                # same physical node unless necessary.
+                'weight': 100,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': TAG_SKYPILOT_CLUSTER_NAME,
+                            'operator': 'In',
+                            'values': [cluster_name_on_cloud]
+                        }]
+                    },
+                    'topologyKey': 'kubernetes.io/hostname'
                 }
-            }
+            })
+            pod_spec_config.set_nested(
+                ('podAntiAffinity',
+                 'preferredDuringSchedulingIgnoredDuringExecution'),
+                existing_rules)
+            pod_spec_copy['spec']['affinity'] = pod_spec_config
 
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU
@@ -803,19 +884,62 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 tpu_toleration
             ]
 
+        if to_create_deployment:
+            _create_persistent_volume_claim(namespace, context, pvc_spec)
+
+            # It's safe to directly modify the template spec in the deployment spec
+            # because controller pod is singleton, i in [0].
+            template_pod_spec = deployment_spec['spec']['template']
+            # Add the deployment name as a label to the pod spec
+            deployment_name = deployment_spec['metadata']['name']
+            pod_spec_copy['metadata']['labels'][
+                TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
+            template_pod_spec['metadata'] = pod_spec_copy['metadata']
+            template_pod_spec['spec'].update(pod_spec_copy['spec'])
+            try:
+                return kubernetes.apps_api(
+                    context).create_namespaced_deployment(
+                        namespace, deployment_spec)
+            except Exception as e:
+                print('Deployment failed', e)
+                raise e
+
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
 
-    # Create pods in parallel
-    pods = subprocess_utils.run_in_parallel(_create_pod_thread,
-                                            list(range(to_start_count)),
-                                            _NUM_THREADS)
+    if not to_start_count:
+        is_provisioned_cluster_ha = is_high_availability_cluster_by_kubectl(
+            cluster_name_on_cloud, context, namespace)
+        if is_provisioned_cluster_ha != to_create_deployment:
+            ha_str = lambda x: 'high availability' if x else 'non-high availability'
 
-    # Process created pods
+            message = (
+                f'The cluster "{cluster_name_on_cloud}" is configured to be '
+                f'{ha_str(to_create_deployment)} but the cluster has already been '
+                f'provisioned as {ha_str(is_provisioned_cluster_ha)}. '
+                'If you want to make the provisioned cluster '
+                f'{ha_str(to_create_deployment)}, please first down the cluster '
+                'and then up the cluster again.')
+            raise exceptions.InconsistentHighAvailabilityError(message)
+
+    # Create pods in parallel
+    created_resources = subprocess_utils.run_in_parallel(
+        _create_resource_thread, list(range(to_start_count)), _NUM_THREADS)
+
+    if to_create_deployment:
+        deployments = copy.deepcopy(created_resources)
+        pods = [
+            pod for deployment in deployments
+            for pod in _wait_for_deployment_pod(context, namespace, deployment)
+        ]
+    else:
+        # If not creating deployments, 'created_resources' already holds Pod objects
+        pods = created_resources
+
+    created_pods = {}
     for pod in pods:
         created_pods[pod.metadata.name] = pod
-        if head_pod_name is None and pod.metadata.labels.get(
-                constants.TAG_RAY_NODE_KIND) == 'head':
+        if head_pod_name is None and _is_head(pod):
             head_pod_name = pod.metadata.name
 
     networking_mode = network_utils.get_networking_mode(
@@ -882,66 +1006,119 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _terminate_node(namespace: str, context: Optional[str],
-                    pod_name: str) -> None:
-    """Terminate a pod."""
+def _delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
+                                    resource_name: str) -> None:
+    """Helper to delete Kubernetes resources with 404 handling and retries.
+
+    Args:
+        delete_func: Function to call to delete the resource
+        resource_type: Type of resource being deleted (e.g. 'service'),
+            used in logging
+        resource_name: Name of the resource being deleted, used in logging
+    """
+    max_retries = 3
+    retry_delay = 5  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            delete_func()
+            return
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                logger.warning(
+                    f'terminate_instances: Tried to delete {resource_type} '
+                    f'{resource_name}, but the {resource_type} was not '
+                    'found (404).')
+                return
+            elif attempt < max_retries - 1:
+                logger.warning(f'terminate_instances: Failed to delete '
+                               f'{resource_type} {resource_name} (attempt '
+                               f'{attempt + 1}/{max_retries}). Error: {e}. '
+                               f'Retrying in {retry_delay} seconds...')
+                time.sleep(retry_delay)
+            else:
+                raise
+
+
+def _delete_services(name_prefix: str, namespace: str,
+                     context: Optional[str]) -> None:
+    """Delete services with the given name prefix.
+
+    Args:
+        name_prefix: Prefix of the service names to delete
+        namespace: Kubernetes namespace
+        context: Kubernetes context
+    """
+    # TODO(andy): We should use tag for the service filter.
+    for service_name in [name_prefix, f'{name_prefix}-ssh']:
+        # Since we are not saving this lambda, it's a false positive.
+        # TODO(andyl): Wait for
+        # https://github.com/pylint-dev/pylint/issues/5263.
+        # pylint: disable=cell-var-from-loop
+        _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
+            context).delete_namespaced_service(name=service_name,
+                                               namespace=namespace,
+                                               _request_timeout=config_lib.
+                                               DELETION_TIMEOUT),
+                                        resource_type='service',
+                                        resource_name=service_name)
+
+
+def _terminate_node(namespace: str,
+                    context: Optional[str],
+                    pod_name: str,
+                    is_head: bool = False) -> None:
+    """Terminate a pod and its associated services."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
-    def _delete_k8s_resource_with_retry(delete_func: Callable,
-                                        resource_type: str,
-                                        resource_name: str) -> None:
-        """Helper to delete Kubernetes resources with 404 handling and retries.
-
-        Args:
-            delete_func: Function to call to delete the resource
-            resource_type: Type of resource being deleted (e.g. 'service'),
-                used in logging
-            resource_name: Name of the resource being deleted, used in logging
-        """
-        max_retries = 3
-        retry_delay = 5  # seconds
-
-        for attempt in range(max_retries):
-            try:
-                delete_func()
-                return
-            except kubernetes.api_exception() as e:
-                if e.status == 404:
-                    logger.warning(
-                        f'terminate_instances: Tried to delete {resource_type} '
-                        f'{resource_name}, but the {resource_type} was not '
-                        'found (404).')
-                    return
-                elif attempt < max_retries - 1:
-                    logger.warning(f'terminate_instances: Failed to delete '
-                                   f'{resource_type} {resource_name} (attempt '
-                                   f'{attempt + 1}/{max_retries}). Error: {e}. '
-                                   f'Retrying in {retry_delay} seconds...')
-                    time.sleep(retry_delay)
-                else:
-                    raise
-
-    # Delete services for the pod
-    for service_name in [pod_name, f'{pod_name}-ssh']:
-        _delete_k8s_resource_with_retry(
-            delete_func=lambda name=service_name: kubernetes.core_api(
-                context).delete_namespaced_service(name=name,
-                                                   namespace=namespace,
-                                                   _request_timeout=config_lib.
-                                                   DELETION_TIMEOUT),
-            resource_type='service',
-            resource_name=service_name)
+    if is_head:
+        # Delete services for the head pod
+        # services are specified in sky/templates/kubernetes-ray.yml.j2
+        _delete_services(pod_name, namespace, context)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
+    # Note - some misbehaving pods may not terminate gracefully if they have
+    # open file descriptors. We force delete pods to avoid this.
     _delete_k8s_resource_with_retry(
         delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
             name=pod_name,
             namespace=namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT),
+            _request_timeout=config_lib.DELETION_TIMEOUT,
+            grace_period_seconds=0),
         resource_type='pod',
         resource_name=pod_name)
+
+
+def _terminate_deployment(cluster_name: str, namespace: str,
+                          context: Optional[str]) -> None:
+    """Terminate a deployment."""
+    # Delete services first
+    _delete_services(f'{cluster_name}-head', namespace, context)
+
+    # Delete deployment
+    deployment_name = _get_deployment_name(cluster_name)
+    _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.apps_api(
+        context).delete_namespaced_deployment(name=deployment_name,
+                                              namespace=namespace,
+                                              _request_timeout=config_lib.
+                                              DELETION_TIMEOUT),
+                                    resource_type='deployment',
+                                    resource_name=deployment_name)
+
+    # Delete PVCs
+    pvc_name = _get_pvc_name(
+        cluster_name,
+        kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME)
+    # pylint: disable=cell-var-from-loop
+    _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
+        context).delete_namespaced_persistent_volume_claim(
+            name=pvc_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+                                    resource_type='pvc',
+                                    resource_name=pvc_name)
 
 
 def terminate_instances(
@@ -952,10 +1129,9 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
-    tag_filters = {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-    }
-    pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
+    pods = kubernetes_utils.filter_pods(namespace, context,
+                                        ray_tag_filter(cluster_name_on_cloud),
+                                        None)
 
     # Clean up the SSH jump pod if in use
     networking_mode = network_utils.get_networking_mode(
@@ -969,15 +1145,19 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    def _is_head(pod) -> bool:
-        return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
+    if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context,
+                                               namespace):
+        # For high availability controllers, terminate the deployment
+        logger.debug(f'Terminating deployment {cluster_name_on_cloud}')
+        _terminate_deployment(cluster_name_on_cloud, namespace, context)
+        return
 
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name)
+        _terminate_node(namespace, context, pod_name, _is_head(pod))
 
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
@@ -992,12 +1172,9 @@ def get_cluster_info(
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
-    tag_filters = {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-    }
 
-    running_pods = kubernetes_utils.filter_pods(namespace, context, tag_filters,
-                                                ['Running'])
+    running_pods = kubernetes_utils.filter_pods(
+        namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
 
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
@@ -1027,7 +1204,7 @@ def get_cluster_info(
                 tags=pod.metadata.labels,
             )
         ]
-        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
+        if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
@@ -1123,11 +1300,25 @@ def get_command_runners(
         cluster_info.provider_config)
     context = kubernetes_utils.get_context_from_config(
         cluster_info.provider_config)
-    node_list = []
+
+    runners: List[command_runner.CommandRunner] = []
     if cluster_info.head_instance_id is not None:
-        node_list = [((namespace, context), cluster_info.head_instance_id)]
-    node_list.extend(((namespace, context), pod_name)
-                     for pod_name in instances.keys()
-                     if pod_name != cluster_info.head_instance_id)
-    return command_runner.KubernetesCommandRunner.make_runner_list(
-        node_list=node_list, **credentials)
+        pod_name = cluster_info.head_instance_id
+
+        # Try to get deployment name from label first
+        head_instance_info = instances[pod_name][0]
+        deployment = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
+
+        node_list = [((namespace, context), pod_name)]
+        head_runner = command_runner.KubernetesCommandRunner(
+            node_list[0], deployment=deployment, **credentials)
+        runners.append(head_runner)
+
+    node_list = [((namespace, context), pod_name)
+                 for pod_name in instances.keys()
+                 if pod_name != cluster_info.head_instance_id]
+    runners.extend(
+        command_runner.KubernetesCommandRunner.make_runner_list(
+            node_list, **credentials))
+
+    return runners

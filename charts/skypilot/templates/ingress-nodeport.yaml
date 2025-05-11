@@ -1,11 +1,11 @@
-{{- /* TODO(aylei): remove this template in v0.9.0 release */ -}}
+{{- /* TODO(aylei): remove this template in v0.10.0 release */ -}}
 {{- $createNodePort := false -}}
 {{- if eq .Values.ingress.nodePortEnabled nil -}}
   {{- /* Keep existing NodePort service if ingress.nodePortEnabled is not set */ -}}
   {{- $existingService := lookup "v1" "Service" .Release.Namespace (printf "%s-ingress-controller-np" .Release.Name) -}}
   {{- if $existingService -}}
     {{- /* If there is an existing legacy NodePort service, error out and ask user to set ingress.nodePortEnabled explicitly */ -}}
-    {{- fail (printf "Service %s-ingress-controller-np is deprecated and will be removed in SkyPilot v0.9.0. Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#sky-migrate-legacy-service for migration steps." .Release.Name) -}}
+    {{- fail (printf "Service %s-ingress-controller-np is deprecated and will be removed in SkyPilot v0.10.0. Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#sky-migrate-legacy-service for migration steps." .Release.Name) -}}
   {{- end -}}
 {{- else -}}
   {{- /* Use explicitly set value */ -}}

@@ -38,7 +38,8 @@ spec:
   ingressClassName: nginx
   {{- end }}
   rules:
-  - http:
+  - host: {{ .Values.ingress.host }}
+    http:
       paths:
       {{- /* TODO(aylei): check whether this works for ingress-controllers other than nginx */}}
       - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}

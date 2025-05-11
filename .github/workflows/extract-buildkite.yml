@@ -1,0 +1,32 @@
+name: Extract Buildkite Build Number
+
+on:
+  workflow_call:
+    inputs:
+      json_data:
+        required: true
+        type: string
+        description: "JSON response from Buildkite trigger API"
+    outputs:
+      build_number:
+        description: "Extracted build number from Buildkite response"
+        value: ${{ jobs.extract.outputs.build_number }}
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    outputs:
+      build_number: ${{ steps.extract.outputs.build_number }}
+    steps:
+      - name: Extract build number
+        id: extract
+        env:
+          JSON_DATA: ${{ inputs.json_data }}
+        run: |
+          # Use printf to avoid shell interpretation
+          printf '%s' "$JSON_DATA" > response.json
+
+          # Extract the build number using jq
+          build_number=$(jq -r '.number' response.json)
+          echo "build_number=$build_number" >> $GITHUB_OUTPUT
+          rm response.json

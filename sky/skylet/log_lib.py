@@ -149,6 +149,7 @@ def run_with_log(
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
+    log_cmd: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -182,6 +183,9 @@ def run_with_log(
     # the terminal output when typing in the terminal that starts the API
     # server.
     stdin = kwargs.pop('stdin', subprocess.DEVNULL)
+    if log_cmd:
+        with open(log_path, 'a', encoding='utf-8') as f:
+            print(f'Running command: {cmd}', file=f)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,

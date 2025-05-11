@@ -578,13 +578,11 @@ class NebiusCloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        endpoint_url = nebius.create_endpoint()
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
-                               f'--endpoint {endpoint_url} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)
@@ -593,12 +591,10 @@ class NebiusCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        endpoint_url = nebius.create_endpoint()
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                f'cp {source} {destination} '
-                               f'--endpoint {endpoint_url} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)

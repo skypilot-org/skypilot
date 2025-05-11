@@ -22,7 +22,7 @@ Refer to the ``Request Returns`` and ``Request Raises`` sections of each API for
 .. note::
 
   **Upgrading from v0.8 or older:** If you upgraded from a version equal to or older than 0.8.0 to any newer version, you need to update your program to adapt to the new
-  :ref:`asynchronous execution model <async>`. See the :ref:`migration guide <migration-0.8.0>` for more details.
+  :ref:`asynchronous execution model <async>`. See the :ref:`migration guide <migration-0.8.1>` for more details.
 
 
 Clusters SDK

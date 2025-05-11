@@ -156,9 +156,21 @@ CONDA_INSTALLATION_COMMANDS = (
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
+    # If conda was not installed and the image is a docker image,
+    # we deactivate any active conda environment we set.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "true" ]; then '
+    'conda deactivate;'
+    'fi;'
     '}; '
+    # run this command only if the image is not a docker image assuming
+    # that if a user is using a docker image, they know what they are doing
+    # in terms of conda setup/activation.
+    # Caller should replace {is_custom_docker} with either true or false.
+    'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
+    'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.
@@ -268,6 +280,24 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# SSH configuration to allow more concurrent sessions and connections.
+# Default MaxSessions is 10.
+# Default MaxStartups is 10:30:60, meaning:
+#   - Up to 10 unauthenticated connections are allowed without restriction.
+#   - From 11 to 60 connections, 30% are randomly dropped.
+#   - Above 60 connections, all are dropped.
+# These defaults are too low for submitting many parallel jobs (e.g., 150),
+# which can easily exceed the limits and cause connection failures.
+# The new values (MaxSessions 200, MaxStartups 150:30:200) increase these
+# limits significantly.
+# TODO(zeping): Bake this configuration in SkyPilot default images.
+SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
+    'sudo bash -c \''
+    'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
+    'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
+    '(systemctl reload sshd || service ssh reload); '
+    '\'')
+
 # Internal: Env var indicating the system is running with a remote API server.
 # It is used for internal purposes, including the jobs controller to mark
 # clusters as launched with a remote API server.
@@ -298,11 +328,6 @@ FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH = '~/.sky/tmp/controller'
 FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
-
-# The default idle timeout for SkyPilot controllers. This include jobs
-# controller and sky serve controller.
-# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each jobs/
@@ -361,9 +386,19 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
 
+# Constants for path in K8S pod to store persistent setup and run scripts
+# so that we can run them again after the pod restarts.
+# Path within user home. For HA controller, assumes home directory is
+# persistent through PVC. See kubernetes-ray.yml.j2.
+PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/.controller_recovery_setup_commands.sh'
+PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
+
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
 # Path to the generated cluster config yamls and ssh configs.
 SKY_USER_FILE_PATH = '~/.sky/generated'
+
+# Environment variable that is set to 'true' if this is a skypilot server.
+ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'

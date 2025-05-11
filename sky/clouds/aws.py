@@ -161,13 +161,19 @@ class AWS(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported_features = {}
         if resources.use_spot:
-            return {
-                clouds.CloudImplementationFeatures.STOP:
-                    ('Stopping spot instances is currently not supported on'
-                     f' {cls._REPR}.'),
-            }
-        return {}
+            unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
+                f'Stopping spot instances is currently not supported on {cls._REPR}.'
+            )
+
+        unsupported_features[
+            clouds.CloudImplementationFeatures.
+            HIGH_AVAILABILITY_CONTROLLERS] = (
+                f'High availability controllers are not supported on {cls._REPR}.'
+            )
+
+        return unsupported_features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -312,13 +318,12 @@ class AWS(clouds.Cloud):
             'Example: ami-0729d913a335efca7')
         try:
             client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id])
-            image_info = image_info.get('Images', [])
+            image_info = client.describe_images(ImageIds=[image_id]).get(
+                'Images', [])
             if not image_info:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(image_not_found_message)
-            image_info = image_info[0]
-            image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
+            image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except (aws.botocore_exceptions().NoCredentialsError,
                 aws.botocore_exceptions().ProfileNotFound):
@@ -571,7 +576,7 @@ class AWS(clouds.Cloud):
         return cls._check_credentials()
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to AWS."""
@@ -710,7 +715,7 @@ class AWS(clouds.Cloud):
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='global', maxsize=1)
+    @annotations.lru_cache(scope='request', maxsize=1)
     def _aws_configure_list(cls) -> Optional[bytes]:
         proc = subprocess.run('aws configure list',
                               shell=True,
@@ -722,7 +727,7 @@ class AWS(clouds.Cloud):
         return proc.stdout
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
@@ -804,7 +809,7 @@ class AWS(clouds.Cloud):
         return [user_ids]
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
@@ -909,7 +914,7 @@ class AWS(clouds.Cloud):
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
-    @annotations.lru_cache(scope='global', maxsize=1)
+    @annotations.lru_cache(scope='request', maxsize=1)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
         return (identity_type is not None and

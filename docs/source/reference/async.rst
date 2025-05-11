@@ -121,7 +121,7 @@ Note that the following log functions are synchronous:
   older than 0.8.0 to any newer version,
   your program using SkyPilot SDKs needs to be updated to use the new
   |sky.stream_and_get|_ function to retrieve the result of a SDK function call.
-  See the :ref:`migration guide <migration-0.8.0>` for more details.
+  See the :ref:`migration guide <migration-0.8.1>` for more details.
 
 .. https://stackoverflow.com/a/4836544
 .. |sky.stream_and_get| replace:: :code:`sky.stream_and_get`

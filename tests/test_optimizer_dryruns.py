@@ -95,6 +95,7 @@ def test_resources_azure(enable_all_clouds):
 
 def test_resources_gcp(enable_all_clouds):
     _test_resources_launch(sky.GCP(), 'n1-standard-16')
+    _test_resources_launch(sky.GCP(), 'a3-highgpu-8g')
 
 
 def test_partial_cpus(enable_all_clouds):
@@ -314,6 +315,9 @@ def test_instance_type_matches_accelerators(enable_all_clouds):
     _test_resources_launch(sky.GCP(),
                            instance_type='a2-highgpu-1g',
                            accelerators='a100')
+    _test_resources_launch(sky.GCP(),
+                           instance_type='a3-highgpu-8g',
+                           accelerators={'H100': 8})
 
     _test_resources_launch(sky.AWS(),
                            instance_type='p3.16xlarge',
@@ -698,7 +702,7 @@ def test_optimize_disk_tier(enable_all_clouds):
     def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
         task = sky.Task()
         task.set_resources(r)
-        _, per_cloud_candidates, _ = optimizer._fill_in_launchable_resources(
+        _, per_cloud_candidates, _, _ = optimizer._fill_in_launchable_resources(
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
 

@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
 import pathlib
+import re
 import tempfile
 import textwrap
 from typing import Dict
@@ -45,9 +46,8 @@ from sky.utils import resources_utils
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
-@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -84,8 +84,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-@pytest.mark.no_nebius  # Doesn't support Nebius for now
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -108,6 +107,11 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str,
     name = smoke_tests_utils.get_cluster_name() + image_id[len('docker:'):][:4]
     total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
     time_to_sleep = 300 if generic_cloud == 'azure' else 200
+    # Nebius support Cuda >= 12.0
+    if (image_id == 'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04' and
+            generic_cloud == 'nebius'):
+        image_id = 'docker:nvidia/cuda:12.1.0-devel-ubuntu18.04'
+
     test = smoke_tests_utils.Test(
         'job_queue_with_docker',
         [
@@ -138,7 +142,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str,
             f'sky logs {name} 5 --status',
             f'sky logs {name} 6 --status',
             # Make sure it is still visible after an stop & start cycle.
-            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep -i "{accelerator}"',
             f'sky logs {name} 7 --status'
         ],
         f'sky down -y {name}',
@@ -227,8 +231,7 @@ def test_scp_job_queue():
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius Cloud does not have T4 gpus.
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -382,7 +385,6 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-@pytest.mark.no_nebius  # Doesn't support Nebius for now
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -442,10 +444,13 @@ def test_multi_echo(generic_cloud: str):
                 job_id=i + 1,
                 job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=120) for i in range(32)
-        ] +
-        # Ensure monitor/autoscaler didn't crash on the 'assert not
-        # unfulfilled' error.  If process not found, grep->ssh returns 1.
-        [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
+        ] + [
+            # ssh record will only be created on cli command like sky status on client side.
+            f'sky status {name}',
+            # Ensure monitor/autoscaler didn't crash on the 'assert not
+            # unfulfilled' error.  If process not found, grep->ssh returns 1.
+            f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
+        ],
         f'sky down -y {name}',
         timeout=20 * 60,
     )
@@ -458,9 +463,8 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
-@pytest.mark.no_nebius  # Nebius does not have T4 gpus for now
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -769,7 +773,7 @@ def test_task_labels_aws():
             'task_labels_aws',
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-                f'sky launch -y -c {name} {file_path}',
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
                 # Verify with aws cli that the tags are set.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'aws ec2 describe-instances '
@@ -801,7 +805,7 @@ def test_task_labels_gcp():
             'task_labels_gcp',
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-                f'sky launch -y -c {name} {file_path}',
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
                 # Verify with gcloud cli that the tags are set
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -833,7 +837,7 @@ def test_task_labels_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {file_path}',
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
                 # Verify with kubectl that the labels are set.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'kubectl get pods '
@@ -1201,7 +1205,6 @@ def test_azure_start_stop():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not autostop yet
 def test_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -1270,7 +1273,7 @@ def test_autostop(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not support stopping in SkyPilot implementation
+@pytest.mark.no_nebius  # Nebius does not support autodown
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
@@ -1396,9 +1399,8 @@ def test_cancel_azure():
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius Cloud does not have V100 gpus
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1699,9 +1701,10 @@ def test_aws_disk_tier():
 
 
 @pytest.mark.gcp
-def test_gcp_disk_tier():
+@pytest.mark.parametrize('instance_type', ['n2-standard-64'])
+def test_gcp_disk_tier(instance_type: str):
     for disk_tier in list(resources_utils.DiskTier):
-        disk_types = [GCP._get_disk_type(disk_tier)]
+        disk_types = [GCP._get_disk_type(instance_type, disk_tier)]
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
@@ -1711,10 +1714,12 @@ def test_gcp_disk_tier():
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             # If using default instance type, it will only enable the high disk tier.
             disk_types = [
-                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
-                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(instance_type,
+                                   resources_utils.DiskTier.ULTRA),
             ]
-            instance_type_options = ['', '--instance-type n2-standard-64']
+            instance_type_options = ['', f'--instance-type {instance_type}']
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
             test = smoke_tests_utils.Test(
@@ -1865,5 +1870,39 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky logs {name} --status 3',
             ],
             f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test min-gpt on Kubernetes ----------
+@pytest.mark.kubernetes
+@pytest.mark.resource_heavy
+def test_min_gpt_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    original_yaml_path = 'examples/distributed-pytorch/train.yaml'
+
+    with open(original_yaml_path, 'r') as f:
+        content = f.read()
+
+    # Let the train exit after 1 epoch
+    modified_content = content.replace('main.py',
+                                       'main.py trainer_config.max_epochs=1')
+
+    modified_content = re.sub(r'accelerators:\s*[^\n]+', 'accelerators: T4',
+                              modified_content)
+
+    # Create a temporary YAML file with the modified content
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(modified_content)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'min_gpt_kubernetes',
+            [
+                f'sky launch -y -c {name} --cloud kubernetes {f.name}',
+                f'sky logs {name} 1 --status',
+            ],
+            f'sky down -y {name}',
+            timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
