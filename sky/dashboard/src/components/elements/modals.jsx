@@ -102,7 +102,9 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigator.clipboard.writeText(`sky status ${cluster}`)}
+                        onClick={() =>
+                          navigator.clipboard.writeText(`sky status ${cluster}`)
+                        }
                         className="h-8 w-8 rounded-full"
                       >
                         <CopyIcon className="h-4 w-4" />
@@ -124,7 +126,11 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigator.clipboard.writeText(`code --remote ssh-remote+${cluster}`)}
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            `code --remote ssh-remote+${cluster}`
+                          )
+                        }
                         className="h-8 w-8 rounded-full"
                       >
                         <CopyIcon className="h-4 w-4" />
