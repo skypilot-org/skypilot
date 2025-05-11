@@ -75,6 +75,30 @@ def wait_for_compute_global_operation(project_name, operation, compute):
     return result
 
 
+def wait_for_compute_region_operation(project_name, region, operation, compute):
+    """Poll for region compute operation until finished."""
+    logger.info('wait_for_compute_region_operation: '
+                'Waiting for operation {} to finish...'.format(
+                    operation['name']))
+
+    for _ in range(constants.MAX_POLLS):
+        result = (compute.regionOperations().get(
+            project=project_name,
+            region=region,
+            operation=operation['name'],
+        ).execute())
+        if 'error' in result:
+            raise Exception(result['error'])
+
+        if result['status'] == 'DONE':
+            logger.info('wait_for_compute_region_operation: Operation done.')
+            break
+
+        time.sleep(constants.POLL_INTERVAL)
+
+    return result
+
+
 def _create_crm(gcp_credentials=None):
     return gcp.build('cloudresourcemanager',
                      'v1',
@@ -660,6 +684,53 @@ def get_usable_vpc_and_subnet(
     return usable_vpc_name, usable_subnet
 
 
+def get_gpu_direct_usable_vpcs_and_subnets(
+    region: str,
+    config: common.ProvisionConfig,
+    compute,
+) -> List[Tuple[str, 'google.cloud.compute_v1.types.compute.Subnetwork']]:
+    """Return a list of usable VPCs and subnets for GPU Direct."""
+    project_id = config.provider_config['project_id']
+    vpc_prefix = constants.SKYPILOT_GPU_DIRECT_VPC_PREFIX
+    vpc_subnet_pairs = []
+
+    # TODO(hailong): Determine the num_vpcs per different GPU Direct types
+    num_vpcs = constants.SKYPILOT_GPU_DIRECT_VPC_NUM
+
+    cidr_prefix = constants.SKYPILOT_GPU_DIRECT_VPC_CIDR_PREFIX
+    for i in range(num_vpcs):
+        if i == 0:
+            vpc_name = f'{vpc_prefix}-mgmt-net'
+        else:
+            vpc_name = f'{vpc_prefix}-data-net-{i}'
+        subnet_name = f'{vpc_name}-subnet'
+        subnet_cidr_range = f'{cidr_prefix}.{i}.0/24'
+        # Check if VPC exists
+        vpc_list = _list_vpcnets(project_id, compute, filter=f'name={vpc_name}')
+        if not vpc_list:
+            body = constants.VPC_TEMPLATE.copy()
+            body['mtu'] = 8244
+            body['autoCreateSubnetworks'] = False
+            body['name'] = vpc_name
+            body['selfLink'] = body['selfLink'].format(PROJ_ID=project_id,
+                                                       VPC_NAME=vpc_name)
+            _create_vpcnet(project_id, compute, body)
+        # Check if subnet exists
+        subnets = _list_subnets(project_id, region, compute, network=vpc_name)
+        if not subnets:
+            _create_subnet(project_id, region, compute, vpc_name, subnet_name,
+                           subnet_cidr_range)
+            subnets = _list_subnets(project_id,
+                                    region,
+                                    compute,
+                                    network=vpc_name)
+        # Apply firewall rules
+        _create_rules(project_id, compute, constants.FIREWALL_RULES_TEMPLATE,
+                      vpc_name)
+        vpc_subnet_pairs.append((vpc_name, subnets[0]))
+    return vpc_subnet_pairs
+
+
 def _configure_subnet(region: str, cluster_name: str,
                       config: common.ProvisionConfig, compute):
     """Pick a reasonable subnet if not specified by the config."""
@@ -671,25 +742,50 @@ def _configure_subnet(region: str, cluster_name: str,
     if 'networkInterfaces' in node_config or 'networkConfig' in node_config:
         return config
 
-    # SkyPilot: make sure there's a usable VPC
-    _, default_subnet = get_usable_vpc_and_subnet(cluster_name, region, config,
-                                                  compute)
-
-    default_interfaces = [{
-        'subnetwork': default_subnet['selfLink'],
-        'accessConfigs': [{
-            'name': 'External NAT',
-            'type': 'ONE_TO_ONE_NAT',
-        }]
-    }]
-    # Add gVNIC if specified in config
+    default_interfaces = []
+    enable_gpu_direct = config.provider_config.get('enable_gpu_direct', False)
     enable_gvnic = config.provider_config.get('enable_gvnic', False)
-    if enable_gvnic:
-        default_interfaces[0]['nicType'] = 'gVNIC'
+    if enable_gpu_direct:
+        if not enable_gvnic:
+            raise ValueError('Enable GPU Direct requires gvnic to be enabled')
+        if 'machineType' not in node_config or not node_config[
+                'machineType'] in constants.GPU_DIRECT_TCPX_INSTANCE_TYPES:
+            raise ValueError(
+                'Enable GPU Direct requires machineType to be one of '
+                f'{constants.GPU_DIRECT_TCPX_INSTANCE_TYPES}')
+        logger.info(f'Enable GPU Direct for cluster {cluster_name} '
+                    f'with machineType {node_config["machineType"]}')
+        vpc_subnet_pairs = get_gpu_direct_usable_vpcs_and_subnets(
+            region, config, compute)
+        for _, subnet in vpc_subnet_pairs:
+            default_interfaces.append({
+                'subnetwork': subnet['selfLink'],
+                'accessConfigs': [{
+                    'name': 'External NAT',
+                    'type': 'ONE_TO_ONE_NAT',
+                }],
+                'nicType': 'gVNIC'
+            })
+    else:
+        # SkyPilot: make sure there's a usable VPC
+        _, default_subnet = get_usable_vpc_and_subnet(cluster_name, region,
+                                                      config, compute)
+
+        default_interfaces = [{
+            'subnetwork': default_subnet['selfLink'],
+            'accessConfigs': [{
+                'name': 'External NAT',
+                'type': 'ONE_TO_ONE_NAT',
+            }]
+        }]
+        # Add gVNIC if specified in config
+        if enable_gvnic:
+            default_interfaces[0]['nicType'] = 'gVNIC'
     enable_external_ips = _enable_external_ips(config)
     if not enable_external_ips:
         # Removing this key means the VM will not be assigned an external IP.
-        default_interfaces[0].pop('accessConfigs')
+        for interface in default_interfaces:
+            interface.pop('accessConfigs')
 
     # The not applicable key will be removed during node creation
 
@@ -840,3 +936,19 @@ def _add_iam_policy_binding(service_account, policy, crm, iam):
     ).execute())
 
     return result
+
+
+def _create_subnet(project_id: str, region: str, compute, vpc_name: str,
+                   subnet_name: str, ip_cidr_range: str):
+    body = {
+        'name': subnet_name,
+        'ipCidrRange': ip_cidr_range,
+        'network': f'projects/{project_id}/global/networks/{vpc_name}',
+        'region': region,
+    }
+    operation = compute.subnetworks().insert(project=project_id,
+                                             region=region,
+                                             body=body).execute()
+    response = wait_for_compute_region_operation(project_id, region, operation,
+                                                 compute)
+    return response

@@ -41,6 +41,13 @@ HAS_TPU_PROVIDER_FIELD = '_has_tpus'
 # with ServiceAccounts.
 
 SKYPILOT_VPC_NAME = 'skypilot-vpc'
+SKYPILOT_GPU_DIRECT_VPC_PREFIX = 'skypilot-gpu-direct-'
+SKYPILOT_GPU_DIRECT_VPC_NUM = 5
+SKYPILOT_GPU_DIRECT_VPC_CIDR_PREFIX = '10.129'
+GPU_DIRECT_TCPX_INSTANCE_TYPES = [
+    'a3-edgegpu-8g',
+    'a3-highgpu-8g',
+]
 
 # Below parameters are from the default VPC on GCP.
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc
