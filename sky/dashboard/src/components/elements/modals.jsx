@@ -94,9 +94,21 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                   Setup SSH access
                 </h3>
                 <Card className="p-3 bg-gray-50">
-                  <pre className="text-sm">
-                    <code>sky status {cluster}</code>
-                  </pre>
+                  <div className="flex items-center justify-between">
+                    <pre className="text-sm">
+                      <code>sky status {cluster}</code>
+                    </pre>
+                    <Tooltip content="Copy command">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigator.clipboard.writeText(`sky status ${cluster}`)}
+                        className="h-8 w-8 rounded-full"
+                      >
+                        <CopyIcon className="h-4 w-4" />
+                      </Button>
+                    </Tooltip>
+                  </div>
                 </Card>
               </div>
               <div>
@@ -127,7 +139,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                 </h3>
                 <div
                   className={`relative ${isMobile ? '-mt-5' : '-mt-10'}`}
-                  style={{ paddingBottom: '75%' }}
+                  style={{ paddingBottom: '70%' }}
                 >
                   <video
                     className="absolute top-0 left-0 w-full h-full rounded-lg"
