@@ -202,7 +202,6 @@ SERIES_TO_DISCRIPTION = {
     't2d': 'T2D AMD Instance',
 }
 
-
 creds, project_id = google.auth.default()
 gcp_client = discovery.build('compute', 'v1')
 tpu_client = discovery.build('tpu', 'v1')

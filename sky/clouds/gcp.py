@@ -1034,13 +1034,17 @@ class GCP(clouds.Cloud):
                 raise exceptions.NotSupportedError(msg)
 
     @classmethod
-    def _get_disk_type(cls, instance_type: Optional[str],
-                       disk_tier: Optional[resources_utils.DiskTier],) -> str:
+    def _get_disk_type(
+        cls,
+        instance_type: Optional[str],
+        disk_tier: Optional[resources_utils.DiskTier],
+    ) -> str:
 
-        def _propagate_disk_type(lowest: Optional[str] = None,
-                                 highest: Optional[str] = None,
-                                 # pylint: disable=redefined-outer-name
-                                 all: Optional[str] = None) -> None:
+        def _propagate_disk_type(
+            lowest: Optional[str] = None,
+            highest: Optional[str] = None,
+            # pylint: disable=redefined-builtin
+            all: Optional[str] = None) -> None:
             if lowest is not None:
                 tier2name[resources_utils.DiskTier.LOW] = lowest
             if highest is not None:
@@ -1061,7 +1065,8 @@ class GCP(clouds.Cloud):
 
         # Remap series-specific disk types.
         # Reference: https://github.com/skypilot-org/skypilot/issues/4705
-        series = instance_type.split('-')[0]  # type: ignore
+        assert instance_type is not None, (instance_type, disk_tier)
+        series = instance_type.split('-')[0]
 
         # General handling of unsupported disk types
         if series in ['n1', 'a2', 'g2']:
@@ -1074,8 +1079,7 @@ class GCP(clouds.Cloud):
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
         if instance_type.startswith('a3-ultragpu'):
             # a3-ultragpu instances only support hyperdisk-balanced.
-            _propagate_disk_type(
-                all='hyperdisk-balanced')
+            _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling
         if series == 'n2':
@@ -1098,7 +1102,8 @@ class GCP(clouds.Cloud):
         specs: Dict[str, Any] = {
             'disk_tier': cls._get_disk_type(instance_type, disk_tier)
         }
-        if disk_tier == resources_utils.DiskTier.ULTRA:
+        if (disk_tier == resources_utils.DiskTier.ULTRA and
+                specs['disk_tier'] == 'pd-extreme'):
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
             specs['disk_iops'] = 20000
