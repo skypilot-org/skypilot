@@ -270,7 +270,6 @@ export function GPUs() {
             disabled={loading || cloudLoading}
             className="text-sky-blue hover:text-sky-blue-bright"
             title="Refresh"
-            asChild={true}
           >
             <>
               <RotateCwIcon className="h-4 w-4 mr-1.5" />
@@ -361,7 +360,7 @@ export function GPUs() {
                                   {gpu.gpu_name}
                                 </span>
                                 <span className="text-sm text-gray-600">
-                                  {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                                  {gpu.gpu_free} free / {gpu.gpu_total} total
                                 </span>
                               </div>
                               <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
@@ -431,45 +430,29 @@ export function GPUs() {
                                             className="p-2 border rounded w-full mb-2"
                                           >
                                             <div className="flex justify-between items-center mb-1">
-                                              <div>
-                                                <span className="font-medium text-gray-800">
-                                                  {gpu.gpu_name}
-                                                </span>
-                                                <span className="text-xs text-gray-500 ml-2">
-                                                  (Requestable:{' '}
-                                                  {
-                                                    gpu.gpu_requestable_qty_per_node
-                                                  }{' '}
-                                                  / Node)
-                                                </span>
-                                              </div>
+                                              <span className="font-medium text-gray-800">
+                                                {gpu.gpu_name}
+                                              </span>
                                               <span className="text-sm text-gray-600">
-                                                {gpu.gpu_free} Free /{' '}
-                                                {gpu.gpu_total} Total
+                                                {gpu.gpu_free} free / {gpu.gpu_total} total
                                               </span>
                                             </div>
                                             <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
                                               <div
-                                                style={{
-                                                  width: `${usedPercentage}%`,
-                                                }}
+                                                style={{ width: `${usedPercentage}%` }}
                                                 className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
                                                 title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
                                               >
-                                                {usedGpus > 0 &&
-                                                usedPercentage > 10
+                                                {usedGpus > 0 && usedPercentage > 10
                                                   ? `${usedGpus} Used`
                                                   : ''}
                                               </div>
                                               <div
-                                                style={{
-                                                  width: `${freePercentage}%`,
-                                                }}
+                                                style={{ width: `${freePercentage}%` }}
                                                 className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                                                 title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                                               >
-                                                {gpu.gpu_free > 0 &&
-                                                freePercentage > 10
+                                                {gpu.gpu_free > 0 && freePercentage > 10
                                                   ? `${gpu.gpu_free} Free`
                                                   : ''}
                                               </div>
@@ -489,7 +472,7 @@ export function GPUs() {
                                                 <thead className="bg-gray-100 sticky top-0 z-10">
                                                   <tr>
                                                     <th className="p-2 text-left font-medium text-gray-600">
-                                                      Node Name
+                                                      Node
                                                     </th>
                                                     <th className="p-2 text-left font-medium text-gray-600">
                                                       GPU
@@ -631,7 +614,7 @@ export function GPUs() {
                                 {gpu.gpu_name}
                               </span>
                               <span className="text-sm text-gray-600">
-                                {gpu.gpu_free} Free / {gpu.gpu_total} Total
+                                {gpu.gpu_free} free / {gpu.gpu_total} total
                               </span>
                             </div>
                             <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
@@ -704,17 +687,16 @@ export function GPUs() {
                                               <span className="font-medium text-gray-800">
                                                 {gpu.gpu_name}
                                               </span>
-                                              <span className="text-xs text-gray-500 ml-2">
+                                              {/* <span className="text-xs text-gray-500 ml-2">
                                                 (Requestable:{' '}
                                                 {
                                                   gpu.gpu_requestable_qty_per_node
                                                 }{' '}
                                                 / Node)
-                                              </span>
+                                              </span> */}
                                             </div>
                                             <span className="text-sm text-gray-600">
-                                              {gpu.gpu_free} Free /{' '}
-                                              {gpu.gpu_total} Total
+                                              {gpu.gpu_free} free / {gpu.gpu_total} total
                                             </span>
                                           </div>
                                           <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
@@ -758,7 +740,7 @@ export function GPUs() {
                                               <thead className="bg-gray-100 sticky top-0 z-10">
                                                 <tr>
                                                   <th className="p-2 text-left font-medium text-gray-600">
-                                                    Node Name
+                                                    Node
                                                   </th>
                                                   <th className="p-2 text-left font-medium text-gray-600">
                                                     GPU

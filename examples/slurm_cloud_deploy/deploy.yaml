@@ -302,6 +302,7 @@ run: |
         # Copy munge key to a temporary location with right permissions for scp
         sudo cp /etc/munge/munge.key /tmp/munge.key.copy
         sudo chown $USERNAME:$USERNAME /tmp/munge.key.copy
+        sudo chmod 600 /tmp/munge.key.copy
         scp -o StrictHostKeyChecking=no /tmp/munge.key.copy $USERNAME@$node:/tmp/munge.key
         sudo rm /tmp/munge.key.copy
         ssh -o StrictHostKeyChecking=no $node "sudo mv /tmp/munge.key /etc/munge/munge.key && sudo chown munge:munge /etc/munge/munge.key && sudo chmod 400 /etc/munge/munge.key"
@@ -395,7 +396,7 @@ run: |
   if [ -z "$CONTROLLER_IP" ]; then
     if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
       # On primary controller, create a script that will be used to mount NFS on worker nodes
-      cat > /tmp/mount_nfs.sh << 'EOF'
+      cat > /tmp/mount_nfs.sh << EOF
   #!/bin/bash
   # Idempotent mount script with retries
   sudo mkdir -p /mnt
@@ -449,7 +450,11 @@ run: |
       # Create and distribute the NFS setup barrier
       create_barrier "nfs_setup_complete"
     else
-      # Worker nodes: Mount the NFS share from controller
+      # Worker node in primary cluster
+      echo "Primary worker node: Waiting for head node NFS setup to complete..."
+      create_barrier "nfs_setup_complete" # Worker waits here
+      echo "Primary worker node: Head node NFS setup reported complete."
+
       sudo mkdir -p /mnt
       
       # Check if already mounted
