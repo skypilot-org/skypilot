@@ -3373,12 +3373,8 @@ def show_gpus(
     * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
       on a single node.
 
-    * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
-      Kubernetes cluster.
-
-    * ``TOTAL_FREE_GPUS`` (Kubernetes only): Number of currently free GPUs
-      in the Kubernetes cluster. This is fetched in real-time and may change
-      when other users are using the cluster.
+    * ``#GPUS`` (Kubernetes only): Total number of GPUs free / available in the
+      Kubernetes cluster
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -3425,10 +3421,8 @@ def show_gpus(
                    str, 'models.KubernetesNodesInfo']]]:
         if quantity_filter:
             qty_header = 'QTY_FILTER'
-            free_header = 'FILTERED_FREE_GPUS'
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
-            free_header = 'TOTAL_FREE_GPUS'
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_kubernetes_gpu_availability(
@@ -3466,7 +3460,7 @@ def show_gpus(
                 ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 realtime_gpu_table = log_utils.create_table(
-                    ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                    ['GPU', qty_header, '#GPUS'])
                 for realtime_gpu_availability in sorted(availability_list):
                     gpu_availability = models.RealtimeGpuAvailability(
                         *realtime_gpu_availability)
@@ -3476,8 +3470,7 @@ def show_gpus(
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
-                        gpu_availability.capacity,
-                        available_qty,
+                        f'{available_qty} of {gpu_availability.capacity} free',
                     ])
                     gpu = gpu_availability.gpu
                     capacity = gpu_availability.capacity
@@ -3496,9 +3489,9 @@ def show_gpus(
         # if there are more than one contexts with GPUs
         if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
-                ['GPU', 'TOTAL_GPUS', free_header])
+                ['GPU', '#GPUS'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
+                total_realtime_gpu_table.add_row([gpu, f'{stats[1]} of {stats[0]} free'])
         else:
             total_realtime_gpu_table = None
 
@@ -3508,7 +3501,7 @@ def show_gpus(
             contexts_info: List[Tuple[str,
                                       'models.KubernetesNodesInfo']]) -> str:
         node_table = log_utils.create_table(
-            ['CONTEXT', 'NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+            ['CONTEXT', 'NODE_NAME', 'GPU_NAME', '#GPUS'])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3527,7 +3520,7 @@ def show_gpus(
                     acc_type = '-'
                 node_table.add_row([
                     context_name, node_name, acc_type,
-                    node_info.total['accelerator_count'], available
+                    f'{available} of {node_info.total["accelerator_count"]} free'
                 ])
 
         k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
