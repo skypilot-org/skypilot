@@ -3073,7 +3073,7 @@ def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
 
     kubectl internally strips all environment variables except for system
     defaults, so a wrapper executable injects the relevant PATH information
-    before exec-auth is executed by kubernetes. 
+    before exec-auth is executed by kubernetes.
 
     Contents of sky-kube-exec-wrapper:
 
@@ -3081,7 +3081,7 @@ def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
     export PATH="$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk:$PATH"
     exec "$@"
 
-    refer to `skylet/constants.py` for more information. 
+    refer to `skylet/constants.py` for more information.
 
     Args:
         kubeconfig_path (str): Path to the input kubeconfig file
@@ -3101,8 +3101,9 @@ def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
             # Strip the path and keep only the executable name
             executable = os.path.basename(current_command)
             exec_info['command'] = constants.SKY_K8S_EXEC_AUTH_WRAPPER
-            exec_args = exec_info.setdefault('args', [])
-            exec_args.insert(0, executable)
+            if exec_info.get('args') is None:
+                exec_info['args'] = []
+            exec_info['args'].insert(0, executable)
             updated = True
 
     with open(output_path, 'w', encoding='utf-8') as file:

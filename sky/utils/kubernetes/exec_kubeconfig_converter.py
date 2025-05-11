@@ -35,7 +35,8 @@ def main():
         help='Output kubeconfig file path (default: %(default)s)')
 
     args = parser.parse_args()
-    updated = kubernetes_utils.format_kubeconfig_exec_auth(args.input, args.output)
+    updated = kubernetes_utils.format_kubeconfig_exec_auth(
+        args.input, args.output)
     if updated:
         print('Kubeconfig updated with path-less exec auth. '
               f'Saved to {args.output}')
