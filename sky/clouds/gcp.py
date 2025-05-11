@@ -1039,6 +1039,7 @@ class GCP(clouds.Cloud):
 
         def _propagate_disk_type(lowest: Optional[str] = None,
                                  highest: Optional[str] = None,
+                                 # pylint: disable=redefined-outer-name
                                  all: Optional[str] = None) -> None:
             if lowest is not None:
                 tier2name[resources_utils.DiskTier.LOW] = lowest

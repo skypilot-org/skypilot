@@ -450,7 +450,7 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
                     continue
             elif 'B200' in gpu_name:
                 gpu_name = 'B200'
-                if count != 1:
+                if count != 8:
                     continue
             if 'VWS' in gpu_name:
                 continue
