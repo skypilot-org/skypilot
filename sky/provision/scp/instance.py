@@ -224,8 +224,8 @@ def _create_security_group(zone_id, vpc):
                 break
             time.sleep(5)
 
-        scp_utils.SCPClient().add_security_group_in_rule(sg_id)
-        scp_utils.SCPClient().add_security_group_out_rule(sg_id)
+        scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', None)
+        scp_utils.SCPClient().add_security_group_rule(sg_id, 'OUT', None)
 
         return sg_id
     except Exception as e:  # pylint: disable=broad-except
@@ -508,8 +508,7 @@ def open_ports(
             instance_info = scp_utils.SCPClient().get_instance_info(
                 instance['virtualServerId'])
             sg_id = instance_info['securityGroupIds'][0]['securityGroupId']
-            scp_utils.SCPClient().add_new_security_group_rule(
-                sg_id, 'IN', ports)
+            scp_utils.SCPClient().add_security_group_rule(sg_id, 'IN', ports)
             vpc_id = instance_info['vpcId']
             internal_ip = instance_info['ip']
             _add_firewall_rule(vpc_id, internal_ip, ports)
