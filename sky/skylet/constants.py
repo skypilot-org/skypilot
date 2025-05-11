@@ -386,7 +386,7 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
 # Name of kubernetes exec auth wrapper script
-SKY_K8S_EXEC_AUTH_WRAPPER = 'kube-exec-auth-wrapper'
+SKY_K8S_EXEC_AUTH_WRAPPER = 'sky-kube-exec-wrapper'
 
 # PATH envvar for kubectl exec auth execve
 SKY_K8S_EXEC_AUTH_PATH = '$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk:$PATH'  # pylint: disable=line-too-long

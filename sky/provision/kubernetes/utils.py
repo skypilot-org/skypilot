@@ -3066,10 +3066,23 @@ def _get_kubeconfig_path() -> str:
     return kubeconfig_path
 
 
-def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str) -> bool:
-    """Strip path information from exec plugin commands in a kubeconfig file.
-    Will create a new kubeconfig file under <output_path> regardless of
-    whether a change has been made
+def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
+    """Reformat the kubeconfig file so that exec-based authentication can be
+    used with SkyPilot. Will create a new kubeconfig file under <output_path>
+    regardless of whether a change has been made
+
+    kubectl internally strips all environment variables except for system
+    defaults, so a wrapper executable injects the relevant PATH information
+    before exec-auth is executed by kubernetes. 
+
+    Contents of sky-kube-exec-wrapper:
+
+    #!/bin/bash
+    export PATH="$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk:$PATH"
+    exec "$@"
+
+    refer to `skylet/constants.py` for more information. 
+
     Args:
         kubeconfig_path (str): Path to the input kubeconfig file
         output_path (str): Path where the potentially modified kubeconfig file
@@ -3091,9 +3104,6 @@ def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str) -> bool:
             exec_args = exec_info.setdefault('args', [])
             exec_args.insert(0, executable)
             updated = True
-            # if executable != current_command:
-            #     exec_info['command'] = executable
-            #     updated = True
 
     with open(output_path, 'w', encoding='utf-8') as file:
         yaml.safe_dump(config, file)
