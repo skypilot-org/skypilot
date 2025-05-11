@@ -1035,14 +1035,18 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, instance_type: Optional[str],
-                       disk_tier: Optional[resources_utils.DiskTier]) -> str:
+                       disk_tier: Optional[resources_utils.DiskTier],) -> str:
 
         def _propagate_disk_type(lowest: Optional[str] = None,
-                                 highest: Optional[str] = None) -> None:
+                                 highest: Optional[str] = None,
+                                 all: Optional[str] = None) -> None:
             if lowest is not None:
                 tier2name[resources_utils.DiskTier.LOW] = lowest
             if highest is not None:
                 tier2name[resources_utils.DiskTier.ULTRA] = highest
+            if all is not None:
+                for tier in tier2name:
+                    tier2name[tier] = all
 
         tier = cls._translate_disk_tier(disk_tier)
 
@@ -1067,6 +1071,10 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
+        if instance_type.startswith('a3-ultragpu'):
+            # a3-ultragpu instances only support hyperdisk-balanced.
+            _propagate_disk_type(
+                all='hyperdisk-balanced')
 
         # Series specific handling
         if series == 'n2':
