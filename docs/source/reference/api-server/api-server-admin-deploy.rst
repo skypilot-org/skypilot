@@ -321,7 +321,7 @@ Following tabs describe how to configure credentials for different clouds on the
                     --reuse-values \
                     --set gcpCredentials.enabled=true \
                     --set gcpCredentials.gcpSecretName=your_secret_name
-    
+
     .. tab-item:: RunPod
         :sync: runpod-creds-tab
 
@@ -334,7 +334,7 @@ Following tabs describe how to configure credentials for different clouds on the
             kubectl create secret generic runpod-credentials \
               --namespace $NAMESPACE \
               --from-literal api_key=YOUR_API_KEY
-        
+
         When installing or upgrading the Helm chart, enable RunPod credentials by setting ``runpodCredentials.enabled=true``
 
         .. dropdown:: Use existing RunPod credentials
@@ -473,6 +473,7 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
 
     # Install the API server with the config file
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
       # Reuse the values set in the previous steps, if any
       --reuse-values \
       --set-file apiService.config=config.yaml
