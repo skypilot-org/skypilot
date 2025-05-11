@@ -148,12 +148,12 @@ Deploying on Google Cloud GKE
    .. code-block:: console
 
        $ sky show-gpus --cloud k8s
-       GPU   REQUESTABLE_QTY_PER_NODE  #GPUS
+       GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
        L4    1, 2, 4                   6 of 8 free
        A100  1, 2                      2 of 4 free
 
        Kubernetes per node GPU availability
-       NODE_NAME                  GPU_NAME  #GPUS
+       NODE                       GPU       UTILIZATION
        my-cluster-0               L4        4 of 4 free
        my-cluster-1               L4        2 of 4 free
        my-cluster-2               A100      2 of 2 free
@@ -203,11 +203,11 @@ Deploying on Amazon EKS
    .. code-block:: console
 
        $ sky show-gpus --cloud k8s
-       GPU   REQUESTABLE_QTY_PER_NODE  #GPUS
+       GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
        A100  1, 2                      2 of 2 free
 
        Kubernetes per node GPU availability
-       NODE_NAME                  GPU_NAME  #GPUS
+       NODE                       GPU       UTILIZATION
        my-cluster-0               A100      2 of 2 free
 
 .. _kubernetes-setup-onprem:

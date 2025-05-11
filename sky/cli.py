@@ -3373,8 +3373,8 @@ def show_gpus(
     * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
       on a single node.
 
-    * ``#GPUS`` (Kubernetes only): Total number of GPUs free / available in the
-      Kubernetes cluster
+    * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
+      in the Kubernetes cluster.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -3460,7 +3460,7 @@ def show_gpus(
                 ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 realtime_gpu_table = log_utils.create_table(
-                    ['GPU', qty_header, '#GPUS'])
+                    ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
                     gpu_availability = models.RealtimeGpuAvailability(
                         *realtime_gpu_availability)
@@ -3488,7 +3488,8 @@ def show_gpus(
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs
         if len(realtime_gpu_infos) > 1:
-            total_realtime_gpu_table = log_utils.create_table(['GPU', '#GPUS'])
+            total_realtime_gpu_table = log_utils.create_table(
+                ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
                 total_realtime_gpu_table.add_row(
                     [gpu, f'{stats[1]} of {stats[0]} free'])
@@ -3501,7 +3502,7 @@ def show_gpus(
             contexts_info: List[Tuple[str,
                                       'models.KubernetesNodesInfo']]) -> str:
         node_table = log_utils.create_table(
-            ['CONTEXT', 'NODE_NAME', 'GPU_NAME', '#GPUS'])
+            ['CONTEXT', 'NODE', 'GPU', 'UTILIZATION'])
 
         no_permissions_str = '<no permissions>'
         hints = []

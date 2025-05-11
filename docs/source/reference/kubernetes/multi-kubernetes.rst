@@ -102,17 +102,17 @@ To check GPUs available in a Kubernetes cluster, you can run ``sky show-gpus --c
 
     $ sky show-gpus --cloud k8s
     Kubernetes GPUs
-    GPU   #GPUS          
+    GPU   UTILIZATION
     H100  16 of 16 free  
     A100  8 of 8 free    
     Context: my-h100-cluster
-    GPU   REQUESTABLE_QTY_PER_NODE  #GPUS          
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION          
     H100  1, 2, 4, 8                16 of 16 free  
     Context: kind-skypilot
-    GPU   REQUESTABLE_QTY_PER_NODE  #GPUS        
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION          
     A100  1, 2, 4, 8                8 of 8 free  
     Kubernetes per-node GPU availability
-    CONTEXT          NODE_NAME                                     GPU_NAME  #GPUS        
+    CONTEXT          NODE                                          GPU       UTILIZATION        
     my-h100-cluster  gke-skypilotalpha-default-pool-ff931856-6uvd  -         0 of 0 free  
     my-h100-cluster  gke-skypilotalpha-largecpu-05dae726-1usy      H100      8 of 8 free  
     my-h100-cluster  gke-skypilotalpha-largecpu-05dae726-4rxa      H100      8 of 8 free  
@@ -155,10 +155,10 @@ by specifying the ``--region`` with the context name for that cluster.
     $ sky show-gpus --cloud k8s --region my-h100-cluster                                                  ✭ ✱
     Kubernetes GPUs
     Context: my-h100-cluster
-    GPU   REQUESTABLE_QTY_PER_NODE  #GPUS          
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     H100  1, 2, 4, 8                16 of 16 free  
     Kubernetes per-node GPU availability
-    CONTEXT          NODE_NAME                                     GPU_NAME  #GPUS        
+    CONTEXT          NODE                                          GPU       UTILIZATION
     my-h100-cluster  gke-skypilotalpha-default-pool-ff931856-6uvd  -         0 of 0 free  
     my-h100-cluster  gke-skypilotalpha-largecpu-05dae726-1usy      H100      8 of 8 free  
     my-h100-cluster  gke-skypilotalpha-largecpu-05dae726-4rxa      H100      8 of 8 free  
