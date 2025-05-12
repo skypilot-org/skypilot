@@ -179,39 +179,21 @@ def _execute(
                 # Ensure the storage is constructed.
                 storage.construct()
 
-    # Determine autostop values from YAML first
-    autostop_idle_minutes_from_yaml = None
-    autostop_down_from_yaml = None  # True, False, or None (if not specified)
-
     # Assuming dag has at least one task, and task has resources.
-    # If multiple resources define autostop, the first one encountered wins.
+    # All the resources must have the same autostop config.
     if dag.tasks and dag.tasks[0].resources:
-        # In theory, a task can have a set/list of Resources.
-        # We'll take the autostop config from the first one that has it defined.
-        for res in dag.tasks[0].resources:
-            if res.autostop_config is not None and res.autostop_config.idle_minutes is not None:
-                autostop_idle_minutes_from_yaml = res.autostop_config.idle_minutes
-                # res.autostop_config.down can be True, False, or None
-                autostop_down_from_yaml = res.autostop_config.down
+        for r in dag.tasks[0].resources:
+            if r.autostop_config is not None:
+                idle_minutes_to_autostop = r.autostop_config.idle_minutes
+                down = r.autostop_config.down
                 break
-
-    # Determine effective autostop settings
-    effective_idle_minutes_to_autostop = idle_minutes_to_autostop
-    effective_down = down  # Default to the 'down' arg passed to the function
-
-    if autostop_idle_minutes_from_yaml is not None:
-        effective_idle_minutes_to_autostop = autostop_idle_minutes_from_yaml
-        # If 'down' is specified in YAML (True or False), it overrides the CLI 'down' flag.
-        # If 'down' is None in YAML (i.e. autostop: 60), then CLI 'down' flag is used.
-        if autostop_down_from_yaml is not None:
-            effective_down = autostop_down_from_yaml
 
     dag, _ = admin_policy_utils.apply(
         dag,
         request_options=admin_policy.RequestOptions(
             cluster_name=cluster_name,
-            idle_minutes_to_autostop=effective_idle_minutes_to_autostop,
-            down=effective_down,  # Use effective_down for admin policy
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
             dryrun=dryrun,
         ))
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
@@ -256,27 +238,27 @@ def _execute(
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
-        if effective_down and effective_idle_minutes_to_autostop is None:
+        if down and idle_minutes_to_autostop is None:
             # Use auto{stop,down} to terminate the cluster after the task is
             # done.
-            effective_idle_minutes_to_autostop = 0
-        if effective_idle_minutes_to_autostop is not None:
-            if effective_idle_minutes_to_autostop == 0:
+            idle_minutes_to_autostop = 0
+        if idle_minutes_to_autostop is not None:
+            if idle_minutes_to_autostop == 0:
                 # idle_minutes_to_autostop=0 can cause the following problem:
                 # After we set the autostop in the PRE_EXEC stage with -i 0,
                 # it could be possible that the cluster immediately found
                 # itself have no task running and start the auto{stop,down}
                 # process, before the task is submitted in the EXEC stage.
-                verb = 'torn down' if effective_down else 'stopped'
+                verb = 'torn down' if down else 'stopped'
                 logger.info(f'{colorama.Style.DIM}The cluster will '
                             f'be {verb} after 1 minutes of idleness '
                             '(after all jobs finish).'
                             f'{colorama.Style.RESET_ALL}')
-                effective_idle_minutes_to_autostop = 1
+                idle_minutes_to_autostop = 1
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
-            if effective_idle_minutes_to_autostop >= 0:
-                if effective_down:
+            if idle_minutes_to_autostop >= 0:
+                if down:
                     requested_features.add(
                         clouds.CloudImplementationFeatures.AUTODOWN)
                 else:
@@ -286,7 +268,7 @@ def _execute(
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
 
-    elif effective_idle_minutes_to_autostop is not None:
+    elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -394,13 +376,12 @@ def _execute(
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
-            if effective_idle_minutes_to_autostop is not None:
+            if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(
-                    handle,
-                    effective_idle_minutes_to_autostop,
-                    down=effective_down)  # Pass effective_down here
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     down=down)
 
         if Stage.EXEC in stages:
             try:
@@ -411,10 +392,10 @@ def _execute(
                                          dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
-                backend.post_execute(handle, effective_down)
+                backend.post_execute(handle, down)
 
         if Stage.DOWN in stages and not dryrun:
-            if effective_down and effective_idle_minutes_to_autostop is None:
+            if down and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:

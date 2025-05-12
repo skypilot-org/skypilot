@@ -1466,11 +1466,6 @@ class Resources:
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAM: ')
 
-        # Determine the final autostop configuration to be used for all resources from this YAML block.
-        autostop_config_dict = config.pop('autostop', None)
-        autostop_config: Optional[AutostopConfig] = cls._parse_autostop_config(
-            autostop_config_dict)
-
         def _override_resources(
                 base_resource_config: Dict[str, Any],
                 override_configs: List[Dict[str, Any]]) -> List[Resources]:
@@ -1508,9 +1503,9 @@ class Resources:
                     if override_autostop_config != autostop_config:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
-                                'Autostop config mismatch for resources config: '
-                                f'{override_config} and global config: {autostop_config}'
-                            )
+                                'Autostop config mismatch for resources '
+                                f'config: {override_config} and global config: '
+                                f'{autostop_config}')
                 new_resource_config[
                     'autostop'] = autostop_config.to_yaml_config()
 
@@ -1562,27 +1557,17 @@ class Resources:
 
         # Translate accelerators field to potential multiple resources.
         if accelerators:  # Use the processed accelerators set/list
-            tmp_resources_list = []
-            for acc_str in accelerators:
-                tmp_resource_config = config_copy.copy()
-                tmp_resource_config[
-                    'accelerators'] = acc_str  # Assign single accelerator string
-                tmp_resources_list.append(
-                    Resources._from_yaml_config_single(
-                        tmp_resource_config,
-                        autostop_config_to_use=autostop_config))
+            accelerator_configs = [{
+                'accelerators': acc_str
+            } for acc_str in accelerators]
             assert isinstance(accelerators, (list, set)), accelerators
-            return type(accelerators)(tmp_resources_list)
+            return type(accelerators)(_override_resources(
+                config_copy, accelerator_configs))
 
-        return {
-            Resources._from_yaml_config_single(
-                config_copy, autostop_config_to_use=autostop_config)
-        }
+        return {Resources._from_yaml_config_single(config_copy)}
 
     @classmethod
-    def _from_yaml_config_single(
-            cls, config: Dict[str, Any],
-            autostop_config_to_use: Optional[AutostopConfig]) -> 'Resources':
+    def _from_yaml_config_single(cls, config: Dict[str, Any]) -> 'Resources':
 
         resources_fields = {}
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
@@ -1620,16 +1605,7 @@ class Resources:
         resources_fields['_cluster_config_overrides'] = config.pop(
             '_cluster_config_overrides', None)
 
-        if config.get('autostop') is not None:
-            current_autostop_config = cls._parse_autostop_config(
-                config.pop('autostop'))
-            if current_autostop_config != autostop_config_to_use:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Autostop config mismatch for resources config: '
-                        f'{config} and global config: {autostop_config_to_use}')
-
-        resources_fields['autostop_config'] = autostop_config_to_use
+        resources_fields['_autostop_config'] = config.pop('autostop', None)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])

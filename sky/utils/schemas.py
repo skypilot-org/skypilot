@@ -193,27 +193,22 @@ def _get_single_resources_schema():
                 'type': 'object',
             },
             'autostop': {
-                'anyOf': [
-                    {
-                        'type': 'integer',
-                        'minimum': 0,
-                    },
-                    {
-                        'type': 'object',
-                        'additionalProperties': False,
-                        'properties': {
-                            'idle_minutes': {
-                                'type': 'integer',
-                                'minimum': 0,
-                            },
-                            'down': {
-                                'type': 'boolean',
-                            },
+                'anyOf': [{
+                    'type': 'integer',
+                    'minimum': 0,
+                }, {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'idle_minutes': {
+                            'type': 'integer',
+                            'minimum': 0,
                         },
-                        # Ensure idle_minutes is present if autostop is an object
-                        'required': ['idle_minutes'],
-                    }
-                ],
+                        'down': {
+                            'type': 'boolean',
+                        },
+                    },
+                }],
             },
         }
     }
