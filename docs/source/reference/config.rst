@@ -105,6 +105,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       provision_timeout: 900
     :ref:`remote_identity <config-yaml-gcp-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
+    :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
 
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
@@ -850,6 +851,15 @@ Enable gVNIC network interface (optional).
 
 Set to true to enable gVNIC network interface for all GCP instances
 launched by SkyPilot. This is useful for improving network performance.
+
+Default: ``false``.
+
+.. _config-yaml-gcp-enable-gpu-direct:
+
+``gcp.enable_gpu_direct``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable GPUDirect-TCPX, a high-performance networking technology that establishes direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` instances launched by SkyPilot. When enabled, this configuration automatically activates the gVNIC network interface for optimal performance.
 
 Default: ``false``.
 

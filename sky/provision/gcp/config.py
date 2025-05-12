@@ -192,6 +192,7 @@ def bootstrap_instances(
     iam_role = _configure_iam_role(config, crm, iam)
     config.node_config.update(iam_role)
     config = _configure_subnet(region, cluster_name, config, compute)
+    config = _configure_placement_policy(region, cluster_name, config, compute)
 
     return config
 
@@ -685,13 +686,15 @@ def get_usable_vpc_and_subnet(
 
 
 def get_gpu_direct_usable_vpcs_and_subnets(
+    cluster_name: str,
     region: str,
     config: common.ProvisionConfig,
     compute,
 ) -> List[Tuple[str, 'google.cloud.compute_v1.types.compute.Subnetwork']]:
     """Return a list of usable VPCs and subnets for GPU Direct."""
     project_id = config.provider_config['project_id']
-    vpc_prefix = constants.SKYPILOT_GPU_DIRECT_VPC_PREFIX
+    vpc_prefix = constants.SKYPILOT
+    cluster_prefix = cluster_name[:constants.CLUSTER_PREFIX_LENGTH]
     vpc_subnet_pairs = []
 
     # TODO(hailong): Determine the num_vpcs per different GPU Direct types
@@ -700,10 +703,10 @@ def get_gpu_direct_usable_vpcs_and_subnets(
     cidr_prefix = constants.SKYPILOT_GPU_DIRECT_VPC_CIDR_PREFIX
     for i in range(num_vpcs):
         if i == 0:
-            vpc_name = f'{vpc_prefix}-mgmt-net'
+            vpc_name = f'{vpc_prefix}-{cluster_prefix}-mgmt-net'
         else:
-            vpc_name = f'{vpc_prefix}-data-net-{i}'
-        subnet_name = f'{vpc_name}-subnet'
+            vpc_name = f'{vpc_prefix}-{cluster_prefix}-data-net-{i}'
+        subnet_name = f'{vpc_name}-{region}-sub'
         subnet_cidr_range = f'{cidr_prefix}.{i}.0/24'
         # Check if VPC exists
         vpc_list = _list_vpcnets(project_id, compute, filter=f'name={vpc_name}')
@@ -731,6 +734,46 @@ def get_gpu_direct_usable_vpcs_and_subnets(
     return vpc_subnet_pairs
 
 
+def _configure_placement_policy(region: str, cluster_name: str,
+                                config: common.ProvisionConfig, compute):
+    """Configure placement group for GPU Direct."""
+    node_config = config.node_config
+    project_id = config.provider_config['project_id']
+    group_placement_policy = config.provider_config.get('placement_policy',
+                                                        None)
+    # If the placement policy is not compact,
+    # or the managed instance group is specified,
+    # skip the placement policy creation.
+    # If placement policy is specified together with managed instance group,
+    # it will cause the following error:
+    # Reason: [{'code': 'UNSUPPORTED_OPERATION',
+    # 'message': 'Creating queued resource with
+    # resource policies is not supported.'}]
+    mig_configuration = config.provider_config.get('use_managed_instance_group',
+                                                   False)
+    if (group_placement_policy is None or group_placement_policy.lower() !=
+            constants.COMPACT_GROUP_PLACEMENT_POLICY or mig_configuration):
+        return config
+
+    cluster_prefix = cluster_name[:constants.CLUSTER_PREFIX_LENGTH]
+    policy_name = f'{cluster_prefix}-placement-policy'
+    resource_policy = {
+        'name': policy_name,
+        'groupPlacementPolicy': {
+            'collocation': constants.COLLOCATED_COLLOCATION,
+        }
+    }
+    # Try to get the placement policy first, if not found, create it
+    placement_policy = _get_placement_policy(project_id, region, compute,
+                                             policy_name)
+    if not placement_policy:
+        logger.info(f'Creating placement policy {policy_name}'
+                    f' for cluster {cluster_name}')
+        _create_placement_policy(project_id, region, compute, resource_policy)
+    node_config['resourcePolicies'] = [policy_name]
+    return config
+
+
 def _configure_subnet(region: str, cluster_name: str,
                       config: common.ProvisionConfig, compute):
     """Pick a reasonable subnet if not specified by the config."""
@@ -747,7 +790,11 @@ def _configure_subnet(region: str, cluster_name: str,
     enable_gvnic = config.provider_config.get('enable_gvnic', False)
     if enable_gpu_direct:
         if not enable_gvnic:
-            raise ValueError('Enable GPU Direct requires gvnic to be enabled')
+            logger.warning(
+                'Enable GPU Direct requires gvnic to be enabled, enabling gvnic'
+            )
+            config.provider_config['enable_gvnic'] = True
+            enable_gvnic = True
         if 'machineType' not in node_config or not node_config[
                 'machineType'] in constants.GPU_DIRECT_TCPX_INSTANCE_TYPES:
             raise ValueError(
@@ -756,7 +803,7 @@ def _configure_subnet(region: str, cluster_name: str,
         logger.info(f'Enable GPU Direct for cluster {cluster_name} '
                     f'with machineType {node_config["machineType"]}')
         vpc_subnet_pairs = get_gpu_direct_usable_vpcs_and_subnets(
-            region, config, compute)
+            cluster_name, region, config, compute)
         for _, subnet in vpc_subnet_pairs:
             default_interfaces.append({
                 'subnetwork': subnet['selfLink'],
@@ -952,3 +999,26 @@ def _create_subnet(project_id: str, region: str, compute, vpc_name: str,
     response = wait_for_compute_region_operation(project_id, region, operation,
                                                  compute)
     return response
+
+
+def _create_placement_policy(project_id: str, region: str, compute,
+                             placement_policy: dict):
+    operation = compute.resourcePolicies().insert(
+        project=project_id, region=region, body=placement_policy).execute()
+    response = wait_for_compute_region_operation(project_id, region, operation,
+                                                 compute)
+    return response
+
+
+def _get_placement_policy(project_id: str, region: str, compute, name: str):
+    try:
+        placement_policy = (compute.resourcePolicies().get(
+            project=project_id,
+            region=region,
+            resourcePolicy=name,
+        ).execute())
+    except gcp.http_error_exception() as e:
+        if e.resp.status == 404:
+            return None
+        raise
+    return placement_policy

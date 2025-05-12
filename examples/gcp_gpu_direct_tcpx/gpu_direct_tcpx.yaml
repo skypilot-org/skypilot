@@ -117,3 +117,10 @@ run: |
   else
     echo "Worker nodes"
   fi
+
+config:
+  gcp:
+    enable_gpu_direct: true
+    managed_instance_group:
+      run_duration: 36000
+      provision_timeout: 900

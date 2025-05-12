@@ -840,6 +840,9 @@ def get_config_schema():
                 'enable_gpu_direct': {
                     'type': 'boolean'
                 },
+                'placement_policy': {
+                    'type': 'string',
+                },
                 'vpc_name': {
                     'oneOf': [
                         {

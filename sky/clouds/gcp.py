@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.provision.gcp import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -112,66 +113,12 @@ _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
 # For GPU-related package version, see sky/clouds/service_catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
-# Use COS image with GPU Direct support. Need to contact GCP support to build our own image for GPUDirect-TCPX support.
-# https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
+# Use COS image with GPU Direct support.
+# Need to contact GCP support to build our own image for GPUDirect-TCPX support.
+# Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
 _DEFAULT_GPU_DIRECT_IMAGE_ID = 'projects/cos-cloud/global/images/cos-109-17800-519-1'
-
-
-def get_gpu_direct_tcpx_user_data() -> str:
-    return """#!/bin/bash
-    set -e
-    set -x
-    # Install GPU Direct TCPX
-    cos-extensions install gpu -- --version=latest;
-    sudo mount --bind /var/lib/nvidia /var/lib/nvidia;
-    sudo mount -o remount,exec /var/lib/nvidia;
-    docker ps -a | grep -q receive-datapath-manager || \
-    docker run \
-    --detach \
-    --pull=always \
-    --name receive-datapath-manager \
-    --privileged \
-    --cap-add=NET_ADMIN --network=host \
-    --volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64 \
-    --device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia1:/dev/nvidia1 \
-    --device /dev/nvidia2:/dev/nvidia2 --device /dev/nvidia3:/dev/nvidia3 \
-    --device /dev/nvidia4:/dev/nvidia4 --device /dev/nvidia5:/dev/nvidia5 \
-    --device /dev/nvidia6:/dev/nvidia6 --device /dev/nvidia7:/dev/nvidia7 \
-    --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl \
-    --env LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
-    --volume /run/tcpx:/run/tcpx \
-    --entrypoint /tcpgpudmarxd/build/app/tcpgpudmarxd \
-    us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd \
-    --gpu_nic_preset a3vm --gpu_shmem_type fd --uds_path "/run/tcpx" --setup_param "--verbose 128 2 0";
-    sudo iptables -I INPUT -p tcp -m tcp -j ACCEPT;
-    docker run --rm -v /var/lib:/var/lib us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx install --install-nccl;
-    sudo mount --bind /var/lib/tcpx /var/lib/tcpx;
-    sudo mount -o remount,exec /var/lib/tcpx;
-    echo "GPU Direct TCPX installed"
-    """
-
-
-def get_gpu_direct_tcpx_specific_options() -> List[str]:
-    return [
-        '--cap-add=IPC_LOCK',
-        '--userns=host',
-        '--volume /run/tcpx:/run/tcpx',
-        '--volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64',
-        '--volume /var/lib/tcpx/lib64:/usr/local/tcpx/lib64',
-        '--volume /var/lib/nvidia/bin:/usr/local/nvidia/bin',
-        '--shm-size=1g --ulimit memlock=-1 --ulimit stack=67108864',
-        '--device /dev/nvidia0:/dev/nvidia0',
-        '--device /dev/nvidia1:/dev/nvidia1',
-        '--device /dev/nvidia2:/dev/nvidia2',
-        '--device /dev/nvidia3:/dev/nvidia3',
-        '--device /dev/nvidia4:/dev/nvidia4',
-        '--device /dev/nvidia5:/dev/nvidia5',
-        '--device /dev/nvidia6:/dev/nvidia6',
-        '--device /dev/nvidia7:/dev/nvidia7',
-        '--device /dev/nvidia-uvm:/dev/nvidia-uvm',
-        '--device /dev/nvidiactl:/dev/nvidiactl',
-        '--env LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/tcpx/lib64:$LD_LIBRARY_PATH',
-    ]
+# TODO(hailong): Use the image with GPUDirect-TCPX support after it's updated in the catalog.
+# _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-cos-109'
 
 
 def _run_output(cmd):
@@ -644,13 +591,16 @@ class GCP(clouds.Cloud):
         enable_gpu_direct = skypilot_config.get_nested(
             ('gcp', 'enable_gpu_direct'), False)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
+        resources_vars['user_data'] = None
         if enable_gpu_direct:
             # Use COS image with GPU Direct support.
             resources_vars['image_id'] = _DEFAULT_GPU_DIRECT_IMAGE_ID
             resources_vars['machine_image'] = None
-            resources_vars['user_data'] = get_gpu_direct_tcpx_user_data()
+            resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
             resources_vars[
-                'docker_run_options'] = get_gpu_direct_tcpx_specific_options()
+                'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+        resources_vars['placement_policy'] = skypilot_config.get_nested(
+            ('gcp', 'placement_policy'), None)
 
         return resources_vars
 
