@@ -889,6 +889,46 @@ Example:
     nvidia_gpus:
       disable_ecc: ...
 
+.. _controller-autostop-config:
+
+Controller Autostop (Global Configuration)
+==========================================
+
+Beyond the task-level ``resources.autostop``, SkyPilot's global configuration (typically found at ``~/.sky/config.yaml``) allows for specifying ``autostop`` behavior for controllers (e.g., ``jobs`` controller, ``serve`` controller).
+
+This global ``autostop`` configuration for controllers can take two forms:
+
+1.  A boolean value:
+
+    *   ``false``: Disables autostop for the controller.
+
+2.  An object with the following fields:
+
+    *   ``idle_minutes`` (integer, optional): The number of minutes of idleness after which the controller's cluster will be stopped. Minimum value is 0.
+    *   ``down`` (boolean, optional): If ``true``, the controller's cluster will be torn down (terminated) instead of just stopped after the idle period. Defaults to ``false`` (stop only).
+
+Example in ``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      resources:  # Resources for the jobs controller VM
+        cloud: aws
+        region: us-west-2
+      autostop:  # Autostop configuration for the jobs controller
+        idle_minutes: 30
+        down: true  # Tear down the controller after 30 idle minutes
+
+  serve:
+    controller:
+      resources:
+        cloud: gcp
+      autostop: false # Disable autostop for the serve controller
+
+This allows for fine-grained control over the lifecycle of controller instances, separate from the autostop behavior of individual task clusters.
+
+
 .. _service-yaml-spec:
 
 SkyServe Service
@@ -1154,3 +1194,27 @@ Port to run your service on each replica.
 
   resources:
     ports: 8080
+
+.. _yaml-spec-resources-autostop:
+
+``resources.autostop``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Idle time in minutes before the cluster is automatically stopped (optional). This field, when specified under ``resources:`` in a task YAML, currently only accepts an integer value.
+
+If specified in the YAML, this integer value will take precedence over the ``--idle-minutes-to-autostop``
+CLI flag provided to ``sky launch`` or ``sky start``, and the ``--idle-minutes`` flag for ``sky autostop``.
+
+Setting this to 0 means the cluster will be stopped (or torn down if ``--down`` is also specified via CLI)
+approximately 1 minute after all jobs finish.
+
+A negative value is not practically useful here as it would mean the autostop feature is disabled,
+which is the default behavior if this field is omitted.
+
+.. code-block:: yaml
+
+  resources:
+    autostop: 60  # Autostop after 60 minutes of idleness.
+
+.. note::
+  While ``resources.autostop`` in the task YAML currently accepts only an integer, a more detailed object format for autostop (specifying both ``idle_minutes`` and a ``down`` flag for termination) is available for controllers (e.g., ``jobs`` or ``serve`` controllers) in the global SkyPilot configuration YAML (``~/.sky/config.yaml``). See :ref:`controller-autostop-config` for more details.

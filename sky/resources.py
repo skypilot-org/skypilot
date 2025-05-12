@@ -34,6 +34,19 @@ RESOURCE_CONFIG_ALIASES = {
 }
 
 
+@dataclasses.dataclass
+class AutostopConfig:
+    """Configuration for autostop."""
+    idle_minutes: int = 5
+    down: bool = False
+
+    def to_yaml_config(self) -> Dict[str, Any]:
+        return {
+            'idle_minutes': self.idle_minutes,
+            'down': self.down,
+        }
+
+
 class Resources:
     """Resources: compute requirements of Tasks.
 
@@ -72,6 +85,7 @@ class Resources:
         labels: Optional[Dict[str, str]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
+        _autostop_config: Optional[AutostopConfig] = None,
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _docker_username_for_runpod: Optional[str] = None,
         _is_image_managed: Optional[bool] = None,
@@ -80,7 +94,7 @@ class Resources:
     ):
         """Initialize a Resources object.
 
-        All fields are optional.  ``Resources.is_launchable`` decides whether
+        All fields are optional.  ``Resources.is_launchable()`` decides whether
         the Resources is fully specified to launch an instance.
 
         Examples:
@@ -152,6 +166,7 @@ class Resources:
             instance tags. On GCP, labels map to instance labels. On
             Kubernetes, labels map to pod labels. On other clouds, labels are
             not supported and will be ignored.
+          autostop_config: AutostopConfig object containing idle_minutes and down flag.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
@@ -191,6 +206,8 @@ class Resources:
                 if strategy_name is not None:
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
+
+        self._autostop_config = _autostop_config
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -478,6 +495,10 @@ class Resources:
     @property
     def labels(self) -> Optional[Dict[str, str]]:
         return self._labels
+
+    @property
+    def autostop_config(self) -> Optional[AutostopConfig]:
+        return self._autostop_config
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -1328,6 +1349,8 @@ class Resources:
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
+            _autostop_config=override.pop('_autostop_config',
+                                          self._autostop_config),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -1394,8 +1417,38 @@ class Resources:
                 del config[alias]
 
     @classmethod
+    def _parse_autostop_config(
+        cls, autostop_config: Optional[Union[int, Dict[str, Any]]]
+    ) -> Optional[AutostopConfig]:
+        """Parses raw autostop YAML value into AutostopConfig or None."""
+        if autostop_config is None:
+            return None
+
+        idle_minutes_to_set = 5  # Default from AutostopConfig
+        down_flag_to_set = False  # Default from AutostopConfig
+
+        if isinstance(autostop_config, int):
+            idle_minutes_to_set = autostop_config
+            # down_flag_to_set remains AutostopConfig default (False)
+        elif isinstance(autostop_config, dict):
+            if 'idle_minutes' in autostop_config:
+                idle_minutes_to_set = autostop_config['idle_minutes']
+            # If 'idle_minutes' not in dict, it uses AutostopConfig default (5)
+
+            if 'down' in autostop_config:
+                down_flag_to_set = autostop_config['down']
+            # If 'down' not in dict, it uses AutostopConfig default (False)
+
+        # This should be safe, as we've already validated the types with
+        # jsonschema above.
+        idle_minutes_to_set = int(idle_minutes_to_set)
+        return AutostopConfig(idle_minutes=idle_minutes_to_set,
+                              down=down_flag_to_set)
+
+    @classmethod
     def from_yaml_config(
-        cls, config: Optional[Dict[str, Any]]
+        cls,
+        config: Optional[Dict[str, Any]],
     ) -> Union[Set['Resources'], List['Resources']]:
         if config is None:
             return {Resources()}
@@ -1409,13 +1462,26 @@ class Resources:
         if ordered is not None and isinstance(ordered, list):
             for ordered_config in ordered:
                 Resources._apply_resource_config_aliases(ordered_config)
+        # Validate the remaining schema
         common_utils.validate_schema(config, schemas.get_resources_schema(),
-                                     'Invalid resources YAML: ')
+                                     'Invalid resources YAM: ')
+
+        # Determine the final autostop configuration to be used for all resources from this YAML block.
+        autostop_config_dict = config.pop('autostop', None)
+        autostop_config: Optional[AutostopConfig] = cls._parse_autostop_config(
+            autostop_config_dict)
 
         def _override_resources(
                 base_resource_config: Dict[str, Any],
                 override_configs: List[Dict[str, Any]]) -> List[Resources]:
             resources_list = []
+
+            autostop_config = cls._parse_autostop_config(
+                base_resource_config.get('autostop', None))
+            if autostop_config is None:
+                autostop_config = cls._parse_autostop_config(
+                    override_configs[0].get('autostop', None))
+
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
                 # Labels are handled separately.
@@ -1430,28 +1496,40 @@ class Resources:
                     labels = override_labels
                 new_resource_config['labels'] = labels
 
-                # Call from_yaml_config again instead of
-                # _from_yaml_config_single to handle the case, where both
-                # multiple accelerators and `any_of` is specified.
-                # This will not cause infinite recursion because we have made
-                # sure that `any_of` and `ordered` cannot be specified in the
-                # resource candidates in `any_of` or `ordered`, by the schema
-                # validation above.
+                # Make sure autostop config is consistent across all resources
+                # TODO(zhwu): it should be fine to allow different autostop
+                # configs for different resources, as some cloud like k8s may
+                # not support autostop.
+                override_autostop_config = override_configs.get(
+                    'autostop', None)
+                if override_autostop_config is not None:
+                    override_autostop_config = cls._parse_autostop_config(
+                        override_autostop_config)
+                    if override_autostop_config != autostop_config:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Autostop config mismatch for resources config: '
+                                f'{override_config} and global config: {autostop_config}'
+                            )
+                new_resource_config[
+                    'autostop'] = autostop_config.to_yaml_config()
+
+                # Recursive call passes the autostop_to_enforce
                 resources_list.extend(
                     list(Resources.from_yaml_config(new_resource_config)))
             return resources_list
 
-        config = config.copy()
-        any_of_configs = config.pop('any_of', None)
-        ordered_configs = config.pop('ordered', None)
+        config_copy = config.copy()
+        any_of_configs = config_copy.pop('any_of', None)
+        ordered_configs = config_copy.pop('ordered', None)
         if any_of_configs is not None and ordered_configs is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
         # Parse resources.accelerators field.
-        accelerators = config.get('accelerators')
-        if config and accelerators is not None:
+        accelerators = config_copy.get('accelerators')
+        if accelerators is not None:
             if isinstance(accelerators, str):
                 accelerators = {accelerators}
             elif isinstance(accelerators, dict):
@@ -1460,6 +1538,8 @@ class Resources:
                     for k, v in accelerators.items()
                 ]
                 accelerators = set(accelerators)
+            # If accelerators is already a list or set, use as is.
+            # Schema validation ensures it's one of these types or string/dict.
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1474,30 +1554,35 @@ class Resources:
                         'in resources.')
 
         if any_of_configs:
-            resources_list = _override_resources(config, any_of_configs)
+            resources_list = _override_resources(config_copy, any_of_configs)
             return set(resources_list)
         if ordered_configs:
-            resources_list = _override_resources(config, ordered_configs)
+            resources_list = _override_resources(config_copy, ordered_configs)
             return resources_list
-        # Translate accelerators field to potential multiple resources.
-        if accelerators:
-            # In yaml file, we store accelerators as a list.
-            # In Task, we store a list of resources, each with 1 accelerator.
-            # This for loop is for format conversion.
-            tmp_resources_list = []
-            for acc in accelerators:
-                tmp_resource = config.copy()
-                tmp_resource['accelerators'] = acc
-                tmp_resources_list.append(
-                    Resources._from_yaml_config_single(tmp_resource))
 
+        # Translate accelerators field to potential multiple resources.
+        if accelerators:  # Use the processed accelerators set/list
+            tmp_resources_list = []
+            for acc_str in accelerators:
+                tmp_resource_config = config_copy.copy()
+                tmp_resource_config[
+                    'accelerators'] = acc_str  # Assign single accelerator string
+                tmp_resources_list.append(
+                    Resources._from_yaml_config_single(
+                        tmp_resource_config,
+                        autostop_config_to_use=autostop_config))
             assert isinstance(accelerators, (list, set)), accelerators
             return type(accelerators)(tmp_resources_list)
 
-        return {Resources._from_yaml_config_single(config)}
+        return {
+            Resources._from_yaml_config_single(
+                config_copy, autostop_config_to_use=autostop_config)
+        }
 
     @classmethod
-    def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
+    def _from_yaml_config_single(
+            cls, config: Dict[str, Any],
+            autostop_config_to_use: Optional[AutostopConfig]) -> 'Resources':
 
         resources_fields = {}
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
@@ -1534,6 +1619,17 @@ class Resources:
         resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
         resources_fields['_cluster_config_overrides'] = config.pop(
             '_cluster_config_overrides', None)
+
+        if config.get('autostop') is not None:
+            current_autostop_config = cls._parse_autostop_config(
+                config.pop('autostop'))
+            if current_autostop_config != autostop_config_to_use:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Autostop config mismatch for resources config: '
+                        f'{config} and global config: {autostop_config_to_use}')
+
+        resources_fields['autostop_config'] = autostop_config_to_use
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
@@ -1574,6 +1670,14 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
+
+        # Serialize autostop
+        if self._autostop_config is not None:
+            config['autostop'] = {
+                'idle_minutes': self._autostop_config.idle_minutes,
+                'down': self._autostop_config.down
+            }
+
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)

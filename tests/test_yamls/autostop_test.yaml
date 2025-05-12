@@ -1,0 +1,8 @@
+resources:
+  cloud: aws # Or any other cloud available for testing
+  autostop: 1
+# Minimal run command to keep the cluster busy for a short while then idle
+run: |
+  echo 'Task running...'
+  sleep 10 
+  echo 'Task finished, idling now.' 

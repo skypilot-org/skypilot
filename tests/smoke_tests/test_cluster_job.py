@@ -1906,3 +1906,70 @@ def test_min_gpt_kubernetes():
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Autostopping from YAML ----------
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_scp
+@pytest.mark.no_kubernetes
+@pytest.mark.no_vast
+def test_autostop_from_yaml(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    total_timeout_minutes = 70 if generic_cloud == 'azure' else 20
+
+    test_yaml_path = 'tests/test_yamls/autostop_test.yaml'
+
+    test = smoke_tests_utils.Test(
+        f'autostop_from_yaml_{generic_cloud}',
+        [
+            # 1. Test YAML autostop only
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {test_yaml_path}',
+            # Ensure autostop is set to 1m from YAML
+            f'sky status {name} --refresh | grep {name} | grep "1m"',
+            # Ensure the cluster is not stopped early (task runs for ~10s, then idles)
+            'sleep 45',  # Should be less than 1m total idle time from launch + run cmd time
+            f'sky status {name} --refresh | grep {name} | grep UP',
+            # Ensure the cluster is STOPPED (autostop from YAML is 1 min)
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+            f'sky down -y {name}',  # Clean up for next test case
+
+            # 2. Test YAML autostop overrides CLI --idle-minutes-to-autostop
+            # YAML has autostop: 1, CLI has -i 5
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {test_yaml_path} -i 5',
+            # Ensure autostop is set to 1m from YAML (not 5m from CLI)
+            f'sky status {name} --refresh | grep {name} | grep "1m"',
+            'sleep 45',
+            f'sky status {name} --refresh | grep {name} | grep UP',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+            f'sky down -y {name}',  # Clean up for next test case
+
+            # 3. Test YAML autostop, then overridden by `sky autostop` CLI
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {test_yaml_path}',
+            # Initial autostop should be 1m from YAML
+            f'sky status {name} --refresh | grep {name} | grep "1m"',
+            # Override with CLI to 2 minutes (using a slightly different value to be distinct)
+            f'sky autostop -y {name} -i 2',
+            f'sky status {name} --refresh | grep {name} | grep "2m"',
+            # Wait for a period longer than 1m but less than 2m total idle time
+            # (considering the time since `sky autostop` reset the timer)
+            'sleep 75',  # ~1m15s
+            f'sky status {name} --refresh | grep {name} | grep UP',
+            # Now wait for it to stop based on the 2m timer
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
