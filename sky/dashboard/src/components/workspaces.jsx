@@ -297,9 +297,9 @@ export function Workspaces() {
       return (
         <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
           {descriptions}
-          <p className="mt-2 text-gray-500 italic">
+          <p className="mt-2 text-gray-500">
             Other accessible infrastructure are enabled. See{' '}
-            <code className="text-sky-blue">ENABLED INFRA</code>.
+            <code className="text-sky-blue">Enabled Infra</code>.
           </p>
         </div>
       );
@@ -435,7 +435,7 @@ export function Workspaces() {
               </CardContent>
 
               <div className="px-6 pb-3 text-sm pt-3">
-                <h4 className="mb-2 text-xs text-gray-500 uppercase tracking-wider">
+                <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
                   Enabled Infra
                 </h4>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
