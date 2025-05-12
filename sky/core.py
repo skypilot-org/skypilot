@@ -1175,3 +1175,23 @@ def local_down() -> None:
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,
                                        is_local=True))
+
+
+@usage_lib.entrypoint
+def ssh_up(cluster_name: Optional[str] = None,
+           kubeconfig_path: Optional[str] = None,
+           cleanup: bool = False) -> None:
+    """Deploys or tears down a Kubernetes cluster on SSH targets.
+    
+    Args:
+        cluster_name: Name of the cluster configuration in ssh_targets.yaml.
+            If None, the first cluster in the file is used.
+        kubeconfig_path: Path where the kubeconfig should be saved.
+            If None, ~/.kube/config will be used.
+        cleanup: If True, clean up the cluster instead of deploying.
+    """
+    kubernetes_deploy_utils.deploy_ssh_cluster(
+        cleanup=cleanup,
+        cluster_name=cluster_name,
+        kubeconfig_path=kubeconfig_path
+    )

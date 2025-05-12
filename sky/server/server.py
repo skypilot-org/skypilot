@@ -838,6 +838,33 @@ async def local_down(request: fastapi.Request) -> None:
     )
 
 
+@app.post('/ssh_up')
+async def ssh_up(request: fastapi.Request,
+                 ssh_up_body: payloads.SSHUpBody) -> None:
+    """Deploys a Kubernetes cluster on SSH targets."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_up',
+        request_body=ssh_up_body,
+        func=core.ssh_up,
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
+@app.post('/ssh_down')
+async def ssh_down(request: fastapi.Request,
+                   ssh_up_body: payloads.SSHUpBody) -> None:
+    """Tears down a Kubernetes cluster on SSH targets."""
+    # We still call ssh_up but with cleanup=True
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_down',
+        request_body=ssh_up_body,
+        func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
 # === API server related APIs ===
 @app.get('/api/get')
 async def api_get(request_id: str) -> requests_lib.RequestPayload:

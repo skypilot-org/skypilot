@@ -8,6 +8,7 @@ import os
 import sys
 import click
 
+from sky.client import sdk
 from sky.utils.kubernetes import kubernetes_deploy_utils as kube_utils
 
 
@@ -26,7 +27,8 @@ def ssh():
 @ssh.command('up')
 @click.option('--cluster', help='Name of the cluster to set up. If not specified, the first cluster in ssh_targets.yaml is used.')
 @click.option('--kubeconfig', help=f'Path to save the Kubernetes configuration file. Default: {SSH_KUBECONFIG_PATH}')
-def up(cluster, kubeconfig):
+@click.option('--async', 'async_call', is_flag=True, hidden=True, help='Run the command asynchronously.')
+def up(cluster, kubeconfig, async_call):
     """Set up a cluster using SSH targets from ~/.sky/ssh_targets.yaml.
     
     This command sets up a Kubernetes cluster on the machines specified in
@@ -41,7 +43,12 @@ def up(cluster, kubeconfig):
     kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
     
     try:
-        kube_utils.deploy_ssh_cluster(cleanup=False, cluster_name=cluster, kubeconfig_path=kubeconfig_path)
+        request_id = sdk.ssh_up(cluster_name=cluster, kubeconfig_path=kubeconfig_path)
+        if async_call:
+            print(f'Request submitted with ID: {request_id}')
+        else:
+            sdk.stream_and_get(request_id)
+            print(f'SSH cluster successfully deployed. Kubeconfig saved to {kubeconfig_path}')
     except Exception as e:
         print(f'Error setting up SSH cluster: {e}')
         sys.exit(1)
@@ -49,7 +56,8 @@ def up(cluster, kubeconfig):
 @ssh.command('down')
 @click.option('--cluster', help='Name of the cluster to clean up. If not specified, the first cluster in ssh_targets.yaml is used.')
 @click.option('--kubeconfig', help=f'Path to the Kubernetes configuration file to update. Default: {SSH_KUBECONFIG_PATH}')
-def down(cluster, kubeconfig):
+@click.option('--async', 'async_call', is_flag=True, hidden=True, help='Run the command asynchronously.')
+def down(cluster, kubeconfig, async_call):
     """Clean up a cluster set up with 'sky ssh up'.
     
     This command removes the Kubernetes installation from the machines specified
@@ -64,7 +72,12 @@ def down(cluster, kubeconfig):
     kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
     
     try:
-        kube_utils.deploy_ssh_cluster(cleanup=True, cluster_name=cluster, kubeconfig_path=kubeconfig_path)
+        request_id = sdk.ssh_down(cluster_name=cluster, kubeconfig_path=kubeconfig_path)
+        if async_call:
+            print(f'Request submitted with ID: {request_id}')
+        else:
+            sdk.stream_and_get(request_id)
+            print('SSH cluster successfully cleaned up.')
     except Exception as e:
         print(f'Error cleaning up SSH cluster: {e}')
         sys.exit(1) 

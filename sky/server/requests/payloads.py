@@ -485,6 +485,13 @@ class LocalUpBody(RequestBody):
     password: Optional[str] = None
 
 
+class SSHUpBody(RequestBody):
+    """The request body for the SSH up/down endpoints."""
+    cluster_name: Optional[str] = None
+    kubeconfig_path: Optional[str] = None
+    cleanup: bool = False
+
+
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""
     service_name: str
