@@ -339,7 +339,7 @@ To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to sp
 
 The ``gcp.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
 
-Two ways to reach those private hosts from your laptop are supported:
+Here are two ways to enable SkyPilot's access those private hosts:
 
 * **Option 1** – :ref:`SSH proxy / bastion host <gcp-proxy-host>`
 * **Option 2** – :ref:`IAP tunneling (Identity‑Aware Proxy) <gcp-iap-tunnel>`
@@ -381,7 +381,7 @@ Option 2: IAP tunneling
 `IAP TCP forwarding <https://cloud.google.com/iap/docs/using-tcp-forwarding>`__
 creates an authenticated tunnel from your workstation to any private IP inside
 a GCP VPC—no public IP, VPN, or self-managed bastion required. SkyPilot
-implements the `IP-based (destination-group) mode <https://cloud.google.com/iap/docs/tcp-by-host>`__; the per-instance mode is not supported.
+implements the `IP-based (destination-group) mode <https://cloud.google.com/iap/docs/tcp-by-host>`__; the per-instance mode is not supported yet.
 
 Prerequisites
 ^^^^^^^^^^^^^
