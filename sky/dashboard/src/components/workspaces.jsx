@@ -146,15 +146,17 @@ export function Workspaces() {
         }
 
         workspaceStatsAggregator[wsName].totalClusterCount++;
-        if (cluster.status === 'RUNNING') {
+        if (cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING') {
           workspaceStatsAggregator[wsName].runningClusterCount++;
           totalRunningClusters++;
         }
         if (cluster.cloud) {
           workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
         }
-        workspaceStatsAggregator[wsName].hourlyCost += cluster.cost_per_hour || 0;
-        totalGlobalHourlyCost += cluster.cost_per_hour || 0;
+        if (cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING') {
+          workspaceStatsAggregator[wsName].hourlyCost += cluster.cost_per_hour || 0;
+          totalGlobalHourlyCost += cluster.cost_per_hour || 0;
+        }
       });
 
       setGlobalTotalClusters(clustersResponse.length);
