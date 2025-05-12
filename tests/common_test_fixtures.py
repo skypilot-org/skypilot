@@ -68,7 +68,7 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
         # executed automatically. We manually call the executor._wrapper
         # here to execute the request.
         if request_obj is not None:
-            ignore_return_value = mock_queue.get(request_id)
+            ignore_return_value, _ = mock_queue.get(request_id)
             if ignore_return_value is None and path == '/optimize':
                 ignore_return_value = True
             logger.info(
@@ -300,12 +300,12 @@ def mock_queue(monkeypatch):
             self.queue_map = {}
 
         def put(self, item):
-            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value)
-            request_id, ignore_return_value = item
-            self.queue_map[request_id] = ignore_return_value
+            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value, retryable)
+            request_id, ignore_return_value, retryable = item
+            self.queue_map[request_id] = (ignore_return_value, retryable)
 
         def get(self, request_id):
-            # Retrieve ignore_return_value for a given request_id
+            # Retrieve ignore_return_value and retryable for a given request_id
             return self.queue_map.get(request_id)
 
     # Create a MockQueue instance
