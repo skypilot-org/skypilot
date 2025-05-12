@@ -18,6 +18,7 @@ The number of the workers is determined by the system resources.
 
 See the [README.md](../README.md) for detailed architecture of the executor.
 """
+import concurrent.futures
 import contextlib
 import multiprocessing
 import os
@@ -31,6 +32,7 @@ from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
 import setproctitle
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -89,21 +91,21 @@ class RequestQueue:
         else:
             raise RuntimeError(f'Invalid queue backend: {backend}')
 
-    def put(self, request: Tuple[str, bool]) -> None:
+    def put(self, request: Tuple[str, bool, bool]) -> None:
         """Put and request to the queue.
 
         Args:
-            request: A tuple of request_id and ignore_return_value.
+            request: A tuple of request_id, ignore_return_value, and retryable.
         """
         self.queue.put(request)  # type: ignore
 
-    def get(self) -> Optional[Tuple[str, bool]]:
+    def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
 
         It is non-blocking if the queue is empty, and returns None.
 
         Returns:
-            A tuple of request_id and ignore_return_value.
+            A tuple of request_id, ignore_return_value, and retryable.
         """
         try:
             return self.queue.get(block=False)
@@ -155,7 +157,7 @@ class RequestWorker:
             if request_element is None:
                 time.sleep(0.1)
                 return
-            request_id, ignore_return_value = request_element
+            request_id, ignore_return_value, retryable = request_element
             request = api_requests.get_request(request_id)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
@@ -167,8 +169,14 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            executor.submit_until_success(_request_execution_wrapper,
-                                          request_id, ignore_return_value)
+            fut = executor.submit_until_success(_request_execution_wrapper,
+                                                request_id, ignore_return_value)
+            if retryable:
+                # If the task might fail and be retried, start a thread to
+                # monitor the future and process retry.
+                threading.Thread(target=self.handle_task_result,
+                                 args=(fut, request_element),
+                                 daemon=True).start()
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -177,6 +185,16 @@ class RequestWorker:
                 f'[{self}] Error processing request: '
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    def handle_task_result(self, fut: concurrent.futures.Future,
+                           request_element: Tuple[str, bool, bool]) -> None:
+        try:
+            fut.result()
+        except exceptions.ExecutionRetryableError as e:
+            time.sleep(e.retry_wait_seconds)
+            # Reschedule the request.
+            queue = _get_queue(self.schedule_type)
+            queue.put(request_element)
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -301,7 +319,9 @@ def _request_execution_wrapper(request_id: str,
         func = request_task.entrypoint
         request_body = request_task.request_body
 
-    with log_path.open('w', encoding='utf-8') as f:
+    # Append to the log file instead of overwriting it since there might be
+    # logs from previous retries.
+    with log_path.open('a', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = _redirect_output(f)
         # Redirect the stdout/stderr before overriding the environment and
@@ -325,6 +345,17 @@ def _request_execution_wrapper(request_id: str,
             subprocess_utils.kill_children_processes()
             _restore_output(original_stdout, original_stderr)
             return
+        except exceptions.ExecutionRetryableError as e:
+            logger.error(e)
+            logger.info(e.hint)
+            with api_requests.update_request(request_id) as request_task:
+                assert request_task is not None, request_id
+                # Retried request will undergo rescheduling and a new execution,
+                # clear the pid of the request.
+                request_task.pid = None
+            # Yield control to the scheduler for uniform handling of retries.
+            _restore_output(original_stdout, original_stderr)
+            raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             api_requests.set_request_failed(request_id, e)
             _restore_output(original_stdout, original_stderr)
@@ -341,17 +372,17 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
 
 
-def schedule_request(
-        request_id: str,
-        request_name: str,
-        request_body: payloads.RequestBody,
-        func: Callable[P, Any],
-        request_cluster_name: Optional[str] = None,
-        ignore_return_value: bool = False,
-        schedule_type: api_requests.ScheduleType = (
-            api_requests.ScheduleType.LONG),
-        is_skypilot_system: bool = False,
-        precondition: Optional[preconditions.Precondition] = None) -> None:
+def schedule_request(request_id: str,
+                     request_name: str,
+                     request_body: payloads.RequestBody,
+                     func: Callable[P, Any],
+                     request_cluster_name: Optional[str] = None,
+                     ignore_return_value: bool = False,
+                     schedule_type: api_requests.ScheduleType = (
+                         api_requests.ScheduleType.LONG),
+                     is_skypilot_system: bool = False,
+                     precondition: Optional[preconditions.Precondition] = None,
+                     retryable: bool = False) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -395,7 +426,7 @@ def schedule_request(
     request.log_path.touch()
 
     def enqueue():
-        input_tuple = (request_id, ignore_return_value)
+        input_tuple = (request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_id}')
         _get_queue(schedule_type).put(input_tuple)
 

@@ -2869,14 +2869,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-                # The most frequent reason for the failure of a provision
-                # request is resource unavailability instead of rate
-                # limiting; to make users wait shorter, we do not make
-                # backoffs exponential.
-                backoff = common_utils.Backoff(
-                    initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
-                    max_backoff_factor=1)
-            attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
                 # within the given region first, then optionally retry on all
@@ -2920,19 +2912,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         error_message = str(e)
 
                     if retry_until_up:
-                        logger.error(error_message)
-                        # Sleep and retry.
-                        gap_seconds = backoff.current_backoff()
-                        plural = 's' if attempt_cnt > 1 else ''
+                        gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
                         retry_message = ux_utils.retry_message(
-                            f'Retry after {gap_seconds:.0f}s '
-                            f'({attempt_cnt} attempt{plural}). ')
-                        logger.info(f'\n{retry_message} '
-                                    f'{ux_utils.log_path_hint(log_path)}'
-                                    f'{colorama.Style.RESET_ALL}')
-                        attempt_cnt += 1
-                        time.sleep(gap_seconds)
-                        continue
+                            f'Retry after {gap_seconds:.0f}s ')
+                        hint_message = (f'\n{retry_message} '
+                                        f'{ux_utils.log_path_hint(log_path)}'
+                                        f'{colorama.Style.RESET_ALL}')
+                        raise exceptions.ExecutionRetryableError(
+                            error_message,
+                            hint=hint_message,
+                            retry_wait_seconds=gap_seconds)
                     # Clean up the cluster's entry in `sky status`.
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
