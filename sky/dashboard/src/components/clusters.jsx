@@ -39,6 +39,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+// Helper function to format cost (copied from workspaces.jsx)
+const formatCost = (cost) => {
+  if (cost >= 10) { // Use the user-updated threshold of 10
+    return cost.toFixed(1);
+  }
+  return cost.toFixed(2);
+};
+
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
 
 export function Clusters() {
@@ -378,9 +386,9 @@ export function ClusterTable({
                     <TableCell>{relativeTime(item.time)}</TableCell>
                     <TableCell>
                       <div className="flex flex-col">
-                        <span>${item.total_cost.toFixed(2)}</span>
+                        <span>${formatCost(item.total_cost)}</span>
                         <span className="text-xs text-gray-500">
-                          ${item.cost_per_hour.toFixed(2)}/hr
+                          ${formatCost(item.cost_per_hour)}/hr
                         </span>
                       </div>
                     </TableCell>

@@ -31,14 +31,23 @@ import {
   BookDocIcon,
   TickIcon,
 } from '@/components/elements/icons';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, DollarSign } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+
+// Helper function to format cost
+const formatCost = (cost) => {
+  if (cost >= 10) {
+    return cost.toFixed(1);
+  }
+  return cost.toFixed(2);
+};
 
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
   const [globalRunningClusters, setGlobalRunningClusters] = useState(0);
   const [globalTotalClusters, setGlobalTotalClusters] = useState(0);
   const [globalManagedJobs, setGlobalManagedJobs] = useState(0);
+  const [globalHourlyCost, setGlobalHourlyCost] = useState(0);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -93,6 +102,7 @@ export function Workspaces() {
       });
 
       let totalRunningClusters = 0;
+      let totalGlobalHourlyCost = 0;
       const workspaceStatsAggregator = {};
 
       if (configuredWorkspaceNames.length > 0) {
@@ -103,6 +113,7 @@ export function Workspaces() {
             runningClusterCount: 0,
             managedJobsCount: 0,
             clouds: new Set(),
+            hourlyCost: 0,
           };
         });
       }
@@ -120,6 +131,7 @@ export function Workspaces() {
               runningClusterCount: 0,
               managedJobsCount: 0,
               clouds: new Set(),
+              hourlyCost: 0,
             };
           }
         } else if (!workspaceStatsAggregator[wsName]) {
@@ -129,6 +141,7 @@ export function Workspaces() {
             runningClusterCount: 0,
             managedJobsCount: 0,
             clouds: new Set(),
+            hourlyCost: 0,
           };
         }
 
@@ -140,10 +153,13 @@ export function Workspaces() {
         if (cluster.cloud) {
           workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
         }
+        workspaceStatsAggregator[wsName].hourlyCost += cluster.cost_per_hour || 0;
+        totalGlobalHourlyCost += cluster.cost_per_hour || 0;
       });
 
       setGlobalTotalClusters(clustersResponse.length);
       setGlobalRunningClusters(totalRunningClusters);
+      setGlobalHourlyCost(totalGlobalHourlyCost);
 
       const jobs = managedJobsResponse.jobs || [];
       jobs.forEach((job) => {
@@ -192,6 +208,7 @@ export function Workspaces() {
       setGlobalRunningClusters(0);
       setGlobalTotalClusters(0);
       setGlobalManagedJobs(0);
+      setGlobalHourlyCost(0);
     }
     setLoading(false);
   };
@@ -394,6 +411,15 @@ export function Workspaces() {
               </span>
             </div>
           </div>
+          <div className="p-2">
+            <div className="flex items-center">
+              <DollarSign className="w-5 h-5 mr-2 text-sky-600" />
+              <span className="text-sm text-gray-600">Hourly Cost:</span>
+              <span className="ml-1 text-xl font-semibold text-sky-700">
+                ${formatCost(globalHourlyCost)}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -430,6 +456,15 @@ export function Workspaces() {
                   </div>
                   <span className="font-normal text-gray-800">
                     {ws.managedJobsCount}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between border-t border-gray-100">
+                  <div className="flex items-center text-gray-600">
+                    <DollarSign className="w-4 h-4 mr-1" />
+                    <span>Hourly Cost</span>
+                  </div>
+                  <span className="font-normal text-gray-800">
+                    ${formatCost(ws.hourlyCost)}
                   </span>
                 </div>
               </CardContent>
