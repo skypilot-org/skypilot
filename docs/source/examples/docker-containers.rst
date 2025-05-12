@@ -214,7 +214,7 @@ you can provide the registry authentication details using :ref:`task environment
             SKYPILOT_DOCKER_PASSWORD: <password>
             SKYPILOT_DOCKER_SERVER: docker.io
 
-    .. tab-item:: AWS Elastic Container Registry (ECR)
+    .. tab-item:: AWS ECR
         :sync: aws-ecr-tab
 
         .. code-block:: yaml
@@ -236,7 +236,7 @@ you can provide the registry authentication details using :ref:`task environment
           sky launch sky.yaml \
             --env SKYPILOT_DOCKER_PASSWORD="$(aws ecr get-login-password --region us-east-1)"
 
-    .. tab-item:: GCP Artifact Registry (GCR)
+    .. tab-item:: GCP GCR
         :sync: gcp-artifact-registry-tab
 
         We support private GCP Artifact Registry (GCR) with a service account key.
@@ -272,7 +272,7 @@ you can provide the registry authentication details using :ref:`task environment
                 SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
 
 
-    .. tab-item:: NVIDIA Container Registry (NGC)
+    .. tab-item:: NVIDIA NGC
         :sync: nvidia-container-registry-tab
 
         .. code-block:: yaml

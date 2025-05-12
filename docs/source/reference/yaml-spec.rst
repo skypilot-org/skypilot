@@ -55,6 +55,12 @@ Below is the configuration syntax and some example values.  See details under ea
       - cloud: gcp
         accelerators: H100
 
+    :ref:`ordered <yaml-spec-resources-ordered>`:
+      - cloud: aws
+        region: us-east-1
+      - cloud: aws
+        region: us-west-2
+
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
   :ref:`envs <yaml-spec-envs>`:
@@ -643,12 +649,9 @@ Candidate resources (optional).
 
 If specified, SkyPilot will only use these candidate resources to launch the cluster.
 
-The fields specified outside of ``any_of``, ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of``, ``ordered`` will override the default values.
+The fields specified outside of ``any_of`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of`` will override the default values.
 
-- ``any_of``: means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
-- ``ordered``: means that SkyPilot will failover through the candidate resources with the specified order.
-
-Note: accelerators under ``any_of`` and ``ordered`` cannot be a list or set.
+``any_of`` means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
 
 Example:
 
@@ -662,7 +665,19 @@ Example:
       - cloud: gcp
         accelerators: H100
 
-OR
+.. _yaml-spec-resources-ordered:
+
+``resources.ordered``
+~~~~~~~~~~~~~~~~~~~~~~
+Ordered candidate resources (optional).
+
+If specified, SkyPilot will failover through the candidate resources with the specified order.
+
+The fields specified outside of ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``ordered`` will override the default values.
+
+``ordered`` means that SkyPilot will failover through the candidate resources with the specified order.
+
+Example:
 
 .. code-block:: yaml
 
@@ -672,7 +687,6 @@ OR
         region: us-east-1
       - cloud: aws
         region: us-west-2
-
 
 .. _yaml-spec-resources-job-recovery:
 
