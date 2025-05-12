@@ -44,13 +44,13 @@ NAME              STATUS   ROLES                  AGE   VERSION
 
 $ sky show-gpus --cloud kubernetes
 Kubernetes GPUs
-GPU  REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-A10  1                         2           2              
+GPU  REQUESTABLE_QTY_PER_NODE  UTILIZATION
+A10  1                         2 of 2 free
 
 Kubernetes per node GPU availability
-NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
-129-80-133-44    A10       1           1
-150-230-191-161  A10       1           1
+NODE             GPU       UTILIZATION
+129-80-133-44    A10       1 of 1 free
+150-230-191-161  A10       1 of 1 free
 ```
 
 ## Run AI workloads on your Kubernetes cluster with SkyPilot

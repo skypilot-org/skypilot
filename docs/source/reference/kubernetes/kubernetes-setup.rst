@@ -219,18 +219,18 @@ You can also check the GPUs available on your nodes by running:
 
     $ sky show-gpus --cloud k8s
     Kubernetes GPUs
-    GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-    L4    1, 2, 4                   12          12
-    H100  1, 2, 4, 8                16          16
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+    L4    1, 2, 4                   12 of 12 free
+    H100  1, 2, 4, 8                16 of 16 free
 
     Kubernetes per node GPU availability
-    NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-    my-cluster-0               L4        4           4
-    my-cluster-1               L4        4           4
-    my-cluster-2               L4        2           2
-    my-cluster-3               L4        2           2
-    my-cluster-4               H100      8           8
-    my-cluster-5               H100      8           8
+    NODE                       GPU       UTILIZATION
+    my-cluster-0               L4        4 of 4 free
+    my-cluster-1               L4        4 of 4 free
+    my-cluster-2               L4        2 of 2 free
+    my-cluster-3               L4        2 of 2 free
+    my-cluster-4               H100      8 of 8 free
+    my-cluster-5               H100      8 of 8 free
 
 .. _kubernetes-optional-steps:
 
