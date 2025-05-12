@@ -55,9 +55,9 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
                             'ssh_up.log')
     
     if cleanup:
-        msg_str = 'Cleaning up SSH cluster...'
+        msg_str = 'Cleaning up SkyPilot on SSH targets...'
     else:
-        msg_str = 'Deploying SSH cluster...'
+        msg_str = 'Deploying SkyPilot on SSH targets...'
     
     with rich_utils.safe_status(
             ux_utils.spinner_message(msg_str,
@@ -68,7 +68,7 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
             log_path=log_path,
             require_outputs=True,
             stream_logs=False, # TODO: Fixme to False after we fix the logging
-            line_processor=log_utils.SkyRemoteUpLineProcessor(
+            line_processor=log_utils.SkySSHUpLineProcessor(
                 log_path=log_path, is_local=True),
             cwd=cwd)
     
@@ -77,7 +77,7 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
     else:
         with ux_utils.print_exception_no_traceback():
             log_hint = ux_utils.log_path_hint(log_path, is_local=True)
-            raise RuntimeError('Failed to deploy SSH cluster. '
+            raise RuntimeError('Failed to deploy SkyPilot on SSH targets. '
                                f'Full log: {log_hint}'
                                f'\nError: {stderr}')
     
@@ -85,13 +85,13 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
         if cleanup:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH cluster cleaned up successfully.',
+                    '🎉 SSH targets cleaned up successfully.',
                     log_path=log_path,
                     is_local=True))
         else:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH cluster deployed successfully.',
+                    '🎉 SSH targets set up successfully.',
                     log_path=log_path,
                     is_local=True))
 

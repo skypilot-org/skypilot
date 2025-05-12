@@ -48,7 +48,6 @@ def up(cluster, kubeconfig, async_call):
             print(f'Request submitted with ID: {request_id}')
         else:
             sdk.stream_and_get(request_id)
-            print(f'SSH cluster successfully deployed. Kubeconfig saved to {kubeconfig_path}')
     except Exception as e:
         print(f'Error setting up SSH cluster: {e}')
         sys.exit(1)
@@ -77,7 +76,6 @@ def down(cluster, kubeconfig, async_call):
             print(f'Request submitted with ID: {request_id}')
         else:
             sdk.stream_and_get(request_id)
-            print('SSH cluster successfully cleaned up.')
     except Exception as e:
         print(f'Error cleaning up SSH cluster: {e}')
         sys.exit(1) 
