@@ -11,18 +11,53 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
-export async function getClusters({ clusterNames = null } = {}) {
+export async function getClusterCosts() {
   try {
-    const response = await fetch(`${ENDPOINT}/status`, {
-      method: 'POST',
+    const response = await fetch(`${ENDPOINT}/cost_report`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        cluster_names: clusterNames,
-        all_users: true,
-      }),
     });
+    // TODO(syang): remove X-Request-ID when v0.10.0 is released.
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('X-Request-ID');
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const data = await fetchedData.json();
+    const costs = data.return_value ? JSON.parse(data.return_value) : [];
+    return costs.reduce((acc, cost) => {
+      // Calculate cost per hour based on resources and duration
+      const duration = cost.duration || 0;
+      const costPerHour = duration > 0 ? (cost.total_cost / (duration / 3600)) : 0;
+      
+      acc[cost.name] = {
+        total_cost: cost.total_cost || 0,
+        cost_per_hour: costPerHour
+      };
+      return acc;
+    }, {});
+  } catch (error) {
+    console.error('Error fetching cluster costs:', error);
+    return {};
+  }
+}
+
+export async function getClusters({ clusterNames = null } = {}) {
+  try {
+    const [response, costs] = await Promise.all([
+      fetch(`${ENDPOINT}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cluster_names: clusterNames,
+          all_users: true,
+        }),
+      }),
+      getClusterCosts()
+    ]);
     // TODO(syang): remove X-Request-ID when v0.10.0 is released.
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
@@ -31,6 +66,7 @@ export async function getClusters({ clusterNames = null } = {}) {
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
+      const cost = costs[cluster.name] || { total_cost: 0, cost_per_hour: 0 };
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
@@ -44,6 +80,8 @@ export async function getClusters({ clusterNames = null } = {}) {
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        total_cost: cost.total_cost,
+        cost_per_hour: cost.cost_per_hour,
         jobs: [],
         events: [
           {

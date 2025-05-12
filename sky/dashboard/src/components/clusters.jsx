@@ -331,6 +331,7 @@ export function ClusterTable({
               >
                 Started{getSortDirection('time')}
               </TableHead>
+              <TableHead>Cost</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -375,6 +376,14 @@ export function ClusterTable({
                     <TableCell>{item.resources_str}</TableCell>
                     <TableCell>{item.region}</TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span>${item.total_cost.toFixed(2)}</span>
+                        <span className="text-xs text-gray-500">
+                          ${item.cost_per_hour.toFixed(2)}/hr
+                        </span>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
