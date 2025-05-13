@@ -346,7 +346,7 @@ export function GPUs() {
 
                               {groupedPerNodeGPUs[context] &&
                                 groupedPerNodeGPUs[context].length > 0 && (
-                                  <div className="mt-4 pt-3 border-t">
+                                  <div className="mt-4 pt-3">
                                     <div className="max-h-52 overflow-y-auto">
                                       <div className="overflow-x-auto">
                                         <table className="min-w-full text-sm border-b border-gray-200">
