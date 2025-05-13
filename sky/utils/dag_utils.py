@@ -195,7 +195,7 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
         assert default_strategy is not None
         for resources in list(task_.resources):
             original_job_recovery = resources.job_recovery
-            job_recovery: Dict[str, Union[str, int]] = {
+            job_recovery: Dict[str, Optional[Union[str, int]]] = {
                 'strategy': default_strategy
             }
             if isinstance(original_job_recovery, str):

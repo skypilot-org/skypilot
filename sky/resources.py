@@ -62,7 +62,8 @@ class Resources:
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
+        job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
+                                     str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Optional[Dict[Optional[str], str]], str, None] = None,
@@ -177,19 +178,19 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
+        self._job_recovery: Optional[Dict[str, Optional[Union[str,
+                                                              int]]]] = None
         if job_recovery is not None:
             if isinstance(job_recovery, str):
                 job_recovery = {'strategy': job_recovery}
             if 'strategy' not in job_recovery:
-                strategy_name = None
-            else:
-                strategy_name = job_recovery['strategy']
+                job_recovery['strategy'] = None
 
+            strategy_name = job_recovery['strategy']
             if strategy_name == 'none':
                 self._job_recovery = None
             else:
-                if strategy_name is not None and isinstance(strategy_name, str):
+                if isinstance(strategy_name, str):
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
@@ -202,10 +203,9 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
+        self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
-            self._image_id: Optional[Dict[Optional[str], str]] = {
-                self._region: image_id.strip()
-            }
+            self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
             if None in image_id:
                 self._image_id = {self._region: image_id[None].strip()}
@@ -461,7 +461,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
+    def job_recovery(self) -> Optional[Dict[str, Optional[Union[str, int]]]]:
         return self._job_recovery
 
     @property
@@ -760,11 +760,12 @@ class Resources:
         """
         assert self.is_launchable(), self
         assert self.cloud is not None, 'Cloud must be specified'
-        assert self.instance_type is not None, 'Instance type must be specified'
-        regions = self.cloud.regions_with_offering(self.instance_type,
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        regions = self.cloud.regions_with_offering(self._instance_type,
                                                    self.accelerators,
-                                                   self.use_spot, self.region,
-                                                   self.zone)
+                                                   self._use_spot, self._region,
+                                                   self._zone)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 
@@ -864,7 +865,10 @@ class Resources:
             cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
             if self._cpus is not None:
-                assert cpus is not None, 'CPUs must be specified'
+                assert cpus is not None, (
+                    f'Can\'t get vCPUs from instance type: '
+                    f'{self._instance_type}, check catalog or '
+                    f'specify cpus directly.')
                 if self._cpus.endswith('+'):
                     if cpus < float(self._cpus[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -879,7 +883,10 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
-                assert mem is not None, 'Memory must be specified'
+                assert mem is not None, (
+                    f'Can\'t get memory from instance type: '
+                    f'{self._instance_type}, check catalog or '
+                    f'specify memory directly.')
                 if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -1075,13 +1082,14 @@ class Resources:
         hours = seconds / 3600
         # Instance.
         assert self.cloud is not None, 'Cloud must be specified'
-        assert self.instance_type is not None, 'Instance type must be specified'
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self.instance_type, self.use_spot, self.region, self.zone)
+            self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot, self.region, self.zone)
+                self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
     def get_accelerators_str(self) -> str:
