@@ -5,7 +5,10 @@ Deploy SkyPilot on existing machines
 
 This guide will help you deploy SkyPilot on your existing machines — whether they are on-premises or reserved instances on a cloud provider.
 
-You can also refer to :ref:`Deploying locally on your laptop <kubernetes-setup-kind>` to deploy a local Kubernetes cluster with `kind <https://kind.sigs.k8s.io/>`_ and try out SkyPilot quickly.
+
+.. tip::
+
+    To run SkyPilot on your local machine, you can directly :ref:`deploy a kubernetes cluster <kubernetes-setup-kind>` with `kind <https://kind.sigs.k8s.io/>`_.
 
 **Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.

@@ -227,9 +227,10 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
   mkdir -p ~/.kube
   cp /path/to/kubeconfig ~/.kube/config
 
-You can refer to :ref:`Deploying locally on your laptop <kubernetes-setup-kind>` to deploy a local Kubernetes cluster with `kind <https://kind.sigs.k8s.io/>`_ and try out SkyPilot quickly.
-
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+
+.. tip::
+   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
 
 .. _aws-installation:
 
