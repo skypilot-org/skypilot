@@ -130,6 +130,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`eu-north1 <config-yaml-nebius>`:
       project_id: project-e00xxxxxxxxxxx
       fabric: fabric-3
+      :ref:`filesystem <config-yaml-nebius-filesystem>`::
+        filesystem_id: computefilesystem-e00xwrry01ysvykbhf
+        mount_path: /mnt/fsnew
+        attach_mode: READ_WRITE
     :ref:`eu-west1 <config-yaml-nebius>`:
       project_id: project-e01xxxxxxxxxxx
       fabric: fabric-5
@@ -1179,7 +1183,25 @@ Example:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
 
+.._config-yaml-nebius-filesystem:
 
+``nebius.filesystem``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To add support filesystem you have to specify ``filesystem_id``.
+``mount_path`` by default ``/mnt/fs``.
+``attach_mode`` can be ``READ_WRITE``, ``READ_ONLY`` by default ``READ_WRITE``.
+
+Example:
+
+.. code-block:: yaml
+
+    nebius:
+      eu-north1:
+        filesystem:
+          filesystem_id: computefilesystem-e00xwrry01ysvykbhf
+          mount_path: /mnt/fsnew
+          attach_mode: READ_WRITE
 
 .. toctree::
    :hidden:
