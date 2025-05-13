@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision import constants as provision_constants
+from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
@@ -522,6 +523,8 @@ def terminate_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
+    region = provider_config['region']
+    enable_gpu_direct = provider_config.get('enable_gpu_direct', False)
 
     tpu_node = provider_config.get('tpu_node')
     if tpu_node is not None:
@@ -534,6 +537,9 @@ def terminate_instances(
             instance_utils.GCPManagedInstanceGroup.delete_mig(
                 project_id, zone, cluster_name_on_cloud))
         if mig_exists_and_deleted:
+            if enable_gpu_direct:
+                gcp_config.delete_gpu_direct_vpcs_and_subnets(
+                    cluster_name_on_cloud, project_id, region)
             return
 
     label_filters = {
@@ -568,6 +574,9 @@ def terminate_instances(
     _wait_for_operations(operations, project_id, zone)
     if errs:
         raise RuntimeError(f'Failed to terminate instances: {errs}')
+    if enable_gpu_direct:
+        gcp_config.delete_gpu_direct_vpcs_and_subnets(cluster_name_on_cloud,
+                                                      project_id, region)
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
 
