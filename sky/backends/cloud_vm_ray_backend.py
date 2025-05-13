@@ -4725,7 +4725,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             resource.docker_login_config,
                             one_task_resource.docker_login_config)
             # If we have docker login config in the new task, override the
-            # existing resources to pick up new credentials.
+            # existing resources to pick up new credentials. This allows the
+            # user to specify new or fixed credentials if the existing
+            # credentials are not working. If we don't do this, the credentials
+            # from the existing resources will always be reused.
             if one_task_resource.docker_login_config is not None:
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
