@@ -37,6 +37,8 @@ export function GPUs() {
     otherGPUs: [],
   });
   const [cloudInitialLoad, setCloudInitialLoad] = useState(true);
+  // Filter state for cloud GPUs
+  const [filterValue, setFilterValue] = useState("");
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -272,13 +274,13 @@ export function GPUs() {
                     {Object.entries(groupedPerContextGPUs).map(
                       ([context, gpusInContext]) => (
                         <div key={context}>
-                          <div className="rounded-lg border bg-card text-card-foreground shadow-sm border flex flex-col">
+                          <div className="rounded-lg border bg-card text-card-foreground shadow-sm border flex flex-col h-[420px]">
                             <div className="flex flex-col space-y-1.5 p-4 pb-2">
                               <h3 className="text-md font-normal">
                                 Context: {context}
                               </h3>
                             </div>
-                            <div className="p-4 pt-2">
+                            <div className="p-4 pt-2 overflow-y-auto flex-1">
                               <div className="space-y-3">
                                 {gpusInContext.map((gpu) => {
                                   const usedGpus =
@@ -419,6 +421,44 @@ export function GPUs() {
   };
 
   const renderCloudTab = () => {
+    // Filter function to match GPU data based on user input
+    const filterGpuData = (data) => {
+      if (!data) return [];
+      if (!filterValue.trim()) return data;
+      
+      const filter = filterValue.trim().toLowerCase();
+      let filterType = null;
+      let filterCount = null;
+      
+      // Parse filter like "A100:2" into type and count
+      if (filter.includes(':')) {
+        const [type, count] = filter.split(':');
+        filterType = type.trim();
+        filterCount = parseInt(count.trim());
+        if (isNaN(filterCount)) filterCount = null;
+      } else {
+        filterType = filter;
+      }
+      
+      return data.filter(item => {
+        const gpuType = (item.gpu_name || '').toLowerCase();
+        if (!gpuType.includes(filterType)) return false;
+        
+        // If count is specified, check if any available quantity matches
+        if (filterCount !== null) {
+          // Check if gpu_quantities is available and contains the filtered count
+          const quantities = item.gpu_quantities || '';
+          return quantities.includes(filterCount.toString());
+        }
+        
+        return true;
+      });
+    };
+    
+    const filteredCommonGpus = filterGpuData(cloudData.commonGPUs);
+    const filteredTpus = filterGpuData(cloudData.tpus);
+    const filteredOtherGpus = filterGpuData(cloudData.otherGPUs);
+
     if (cloudLoading && cloudInitialLoad) {
       return (
         <div className="flex flex-col items-center justify-center h-64">
@@ -434,29 +474,51 @@ export function GPUs() {
         (cloudData.tpus && cloudData.tpus.length > 0) ||
         (cloudData.otherGPUs && cloudData.otherGPUs.length > 0)) {
       return (
-        <>
-          {cloudData.commonGPUs && cloudData.commonGPUs.length > 0 && (
-            <div className="mb-4">
-              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
-                <CloudGpuTable data={cloudData.commonGPUs} title="Common GPUs" />
-              </div>
+        <div className="px-4 py-2">
+          <div className="mt-2 mb-4">
+            <div className="flex items-center">
+              <input
+                type="text"
+                placeholder="Filter GPUs (e.g., A100 or A100:2)"
+                value={filterValue}
+                onChange={(e) => setFilterValue(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-full"
+              />
             </div>
-          )}
-          {cloudData.tpus && cloudData.tpus.length > 0 && (
-            <div className="mb-4">
-              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
-                <CloudGpuTable data={cloudData.tpus} title="TPUs" />
-              </div>
+          </div>
+          
+          {/* Display cloud GPUs in a grid layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Common GPUs and Other GPUs in the first column/row */}
+            <div>
+              {filteredCommonGpus && filteredCommonGpus.length > 0 && (
+                <div className="mb-4">
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4 h-full">
+                    <CloudGpuTable data={filteredCommonGpus} title="Common GPUs" />
+                  </div>
+                </div>
+              )}
+              {filteredOtherGpus && filteredOtherGpus.length > 0 && (
+                <div className="mb-4">
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4 h-full">
+                    <CloudGpuTable data={filteredOtherGpus} title="Other GPUs" />
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          {cloudData.otherGPUs && cloudData.otherGPUs.length > 0 && (
-            <div className="mb-4">
-              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
-                <CloudGpuTable data={cloudData.otherGPUs} title="Other GPUs" />
-              </div>
+            
+            {/* TPUs in the second column/row */}
+            <div>
+              {filteredTpus && filteredTpus.length > 0 && (
+                <div className="mb-4">
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4 h-full">
+                    <CloudGpuTable data={filteredTpus} title="TPUs" />
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </>
+          </div>
+        </div>
       );
     }
 
