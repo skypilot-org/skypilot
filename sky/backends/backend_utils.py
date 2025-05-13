@@ -1556,8 +1556,8 @@ def check_owner_identity(cluster_name: str) -> None:
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
 
-    cloud = handle.launched_resources.cloud
-    assert cloud is not None, 'cloud should have been set by the optimizer.'
+    launched_resources = handle.launched_resources.assert_launchable()
+    cloud = launched_resources.cloud
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
     if user_identities is None:
@@ -1721,13 +1721,12 @@ def check_can_clone_disk_and_override_task(
                     'a new target cluster name.')
 
     new_task_resources = []
-    original_cloud = handle.launched_resources.cloud
-    assert original_cloud is not None, 'cloud should have been set by the optimizer.'
+    launched_resources = handle.launched_resources.assert_launchable()
+    original_cloud = launched_resources.cloud
     original_cloud.check_features_are_supported(
-        handle.launched_resources,
+        launched_resources,
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    assert original_cloud is not None, handle.launched_resources
     has_override = False
     has_disk_size_met = False
     has_cloud_met = False
@@ -1935,10 +1934,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
-    assert handle.launched_resources.cloud is not None, (
-        handle.launched_resources,
-        'cloud should have been set by the optimizer.')
-    if (not node_statuses and handle.launched_resources.cloud.STATUS_VERSION >=
+    launched_resources = handle.launched_resources.assert_launchable()
+    if (not node_statuses and launched_resources.cloud.STATUS_VERSION >=
             clouds.StatusVersion.SKYPILOT):
         # Note: launched_at is set during sky launch, even on an existing
         # cluster. This will catch the case where the cluster was terminated on
@@ -2987,14 +2984,11 @@ def get_endpoints(cluster: str,
                                              head_ip=handle.head_ip,
                                              provider_config=config['provider'])
 
-    assert handle.launched_resources.cloud is not None, (
-        handle.launched_resources,
-        'cloud should have been set by the optimizer.')
+    launched_resources = handle.launched_resources.assert_launchable()
     # Validation before returning the endpoints
     if port is not None:
         # If the requested endpoint was not to be exposed
-        port_set = resources_utils.port_ranges_to_set(
-            handle.launched_resources.ports)
+        port_set = resources_utils.port_ranges_to_set(launched_resources.ports)
         if port not in port_set:
             logger.warning(f'Port {port} is not exposed on '
                            f'cluster {cluster!r}.')
@@ -3003,8 +2997,7 @@ def get_endpoints(cluster: str,
         if port not in port_details:
             error_msg = (f'Port {port} not exposed yet. '
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
-            if handle.launched_resources.cloud.is_same_cloud(
-                    clouds.Kubernetes()):
+            if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
                 error_msg += (kubernetes_utils.get_endpoint_debug_message())
             logger.warning(error_msg)
@@ -3013,7 +3006,7 @@ def get_endpoints(cluster: str,
     else:
         if not port_details:
             # If cluster had no ports to be exposed
-            if handle.launched_resources.ports is None:
+            if launched_resources.ports is None:
                 logger.warning(f'Cluster {cluster!r} does not have any '
                                'ports to be exposed.')
                 return {}
@@ -3022,8 +3015,7 @@ def get_endpoints(cluster: str,
             else:
                 error_msg = (f'No endpoints exposed yet. '
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                if handle.launched_resources.cloud.is_same_cloud(
-                        clouds.Kubernetes()):
+                if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                     # Add Kubernetes specific debugging info
                     error_msg += \
                         kubernetes_utils.get_endpoint_debug_message()

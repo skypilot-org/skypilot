@@ -1,7 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import textwrap
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -656,7 +656,13 @@ class Resources:
         self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
 
     def is_launchable(self) -> bool:
+        """Returns whether the resource is launchable."""
         return self.cloud is not None and self._instance_type is not None
+
+    def assert_launchable(self) -> 'LaunchableResources':
+        """A workaround to make mypy understand that is_launchable() is true."""
+        assert self.is_launchable(), self
+        return cast(LaunchableResources, self)
 
     def need_cleanup_after_preemption_or_failure(self) -> bool:
         """Whether a resource needs cleanup after preemption or failure."""
@@ -1757,3 +1763,23 @@ class Resources:
                 '_docker_username_for_runpod', None)
 
         self.__dict__.update(state)
+
+
+class LaunchableResources(Resources):
+    """A class representing resources that can be launched on a cloud provider.
+
+    This class extends the base Resources class and adds properties for
+    accessing the cloud provider and instance type, with validation to ensure
+    these required fields are specified.
+    """
+
+    @property
+    def cloud(self) -> clouds.Cloud:
+        assert self._cloud is not None, 'Cloud must be specified'
+        return self._cloud
+
+    @property
+    def instance_type(self) -> str:
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        return self._instance_type
