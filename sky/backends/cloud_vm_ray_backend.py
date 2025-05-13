@@ -2431,22 +2431,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
-        assert self.launched_resources.cloud is not None, (
-            self.launched_resources,
-            'cloud should have been set by the optimizer.')
+
+        launched_resources = self.launched_resources.assert_launchable()
         updated_to_skypilot_provisioner_after_provisioned = (
-            self.launched_resources.cloud.PROVISIONER_VERSION >=
+            launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
             self.cached_external_ips is not None and
             self.cached_cluster_info is None)
         if updated_to_skypilot_provisioner_after_provisioned:
             logger.debug(
-                f'{self.launched_resources.cloud} has been updated to the new '
+                f'{launched_resources.cloud} has been updated to the new '
                 f'provisioner after cluster {self.cluster_name} was '
                 f'provisioned. Cached IPs are used for connecting to the '
                 'cluster.')
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                self.launched_resources.cloud.PROVISIONER_VERSION or
+                launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
@@ -3150,10 +3149,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
-            cloud = handle.launched_resources.cloud
-            assert cloud is not None, (
-                'cloud should have been set by the optimizer.')
-            if not (cloud.OPEN_PORTS_VERSION <=
+            launched_resources = handle.launched_resources.assert_launchable()
+            if not (launched_resources.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
