@@ -11,8 +11,7 @@ import os
 
 import requests
 
-# TODO Replace with the actual endpoint
-ENDPOINT = ''  #'https://api.hyperbolic.cloud/v1/instances'
+ENDPOINT = 'http://localhost:8080/v2/skypilot/catalog'
 API_KEY_PATH = os.path.expanduser('~/.hyperbolic/api_key')
 
 
@@ -37,7 +36,7 @@ def create_catalog() -> None:
             timeout=30)
         if not response.ok:
             raise RuntimeError(f'API request failed: {response.text}')
-        instances = response.json()
+        instances = response.json()["vms"]
     except requests.exceptions.RequestException as request_error:
         raise RuntimeError(f'Failed to fetch instance data: {request_error}'
                           ) from request_error
@@ -46,7 +45,7 @@ def create_catalog() -> None:
     with open('hyperbolic/vms.csv', 'w', newline='', encoding='utf-8') as f:
         fieldnames = [
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-            'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
+            'MemoryGiB', 'StorageGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
