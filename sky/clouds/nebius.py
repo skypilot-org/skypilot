@@ -195,8 +195,7 @@ class Nebius(clouds.Cloud):
         del dryrun, cluster_name
         assert zones is None, ('Nebius does not support zones', zones)
 
-        assert resources.instance_type is not None, \
-            'Instance type must be specified'
+        resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(

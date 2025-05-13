@@ -217,8 +217,7 @@ class OCI(clouds.Cloud):
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
 
-        assert resources.instance_type is not None, (
-            resources, 'instance_type should have been set by the optimizer.')
+        resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
@@ -248,8 +247,6 @@ class OCI(clouds.Cloud):
 
         cpus = resources.cpus
         original_instance_type = resources.instance_type
-        assert original_instance_type is not None, (
-            resources, 'instance_type should have been set by the optimizer.')
         instance_type_arr = original_instance_type.split(
             oci_utils.oci_config.INSTANCE_TYPE_RES_SPERATOR)
         instance_type = instance_type_arr[0]

@@ -189,13 +189,14 @@ class SCP(clouds.Cloud):
         del cluster_name, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
-        r = resources
-        assert r.instance_type is not None, 'Instance type must be specified'
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        image_id = self._get_image_id(r.image_id, region.name, r.instance_type)
+        image_id = self._get_image_id(resources.image_id, region.name,
+                                      resources.instance_type)
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,

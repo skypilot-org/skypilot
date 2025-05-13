@@ -722,7 +722,7 @@ class Cloud:
         Raises:
             ResourcesMismatchError: If the accelerator is not supported.
         """
-        assert resources.is_launchable(), resources
+        resources = resources.assert_launchable()
 
         def _equal_accelerators(
             acc_requested: Optional[Dict[str, Union[int, float]]],
@@ -748,8 +748,6 @@ class Cloud:
                     return False
             return True
 
-        assert resources.instance_type is not None, \
-            'Instance type must be specified'
         acc_from_instance_type = cls.get_accelerators_from_instance_type(
             resources.instance_type)
         if not _equal_accelerators(resources.accelerators,

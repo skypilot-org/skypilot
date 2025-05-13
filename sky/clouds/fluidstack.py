@@ -188,8 +188,7 @@ class Fluidstack(clouds.Cloud):
     ) -> Dict[str, Optional[str]]:
 
         assert zones is None, 'FluidStack does not support zones.'
-        assert resources.instance_type is not None, (
-            resources, 'instance_type should have been set by the optimizer.')
+        resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(

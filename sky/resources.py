@@ -1783,3 +1783,7 @@ class LaunchableResources(Resources):
         assert self._instance_type is not None, (
             'Instance type must be specified')
         return self._instance_type
+
+    def copy(self, **override) -> 'LaunchableResources':
+        self.assert_launchable()
+        return cast(LaunchableResources, super().copy(**override))
