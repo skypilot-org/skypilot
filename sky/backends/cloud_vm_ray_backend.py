@@ -1355,12 +1355,12 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
 
+        to_provision = to_provision.assert_launchable()
+
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
 
-        assert to_provision.cloud is not None, (
-            to_provision, 'cloud should have been set by the optimizer.')
         # Optimization - check if user has non-zero quota for
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
@@ -3254,12 +3254,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
+        launched_resources = handle.launched_resources.assert_launchable()
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
-            assert handle.launched_resources.cloud is not None, (
-                handle.launched_resources,
-                'cloud should have been set by the optimizer.')
             controller_utils.replace_skypilot_config_path_in_file_mounts(
-                handle.launched_resources.cloud, all_file_mounts)
+                launched_resources.cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
             self._execute_storage_mounts(handle, storage_mounts)
             self._set_storage_mounts_metadata(handle.cluster_name,
@@ -4158,8 +4156,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
-        cloud = handle.launched_resources.cloud
-        assert cloud is not None, 'cloud should have been set by the optimizer.'
+        launched_resources = handle.launched_resources.assert_launchable()
+        cloud = launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
@@ -4371,12 +4369,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the right resource to provision the cluster.
             if handle.cluster_yaml is not None:
                 try:
-                    cloud = handle.launched_resources.cloud
-                    assert cloud is not None, (
-                        'cloud should have been set by the optimizer.')
+                    launched_resources = (
+                        handle.launched_resources.assert_launchable())
+                    cloud = launched_resources.cloud
                     config = common_utils.read_yaml(handle.cluster_yaml)
                     cloud.check_features_are_supported(
-                        handle.launched_resources,
+                        launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
                     provision_lib.cleanup_ports(repr(cloud),
                                                 cluster_name_on_cloud,
@@ -4713,10 +4711,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
                                                            requested_ports_set)
             to_provision = handle.launched_resources
-            assert (to_provision is not None and
-                    to_provision.cloud is not None), (
-                        to_provision,
-                        'to_provision should have been set by the optimizer.')
+            assert to_provision is not None
+            to_provision = to_provision.assert_launchable()
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
