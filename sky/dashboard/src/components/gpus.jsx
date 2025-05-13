@@ -9,9 +9,9 @@ import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Layout } from '@/components/elements/layout';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
-import { getGPUs, getCloudGPUs } from '@/data/connectors/gpus';
+import { getGPUs, getCloudGPUs, getDetailedGpuInfo } from '@/data/connectors/gpus';
 
 // Set the refresh interval to 1 minute for GPU data
 const GPU_REFRESH_INTERVAL = 60000;
@@ -37,8 +37,15 @@ export function GPUs() {
     otherGPUs: [],
   });
   const [cloudInitialLoad, setCloudInitialLoad] = useState(true);
-  // Filter state for cloud GPUs
+  // Filter state for cloud GPUs (top-level filter box)
   const [filterValue, setFilterValue] = useState("");
+
+  // Detailed search results state
+  const [showDetailedResults, setShowDetailedResults] = useState(false);
+  const [detailedGpuData, setDetailedGpuData] = useState([]);
+  const [detailedGpuLoading, setDetailedGpuLoading] = useState(false);
+  // State for filtering detailed results by cloud
+  const [detailedCloudFilter, setDetailedCloudFilter] = useState('All Clouds');
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -155,6 +162,42 @@ export function GPUs() {
         });
     }
   }, [selectedTab, cloudInitialLoad]);
+
+  // Function to fetch detailed GPU info
+  const fetchDetailedGpuInfo = async (filter) => {
+    setDetailedGpuLoading(true);
+    try {
+      const data = await getDetailedGpuInfo(filter);
+      setDetailedGpuData(data);
+    } catch (error) {
+      console.error("Error fetching detailed GPU info:", error);
+      setDetailedGpuData([]);
+    } finally {
+      setDetailedGpuLoading(false);
+    }
+  };
+  
+  // Handler for search button click
+  const handleDetailedSearch = () => {
+    setShowDetailedResults(true);
+    setDetailedGpuLoading(true);
+    fetchDetailedGpuInfo(filterValue);
+  };
+
+  // Prepare cloud filter options for detailed results - MOVED TO TOP LEVEL
+  const detailedCloudOptions = React.useMemo(() => {
+    if (!detailedGpuData || detailedGpuData.length === 0) return ['All Clouds'];
+    const clouds = new Set(detailedGpuData.map(gpu => gpu.cloud));
+    return ['All Clouds', ...Array.from(clouds).sort()];
+  }, [detailedGpuData]);
+
+  // Filter detailed GPU data by selected cloud - MOVED TO TOP LEVEL
+  const currentDetailedGpuData = React.useMemo(() => {
+    if (detailedCloudFilter === 'All Clouds') {
+      return detailedGpuData;
+    }
+    return detailedGpuData.filter(gpu => gpu.cloud === detailedCloudFilter);
+  }, [detailedGpuData, detailedCloudFilter]);
 
   const renderKubernetesTab = () => {
     if (isInitialLoad && loading) {
@@ -477,15 +520,118 @@ export function GPUs() {
         <div className="px-4 py-2">
           <div className="mt-2 mb-4">
             <div className="flex items-center">
-              <input
-                type="text"
-                placeholder="Filter GPUs (e.g., A100 or A100:2)"
-                value={filterValue}
-                onChange={(e) => setFilterValue(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-full"
-              />
+              <div className="relative flex-grow">
+                <input
+                  type="text"
+                  placeholder="Filter GPUs (e.g., A100 or A100:2)"
+                  value={filterValue}
+                  onChange={(e) => setFilterValue(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-full pr-10"
+                />
+                {filterValue.trim() && (
+                  <button
+                    onClick={() => {
+                      setFilterValue("");
+                      setShowDetailedResults(false);
+                      setDetailedCloudFilter('All Clouds');
+                    }}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                    title="Clear filter"
+                  >
+                    <XIcon size={18} />
+                  </button>
+                )}
+              </div>
+              {filterValue.trim() && (
+                <button
+                  onClick={handleDetailedSearch}
+                  className="ml-2 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none text-sm shrink-0"
+                  title="Show detailed GPU information"
+                >
+                  Search for more details
+                </button>
+              )}
             </div>
           </div>
+          
+          {/* Detailed GPU Results Section */}
+          {showDetailedResults && (
+            <div className="mb-6 border rounded-lg p-4 bg-white">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center">
+                  <h3 className="text-lg font-semibold mr-4">
+                    Detailed GPU Info: {filterValue}
+                  </h3>
+                  {detailedGpuData && detailedGpuData.length > 0 && (
+                    <select 
+                      value={detailedCloudFilter} 
+                      onChange={(e) => setDetailedCloudFilter(e.target.value)}
+                      className="px-2 py-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    >
+                      {detailedCloudOptions.map(cloud => (
+                        <option key={cloud} value={cloud}>{cloud}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    setShowDetailedResults(false);
+                    setDetailedCloudFilter('All Clouds'); // Reset filter on close
+                  }}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <XIcon size={18} />
+                </button>
+              </div>
+              
+              {detailedGpuLoading ? (
+                <div className="flex flex-col items-center justify-center py-10">
+                  <CircularProgress size={32} className="mb-4" />
+                  <span className="text-gray-500">Loading detailed GPU information...</span>
+                </div>
+              ) : currentDetailedGpuData && currentDetailedGpuData.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm border-b border-gray-200">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="p-2 text-left font-medium text-gray-600">GPU</th>
+                        <th className="p-2 text-left font-medium text-gray-600">QTY</th>
+                        <th className="p-2 text-left font-medium text-gray-600">CLOUD</th>
+                        <th className="p-2 text-left font-medium text-gray-600">INSTANCE TYPE</th>
+                        <th className="p-2 text-left font-medium text-gray-600">DEVICE MEM</th>
+                        <th className="p-2 text-left font-medium text-gray-600">vCPUs</th>
+                        <th className="p-2 text-left font-medium text-gray-600">HOST MEM</th>
+                        <th className="p-2 text-left font-medium text-gray-600">HOURLY PRICE</th>
+                        <th className="p-2 text-left font-medium text-gray-600">HOURLY SPOT PRICE</th>
+                        <th className="p-2 text-left font-medium text-gray-600">REGION</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {currentDetailedGpuData.map((gpu, idx) => (
+                        <tr key={`detailed-gpu-${idx}-${gpu.cloud}-${gpu.instance_type}-${gpu.region}`}>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.accelerator_name}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.accelerator_count}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.cloud}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.instance_type}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.device_memory}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.cpu_count}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.memory}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.price}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.spot_price}</td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.region}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No detailed information found for "{filterValue}" {detailedCloudFilter !== 'All Clouds' ? `in ${detailedCloudFilter}` : ''}.
+                </div>
+              )}
+            </div>
+          )}
           
           {/* Display cloud GPUs in a grid layout */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

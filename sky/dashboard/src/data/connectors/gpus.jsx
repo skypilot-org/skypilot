@@ -254,3 +254,153 @@ export async function getCloudGPUs() {
     };
   }
 }
+
+export async function getDetailedGpuInfo(filter) {
+  try {
+    let gpuName = filter;
+    let gpuCount = null; 
+    
+    if (filter.includes(':')) {
+      const [name, countStr] = filter.split(':');
+      gpuName = name.trim();
+      const parsedCount = parseInt(countStr.trim());
+      if (!isNaN(parsedCount) && parsedCount > 0) {
+        gpuCount = parsedCount;
+      }
+    }
+    
+    console.log(`Searching for GPU: ${gpuName}${gpuCount !== null ? ", effective count: ${gpuCount}" : ""}`);
+    
+    const response = await fetch(`${ENDPOINT}/list_accelerators`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        gpus_only: true,
+        name_filter: gpuName, 
+        quantity_filter: gpuCount, 
+        clouds: CLOUDS_LIST,
+        case_sensitive: false,
+        all_regions: true,
+      }),
+    });
+    const id = response.headers.get('x-request-id');
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    
+    if (fetchedData.status === 500) {
+      console.error('Error fetching detailed GPU info: Server error');
+      return [];
+    }
+    
+    const data = await fetchedData.json();
+    
+    if (!data.return_value) {
+      console.log('No return_value in API response for detailed GPU info.');
+      return [];
+    }
+    
+    let rawData;
+    try {
+      const jsonStr = data.return_value;
+      const processedStr = jsonStr
+        .replace(/NaN/g, 'null')
+        .replace(/Infinity/g, 'null')
+        .replace(/-Infinity/g, 'null')
+        .replace(/undefined/g, 'null');
+      
+      rawData = JSON.parse(processedStr);
+      console.log('Successfully parsed GPU data. Top-level keys:', Object.keys(rawData));
+    } catch (parseError) {
+      console.error('Error parsing GPU data:', parseError);
+      return [];
+    }
+    
+    const formattedData = [];
+    const expectedArrayLength = 10; // Expected number of elements in the instance array
+
+    for (const [gpuNameKey, instances] of Object.entries(rawData)) {
+      if (!Array.isArray(instances)) {
+        console.log(`Value for key ${gpuNameKey} is not an array:`, instances);
+        continue;
+      }
+      console.log(`Processing ${instances.length} instances for ${gpuNameKey}`);
+      if (instances.length > 0 && Array.isArray(instances[0])) {
+         console.log('First instance array being processed:', JSON.stringify(instances[0], null, 2));
+      } else if (instances.length > 0) {
+        console.log('First instance (not an array as expected):', JSON.stringify(instances[0], null, 2));
+      }
+      
+      instances.forEach(instanceArray => {
+        if (!Array.isArray(instanceArray) || instanceArray.length < expectedArrayLength) {
+          // Log if it's not an array or not the expected length, but still try to process if it is an array
+          if (!Array.isArray(instanceArray)){
+            console.warn(`Expected an array for instance under ${gpuNameKey}, but got:`, instanceArray);
+            return; // Skip if not an array at all
+          } else {
+            console.warn(`Instance array for ${gpuNameKey} has unexpected length ${instanceArray.length} (expected ${expectedArrayLength}):`, instanceArray);
+            // Continue processing with available data, using undefined for missing fields
+          }
+        }
+        
+        const cloud         = instanceArray[0];
+        const instance_type = instanceArray[1];
+        // instanceArray[2] is accelerator_name, already covered by gpuNameKey or instance.accelerator_name if it were an object
+        const acc_count     = instanceArray[3];
+        const cpu_val       = instanceArray[4];
+        const dev_mem_val   = instanceArray[5];
+        const mem_val       = instanceArray[6];
+        const price_val     = instanceArray[7];
+        const spot_val      = instanceArray[8];
+        const region_val    = instanceArray[9];
+
+        let display_count = acc_count;
+        if (gpuCount !== null && (display_count === null || display_count === undefined || display_count === 0)) {
+          display_count = gpuCount;
+        }
+        display_count = (display_count === null || display_count === undefined || isNaN(parseInt(display_count))) ? 0 : parseInt(display_count);
+        
+        const instanceType = instance_type || '(attachable)';
+        const deviceMemory = dev_mem_val !== null && !isNaN(dev_mem_val) 
+          ? `${Math.floor(dev_mem_val)}GB` 
+          : '-';
+        const cpuCount = cpu_val !== null && !isNaN(cpu_val)
+          ? (Number.isInteger(cpu_val) ? cpu_val : parseFloat(cpu_val).toFixed(1))
+          : '-';
+        const memory = mem_val !== null && !isNaN(mem_val)
+          ? `${Math.floor(mem_val)}GB`
+          : '-';
+        const price = price_val !== null && !isNaN(price_val)
+          ? `$${parseFloat(price_val).toFixed(3)}`
+          : '-';
+        const spotPrice = spot_val !== null && !isNaN(spot_val)
+          ? `$${parseFloat(spot_val).toFixed(3)}`
+          : '-';
+        const region = region_val || '-';
+        
+        formattedData.push({
+          accelerator_name: gpuNameKey, // Use the key from rawData as the primary GPU name for the group
+          accelerator_count: display_count,
+          cloud: cloud || '',
+          instance_type: instanceType,
+          device_memory: deviceMemory,
+          cpu_count: cpuCount,
+          memory: memory,
+          price: price,
+          spot_price: spotPrice,
+          region: region,
+          raw_price: price_val !== null && !isNaN(price_val) ? parseFloat(price_val) : Infinity,
+          raw_spot_price: spot_val !== null && !isNaN(spot_val) ? parseFloat(spot_val) : Infinity,
+        });
+      });
+    }
+    
+    return formattedData.sort((a, b) => {
+      if (a.raw_price !== b.raw_price) return a.raw_price - b.raw_price;
+      return a.raw_spot_price - b.raw_spot_price;
+    });
+  } catch (error) {
+    console.error('Outer error in getDetailedGpuInfo:', error);
+    return [];
+  }
+}
