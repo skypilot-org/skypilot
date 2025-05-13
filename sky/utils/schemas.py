@@ -1089,6 +1089,24 @@ def get_config_schema():
                     'fabric': {
                         'type': 'string',
                     },
+                    'filesystem': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'filesystem_id': {
+                                'type': 'string',
+                            },
+                            'attach_mode': {
+                                'type': 'string',
+                                'case_sensitive_enum': [
+                                    'READ_WRITE', 'READ_ONLY'
+                                ]
+                            },
+                            'mount_path': {
+                                'type': 'string',
+                            }
+                        }
+                    },
                 }
             },
         }

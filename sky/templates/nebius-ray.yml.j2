@@ -46,6 +46,10 @@ available_node_types:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
+      Filesystem:
+        filesystem_id: {{ filesystem_id }}
+        attach_mode: {{ filesystem_attach_mode }}
+        mount_path: {{ filesystem_mount_path }}
       UserData: |
         runcmd:
           - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
@@ -130,6 +134,11 @@ setup_commands:
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
+    {%- if filesystem_id != '' %}
+    sudo mkdir {{ filesystem_mount_path }};
+    sudo mount -t virtiofs filesystem-skypilot {{ filesystem_mount_path }};
+    sudo chmod a+w {{ filesystem_mount_path }};
+    {% endif %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
