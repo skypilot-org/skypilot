@@ -706,7 +706,7 @@ def get_gpu_direct_usable_vpcs_and_subnets(
             vpc_name = f'{vpc_prefix}-{cluster_prefix}-mgmt-net'
         else:
             vpc_name = f'{vpc_prefix}-{cluster_prefix}-data-net-{i}'
-        subnet_name = f'{vpc_name}-{region}-sub'
+        subnet_name = f'{vpc_name}-sub'
         subnet_cidr_range = f'{cidr_prefix}.{i}.0/24'
         # Check if VPC exists
         vpc_list = _list_vpcnets(project_id, compute, filter=f'name={vpc_name}')
@@ -795,8 +795,8 @@ def _configure_subnet(region: str, cluster_name: str,
             )
             config.provider_config['enable_gvnic'] = True
             enable_gvnic = True
-        if 'machineType' not in node_config or not node_config[
-                'machineType'] in constants.GPU_DIRECT_TCPX_INSTANCE_TYPES:
+        if 'machineType' not in node_config or node_config[
+                'machineType'] not in constants.GPU_DIRECT_TCPX_INSTANCE_TYPES:
             raise ValueError(
                 'Enable GPU Direct requires machineType to be one of '
                 f'{constants.GPU_DIRECT_TCPX_INSTANCE_TYPES}')

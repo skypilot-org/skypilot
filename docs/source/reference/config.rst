@@ -106,6 +106,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`remote_identity <config-yaml-gcp-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
     :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
+    :ref:`placement_policy <config-yaml-gcp-placement-policy>`: compact
 
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
@@ -862,6 +863,17 @@ Default: ``false``.
 Enable GPUDirect-TCPX, a high-performance networking technology that establishes direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` instances launched by SkyPilot. When enabled, this configuration automatically activates the gVNIC network interface for optimal performance.
 
 Default: ``false``.
+
+.. _config-yaml-gcp-placement-policy:
+
+``gcp.placement_policy``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Placement policy for GCP instances. This setting controls how instances are physically placed within a data center to optimize performance and resource utilization.
+
+When `gcp.enable_gpu_direct` is enabled, the placement policy is automatically set to `compact` to ensure optimal communication performance. If `gcp.enable_gpu_direct` is disabled, no default placement policy is applied.
+
+Refer to the `GCP documentation <https://cloud.google.com/compute/docs/instances/placement-policies-overview>`_ for more information on placement policies.
 
 .. _config-yaml-azure:
 

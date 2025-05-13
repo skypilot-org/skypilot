@@ -587,9 +587,17 @@ class GCP(clouds.Cloud):
 
         # Add gVNIC from config
         resources_vars['enable_gvnic'] = skypilot_config.get_nested(
-            ('gcp', 'enable_gvnic'), False)
+            ('gcp', 'enable_gvnic'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+        placement_policy = skypilot_config.get_nested(
+            ('gcp', 'placement_policy'),
+            None,
+            override_configs=resources.cluster_config_overrides)
         enable_gpu_direct = skypilot_config.get_nested(
-            ('gcp', 'enable_gpu_direct'), False)
+            ('gcp', 'enable_gpu_direct'),
+            False,
+            override_configs=resources.cluster_config_overrides)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
         resources_vars['user_data'] = None
         if enable_gpu_direct:
@@ -599,8 +607,9 @@ class GCP(clouds.Cloud):
             resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
             resources_vars[
                 'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
-        resources_vars['placement_policy'] = skypilot_config.get_nested(
-            ('gcp', 'placement_policy'), None)
+            if placement_policy is None:
+                placement_policy = constants.COMPACT_GROUP_PLACEMENT_POLICY
+        resources_vars['placement_policy'] = placement_policy
 
         return resources_vars
 
