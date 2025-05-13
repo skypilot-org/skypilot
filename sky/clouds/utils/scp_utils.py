@@ -233,7 +233,7 @@ class SCPClient:
             'securityGroupName': sg_name,
             'serviceZoneId': zone_id,
             'vpcId': vpc_id,
-            'securityGroupDescription': 'skypilot'
+            'securityGroupDescription': 'sky security group'
         }
         return self._post(url, request_body)
 
@@ -271,7 +271,7 @@ class SCPClient:
                 'ruleDirection': direction,
                 'services': services,
                 target_address: ['0.0.0.0/0'],
-                'ruleDescription': 'skypilot'
+                'ruleDescription': 'sky security group rule'
             }
             return self._post(url, request_body)
 
@@ -319,7 +319,7 @@ class SCPClient:
                 'ruleAction': 'ALLOW',
                 'isRuleEnabled': True,
                 'ruleLocationType': 'FIRST',
-                'ruleDescription': 'skypilot'
+                'ruleDescription': 'sky firewall rule'
             }
             return self._post(url, request_body)
 
