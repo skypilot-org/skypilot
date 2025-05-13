@@ -41,6 +41,70 @@ HAS_TPU_PROVIDER_FIELD = '_has_tpus'
 # with ServiceAccounts.
 
 SKYPILOT_VPC_NAME = 'skypilot-vpc'
+SKYPILOT_GPU_DIRECT_VPC_NUM = 5
+SKYPILOT_GPU_DIRECT_VPC_CIDR_PREFIX = '10.129'
+GPU_DIRECT_TCPX_INSTANCE_TYPES = [
+    'a3-edgegpu-8g',
+    'a3-highgpu-8g',
+]
+# The prefix length of the cluster name.
+# To make sure the VPC and subnet names are within the GCP limits.
+CLUSTER_PREFIX_LENGTH = 10
+
+COMPACT_GROUP_PLACEMENT_POLICY = 'compact'
+COLLOCATED_COLLOCATION = 'COLLOCATED'
+GPU_DIRECT_TCPX_USER_DATA = """#!/bin/bash
+    set -e
+    set -x
+    # Install GPU Direct TCPX
+    cos-extensions install gpu -- --version=latest;
+    sudo mount --bind /var/lib/nvidia /var/lib/nvidia;
+    sudo mount -o remount,exec /var/lib/nvidia;
+    docker ps -a | grep -q receive-datapath-manager || \
+    docker run \
+    --detach \
+    --pull=always \
+    --name receive-datapath-manager \
+    --privileged \
+    --cap-add=NET_ADMIN --network=host \
+    --volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64 \
+    --device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia1:/dev/nvidia1 \
+    --device /dev/nvidia2:/dev/nvidia2 --device /dev/nvidia3:/dev/nvidia3 \
+    --device /dev/nvidia4:/dev/nvidia4 --device /dev/nvidia5:/dev/nvidia5 \
+    --device /dev/nvidia6:/dev/nvidia6 --device /dev/nvidia7:/dev/nvidia7 \
+    --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl \
+    --env LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
+    --volume /run/tcpx:/run/tcpx \
+    --entrypoint /tcpgpudmarxd/build/app/tcpgpudmarxd \
+    us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd \
+    --gpu_nic_preset a3vm --gpu_shmem_type fd --uds_path "/run/tcpx" --setup_param "--verbose 128 2 0";
+    sudo iptables -I INPUT -p tcp -m tcp -j ACCEPT;
+    docker run --rm -v /var/lib:/var/lib us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx install --install-nccl;
+    sudo mount --bind /var/lib/tcpx /var/lib/tcpx;
+    sudo mount -o remount,exec /var/lib/tcpx;
+    echo "GPU Direct TCPX installed"
+    """
+
+GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
+    '--cap-add=IPC_LOCK',
+    '--userns=host',
+    '--volume /run/tcpx:/run/tcpx',
+    '--volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64',
+    '--volume /var/lib/tcpx/lib64:/usr/local/tcpx/lib64',
+    '--volume /var/lib/nvidia/bin:/usr/local/nvidia/bin',
+    '--shm-size=1g --ulimit memlock=-1 --ulimit stack=67108864',
+    '--device /dev/nvidia0:/dev/nvidia0',
+    '--device /dev/nvidia1:/dev/nvidia1',
+    '--device /dev/nvidia2:/dev/nvidia2',
+    '--device /dev/nvidia3:/dev/nvidia3',
+    '--device /dev/nvidia4:/dev/nvidia4',
+    '--device /dev/nvidia5:/dev/nvidia5',
+    '--device /dev/nvidia6:/dev/nvidia6',
+    '--device /dev/nvidia7:/dev/nvidia7',
+    '--device /dev/nvidia-uvm:/dev/nvidia-uvm',
+    '--device /dev/nvidiactl:/dev/nvidiactl',
+    '--env LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/tcpx/lib64',
+]
 
 # Below parameters are from the default VPC on GCP.
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc

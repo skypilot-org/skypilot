@@ -343,9 +343,12 @@ class DockerInitializer:
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         port = constants.DEFAULT_DOCKER_PORT
+        # In case the port is already configured in the sshd_config file
+        # in some images, we delete it first and then append the new one.
         # pylint: disable=anomalous-backslash-in-string
         self._run(
-            f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
+            'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
+            f'sudo echo "Port {port}" >> /etc/ssh/sshd_config;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
