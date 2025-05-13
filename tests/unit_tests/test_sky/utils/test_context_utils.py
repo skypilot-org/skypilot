@@ -17,3 +17,6 @@ def test_cancellation_guard_perserves_typecheck():
         'arg2': str,
         'return': Optional[Union[int, str]]
     }
+
+    # Verify that the decorated function can be called with the same signature
+    assert original_function(1, 'test') is None

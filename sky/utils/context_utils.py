@@ -6,7 +6,8 @@ import multiprocessing
 import os
 import subprocess
 import sys
-from typing import Any, Callable, IO, Optional, Tuple
+import typing
+from typing import Any, Callable, IO, Optional, Tuple, TypeVar
 
 from sky import sky_logging
 from sky.utils import context
@@ -15,8 +16,8 @@ from sky.utils import subprocess_utils
 StreamHandler = Callable[[IO[Any], IO[Any]], str]
 
 
-# TODO(aylei): call hijack_sys_attrs() proactivly in module init once we have
-# context widely adopted.
+# TODO(aylei): call hijack_sys_attrs() proactivly in module init at server-side
+# once we have context widely adopted.
 def hijack_sys_attrs():
     """hijack system attributes to be context aware
 
@@ -138,6 +139,8 @@ def wait_process(ctx: context.Context,
 
 
 F = TypeVar('F', bound=Callable[..., Any])
+
+
 def cancellation_guard(func: F) -> F:
     """Decorator to make a synchronous function cancellable via context.
 
@@ -166,4 +169,4 @@ def cancellation_guard(func: F) -> F:
                 f'Function {func.__name__} cancelled before execution')
         return func(*args, **kwargs)
 
-    return wrapper
+    return typing.cast(F, wrapper)
