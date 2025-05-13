@@ -1125,12 +1125,14 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             if re.search(mig_utils.IT_RESOURCE_NOT_FOUND_PATTERN,
                          str(e)) is None:
                 raise
-            logger.warning(
+            logger.debug(
                 f'Instance template {instance_template_name!r} does not exist. '
                 'Skip deletion.')
 
     @classmethod
-    def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
+    def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> bool:
+        """Returns whether the MIG is deleted successfully."""
+        mig_exists_and_deleted = True
         mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
         # Get all resize request of the MIG and cancel them.
         mig_utils.cancel_all_resize_request_for_mig(project_id, zone, mig_name)
@@ -1144,8 +1146,9 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             if re.search(mig_utils.MIG_RESOURCE_NOT_FOUND_PATTERN,
                          str(e)) is None:
                 raise
-            logger.warning(f'MIG {mig_name!r} does not exist. Skip '
-                           'deletion.')
+            logger.debug(f'MIG {mig_name!r} does not exist. Skip '
+                         'deletion.')
+            mig_exists_and_deleted = False
 
         # In the autostop case, the following deletion of instance template
         # will not be executed as the instance that runs the deletion will be
@@ -1156,6 +1159,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         cls._delete_instance_template(
             project_id, zone,
             mig_utils.get_instance_template_name(cluster_name))
+        return mig_exists_and_deleted
 
     @classmethod
     def _add_labels_and_find_head(

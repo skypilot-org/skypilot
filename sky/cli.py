@@ -91,6 +91,8 @@ from sky.utils.cli_utils import status_utils
 if typing.TYPE_CHECKING:
     import types
 
+    import prettytable
+
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
 
@@ -3371,12 +3373,8 @@ def show_gpus(
     * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
       on a single node.
 
-    * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
-      Kubernetes cluster.
-
-    * ``TOTAL_FREE_GPUS`` (Kubernetes only): Number of currently free GPUs
-      in the Kubernetes cluster. This is fetched in real-time and may change
-      when other users are using the cluster.
+    * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
+      in the Kubernetes cluster.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -3415,15 +3413,16 @@ def show_gpus(
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
     def _get_kubernetes_realtime_gpu_tables(
-            context: Optional[str] = None,
-            name_filter: Optional[str] = None,
-            quantity_filter: Optional[int] = None):
+        context: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
+               Optional['prettytable.PrettyTable'], List[Tuple[
+                   str, 'models.KubernetesNodesInfo']]]:
         if quantity_filter:
             qty_header = 'QTY_FILTER'
-            free_header = 'FILTERED_FREE_GPUS'
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
-            free_header = 'TOTAL_FREE_GPUS'
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_kubernetes_gpu_availability(
@@ -3449,41 +3448,19 @@ def show_gpus(
         realtime_gpu_infos = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
+        all_nodes_info = []
 
-        # TODO(kyuds): remove backwards compatibility code (else branch)
-        # when API version is bumped
         if realtime_gpu_availability_lists:
-            # can't check for isinstance tuple as the tuple is converted to list
-            if len(realtime_gpu_availability_lists[0]) == 2:
-                for (ctx, availability_list) in realtime_gpu_availability_lists:
-                    realtime_gpu_table = log_utils.create_table(
-                        ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-                    for realtime_gpu_availability in sorted(availability_list):
-                        gpu_availability = models.RealtimeGpuAvailability(
-                            *realtime_gpu_availability)
-                        available_qty = (gpu_availability.available
-                                         if gpu_availability.available != -1
-                                         else no_permissions_str)
-                        realtime_gpu_table.add_row([
-                            gpu_availability.gpu,
-                            _list_to_str(gpu_availability.counts),
-                            gpu_availability.capacity,
-                            available_qty,
-                        ])
-                        gpu = gpu_availability.gpu
-                        capacity = gpu_availability.capacity
-                        # we want total, so skip permission denied.
-                        available = max(gpu_availability.available, 0)
-                        if capacity > 0:
-                            total_gpu_info[gpu][0] += capacity
-                            total_gpu_info[gpu][1] += available
-                    realtime_gpu_infos.append((ctx, realtime_gpu_table))
-            else:
-                # can remove this with api server version bump.
-                # 2025.05.03
-                availability_list = realtime_gpu_availability_lists
+            if len(realtime_gpu_availability_lists[0]) != 2:
+                # TODO(kyuds): for backwards compatibility, as we add new
+                # context to the API server response in #5362. Remove this after
+                # 0.10.0.
+                realtime_gpu_availability_lists = [
+                    (context, realtime_gpu_availability_lists)
+                ]
+            for (ctx, availability_list) in realtime_gpu_availability_lists:
                 realtime_gpu_table = log_utils.create_table(
-                    ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+                    ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
                     gpu_availability = models.RealtimeGpuAvailability(
                         *realtime_gpu_availability)
@@ -3493,48 +3470,99 @@ def show_gpus(
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
-                        gpu_availability.capacity,
-                        available_qty,
+                        f'{available_qty} of {gpu_availability.capacity} free',
                     ])
-                realtime_gpu_infos.append((context, realtime_gpu_table))
+                    gpu = gpu_availability.gpu
+                    capacity = gpu_availability.capacity
+                    # we want total, so skip permission denied.
+                    available = max(gpu_availability.available, 0)
+                    if capacity > 0:
+                        total_gpu_info[gpu][0] += capacity
+                        total_gpu_info[gpu][1] += available
+                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                # Collect node info for this context
+                nodes_info = sdk.stream_and_get(
+                    sdk.kubernetes_node_info(context=ctx))
+                all_nodes_info.append((ctx, nodes_info))
 
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs
         if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
-                ['GPU', 'TOTAL_GPUS', free_header])
+                ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row([gpu, stats[0], stats[1]])
+                total_realtime_gpu_table.add_row(
+                    [gpu, f'{stats[1]} of {stats[0]} free'])
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table
+        return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
-    def _format_kubernetes_node_info(context: Optional[str]):
+    def _format_kubernetes_node_info_combined(
+            contexts_info: List[Tuple[str,
+                                      'models.KubernetesNodesInfo']]) -> str:
         node_table = log_utils.create_table(
-            ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+            ['CONTEXT', 'NODE', 'GPU', 'UTILIZATION'])
 
-        nodes_info = sdk.stream_and_get(
-            sdk.kubernetes_node_info(context=context))
         no_permissions_str = '<no permissions>'
-        for node_name, node_info in nodes_info.node_info_dict.items():
-            available = node_info.free[
-                'accelerators_available'] if node_info.free[
-                    'accelerators_available'] != -1 else no_permissions_str
-            total = node_info.total['accelerator_count']
-            if total > 0:
+        hints = []
+
+        for context, nodes_info in contexts_info:
+            context_name = context if context else 'default'
+            if nodes_info.hint:
+                hints.append(f'{context_name}: {nodes_info.hint}')
+
+            for node_name, node_info in nodes_info.node_info_dict.items():
+                available = node_info.free[
+                    'accelerators_available'] if node_info.free[
+                        'accelerators_available'] != -1 else no_permissions_str
+                acc_type = node_info.accelerator_type
+                if acc_type is None:
+                    acc_type = '-'
                 node_table.add_row([
-                    node_name, node_info.accelerator_type,
-                    node_info.total['accelerator_count'], available
+                    context_name, node_name, acc_type,
+                    f'{available} of {node_info.total["accelerator_count"]} '
+                    'free'
                 ])
-        k8s_per_node_acc_message = (
-            'Kubernetes per node accelerator availability ')
-        if nodes_info.hint:
-            k8s_per_node_acc_message += nodes_info.hint
+
+        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        if hints:
+            k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
+
         return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                 f'{k8s_per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
+
+    def _format_kubernetes_realtime_gpu(
+            total_table: 'prettytable.PrettyTable',
+            k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
+            all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            show_node_info: bool) -> Generator[str, None, None]:
+        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+               'Kubernetes GPUs'
+               f'{colorama.Style.RESET_ALL}')
+        # print total table
+        if total_table is not None:
+            yield '\n'
+            yield from total_table.get_string()
+
+        # print individual infos.
+        for (ctx, k8s_realtime_table) in k8s_realtime_infos:
+            yield '\n'
+            # Print context header separately
+            if ctx:
+                context_str = f'Context: {ctx}'
+            else:
+                context_str = 'Default Context'
+            yield (
+                f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
+            )
+            yield from k8s_realtime_table.get_string()
+
+        if show_node_info:
+            yield '\n'
+            yield _format_kubernetes_node_info_combined(all_nodes_info)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3568,7 +3596,7 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
+                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3577,27 +3605,12 @@ def show_gpus(
                 else:
                     print_section_titles = True
 
-                    # print total table
-                    if total_table is not None:
-                        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                               'Total Kubernetes GPUs'
-                               f'{colorama.Style.RESET_ALL}\n')
-                        yield from total_table.get_string()
-                        yield '\n\n'
+                    yield from _format_kubernetes_realtime_gpu(
+                        total_table,
+                        k8s_realtime_infos,
+                        all_nodes_info,
+                        show_node_info=True)
 
-                    # print individual infos.
-                    for (idx,
-                         (ctx,
-                          k8s_realtime_table)) in enumerate(k8s_realtime_infos):
-                        context_str = f'(Context: {ctx})' if ctx else ''
-                        yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                               f'Kubernetes GPUs {context_str}'
-                               f'{colorama.Style.RESET_ALL}\n')
-                        yield from k8s_realtime_table.get_string()
-                        yield '\n\n'
-                        yield _format_kubernetes_node_info(ctx)
-                        if idx != len(k8s_realtime_infos) - 1:
-                            yield '\n\n'
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3688,31 +3701,18 @@ def show_gpus(
             print_section_titles = True
             # TODO(romilb): Show filtered per node GPU availability here as well
             try:
-                k8s_realtime_infos, total_table = _get_kubernetes_realtime_gpu_tables(  # pylint: disable=line-too-long
-                    context=region,
-                    name_filter=name,
-                    quantity_filter=quantity)
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region, name_filter=name, quantity_filter=quantity)
 
-                # print total table
-                if total_table is not None:
-                    yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                           'Total Kubernetes GPUs'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from total_table.get_string()
-                    yield '\n\n'
-
-                # print individual tables
-                for (ctx, k8s_realtime_table) in k8s_realtime_infos:
-                    context_str = f'(Context: {ctx})' if ctx else ''
-                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs {context_str}'
-                           f'{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_realtime_table.get_string()
-                    yield '\n\n'
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
-                yield str(e)
+                yield common_utils.format_exception(e, use_bracket=True)
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)

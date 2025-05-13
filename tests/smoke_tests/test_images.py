@@ -325,11 +325,15 @@ def test_clone_disk_gcp():
 def test_gcp_mig():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
+    zone = 'us-central1-a'
     test = smoke_tests_utils.Test(
         'gcp_mig',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
+            # Launch a CPU instance asynchronously.
+            f'sky launch -y -c {name}-cpu {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud gcp --zone {zone} --async tests/test_yamls/minimal.yaml',
+            # Launch a GPU instance.
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus l4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
@@ -342,7 +346,7 @@ def test_gcp_mig():
                 )),
             f'sky autostop -i 0 --down -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
-                cluster_name=name, timeout=120),
+                cluster_name=name, timeout=150),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=
@@ -353,15 +357,28 @@ def test_gcp_mig():
             f'sky launch -y -c {name} --gpus L4 --num-nodes 2 --region {region} nvidia-smi',
             f'sky logs {name} 1 | grep "L4"',
             f'sky down -y {name}',
+            f'sky status | grep {name}-cpu | grep UP',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=
                 (f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true'
                 )),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(
+                    f'gcloud compute instances list --filter='
+                    f'"(labels.ray-cluster-name:{name}-cpu)" '
+                    f'--zones={zone} --format="value(name)" | wc -l | grep 1')),
+            f'sky down -y {name}-cpu',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{name}-cpu)" '
+                     f'--zones={zone} --format="value(name)" | wc -l | grep 0'))
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
+            skypilot_config.ENV_VAR_PROJECT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
             constants.SKY_API_SERVER_URL_ENV_VAR:
                 sky.server.common.get_server_url()
         })
