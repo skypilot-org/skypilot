@@ -116,9 +116,7 @@ _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Use COS image with GPU Direct support.
 # Need to contact GCP support to build our own image for GPUDirect-TCPX support.
 # Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
-_DEFAULT_GPU_DIRECT_IMAGE_ID = 'projects/cos-cloud/global/images/cos-109-17800-519-1'
-# TODO(hailong): Use the image with GPUDirect-TCPX support after it's updated in the catalog.
-# _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-cos-109'
+_DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 
 
 def _run_output(cmd):
@@ -495,6 +493,11 @@ class GCP(clouds.Cloud):
             'gcp_project_id': self.get_project_id(dryrun),
             **GCP._get_disk_specs(r.instance_type, _failover_disk_tier()),
         }
+        enable_gpu_direct = skypilot_config.get_nested(
+            ('gcp', 'enable_gpu_direct'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+        resources_vars['enable_gpu_direct'] = enable_gpu_direct
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
@@ -527,14 +530,17 @@ class GCP(clouds.Cloud):
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if acc == 'K80':
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = _DEFAULT_GPU_K80_IMAGE_ID
+                if enable_gpu_direct:
+                    image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
-                    # CUDA driver version 535.86.10, CUDA Library 12.2
-                    image_id = _DEFAULT_GPU_IMAGE_ID
+                    if acc == 'K80':
+                        # Though the image is called cu113, it actually has later
+                        # versions of CUDA as noted below.
+                        # CUDA driver version 470.57.02, CUDA Library 11.4
+                        image_id = _DEFAULT_GPU_K80_IMAGE_ID
+                    else:
+                        # CUDA driver version 535.86.10, CUDA Library 12.2
+                        image_id = _DEFAULT_GPU_IMAGE_ID
 
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
@@ -594,16 +600,8 @@ class GCP(clouds.Cloud):
             ('gcp', 'placement_policy'),
             None,
             override_configs=resources.cluster_config_overrides)
-        enable_gpu_direct = skypilot_config.get_nested(
-            ('gcp', 'enable_gpu_direct'),
-            False,
-            override_configs=resources.cluster_config_overrides)
-        resources_vars['enable_gpu_direct'] = enable_gpu_direct
         resources_vars['user_data'] = None
         if enable_gpu_direct:
-            # Use COS image with GPU Direct support.
-            resources_vars['image_id'] = _DEFAULT_GPU_DIRECT_IMAGE_ID
-            resources_vars['machine_image'] = None
             resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
             resources_vars[
                 'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
