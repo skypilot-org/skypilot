@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
@@ -21,6 +21,7 @@ export function GPUs() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const refreshDataRef = React.useRef(null);
   const isMobile = useMobile();
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
 
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
@@ -58,6 +59,7 @@ export function GPUs() {
     } finally {
       setLoading(false);
       if (isInitialLoad) setIsInitialLoad(false);
+      setInitialDataLoaded(true);
     }
   }, [isInitialLoad]);
 
@@ -87,6 +89,7 @@ export function GPUs() {
   const handleRefresh = () => {
     if (selectedTab === 'kubernetes') {
       if (refreshDataRef.current) {
+        setIsInitialLoad(false);
         refreshDataRef.current();
       }
     } else if (selectedTab === 'cloud') {
@@ -110,7 +113,7 @@ export function GPUs() {
     0
   );
 
-  // Group perContextGPUs by context
+  // Group perContextGPUs by context (already flattened from the backend)
   const groupedPerContextGPUs = React.useMemo(() => {
     if (!perContextGPUs) return {};
     return perContextGPUs.reduce((acc, gpu) => {
@@ -151,182 +154,139 @@ export function GPUs() {
     }
   }, [selectedTab, cloudInitialLoad]);
 
-  return (
-    <Layout highlighted="gpus">
-      <div className="flex items-center mb-4 h-5 w-full">
-        <div className="flex space-x-6">
-          <button
-            className={`transition-colors duration-150 border-b-2 ${selectedTab === 'kubernetes' ? 'border-transparent text-blue-600' : 'border-transparent text-gray-500 hover:text-blue-600'}`}
-            onClick={() => setSelectedTab('kubernetes')}
-          >
-            Kubernetes GPUs
-          </button>
-          <button
-            className={`transition-colors duration-150 border-b-2 ${selectedTab === 'cloud' ? 'border-transparent text-blue-600' : 'border-transparent text-gray-500 hover:text-blue-600'}`}
-            onClick={() => setSelectedTab('cloud')}
-          >
-            Cloud GPUs
-          </button>
+  const renderKubernetesTab = () => {
+    if (isInitialLoad && loading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64">
+          <CircularProgress size={32} className="mb-4" />
+          <span className="text-gray-500 text-lg">
+            Loading Kubernetes GPUs...
+          </span>
         </div>
-        <div className="flex items-center space-x-2 ml-auto">
-          {(loading || cloudLoading) && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={
-              (selectedTab === 'kubernetes' && loading) ||
-              (selectedTab === 'cloud' && cloudLoading)
-            }
-            className="text-sky-blue hover:text-sky-blue-bright"
-            title="Refresh"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </Button>
-        </div>
-      </div>
+      );
+    }
 
-      {/* Tab Content */}
-      {selectedTab === 'kubernetes' ? (
-        <>
-          {/* Initial loading spinner */}
-          {isInitialLoad ? (
-            <div className="flex flex-col items-center justify-center h-64">
-              <CircularProgress size={32} className="mb-4" />
-              <span className="text-gray-500 text-lg">Loading...</span>
+    if (initialDataLoaded && allGPUs.length > 0) {
+      return (
+        <div className="mb-4">
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+            <div className="flex flex-col space-y-1.5 p-6 pb-0">
+              <h3 className="text-lg font-semibold">GPUs on Kubernetes</h3>
             </div>
-          ) : (
-            <>
-              {/* Summary Section */}
-              {allGPUs.length > 0 ? (
-                <Card className="mb-4 p-4">
-                  <div>
-                    <h3 className="text-lg font-semibold mb-3">
-                      GPUs on Kubernetes
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                      <Card className="p-4">
-                        <div>
-                          <p className="text-sm text-gray-500">
-                            Total GPU Types
-                          </p>
-                          <p className="text-2xl font-bold">{totalGpuTypes}</p>
-                        </div>
-                      </Card>
-                      <Card className="p-4">
-                        <div>
-                          <p className="text-sm text-gray-500">
-                            Total GPUs (All Types)
-                          </p>
-                          <p className="text-2xl font-bold">{grandTotalGPUs}</p>
-                        </div>
-                      </Card>
-                      <Card className="p-4">
-                        <div>
-                          <p className="text-sm text-gray-500">
-                            Total Free GPUs (All Types)
-                          </p>
-                          <p className="text-2xl font-bold">
-                            {grandTotalFreeGPUs}
-                          </p>
-                        </div>
-                      </Card>
-                    </div>
-
-                    <h4 className="text-md font-semibold mb-3">GPU Types</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                      {allGPUs.map((gpu) => {
-                        const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                        const freePercentage =
-                          gpu.gpu_total > 0
-                            ? (gpu.gpu_free / gpu.gpu_total) * 100
-                            : 0;
-                        const usedPercentage =
-                          gpu.gpu_total > 0
-                            ? (usedGpus / gpu.gpu_total) * 100
-                            : 0;
-                        return (
-                          <div
-                            key={gpu.gpu_name}
-                            className="p-2 border rounded w-full"
-                          >
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="font-medium">
-                                {gpu.gpu_name}
-                              </span>
-                              <span className="text-sm text-gray-600">
-                                {gpu.gpu_free} Free / {gpu.gpu_total} Total
-                              </span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
-                              <div
-                                style={{ width: `${usedPercentage}%` }}
-                                className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
-                                title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
-                              >
-                                {usedGpus > 0 && usedPercentage > 10
-                                  ? `${usedGpus} Used`
-                                  : ''}
-                              </div>
-                              <div
-                                style={{ width: `${freePercentage}%` }}
-                                className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
-                                title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
-                              >
-                                {gpu.gpu_free > 0 && freePercentage > 10
-                                  ? `${gpu.gpu_free} Free`
-                                  : ''}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+            <div className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+                    <div className="p-4">
+                      <p className="text-sm text-gray-500">Total GPU Types</p>
+                      <p className="text-2xl font-bold">{totalGpuTypes}</p>
                     </div>
                   </div>
-                </Card>
-              ) : (
-                <Card className="mb-4 p-4">
-                  <div>
-                    <h3 className="text-lg font-semibold mb-3">
-                      GPUs on Kubernetes
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                      <p className="text-sm text-gray-500">No GPUs found</p>
+                </div>
+                <div>
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+                    <div className="p-4">
+                      <p className="text-sm text-gray-500">Total GPUs (All Types)</p>
+                      <p className="text-2xl font-bold">{grandTotalGPUs}</p>
                     </div>
                   </div>
-                </Card>
-              )}
+                </div>
+                <div>
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+                    <div className="p-4">
+                      <p className="text-sm text-gray-500">Total Free GPUs (All Types)</p>
+                      <p className="text-2xl font-bold">{grandTotalFreeGPUs}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-              {/* Per-Context GPU Summary Section */}
+              <h4 className="text-md font-semibold my-3">GPU Types</h4>
+              <div
+                className={`
+                  grid gap-4
+                  ${allGPUs.length === 1 ? 'grid-cols-1' : 
+                    allGPUs.length === 2 ? 'grid-cols-2' : 
+                    'md:grid-cols-2 xl:grid-cols-3'}
+                `}
+              >
+                {allGPUs.map((gpu) => {
+                  const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                  const freePercentage =
+                    gpu.gpu_total > 0
+                      ? (gpu.gpu_free / gpu.gpu_total) * 100
+                      : 0;
+                  const usedPercentage =
+                    gpu.gpu_total > 0
+                      ? (usedGpus / gpu.gpu_total) * 100
+                      : 0;
+                  return (
+                    <div
+                      key={gpu.gpu_name}
+                      className="p-2 border rounded w-full"
+                    >
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-medium">
+                          {gpu.gpu_name}
+                        </span>
+                        <span className="text-sm text-gray-600">
+                          {gpu.gpu_free} free / {gpu.gpu_total} total
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden">
+                        <div
+                          style={{ width: `${usedPercentage}%` }}
+                          className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
+                          title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
+                        >
+                          {usedGpus > 0 && usedPercentage > 10
+                            ? `${usedGpus} Used`
+                            : ''}
+                        </div>
+                        <div
+                          style={{ width: `${freePercentage}%` }}
+                          className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
+                          title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
+                        >
+                          {gpu.gpu_free > 0 && freePercentage > 10
+                            ? `${gpu.gpu_free} Free`
+                            : ''}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
               {Object.keys(groupedPerContextGPUs).length > 0 && (
-                <Card className="mb-4 p-4">
-                  <div>
-                    <h3 className="text-lg font-semibold mb-3">
-                      Per-Context GPUs
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {Object.entries(groupedPerContextGPUs).map(
-                        ([context, gpusInContext]) => (
-                          <Card
-                            key={context}
-                            className="p-4 border flex flex-col"
-                          >
-                            <div>
-                              <h4 className="text-md font-normal mb-3">
+                <div className="mt-6 pt-6 border-t">
+                  <h3 className="text-lg font-semibold mb-3">
+                    Per-Context GPU Detail
+                  </h3>
+                  <div
+                    className={`
+                      grid gap-6
+                      ${Object.keys(groupedPerContextGPUs).length === 1 ? 'grid-cols-1' : 'md:grid-cols-2'}
+                    `}
+                  >
+                    {Object.entries(groupedPerContextGPUs).map(
+                      ([context, gpusInContext]) => (
+                        <div key={context}>
+                          <div className="rounded-lg border bg-card text-card-foreground shadow-sm border flex flex-col">
+                            <div className="flex flex-col space-y-1.5 p-4 pb-2">
+                              <h3 className="text-md font-normal">
                                 Context: {context}
-                              </h4>
+                              </h3>
+                            </div>
+                            <div className="p-4 pt-2">
                               <div className="space-y-3">
                                 {gpusInContext.map((gpu) => {
-                                  const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                                  const usedGpus =
+                                    gpu.gpu_total - gpu.gpu_free;
                                   const freePercentage =
                                     gpu.gpu_total > 0
-                                      ? (gpu.gpu_free / gpu.gpu_total) * 100
+                                      ? (gpu.gpu_free / gpu.gpu_total) *
+                                        100
                                       : 0;
                                   const usedPercentage =
                                     gpu.gpu_total > 0
@@ -344,13 +304,13 @@ export function GPUs() {
                                           </span>
                                           <span className="text-xs text-gray-500 ml-2">
                                             (Requestable:{' '}
-                                            {gpu.gpu_requestable_qty_per_node} /
-                                            Node)
+                                            {gpu.gpu_requestable_qty_per_node}{' '}
+                                            / Node)
                                           </span>
                                         </div>
                                         <span className="text-sm text-gray-600">
-                                          {gpu.gpu_free} Free / {gpu.gpu_total}{' '}
-                                          Total
+                                          {gpu.gpu_free} free /{' '}
+                                          {gpu.gpu_total} total
                                         </span>
                                       </div>
                                       <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
@@ -361,8 +321,9 @@ export function GPUs() {
                                           className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
                                           title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
                                         >
-                                          {usedGpus > 0 && usedPercentage > 10
-                                            ? `${usedGpus}`
+                                          {usedGpus > 0 &&
+                                            usedPercentage > 10
+                                            ? `${usedGpus} Used`
                                             : ''}
                                         </div>
                                         <div
@@ -373,8 +334,8 @@ export function GPUs() {
                                           title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                                         >
                                           {gpu.gpu_free > 0 &&
-                                          freePercentage > 10
-                                            ? `${gpu.gpu_free}`
+                                            freePercentage > 10
+                                            ? `${gpu.gpu_free} Free`
                                             : ''}
                                         </div>
                                       </div>
@@ -383,20 +344,16 @@ export function GPUs() {
                                 })}
                               </div>
 
-                              {/* Nodes Table within Context Card */}
                               {groupedPerNodeGPUs[context] &&
                                 groupedPerNodeGPUs[context].length > 0 && (
                                   <div className="mt-4 pt-3 border-t">
-                                    {/* <h5 className="text-sm font-semibold mb-2 text-gray-600">
-                                      Nodes in {context}:
-                                    </h5> */}
                                     <div className="max-h-52 overflow-y-auto">
                                       <div className="overflow-x-auto">
                                         <table className="min-w-full text-sm border-b border-gray-200">
                                           <thead className="bg-gray-100 sticky top-0 z-10">
                                             <tr>
                                               <th className="p-2 text-left font-medium text-gray-600">
-                                                Node Name
+                                                Node
                                               </th>
                                               <th className="p-2 text-left font-medium text-gray-600">
                                                 GPU
@@ -431,62 +388,141 @@ export function GPUs() {
                                   </div>
                                 )}
                             </div>
-                          </Card>
-                        )
-                      )}
-                    </div>
+                          </div>
+                        </div>
+                      )
+                    )}
                   </div>
-                </Card>
+                </div>
               )}
-            </>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (initialDataLoaded && allGPUs.length === 0) {
+      return (
+        <div className="mb-4">
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+            <div className="p-4">
+              <p className="text-sm text-gray-500">
+                No Kubernetes GPUs found or Kubernetes is not configured.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderCloudTab = () => {
+    if (cloudLoading && cloudInitialLoad) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64">
+          <CircularProgress size={32} className="mb-4" />
+          <span className="text-gray-500 text-lg">
+            Loading Cloud GPUs...
+          </span>
+        </div>
+      );
+    }
+
+    if ((cloudData.commonGPUs && cloudData.commonGPUs.length > 0) ||
+        (cloudData.tpus && cloudData.tpus.length > 0) ||
+        (cloudData.otherGPUs && cloudData.otherGPUs.length > 0)) {
+      return (
+        <>
+          {cloudData.commonGPUs && cloudData.commonGPUs.length > 0 && (
+            <div className="mb-4">
+              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
+                <CloudGpuTable data={cloudData.commonGPUs} title="Common GPUs" />
+              </div>
+            </div>
+          )}
+          {cloudData.tpus && cloudData.tpus.length > 0 && (
+            <div className="mb-4">
+              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
+                <CloudGpuTable data={cloudData.tpus} title="TPUs" />
+              </div>
+            </div>
+          )}
+          {cloudData.otherGPUs && cloudData.otherGPUs.length > 0 && (
+            <div className="mb-4">
+              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
+                <CloudGpuTable data={cloudData.otherGPUs} title="Other GPUs" />
+              </div>
+            </div>
           )}
         </>
-      ) : (
-        // Cloud GPUs Tab
-        <div>
-          {cloudLoading ? (
-            <div className="flex flex-col items-center justify-center h-64">
-              <CircularProgress size={32} className="mb-4" />
-              <span className="text-gray-500 text-lg">
-                Loading Cloud GPUs...
-              </span>
-            </div>
-          ) : (
-            <>
-              {/* Common GPUs Card */}
-              {selectedTab === 'cloud' && !cloudLoading && (
-                <Card className="mb-4 p-4">
-                  <div>
-                    <CloudGpuTable
-                      data={cloudData.commonGPUs}
-                      title="Common GPUs"
-                    />
-                  </div>
-                </Card>
-              )}
-              {/* TPUs Card */}
-              {selectedTab === 'cloud' && !cloudLoading && (
-                <Card className="mb-4 p-4">
-                  <div>
-                    <CloudGpuTable data={cloudData.tpus} title="TPUs" />
-                  </div>
-                </Card>
-              )}
-              {/* Other GPUs Card */}
-              {selectedTab === 'cloud' && !cloudLoading && (
-                <Card className="mb-4 p-4">
-                  <div>
-                    <CloudGpuTable
-                      data={cloudData.otherGPUs}
-                      title="Other GPUs"
-                    />
-                  </div>
-                </Card>
-              )}
-            </>
-          )}
+      );
+    }
+
+    if (!cloudLoading && !cloudInitialLoad) {
+      return (
+        <div className="mb-4">
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
+            <p className="text-sm text-gray-500">
+              No Cloud GPUs found or cloud providers are not configured.
+            </p>
+          </div>
         </div>
-      )}
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <Layout highlighted="gpus">
+      <div className="flex items-center mb-4 h-5 w-full">
+        <div className="flex space-x-6">
+          <button
+            className={`transition-colors duration-150 border-b-2 ${selectedTab === 'kubernetes' ? 'border-transparent text-blue-600' : 'border-transparent text-gray-500 hover:text-blue-600'}`}
+            onClick={() => setSelectedTab('kubernetes')}
+          >
+            Kubernetes GPUs
+          </button>
+          <button
+            className={`transition-colors duration-150 border-b-2 ${selectedTab === 'cloud' ? 'border-transparent text-blue-600' : 'border-transparent text-gray-500 hover:text-blue-600'}`}
+            onClick={() => setSelectedTab('cloud')}
+          >
+            Cloud GPUs
+          </button>
+        </div>
+        <div className="flex items-center space-x-2 ml-auto">
+          {(selectedTab === 'kubernetes' && loading && isInitialLoad) ||
+          (selectedTab === 'cloud' && cloudLoading) ? (
+            <div className="flex items-center mr-2">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+            </div>
+          ) : null}
+          {(selectedTab === 'kubernetes' && loading && !isInitialLoad) ||
+          (selectedTab === 'cloud' && cloudLoading && !cloudInitialLoad) ? (
+            <div className="flex items-center mr-2">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Refreshing...</span>
+            </div>
+          ) : null}
+          <button
+            className="text-sky-blue hover:text-sky-blue-bright inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium h-9 rounded-md px-3 hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+            onClick={handleRefresh}
+            disabled={(selectedTab === 'kubernetes' && loading) ||
+              (selectedTab === 'cloud' && cloudLoading)}
+            title="Refresh"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      {selectedTab === 'kubernetes' && renderKubernetesTab()}
+      {selectedTab === 'cloud' && renderCloudTab()}
     </Layout>
   );
 }
@@ -500,14 +536,16 @@ function CloudGpuTable({ data, title }) {
     return (
       <>
         <h3 className="text-lg font-semibold mb-3">{title}</h3>
-        <p className="text-sm text-gray-500">No GPUs found</p>
+        <p className="text-sm text-gray-500">
+          No GPUs found for this category.
+        </p>
       </>
     );
   }
 
   const totalPages = Math.ceil(data.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
+  const endIndex = Math.min(startIndex + pageSize, data.length);
   const paginatedData = data.slice(startIndex, endIndex);
 
   const goToPreviousPage = () => {
@@ -519,7 +557,7 @@ function CloudGpuTable({ data, title }) {
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
-    setCurrentPage(1);
+    setCurrentPage(1); // Reset to first page when page size changes
   };
 
   return (
@@ -537,7 +575,7 @@ function CloudGpuTable({ data, title }) {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedData.map((gpu, idx) => (
-              <tr key={gpu.gpu_name + idx}>
+              <tr key={`${gpu.gpu_name}-${idx}`}>
                 <td className="p-2 whitespace-nowrap text-gray-700">
                   {gpu.gpu_name}
                 </td>
@@ -550,7 +588,7 @@ function CloudGpuTable({ data, title }) {
         </table>
       </div>
       {/* Pagination controls */}
-      {data.length > 0 && (
+      {data.length > pageSize && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -584,8 +622,7 @@ function CloudGpuTable({ data, title }) {
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {startIndex + 1} – {endIndex} of {data.length}
             </div>
             <div className="flex items-center space-x-2">
               <button

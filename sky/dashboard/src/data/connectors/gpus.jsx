@@ -2,7 +2,6 @@ import {
   ENDPOINT,
   CLOUDS_LIST,
   COMMON_GPUS,
-  TPU_LIST,
 } from '@/data/connectors/constants';
 
 export async function getGPUs() {
@@ -99,12 +98,17 @@ async function getKubernetesGPUs() {
     const contextGPUs = await getKubernetesContextGPUs();
 
     const allGPUs = {};
-    const perContextGPUs = {};
+    const perContextGPUsData = {}; // Renamed to avoid confusion, this will be { context: [gpu1, gpu2] }
     const perNodeGPUs = {};
 
     for (const contextGPU of contextGPUs) {
       const context = contextGPU[0];
       const gpus = contextGPU[1];
+
+      if (!perContextGPUsData[context]) {
+        perContextGPUsData[context] = [];
+      }
+
       for (const gpu of gpus) {
         const gpuName = gpu[0];
         const gpuRequestableQtyPerNode = gpu[1].join(', ');
@@ -122,13 +126,14 @@ async function getKubernetesGPUs() {
           };
         }
 
-        perContextGPUs[context] = {
+        // Push each GPU type into the array for the context
+        perContextGPUsData[context].push({
           gpu_name: gpuName,
           gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
           gpu_total: gpuTotal,
           gpu_free: gpuFree,
           context: context,
-        };
+        });
       }
 
       // Get per node gpus
@@ -148,12 +153,15 @@ async function getKubernetesGPUs() {
       allGPUs: Object.values(allGPUs).sort((a, b) =>
         a.gpu_name.localeCompare(b.gpu_name)
       ),
-      // Sort by context first, and for the same context, sort by gpu_name
-      perContextGPUs: Object.values(perContextGPUs).sort(
-        (a, b) =>
-          a.context.localeCompare(b.context) ||
-          a.gpu_name.localeCompare(b.gpu_name)
-      ),
+      // Flatten perContextGPUsData for the expected output structure
+      // The component gpus.jsx will group it again using useMemo
+      perContextGPUs: Object.values(perContextGPUsData)
+        .flat()
+        .sort(
+          (a, b) =>
+            a.context.localeCompare(b.context) ||
+            a.gpu_name.localeCompare(b.gpu_name)
+        ),
       // Sort by context first, and for the same context, sort by node_name, and for the same node_name, sort by gpu_name
       perNodeGPUs: Object.values(perNodeGPUs).sort(
         (a, b) =>
