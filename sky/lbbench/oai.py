@@ -49,11 +49,14 @@ async def call_chat_completion_async(
     tic: Optional[float] = None,
     duration: Optional[float] = None,
     hash_key: Optional[str] = None,
+    program_id: Optional[str] = None,
 ) -> Union[utils.OAIChatHistory, Exception]:
     assert lock is not None
     typed_messages = typing.cast(List[ChatCompletionMessageParam], messages)
     output = ''
     metric = utils.Metric(uid=uid)
+    metric.hash_key = hash_key
+    metric.program_id = program_id
     exception: Optional[Exception] = None
     assert async_client is not None and model is not None
     try:

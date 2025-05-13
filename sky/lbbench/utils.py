@@ -52,6 +52,8 @@ class Metric:
     output_tokens: int = 0
     headers: Optional[Dict[str, str]] = None
     cached_tokens: Optional[int] = None
+    hash_key: Optional[str] = None
+    program_id: Optional[str] = None
 
 
 def get_one_round(role: str, content: str) -> Dict[str, str]:

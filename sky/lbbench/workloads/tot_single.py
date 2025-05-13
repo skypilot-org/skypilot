@@ -56,8 +56,9 @@ async def _dummy_start() -> utils.OAIChatHistory:
     return []
 
 
-async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
-                       duration: float, real_user: str, num_users: int,
+async def _tree_search(uid: int, idx: int, question: str, num_branches: int,
+                       tic: float, duration: float, real_user: str,
+                       num_users: int,
                        disable_parallel: bool) -> List[utils.OAIChatHistory]:
     prompts = [
         PROPOSE_PLAN_PROMPT.format(question=question), EXECUTE_PLAN_PROMPT,
@@ -124,9 +125,10 @@ async def _tree_search(uid: int, question: str, num_branches: int, tic: float,
                     stop=None,
                     tic=tic,
                     duration=duration,
-                    # hash_key=f'{real_user}-{uid}',
-                    hash_key=f'{real_user}-{uid // (num_users // 5)}',
+                    hash_key=f'{real_user}-{uid}',
+                    # hash_key=f'{real_user}-{uid // (num_users // 5)}',
                     # hash_key=str(hash_key),
+                    program_id=f'{real_user}-{uid}-{idx}',
                 )
                 tasks.append(call_llm_coro)
 
@@ -144,11 +146,11 @@ async def _user_task(tic: float, uid: int, questions: List[str],
     while True:
         iteration_cnt += 1
         cnt = 0
-        for question in questions:
+        for i, question in enumerate(questions):
             cnt += 1
             print(f'[{tic:.1f}][{time.time() - tic:.3f}][START] User {uid} '
                   f'question {cnt} iteration {iteration_cnt}')
-            result = await _tree_search(uid, question, num_branches, tic,
+            result = await _tree_search(uid, i, question, num_branches, tic,
                                         duration, real_user, num_users,
                                         disable_parallel)
             print(f'[{tic:.1f}][{time.time() - tic:.3f}][END] User {uid} '

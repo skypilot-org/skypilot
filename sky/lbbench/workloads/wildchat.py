@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import collections
 import time
-from typing import Any, Awaitable, Dict, List
+from typing import Any, Awaitable, Dict, List, Optional
 
 import datasets
 
@@ -19,12 +19,16 @@ DATASET_NAME = 'allenai/WildChat-1M'
 def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--duration', type=int, default=120)
     parser.add_argument('--seed', type=str, default='default')
+    parser.add_argument('--start-index', type=int, default=0)
+    parser.add_argument('--open-loop-threshold', type=int, default=None)
 
 
 def args_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         'duration': args.duration,
         'seed': args.seed,
+        'start_index': args.start_index,
+        'open_loop_threshold': args.open_loop_threshold,
     }
 
 
@@ -75,9 +79,10 @@ def _filter_conv_by_region(conv: Dict[str, Any], region: str) -> bool:
     return False
 
 
-def _load_dataset(region: str) -> List[Dict[str, Any]]:
+def _load_dataset(region: str, start_index: int) -> List[Dict[str, Any]]:
     tic = time.time()
-    chunk_data = datasets.load_dataset(DATASET_NAME, split='train[:100000]')
+    split_slice = f'{start_index*100000}:{(start_index+1)*100000}'
+    chunk_data = datasets.load_dataset(DATASET_NAME, split=f'train[{split_slice}]')
     multi_turn_data = []
     for d in chunk_data:
         # At least 2 full turns: user + assistant + user + assistant (len >= 4)
@@ -107,8 +112,8 @@ def _load_dataset(region: str) -> List[Dict[str, Any]]:
 # _load_dataset('ap-northeast-1')
 
 
-async def _multi_turn_conv(uid: int, duration: int, tic: float, real_uid: str,
-                           conv: Dict[str, Any]) -> None:
+async def _multi_turn_conv(uid: int, idx: int, duration: int, tic: float, real_uid: str,
+                           conv: Dict[str, Any], open_loop_threshold: Optional[int]) -> None:
     history = []
     for i, msg in enumerate(conv['conv']):
         elapsed = time.time() - tic
@@ -119,6 +124,7 @@ async def _multi_turn_conv(uid: int, duration: int, tic: float, real_uid: str,
             assert msg['role'] == 'user'
             history.append(utils.get_one_round('user', msg['content']))
         else:
+            st_this_round = time.time()
             assert msg['role'] == 'assistant'
             task = asyncio.create_task(
                 oai.call_chat_completion_async(
@@ -132,6 +138,7 @@ async def _multi_turn_conv(uid: int, duration: int, tic: float, real_uid: str,
                     duration=duration,
                     # hash_key=f'{real_uid}-{uid}',
                     hash_key=conv['user'],
+                    program_id=f'{real_uid}-{uid}-{idx}',
                 ))
             while not task.done():
                 if time.time() - tic > duration:
@@ -145,11 +152,16 @@ async def _multi_turn_conv(uid: int, duration: int, tic: float, real_uid: str,
             history.extend(result)
             print(f'[{tic:.1f}][{time.time() - tic:.3f}] User {uid} '
                   f'done one task, {len(history)=}')
+            if open_loop_threshold is not None:
+                remaining_to_wait = max(0, open_loop_threshold - (time.time() - st_this_round))
+                remaining_to_wait = min(remaining_to_wait, duration - (time.time() - tic))
+                if remaining_to_wait > 0:
+                    await asyncio.sleep(remaining_to_wait)
 
 
 async def _user_task(duration: int, tic: float, uid: int, max_uid: int,
                      convs: List[Dict[str, Any]], real_uid: str,
-                     region: str) -> None:
+                     region: str, open_loop_threshold: Optional[int]) -> None:
     uid_repr = f'{uid:<{len(str(max_uid))}}'
     print(f'User {uid_repr}: {len(convs)} conversations in total.')
 
@@ -159,7 +171,7 @@ async def _user_task(duration: int, tic: float, uid: int, max_uid: int,
             break
         # We already filtered the conversations by region in _load_dataset
         assert _filter_conv_by_region(conv, region)
-        coro = _multi_turn_conv(uid, duration, tic, real_uid, conv)
+        coro = _multi_turn_conv(uid, i, duration, tic, real_uid, conv, open_loop_threshold)
         try:
             await coro
             print(f'User {uid_repr}: ({i+1}/{len(convs)}) conversations '
@@ -172,10 +184,10 @@ async def _user_task(duration: int, tic: float, uid: int, max_uid: int,
 
 async def _user_task_loop(duration: int, uid: int, max_uid: int,
                           convs: List[Dict[str, Any]], real_uid: str,
-                          region: str) -> None:
+                          region: str, open_loop_threshold: Optional[int]) -> None:
     tic = time.time()
     while True:
-        await _user_task(duration, tic, uid, max_uid, convs, real_uid, region)
+        await _user_task(duration, tic, uid, max_uid, convs, real_uid, region, open_loop_threshold)
         if time.time() - tic > duration:
             break
 
@@ -186,7 +198,7 @@ def launch_user_tasks(args: argparse.Namespace,
             ux_utils.spinner_message(
                 f'[bold cyan]Loading dataset {DATASET_NAME}[/]')) as spinner:
         # random.seed(args.seed, args.region)
-        convs = _load_dataset(args.region)
+        convs = _load_dataset(args.region, args.start_index)
         spinner.update('[bold cyan]Grouping conversations[/]')
         user_to_convs: Dict[str,
                             List[Dict[str,
@@ -211,5 +223,5 @@ def launch_user_tasks(args: argparse.Namespace,
         user_convs.sort(key=lambda conv: conv['timestamp'])
         tasks.append(
             _user_task_loop(args.duration, uid, len(groups), user_convs,
-                            str(args.seed), args.region))
+                            str(args.seed), args.region, args.open_loop_threshold))
     return tasks

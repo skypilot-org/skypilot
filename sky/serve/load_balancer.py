@@ -43,10 +43,11 @@ _DO_PUSHING_ACROSS_LB = env_options.Options.DO_PUSHING_ACROSS_LB.get()
 _LB_PUSHING_ENABLE_LB = env_options.Options.LB_PUSHING_ENABLE_LB.get()
 _DO_PUSHING_TO_REPLICA = env_options.Options.DO_PUSHING_TO_REPLICA.get()
 _USE_V2_STEALING = env_options.Options.USE_V2_STEALING.get()
-_DISABLE_LEAST_LOAD_IN_PREFIX = env_options.Options.DISABLE_LEAST_LOAD_IN_PREFIX.get()
+_DISABLE_LEAST_LOAD_IN_PREFIX = env_options.Options.DISABLE_LEAST_LOAD_IN_PREFIX.get(
+)
 
 _DISABLE_SELECTIVE_PUSHING = env_options.Options.DISABLE_SELECTIVE_PUSHING.get()
-
+_FORCE_DISABLE_STEALING = env_options.Options.FORCE_DISABLE_STEALING.get()
 
 
 @dataclasses.dataclass
@@ -191,7 +192,8 @@ class ClientPool:
         # Use the registry to create the load balancing policy
         self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
             load_balancing_policy_name)
-        if _DISABLE_LEAST_LOAD_IN_PREFIX and isinstance(self._load_balancing_policy, lb_policies.PrefixTreePolicy):
+        if _DISABLE_LEAST_LOAD_IN_PREFIX and isinstance(
+                self._load_balancing_policy, lb_policies.PrefixTreePolicy):
             self._load_balancing_policy.disbale_least_load_fallback()
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
         # for each client. We should wait for feedback on the best max
@@ -1380,7 +1382,8 @@ class SkyServeLoadBalancer:
 
             # Start the request stealing loop. Only enable if the region is set,
             # i.e. not global LB; and pushing across LBs is not enabled.
-            if self._region is not None and not _DO_PUSHING_ACROSS_LB:
+            if (self._region is not None and not _DO_PUSHING_ACROSS_LB and
+                    not _FORCE_DISABLE_STEALING):
                 self._tasks.append(
                     self._loop.create_task(self._request_stealing_loop()))
 
@@ -1426,7 +1429,9 @@ class SkyServeLoadBalancer:
             f'_DISABLE_SELECTIVE_PUSHING: {_DISABLE_SELECTIVE_PUSHING}, '
             f'[{os.getenv(env_options.Options.DISABLE_SELECTIVE_PUSHING.env_key)}], '
             f'_DISABLE_LEAST_LOAD_IN_PREFIX: {_DISABLE_LEAST_LOAD_IN_PREFIX}, '
-            f'[{os.getenv(env_options.Options.DISABLE_LEAST_LOAD_IN_PREFIX.env_key)}]'
+            f'[{os.getenv(env_options.Options.DISABLE_LEAST_LOAD_IN_PREFIX.env_key)}], '
+            f'_FORCE_DISABLE_STEALING: {_FORCE_DISABLE_STEALING}, '
+            f'[{os.getenv(env_options.Options.FORCE_DISABLE_STEALING.env_key)}]'
         )
         uvicorn.run(self._app,
                     host='0.0.0.0',

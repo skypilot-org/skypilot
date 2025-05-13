@@ -29,6 +29,7 @@ raw_describes = [
     'sky_pull_pull',
     # 'sky_pull_pull_small',
     'sky_pull_pull_small_3',
+    'sky_no_cross_region_traffic_handling',
     'sky_push_pull',
     'sky_push_push',
     # 'sky_pull_pull_rate_limit_prefix_tree',
@@ -58,6 +59,7 @@ raw_presents = [
     'Ours\\n[Pull/Steal+Pull]',
     # 'Ours\\n[Pull/StealSmall+Pull]',
     'Ours\\n[Pull/StealSmall3+Pull]',
+    'NoCrossRegion',
     'Ours\\n[Push+Pull]',
     'Ours\\n[Push+Push]',
     # 'Ours\\n[SelPush/Prefix+Pull]',
@@ -80,15 +82,16 @@ enabled_systems = [
     8,  # rr with selective pushing
     9,  # sky pulling in lb, pulling in replica, but workload stealing
     10,  # sky pulling in lb, pulling in replica, but steal small #requests
-    11,  # sky pushing in lb, pulling in replica
-    12,  # sky pushing in lb, pushing in replica
-    13,  # selective pushing for both lb and replica. with prefix tree.
-    14,  # selective pushing for both lb and replica. with least load.
-    15,  # selective pushing for both lb and replica. with round robin.
-    16,  # selective pushing for both lb and replica. with consistent hashing.
-    17,  # same with 12 but disable least load fallback for < 50% match.
+    11,  # no cross-region traffic handling baseline.
+    12,  # sky pushing in lb, pulling in replica
+    13,  # sky pushing in lb, pushing in replica
+    14,  # selective pushing for both lb and replica. with prefix tree.
+    15,  # selective pushing for both lb and replica. with least load.
+    16,  # selective pushing for both lb and replica. with round robin.
+    17,  # selective pushing for both lb and replica. with consistent hashing.
+    18,  # same with 13 but disable least load fallback for < 50% match.
 ]
-enabled_systems = [16]
+enabled_systems = [11, 14]
 # enabled_systems = [15]
 
 describes = [raw_describes[i] for i in enabled_systems]
@@ -194,7 +197,8 @@ def main():
             cn2cmds[cluster].append(
                 f'sky exec {cluster} --detach-run '
                 f'--env CMD={shlex.quote(region_cmd)} '
-                '--env HF_TOKEN examples/serve/external-lb/client.yaml')
+                '--env HF_TOKEN examples/serve/external-lb/client.yaml '
+                f'--name {en}')
             output_remote = f'{cluster}:{output}'
             met = f'{output_remote}/metric/{en}.json'
             scps.append(f'scp {met} {output_local}'
@@ -297,6 +301,7 @@ def main():
         f.write('wait_for_empty_queues() {\n')
         f.write('  start_time=$(date +%s)\n')
         f.write('  wait_count=0\n')
+        f.write(f'  expected_jobs={len(regions) * len(describes)}\n')
         f.write('  while true; do\n')
         f.write('    current_time=$(date +%s)\n')
         f.write('    elapsed=$((current_time - start_time))\n')
@@ -306,13 +311,28 @@ def main():
             cluster = _region_cluster_name(r)
             f.write(f' {cluster}')
         f.write(')\n')
-        f.write('    if ! echo "$queue_output" | grep -q "RUNNING"; then\n')
+        f.write('    filtered_output=$(echo "$queue_output" | grep "$exp_name" || true)\n')
+        f.write('    if echo "$filtered_output" | grep -q "FAILED"; then\n')
+        f.write('      echo "ERROR: Found FAILED jobs for experiment $exp_name!"\n')
+        f.write('      echo "$filtered_output" | grep "FAILED"\n')
+        f.write('      exit 1\n')
+        f.write('    fi\n')
+        f.write('    num_succeeded=$(echo "$filtered_output" | grep -c "SUCCEEDED" || true)\n')
+        f.write('    num_running=$(echo "$filtered_output" | grep -c "RUNNING" || true)\n')
+        f.write('    total_jobs=$((num_succeeded + num_running))\n')
+        f.write('    if [ "$total_jobs" -ne "$expected_jobs" ]; then\n')
+        f.write('      echo "WARNING: Expected $expected_jobs jobs but found $total_jobs (Finished: $num_succeeded, Running: $num_running)"\n')
+        f.write('      echo "Retrying queue status fetch..."\n')
+        f.write('      sleep 5\n')
+        f.write('      continue\n')
+        f.write('    fi\n')
+        f.write('    if echo "$filtered_output" | grep -q "SUCCEEDED" && ! echo "$filtered_output" | grep -q "RUNNING"; then\n')
         f.write('      echo "All queues are empty after '
-                '$elapsed seconds ($wait_count checks)."\n')
+                '$elapsed seconds ($wait_count checks). Finished: $num_succeeded, Running: $num_running"\n')
         f.write('      break\n')
         f.write('    fi\n')
         f.write('    echo "Waiting for queues to be empty... Elapsed time: '
-                '$elapsed seconds, Check #$wait_count"\n')
+                '$elapsed seconds, Check #$wait_count, Finished: $num_succeeded, Running: $num_running"\n')
         # f.write('    echo "$queue_output"\n')
         f.write('    sleep 10\n')
         f.write('  done\n')
