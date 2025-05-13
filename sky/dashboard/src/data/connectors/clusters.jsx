@@ -31,10 +31,14 @@ export async function getClusterCosts() {
       const duration = cost.duration || 0;
       const costPerHour = duration > 0 ? (cost.total_cost / (duration / 3600)) : 0;
       
-      acc[cost.name] = {
-        total_cost: cost.total_cost || 0,
-        cost_per_hour: costPerHour
-      };
+      // Use cluster_hash as the unique key, assuming it exists in the cost report items.
+      const key = cost.cluster_hash;
+      if (key) { // Only add if the hash exists
+        acc[key] = {
+          total_cost: cost.total_cost || 0,
+          cost_per_hour: costPerHour
+        };
+      }
       return acc;
     }, {});
   } catch (error) {
@@ -66,7 +70,9 @@ export async function getClusters({ clusterNames = null } = {}) {
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
-      const cost = costs[cluster.name] || { total_cost: 0, cost_per_hour: 0 };
+      // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
+      const costKey = cluster.cluster_hash;
+      const cost = costKey ? (costs[costKey] || { total_cost: 0, cost_per_hour: 0 }) : { total_cost: 0, cost_per_hour: 0 };
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
