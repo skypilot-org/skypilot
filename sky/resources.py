@@ -500,6 +500,10 @@ class Resources:
         self._requires_fuse = value
 
     @property
+    def docker_login_config(self) -> Optional[docker_utils.DockerLoginConfig]:
+        return self._docker_login_config
+
+    @property
     def docker_username_for_runpod(self) -> Optional[str]:
         return self._docker_username_for_runpod
 

@@ -4664,6 +4664,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle_before_refresh = record['handle']
             status_before_refresh = record['status']
 
+        handle: Optional[CloudVmRayResourceHandle]
         prev_cluster_status, handle = (status_before_refresh,
                                        handle_before_refresh)
 
@@ -4684,7 +4685,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status = None
                 handle = None
         # We should check the cluster_ever_up after refresh, because if the
-        # cluster is terminated (through console or auto-dwon), the record will
+        # cluster is terminated (through console or auto-down), the record will
         # become None and the cluster_ever_up should be considered as False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
         prev_config_hash = record['config_hash'] if record is not None else None
@@ -4697,11 +4698,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
+            # Take a random resource in order to get resource info that applies
+            # to all resources.
+            one_task_resource = list(task.resources)[0]
             # Assume resources share the same ports.
             for resource in task.resources:
-                assert resource.ports == list(task.resources)[0].ports
+                assert resource.ports == one_task_resource.ports
             requested_ports_set = resources_utils.port_ranges_to_set(
-                list(task.resources)[0].ports)
+                one_task_resource.ports)
             current_ports_set = resources_utils.port_ranges_to_set(
                 handle.launched_resources.ports)
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
@@ -4720,6 +4724,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'a new cluster with the desired ports open.')
             if all_ports:
                 to_provision = to_provision.copy(ports=all_ports)
+            # Docker login should always be the same for all resources, since
+            # it's set from envs.
+            for resource in task.resources:
+                assert (resource.docker_login_config ==
+                        one_task_resource.docker_login_config), (
+                            resource.docker_login_config,
+                            one_task_resource.docker_login_config)
+            # If we have docker login config in the new task, override the
+            # existing resources to pick up new credentials. This allows the
+            # user to specify new or fixed credentials if the existing
+            # credentials are not working. If we don't do this, the credentials
+            # from the existing resources will always be reused.
+            if one_task_resource.docker_login_config is not None:
+                to_provision = to_provision.copy(
+                    _docker_login_config=one_task_resource.docker_login_config)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
