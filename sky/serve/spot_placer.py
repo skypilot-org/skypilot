@@ -46,8 +46,8 @@ class Location:
 
     @classmethod
     def from_resources(cls, resources: 'resources_lib.Resources') -> 'Location':
-        assert (resources.cloud is not None), 'Cloud must be specified'
-        assert (resources.region is not None), 'Region must be specified'
+        assert resources.cloud is not None, 'Cloud must be specified'
+        assert resources.region is not None, 'Region must be specified'
         return cls(resources.cloud, resources.region, resources.zone)
 
     def to_dict(self) -> Dict[str, Any]:

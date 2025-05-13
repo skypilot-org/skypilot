@@ -817,10 +817,8 @@ class Optimizer:
 
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
+            resources = resources.assert_launchable()
             cloud = resources.cloud
-            assert cloud is not None, 'Cloud must be specified'
-            assert (resources.instance_type is not None), \
-                    'Instance type must be specified'
             vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
