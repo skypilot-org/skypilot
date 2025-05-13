@@ -54,7 +54,7 @@ Install the SkyPilot Helm chart with the following command:
       --create-namespace \
       --set ingress.authCredentials=$AUTH_STRING
 
-.. dropdown:: Flags explained
+.. dropdown:: Flags explanation
 
     Here is a breakdown of the flags used in the command above:
 
