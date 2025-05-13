@@ -2966,9 +2966,8 @@ def get_endpoints(cluster: str,
                              f'for cluster {cluster!r} with backend '
                              f'{get_backend_from_handle(handle).NAME}.')
 
-    launched_resources = handle.launched_resources
+    launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
-    assert cloud is not None, 'cloud should have been set by the optimizer.'
     try:
         cloud.check_features_are_supported(
             launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
