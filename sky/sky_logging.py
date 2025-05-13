@@ -10,6 +10,7 @@ import threading
 import colorama
 
 from sky.skylet import constants
+from sky.utils import context
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -47,6 +48,43 @@ class NewLineFormatter(logging.Formatter):
         return msg
 
 
+class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
+    """A handler that awares environment variables.
+
+    This handler dynamically reflects the log level from environment variables.
+    """
+
+    def __init__(self, stream=None, level=logging.NOTSET, sensitive=False):
+        super().__init__(stream)
+        self.level = level
+        self._sensitive = sensitive
+
+    @property
+    def level(self):
+        # Only refresh log level if we are in a context, since the log level
+        # has already been reloaded eagerly in multi-processing. Refresh again
+        # is a no-op and can be avoided.
+        # TODO(aylei): unify the mechanism for coroutine context and
+        # multi-processing.
+        if context.get() is not None:
+            if self._sensitive:
+                # For sensitive logger, suppress debug log despite the
+                # SKYPILOT_DEBUG env var if SUPPRESS_SENSITIVE_LOG is set
+                if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
+                    return logging.INFO
+            if env_options.Options.SHOW_DEBUG_INFO.get():
+                return logging.DEBUG
+            else:
+                return self._level
+        else:
+            return self._level
+
+    @level.setter
+    def level(self, level):
+        # pylint: disable=protected-access
+        self._level = logging._checkLevel(level)
+
+
 _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
@@ -67,7 +105,7 @@ def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = rich_utils.RichSafeStreamHandler(sys.stdout)
+        _default_handler = EnvAwareHandler(sys.stdout)
         _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)
@@ -87,7 +125,7 @@ def _setup_logger():
         # for certain loggers.
         for logger_name in _SENSITIVE_LOGGER:
             logger = logging.getLogger(logger_name)
-            handler_to_logger = rich_utils.RichSafeStreamHandler(sys.stdout)
+            handler_to_logger = EnvAwareHandler(sys.stdout, sensitive=True)
             handler_to_logger.flush = sys.stdout.flush  # type: ignore
             logger.addHandler(handler_to_logger)
             logger.setLevel(logging.INFO)

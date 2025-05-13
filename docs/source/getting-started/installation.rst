@@ -229,6 +229,9 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
+.. tip::
+   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
+
 .. _aws-installation:
 
 AWS
