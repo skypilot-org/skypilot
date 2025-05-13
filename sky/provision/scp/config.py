@@ -16,15 +16,13 @@ def bootstrap_instances(
     zone_id = _get_zone_id(region)
     node_cfg['zone_id'] = zone_id
 
-    ssh_public_key = node_cfg['AuthorizedKey']
-
     docker_cfg = config.docker_config
     docker_cfg['imageId'] = node_cfg['imageId']
     docker_cfg['serviceZoneId'] = zone_id
     docker_cfg['serverType'] = node_cfg['InstanceType']
     docker_cfg['contractId'] = 'None'
-    initial_script = _get_init_script(ssh_public_key)
-    docker_cfg['initialScript'] = initial_script
+    ssh_public_key = node_cfg['AuthorizedKey']
+    docker_cfg['initialScript'] = _get_init_script(ssh_public_key)
 
     key_pair_id = _get_key_pair_id()
     miscellaneous = {
