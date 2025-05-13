@@ -608,9 +608,9 @@ def get_controller_resources(
     controller_zone = controller_resources_to_use.zone
 
     # Filter clouds if controller_resources_to_use.cloud is specified.
-    filtered_clouds: Set[str] = set(
-        {controller_cloud} if controller_cloud is not None else set(
-            requested_clouds_with_region_zone.keys()))
+    filtered_clouds: Set[str] = {controller_cloud
+                                } if controller_cloud is not None else set(
+                                    requested_clouds_with_region_zone.keys())
 
     # Filter regions and zones and construct the result.
     result: Set[resources.Resources] = set()

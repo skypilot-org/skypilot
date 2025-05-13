@@ -140,10 +140,8 @@ def simplify_ports(ports: List[str]) -> List[str]:
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
     if simplify:
+        resource = resource.assert_launchable()
         cloud = resource.cloud
-        assert cloud is not None, 'Cloud must be specified'
-        assert (resource.instance_type is not None), \
-            'Instance type must be specified'
         if resource.accelerators is None:
             vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
                 resource.instance_type)
