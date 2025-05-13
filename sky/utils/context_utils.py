@@ -137,7 +137,8 @@ def wait_process(ctx: context.Context,
             break
 
 
-def cancellation_guard(func):
+F = TypeVar('F', bound=Callable[..., Any])
+def cancellation_guard(func: F) -> F:
     """Decorator to make a synchronous function cancellable via context.
 
     Guards the function execution by checking context.is_canceled() before
