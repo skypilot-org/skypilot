@@ -73,19 +73,19 @@ def _get_init_script(ssh_public_key: str):
     }
 
 
-def _get_ssh_key_gen_cmd(ssh_public_key: str):
-    cmd_st = 'mkdir -p ~/.ssh/; touch ~/.ssh/authorized_keys;'
-    cmd_ed = 'chmod 644 ~/.ssh/authorized_keys; chmod 700 ~/.ssh/'
-    cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(ssh_public_key)  # pylint: disable=invalid-string-quote
-    return cmd_st + cmd + cmd_ed
-
-
 def _get_default_config_cmd():
     cmd_list = ['apt-get update', 'apt-get -y install python3-pip']
     res = ''
     for cmd in cmd_list:
         res += cmd + '; '
     return res
+
+
+def _get_ssh_key_gen_cmd(ssh_public_key: str):
+    cmd_st = 'mkdir -p ~/.ssh/; touch ~/.ssh/authorized_keys;'
+    cmd_ed = 'chmod 644 ~/.ssh/authorized_keys; chmod 700 ~/.ssh/'
+    cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(ssh_public_key)  # pylint: disable=invalid-string-quote
+    return cmd_st + cmd + cmd_ed
 
 
 def _get_key_pair_id():
