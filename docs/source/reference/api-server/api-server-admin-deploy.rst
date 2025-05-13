@@ -66,6 +66,8 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
+The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`.
+
 .. tip::
 
     The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for more clouds and Kubernetes clusters.
@@ -562,6 +564,60 @@ If you are upgrading from an early 0.8.0 nightly with a previously deployed Node
 .. note::
 
     Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
+
+.. _sky-api-server-helm-multiple-deploy:
+
+Reusing ingress controller for API server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, the ingress-nginx controller has some cluster-scope resources that will cause conflicts between multiple installations by default. It is recommended to reuse an existing ingress controller if you want to deploy multiple API servers in the same Kubernetes cluster.
+
+To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled <helm-values-ingress-nginx-enabled>` to ``false`` and set :ref:`ingress.path <helm-values-ingress-path>` to a unique path for the deploying API server. For example:
+
+.. code-block:: bash
+
+    # The first API server, with niginx-ingress controller deployed
+    # It is assumed that the first API server is already deployed. If it is not deployed yet,
+    # add neccessary values instead of specifying --reuse-values
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set ingress.path=/first-server
+    
+    # The second API server, reusing the existing ingress controller and using a different path
+    ANOTHER_RELEASE_NAME=skypilot2
+    # Replace with your username and password to configure the basic auth credentials for the second API server
+    ANOTHER_WEB_USERNAME=skypilot
+    ANOTHER_WEB_PASSWORD=yourpassword
+    ANOTHER_AUTH_STRING=$(htpasswd -nb $ANOTHER_WEB_USERNAME $ANOTHER_WEB_PASSWORD)
+    # Deploy the API server, either in the same namespace or a different namespace
+    helm upgrade --install $ANOTHER_RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --set ingress-nginx.enabled=false \
+        --set ingress.path=/second-server \
+        --set ingress.authCredentials=$ANOTHER_AUTH_STRING
+
+With the above commands, these two API servers will share the same ingress controller and serves under different paths of the endpoint you get from :ref:`Step 2: Get the API server URL <sky-get-api-server-url>`:
+
+- The first API server serves at ``https://<endpoint>/first-server``
+- The second API server serves at ``https://<endpoint>/second-server``
+
+.. note::
+
+    :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` should be applied to the API server installation that has the ingress-nginx controller deployed. Other installations shares the same endpoint.
+
+The same approach also applies when you have a ingress-nginx controller deployed before installing the SkyPilot API server:
+
+.. code-block:: bash
+
+    # The first API server, disabling the ingress-nginx controller to reuse the existing one
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --set ingress-nginx.enabled=false \
+        --set ingress.path=/skypilot
+
+It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingress-path>` too in this case, to avoid conflicts with other backends hosted on the same ingress controller.
+
 
 .. _sky-api-server-cloud-deploy:
 
