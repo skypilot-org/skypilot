@@ -301,7 +301,6 @@ def _get_firewall_id(vpc_id):
         if firewall['vpcId'] == vpc_id and
         (firewall['firewallState'] in ['ACTIVE', 'DEPLOYING'])
     ][0]
-
     return firewall_id
 
 
