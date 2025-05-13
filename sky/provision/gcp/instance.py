@@ -530,9 +530,11 @@ def terminate_instances(
     use_mig = provider_config.get('use_managed_instance_group', False)
     if use_mig:
         # Deleting the MIG will also delete the instances.
-        instance_utils.GCPManagedInstanceGroup.delete_mig(
-            project_id, zone, cluster_name_on_cloud)
-        return
+        mig_exists_and_deleted = (
+            instance_utils.GCPManagedInstanceGroup.delete_mig(
+                project_id, zone, cluster_name_on_cloud))
+        if mig_exists_and_deleted:
+            return
 
     label_filters = {
         provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud

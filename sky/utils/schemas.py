@@ -963,6 +963,26 @@ def get_config_schema():
                 }
             },
         },
+        'nebius': {
+            'type': 'object',
+            'required': [],
+            'properties': {
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            'additionalProperties': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'project_id': {
+                        'type': 'string',
+                    },
+                    'fabric': {
+                        'type': 'string',
+                    },
+                }
+            },
+        }
     }
 
     admin_policy_schema = {

@@ -544,11 +544,8 @@ Nebius
   nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-**Optional**: You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
 
-.. code-block:: shell
-
-  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
+**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
 
 Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
@@ -568,8 +565,8 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 
   aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
   aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
-  aws configure set region eu-west1 --profile nebius
-  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
+  aws configure set region <REGION> --profile nebius
+  aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
 Request quotas for first time users
 --------------------------------------

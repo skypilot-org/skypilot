@@ -4,6 +4,7 @@ from typing import Any, Dict
 import uuid
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.utils import common_utils
 
@@ -35,44 +36,22 @@ def get_project_by_region(region: str) -> str:
     service = nebius.iam().ProjectServiceClient(nebius.sdk())
     projects = service.list(nebius.iam().ListProjectsRequest(
         parent_id=nebius.get_tenant_id())).wait()
-    # To find a project in a specific region, we rely on the project ID to
-    # deduce the region, since there is currently no method to retrieve region
-    # information directly from the project. Additionally, there is only one
-    # project per region, and projects cannot be created at this time.
-    # The region is determined from the project ID using a region-specific
-    # identifier embedded in it.
-    # Project id looks like project-e00xxxxxxxxxxxxxx where
-    # e00 - id of region 'eu-north1'
-    # e01 - id of region 'eu-west1'
-    region_ids = {'eu-north1': 'e00', 'eu-west1': 'e01'}
-    # TODO(SalikovAlex): fix when info about region will be in projects list
-    # Currently, Nebius cloud supports 2 regions. We manually enumerate
-    # them here. Reference: https://docs.nebius.com/overview/regions
 
     #  Check is there project if in config
-    preferable_project_id = nebius.get_project_id()
-    if preferable_project_id is not None:
-        if preferable_project_id[8:11] == region_ids[region]:
-            return preferable_project_id
-        logger.warning(
-            f'Can\'t use customized NEBIUS_PROJECT_ID ({preferable_project_id})'
-            f' for region {region}. Please check if the project ID is correct.')
+    project_id = skypilot_config.get_nested(('nebius', region, 'project_id'),
+                                            None)
+    if project_id is not None:
+        return project_id
     for project in projects.items:
-        if project.metadata.id[8:11] == region_ids[region]:
+        if project.status.region == region:
             return project.metadata.id
     raise Exception(f'No project found for region "{region}".')
 
 
-def get_or_create_gpu_cluster(name: str, region: str) -> str:
+def get_or_create_gpu_cluster(name: str, project_id: str, fabric: str) -> str:
     """Creates a GPU cluster.
-    When creating a GPU cluster, select an InfiniBand fabric for it:
-
-    fabric-2, fabric-3 or fabric-4 for projects in the eu-north1 region.
-    fabric-5 for projects in the eu-west1 region.
-
     https://docs.nebius.com/compute/clusters/gpu
     """
-    project_id = get_project_by_region(region)
     service = nebius.compute().GpuClusterServiceClient(nebius.sdk())
     try:
         cluster = service.get_by_name(nebius.nebius_common().GetByNameRequest(
@@ -80,14 +59,7 @@ def get_or_create_gpu_cluster(name: str, region: str) -> str:
             name=name,
         )).wait()
         cluster_id = cluster.metadata.id
-    except nebius.request_error() as no_cluster_found_error:
-        if region == 'eu-north1':
-            fabric = 'fabric-4'
-        elif region == 'eu-west1':
-            fabric = 'fabric-5'
-        else:
-            raise RuntimeError(
-                f'Unsupported region {region}.') from no_cluster_found_error
+    except nebius.request_error():
         cluster = service.create(nebius.compute().CreateGpuClusterRequest(
             metadata=nebius.nebius_common().ResourceMetadata(
                 parent_id=project_id,
@@ -186,7 +158,7 @@ def start(instance_id: str) -> None:
 
 def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
            preset: str, region: str, image_family: str, disk_size: int,
-           user_data: str) -> str:
+           user_data: str, associate_public_ip_address: bool) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -196,15 +168,23 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
 
     disk_name = 'disk-' + instance_name
     cluster_id = None
+    project_id = get_project_by_region(region)
     # 8 GPU virtual machines can be grouped into a GPU cluster.
     # The GPU clusters are built with InfiniBand secure high-speed networking.
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
         if preset == '8gpu-128vcpu-1600gb':
-            cluster_id = get_or_create_gpu_cluster(cluster_name_on_cloud,
-                                                   region)
+            #  Check is there fabric in config
+            fabric = skypilot_config.get_nested(('nebius', region, 'fabric'),
+                                                None)
+            if fabric is None:
+                logger.warning(
+                    f'Set up fabric for region {region} in ~/.sky/config.yaml '
+                    'to use GPU clusters.')
+            else:
+                cluster_id = get_or_create_gpu_cluster(cluster_name_on_cloud,
+                                                       project_id, fabric)
 
-    project_id = get_project_by_region(region)
     service = nebius.compute().DiskServiceClient(nebius.sdk())
     disk = service.create(nebius.compute().CreateDiskRequest(
         metadata=nebius.nebius_common().ResourceMetadata(
@@ -262,7 +242,9 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
                     subnet_id=sub_net.items[0].metadata.id,
                     ip_address=nebius.compute().IPAddress(),
                     name='network-interface-0',
-                    public_ip_address=nebius.compute().PublicIPAddress())
+                    public_ip_address=nebius.compute().PublicIPAddress()
+                    if associate_public_ip_address else None,
+                )
             ]))).wait()
     instance_id = ''
     retry_count = 0
