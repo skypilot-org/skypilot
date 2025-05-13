@@ -2032,8 +2032,7 @@ class RetryingVmProvisioner(object):
                             f' that never expire or a service account.\033[0m')
                 logger.warning(warnings)
 
-        assert to_provision.cloud is not None, (
-            to_provision, 'cloud should have been set by the optimizer.')
+        to_provision = to_provision.assert_launchable()
         # Retrying launchable resources.
         while True:
             try:

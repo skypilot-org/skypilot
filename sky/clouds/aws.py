@@ -440,9 +440,8 @@ class AWS(clouds.Cloud):
         region_name = region.name
         zone_names = [zone.name for zone in zones]
 
-        assert resources.instance_type is not None, \
-            'Instance type must be specified'
-        # r.accelerators is cleared but .instance_type encodes the info.
+        resources = resources.assert_launchable()
+        # resources.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
@@ -973,6 +972,7 @@ class AWS(clouds.Cloud):
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
 
+        resources = resources.assert_launchable()
         instance_type = resources.instance_type
         region = resources.region
         use_spot = resources.use_spot
@@ -980,7 +980,6 @@ class AWS(clouds.Cloud):
         # pylint: disable=import-outside-toplevel,unused-import
         from sky.clouds.service_catalog import aws_catalog
 
-        assert instance_type is not None, 'Instance type must be specified'
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
         if quota_code is None:
