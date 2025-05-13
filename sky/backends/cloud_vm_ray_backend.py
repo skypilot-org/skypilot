@@ -4720,12 +4720,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Docker login should always be the same for all resources, since
             # it's set from envs.
             for resource in task.resources:
-                assert resource._docker_login_config == one_task_resource._docker_login_config
+                assert (resource.docker_login_config ==
+                        one_task_resource.docker_login_config), (
+                            resource.docker_login_config,
+                            one_task_resource.docker_login_config)
             # If we have docker login config in the new task, override the
             # existing resources to pick up new credentials.
-            if one_task_resource._docker_login_config is not None:
+            if one_task_resource.docker_login_config is not None:
                 to_provision = to_provision.copy(
-                    _docker_login_config=one_task_resource._docker_login_config)
+                    _docker_login_config=one_task_resource.docker_login_config)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
