@@ -154,3 +154,6 @@ sky serve down llama4
 
 See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
 
+## Community tutorial: Llama 4 on SGLang, served via SkyServe
+
+For a community tutorial on how to serve Llama 4 on SGLang (both single-node and multi-node), see [Serving Llama 4 models on Nebius AI Cloud with SkyPilot and SGLang](https://nebius.com/blog/posts/serving-llama-4-skypilot-sglang).

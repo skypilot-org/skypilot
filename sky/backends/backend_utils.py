@@ -40,6 +40,7 @@ from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import registry
@@ -713,7 +714,7 @@ def write_cluster_config(
     # this feature has been checked by
     # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
     high_availability_specified = controller_utils.high_availability_specified(
-        cluster_name_on_cloud)
+        cluster_name)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -798,6 +799,8 @@ def write_cluster_config(
                 'sky_ray_yaml_local_path': tmp_yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
+                'ssh_max_sessions_config':
+                    constants.SET_SSH_MAX_SESSIONS_CONFIG_CMD,
                 # Authentication (optional).
                 **auth_config,
 
@@ -2202,6 +2205,7 @@ def refresh_cluster_record(
 
 
 @timeline.event
+@context_utils.cancellation_guard
 def refresh_cluster_status_handle(
     cluster_name: str,
     *,
@@ -2251,6 +2255,7 @@ def check_cluster_available(
     ...
 
 
+@context_utils.cancellation_guard
 def check_cluster_available(
     cluster_name: str,
     *,

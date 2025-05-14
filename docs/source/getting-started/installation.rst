@@ -132,10 +132,10 @@ Installing via ``uv`` is also supported:
 .. code-block:: shell
 
   uv venv --seed --python 3.10
-  uv pip install "skypilot[kubernetes,aws,gcp]"
-  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-  uv pip install --prerelease allow azure-cli
-  uv pip install "skypilot[all]"
+  uv pip install --prerelease allow 'azure-cli>=2.65.0'
+  # Explicitly install prerelease dependency to work around https://docs.astral.sh/uv/pip/compatibility/#pre-release-compatibility
+  # Optionally only install specific clouds - e.g. 'skypilot[aws,gcp,kubernetes]'
+  uv pip install 'omegaconf>=2.4.0dev3' 'skypilot[all]'
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
@@ -228,6 +228,9 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
   cp /path/to/kubeconfig ~/.kube/config
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+
+.. tip::
+   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
 
 .. _aws-installation:
 
@@ -542,52 +545,14 @@ Nebius
 
   mkdir -p ~/.nebius
   nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
-
-If you have one tenant you can run:
-
-.. code-block:: shell
-
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
 
-.. code-block:: shell
+**Optional**: You can specify specific project ID and fabric in `~/.sky/config.yaml`, see :ref:`Configuration project_id and fabric for Nebius <config-yaml-nebius>`.
 
-  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
+Alternatively, you can also use a service account to access Nebius, see :ref:`Using Service Account for Nebius <nebius-service-account>`.
 
-To use *Service Account* authentication, follow these steps:
-
-1. **Create a Service Account** using the Nebius web console.
-2. **Generate PEM Keys**:
-
-.. code-block:: shell
-
-   openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
-
-3.  **Generate and Save the Credentials File**:
-
-* Save the file as `~/.nebius/credentials.json`.
-* Ensure the file matches the expected format below:
-
-.. code-block:: json
-
-     {
-         "subject-credentials": {
-             "alg": "RS256",
-             "private-key": "PKCS#8 PEM with new lines escaped as \n",
-             "kid": "public-key-id",
-             "iss": "service-account-id",
-             "sub": "service-account-id"
-         }
-     }
-
-
-**Important Notes:**
-
-* The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
-* Service Accounts are restricted to a single region. Ensure you configure the Service Account for the appropriate region during creation.
-
-Nebius offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+Nebius also offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
 SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
 
 .. code-block:: shell
@@ -603,8 +568,8 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 
   aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
   aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
-  aws configure set region eu-west1 --profile nebius
-  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
+  aws configure set region <REGION> --profile nebius
+  aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
 Request quotas for first time users
 --------------------------------------

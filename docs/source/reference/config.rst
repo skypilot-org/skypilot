@@ -105,6 +105,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       provision_timeout: 900
     :ref:`remote_identity <config-yaml-gcp-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
+    :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
+    :ref:`placement_policy <config-yaml-gcp-placement-policy>`: compact
 
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
@@ -122,6 +124,15 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`us-ashburn-1 <config-yaml-oci>`:
       vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+  :ref:`nebius <config-yaml-nebius>`:
+    :ref:`eu-north1 <config-yaml-nebius>`:
+      project_id: project-e00xxxxxxxxxxx
+      fabric: fabric-3
+    :ref:`eu-west1 <config-yaml-nebius>`:
+      project_id: project-e01xxxxxxxxxxx
+      fabric: fabric-5
+    :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
 
 Fields
 ----------
@@ -846,6 +857,26 @@ launched by SkyPilot. This is useful for improving network performance.
 
 Default: ``false``.
 
+.. _config-yaml-gcp-enable-gpu-direct:
+
+``gcp.enable_gpu_direct``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable GPUDirect-TCPX, a high-performance networking technology that establishes direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` instances launched by SkyPilot. When enabled, this configuration automatically activates the gVNIC network interface for optimal performance.
+
+Default: ``false``.
+
+.. _config-yaml-gcp-placement-policy:
+
+``gcp.placement_policy``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Placement policy for GCP instances. This setting controls how instances are physically placed within a data center to optimize performance and resource utilization.
+
+When `gcp.enable_gpu_direct` is enabled, the placement policy is automatically set to `compact` to ensure optimal communication performance. If `gcp.enable_gpu_direct` is disabled, no default placement policy is applied.
+
+Refer to the `GCP documentation <https://cloud.google.com/compute/docs/instances/placement-policies-overview>`_ for more information on placement policies.
+
 .. _config-yaml-azure:
 
 ``azure``
@@ -1047,6 +1078,89 @@ Example:
         us-ashburn-1:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+.. _config-yaml-nebius:
+
+``nebius``
+~~~~~~~~~~
+
+Advanced Nebius configuration (optional).
+
+``project_id``
+    Identifier for the Nebius project (optional)
+    Default: Uses first available project if not specified
+
+``fabric``
+    GPU cluster configuration identifier (optional)
+    Optional: GPU cluster disabled if not specified
+
+
+The configuration must be specified in region-specific sections.
+
+Example:
+
+.. code-block:: yaml
+
+    nebius:
+        :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+        :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+          eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+          eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+        # Region-specific configuration
+        eu-north1:
+            # Project identifier for this region
+            # Optional: Uses first available project if not specified
+            project_id: project-e00......
+            # GPU cluster fabric identifier
+            # Optional: GPU cluster disabled if not specified
+            fabric: fabric-3
+        eu-west1:
+            project_id: project-e01...
+            fabric: fabric-5
+
+.. _config-yaml-nebius-use-internal-ips:
+
+``nebius.use_internal_ips``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Should instances be assigned private IPs only? (optional).
+
+Set to ``true`` to use private IPs to communicate between the local client and
+any SkyPilot nodes. This requires the networking stack be properly set up.
+
+This flag is typically set together with ``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. _config-yaml-nebius-ssh-proxy-command:
+
+``nebius.ssh_proxy_command``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSH proxy command (optional).
+
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+Format 1:
+  A string; the same proxy command is used for all regions.
+Format 2:
+  A dict mapping region names to region-specific proxy commands.
+  NOTE: This restricts SkyPilot's search space for this cloud to only use
+  the specified regions and not any other regions in this cloud.
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    # Format 1
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
+    # Format 2
+    ssh_proxy_command:
+      eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+      eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
 
 
 .. toctree::

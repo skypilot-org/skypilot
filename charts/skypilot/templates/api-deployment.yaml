@@ -120,6 +120,11 @@ spec:
         - name: kube-config
           mountPath: /root/.kube
         {{- end }}
+        {{- if .Values.runpodCredentials.enabled }}
+        - name: runpod-config
+          mountPath: /root/.runpod
+          readOnly: true
+        {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
@@ -178,6 +183,36 @@ spec:
         - name: gcp-config
           mountPath: /root/.config/gcloud
       {{- end }}
+      {{- if .Values.runpodCredentials.enabled }}
+      - name: create-runpod-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up RunPod credentials..."
+          if [ -n "$RUNPOD_API_KEY" ]; then
+            echo "RunPod credentials found in environment variable."
+            mkdir -p /root/.runpod
+            echo "[default]" > /root/.runpod/config.toml
+            echo "api_key = \"$RUNPOD_API_KEY\"" >> /root/.runpod/config.toml
+          else
+            echo "RunPod credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: RUNPOD_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.runpodCredentials.runpodSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: runpod-config
+          mountPath: /root/.runpod
+      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -191,12 +226,15 @@ spec:
       - name: aws-config
         emptyDir: {}
       {{- end }}
-
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
         secret:
           secretName: {{ .Values.gcpCredentials.gcpSecretName }}
       - name: gcp-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.runpodCredentials.enabled }}
+      - name: runpod-config
         emptyDir: {}
       {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}

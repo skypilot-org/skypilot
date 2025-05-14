@@ -837,6 +837,12 @@ def get_config_schema():
                 'enable_gvnic': {
                     'type': 'boolean'
                 },
+                'enable_gpu_direct': {
+                    'type': 'boolean'
+                },
+                'placement_policy': {
+                    'type': 'string',
+                },
                 'vpc_name': {
                     'oneOf': [
                         {
@@ -963,6 +969,26 @@ def get_config_schema():
                 }
             },
         },
+        'nebius': {
+            'type': 'object',
+            'required': [],
+            'properties': {
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            'additionalProperties': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'project_id': {
+                        'type': 'string',
+                    },
+                    'fabric': {
+                        'type': 'string',
+                    },
+                }
+            },
+        }
     }
 
     admin_policy_schema = {

@@ -1,13 +1,15 @@
 """Rich status spinner utils."""
 import contextlib
+import contextvars
 import enum
 import logging
 import threading
 import typing
-from typing import Dict, Iterator, Optional, Tuple, Union
+from typing import Callable, Iterator, Optional, Tuple, Union
 
 from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
+from sky.utils import context
 from sky.utils import message_utils
 from sky.utils import rich_console_utils
 
@@ -18,11 +20,31 @@ else:
     requests = adaptors_common.LazyImport('requests')
     rich_console = adaptors_common.LazyImport('rich.console')
 
-_statuses: Dict[str, Optional[Union['EncodedStatus',
-                                    'rich_console.Status']]] = {
-                                        'server': None,
-                                        'client': None,
-                                    }
+GeneralStatus = Union['rich_console.Status', 'EncodedStatus']
+
+_client_status: Optional[GeneralStatus] = None
+_server_status: contextvars.ContextVar[
+    Optional[GeneralStatus]] = contextvars.ContextVar('server_status',
+                                                      default=None)
+
+
+def _get_client_status() -> Optional[GeneralStatus]:
+    return _client_status
+
+
+def _get_server_status() -> Optional[GeneralStatus]:
+    return _server_status.get()
+
+
+def _set_client_status(status: Optional[GeneralStatus]):
+    global _client_status
+    _client_status = status
+
+
+def _set_server_status(status: Optional[GeneralStatus]):
+    _server_status.set(status)
+
+
 _status_nesting_level = 0
 
 _logging_lock = threading.RLock()
@@ -128,20 +150,22 @@ class _NoOpConsoleStatus:
 class _RevertibleStatus:
     """A wrapper for status that can revert to previous message after exit."""
 
-    def __init__(self, message: str, status_type: str):
+    def __init__(self, message: str, get_status_fn: Callable[[], GeneralStatus],
+                 set_status_fn: Callable[[Optional[GeneralStatus]], None]):
         self.previous_message = None
-        self.status_type = status_type
-        status = _statuses[status_type]
+        self.get_status_fn = get_status_fn
+        self.set_status_fn = set_status_fn
+        status = self.get_status_fn()
         if status is not None:
             self.previous_message = status.status
         self.message = message
 
     def __enter__(self):
         global _status_nesting_level
-        _statuses[self.status_type].update(self.message)
+        self.get_status_fn().update(self.message)
         _status_nesting_level += 1
-        _statuses[self.status_type].__enter__()
-        return _statuses[self.status_type]
+        self.get_status_fn().__enter__()
+        return self.get_status_fn()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # We use the same lock with the `safe_logger` to avoid the following 2
@@ -160,32 +184,48 @@ class _RevertibleStatus:
             _status_nesting_level -= 1
             if _status_nesting_level <= 0:
                 _status_nesting_level = 0
-                if _statuses[self.status_type] is not None:
-                    _statuses[self.status_type].__exit__(
-                        exc_type, exc_val, exc_tb)
-                    _statuses[self.status_type] = None
+                if self.get_status_fn() is not None:
+                    self.get_status_fn().__exit__(exc_type, exc_val, exc_tb)
+                    self.set_status_fn(None)
             else:
-                _statuses[self.status_type].update(self.previous_message)
+                self.get_status_fn().update(self.previous_message)
 
     def update(self, *args, **kwargs):
-        _statuses[self.status_type].update(*args, **kwargs)
+        self.get_status_fn().update(*args, **kwargs)
 
     def stop(self):
-        _statuses[self.status_type].stop()
+        self.get_status_fn().stop()
 
     def start(self):
-        _statuses[self.status_type].start()
+        self.get_status_fn().start()
+
+
+def _is_thread_safe() -> bool:
+    """Check if the current status context is thread-safe.
+
+    We are thread-safe if we are on the main thread or the server_status is
+    context-local, i.e. an async context has been initialized.
+    """
+    return (threading.current_thread() is threading.main_thread() or
+            context.get() is not None)
 
 
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
-    """A wrapper for multi-threaded console.status."""
+    """A wrapper for multi-threaded server-side console.status.
+
+    This function will encode rich status with control codes and output the
+    encoded string to stdout. Client-side decode control codes from server
+    output and update the rich status. This function is safe to be called in
+    async/multi-threaded context.
+
+    See also: :func:`client_status`, :class:`EncodedStatus`.
+    """
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
-    if (annotations.is_on_api_server and
-            threading.current_thread() is threading.main_thread() and
+    if (annotations.is_on_api_server and _is_thread_safe() and
             not sky_logging.is_silent()):
-        if _statuses['server'] is None:
-            _statuses['server'] = EncodedStatus(msg)
-        return _RevertibleStatus(msg, 'server')
+        if _get_server_status() is None:
+            _set_server_status(EncodedStatus(msg))
+        return _RevertibleStatus(msg, _get_server_status, _set_server_status)
     return _NoOpConsoleStatus()
 
 
@@ -196,22 +236,26 @@ def stop_safe_status():
     stream logs from user program and do not want it to interfere with the
     spinner display.
     """
-    if (threading.current_thread() is threading.main_thread() and
-            _statuses['server'] is not None):
-        _statuses['server'].stop()
+    if _is_thread_safe():
+        return
+    server_status = _get_server_status()
+    if server_status is not None:
+        server_status.stop()
 
 
 def force_update_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
-    if (threading.current_thread() is threading.main_thread() and
-            _statuses['server'] is not None):
-        _statuses['server'].update(msg)
+    if not _is_thread_safe():
+        return
+    server_status = _get_server_status()
+    if server_status is not None:
+        server_status.update(msg)
 
 
 @contextlib.contextmanager
 def safe_logger():
     with _logging_lock:
-        client_status_obj = _statuses['client']
+        client_status_obj = _get_client_status()
 
         client_status_live = (client_status_obj is not None and
                               client_status_obj._live.is_started)  # pylint: disable=protected-access
@@ -230,13 +274,13 @@ class RichSafeStreamHandler(logging.StreamHandler):
 
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
-    """A wrapper for multi-threaded console.status."""
+    """A wrapper for multi-threaded client-side console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
-        if _statuses['client'] is None:
-            _statuses['client'] = rich_console_utils.get_console().status(msg)
-        return _RevertibleStatus(msg, 'client')
+        if _get_client_status() is None:
+            _set_client_status(rich_console_utils.get_console().status(msg))
+        return _RevertibleStatus(msg, _get_client_status, _set_client_status)
     return _NoOpConsoleStatus()
 
 

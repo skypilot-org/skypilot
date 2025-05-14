@@ -33,7 +33,6 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
-from sky.clouds import Lambda
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
@@ -742,8 +741,10 @@ def test_kubernetes_context_failover(unreachable_context):
                 'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
-                # H100 should not in the current context
-                '! sky show-gpus --cloud kubernetes | grep H100',
+                # H100 should not be in the current context
+                f'! sky show-gpus --cloud kubernetes --region {context} | grep H100',
+                # H100 should be displayed as long as it is available in one of the contexts
+                'sky show-gpus --cloud kubernetes | grep H100',
                 f'sky launch -y -c {name}-1 --cpus 1 echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
@@ -827,22 +828,28 @@ def test_launch_and_exec_async(generic_cloud: str):
 def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test('cancel_launch_and_exec_async', [
-        f'sky launch -c {name} -y --cloud {generic_cloud} --async',
-        (f's=$(sky exec {name} echo --async) && '
-         'echo "$s" && '
-         'logs_cmd=$(echo "$s" | grep "Check logs with" | '
-         'sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
-         'echo "Extracted logs command: $logs_cmd" && '
-         f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT, sky.ClusterStatus.UP], 30)} && '
-         f'sky down -y {name} && '
-         'log_output=$(eval $logs_cmd || true) && '
-         'echo "===logs===" && echo "$log_output" && '
-         'echo "$log_output" | grep "cancelled"'),
-    ],
-                                  teardown=f'sky down -y {name}',
-                                  timeout=smoke_tests_utils.get_timeout(
-                                      generic_cloud))
+
+    wait_cmd = smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+        name, [sky.ClusterStatus.INIT], 30)
+    # This test need cluster to be in INIT state, so that job will be cancelled,
+    # so we need to reduce the waiting time for the cluster to avoid it goes to UP state
+    wait_cmd = wait_cmd.replace('sleep 10', 'sleep 1')
+    test = smoke_tests_utils.Test(
+        'cancel_launch_and_exec_async', [
+            f'sky launch -c {name} -y --cloud {generic_cloud} --async',
+            (f's=$(sky exec {name} echo --async) && '
+             'echo "$s" && '
+             'logs_cmd=$(echo "$s" | grep "Check logs with" | '
+             'sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
+             'echo "Extracted logs command: $logs_cmd" && '
+             f'{wait_cmd} && '
+             f'sky down -y {name} && '
+             'log_output=$(eval $logs_cmd || true) && '
+             'echo "===logs===" && echo "$log_output" && '
+             'echo "$log_output" | grep "cancelled"'),
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud))
     smoke_tests_utils.run_one_test(test)
 
 
