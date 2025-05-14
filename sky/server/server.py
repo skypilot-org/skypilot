@@ -19,7 +19,6 @@ import zipfile
 
 import aiofiles
 import fastapi
-from fastapi import staticfiles
 from fastapi.middleware import cors
 import starlette.middleware.base
 
@@ -208,16 +207,6 @@ app.add_middleware(
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
-# Serve static files from the dashboard directory
-if not os.path.exists(server_constants.DASHBOARD_NEXT_DIR):
-    logger.warning(
-        f'Dashboard directory {server_constants.DASHBOARD_NEXT_DIR} does '
-        f'not exist. Create it for the dashboard static files mount.')
-    os.makedirs(server_constants.DASHBOARD_NEXT_DIR, exist_ok=True)
-app.mount(
-    '/dashboard/_next',
-    staticfiles.StaticFiles(directory=server_constants.DASHBOARD_NEXT_DIR),
-    name='dashboard')
 
 
 @app.post('/check')
@@ -1176,8 +1165,8 @@ async def serve_dashboard(full_path: str):
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
-    # Try to serve the file directly e.g. /skypilot.svg,
-    # /favicon.ico, and /videos, etc.
+    # Try to serve the staticfile directly e.g. /skypilot.svg,
+    # /favicon.ico, and /_next/, etc.
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
