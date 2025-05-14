@@ -275,6 +275,10 @@ def _get_cloud_dependencies_installation_commands(
                 # We install the plugin here instead of the next elif branch
                 # because gcloud is required to install the plugin, so the order
                 # of command execution is critical.
+
+                # We install plugin here regardless of whether exec-auth is
+                # actually used as exec-auth may be used in the future.
+                # TODO (kyuds): how to implement conservative installation?
                 commands.append(
                     '(command -v gke-gcloud-auth-plugin &>/dev/null || '
                     '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null && '  # pylint: disable=line-too-long
