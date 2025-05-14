@@ -101,11 +101,11 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 | g6e.48xlarge  | L40S:8   | 4    |
 
 
-Update the EFA number in the `nccl_efa.yaml` for the GPUs you use.
+Update the EFA number in the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the GPUs you use.
 
 ## Running NCCL test with EFA using SkyPilot
 
-Check the `nccl_efa.yaml` for the complete SkyPilot cluster yaml configurations.
+Check the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot cluster yaml configurations.
 
 The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
