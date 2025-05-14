@@ -98,7 +98,7 @@ def list_accelerators(
     """Returns all instance types in Hyperbolic offering GPUs."""
     del require_price
     return common.list_accelerators_impl(
-        'Hyperbolic',
+        'hyperbolic',
         _df,
         gpus_only,
         name_filter,

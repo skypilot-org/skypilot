@@ -1,0 +1,40 @@
+# Ray cluster config template for Hyperbolic Cloud
+
+cluster_name: {{ cluster_name }}
+
+provider:
+  type: hyperbolic
+
+available_node_types:
+  ray.head.default:
+    node_config:
+      InstanceType: {{ head_instance_type }}
+      # Add any Hyperbolic-specific config here
+    resources: {{ head_resources }}
+    min_workers: 0
+    max_workers: 0
+
+  ray.worker.default:
+    node_config:
+      InstanceType: {{ worker_instance_type }}
+      # Add any Hyperbolic-specific config here
+    resources: {{ worker_resources }}
+    min_workers: {{ min_workers }}
+    max_workers: {{ max_workers }}
+
+auth:
+  ssh_user: {{ ssh_user }}
+  ssh_private_key: {{ ssh_private_key }}
+
+setup_commands:
+  - echo "Setup commands for Hyperbolic"
+
+head_setup_commands:
+  - echo "Head node setup for Hyperbolic"
+
+worker_setup_commands:
+  - echo "Worker node setup for Hyperbolic"
+
+file_mounts: {}
+
+# Add more fields as needed for your cloud
