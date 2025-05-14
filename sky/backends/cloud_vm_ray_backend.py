@@ -61,7 +61,6 @@ from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import log_utils
@@ -275,7 +274,6 @@ class RayCodeGen:
         ray_address = 'auto'
         self._code = [
             textwrap.dedent(f"""\
-            import functools
             import getpass
             import hashlib
             import io
@@ -303,8 +301,6 @@ class RayCodeGen:
             from sky.skylet import autostop_lib
             from sky.skylet import constants
             from sky.skylet import job_lib
-            from sky.utils import context
-            from sky.utils import context_utils
             from sky.utils import log_utils
             from sky.utils import subprocess_utils
 
@@ -2419,7 +2415,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
-    @context_utils.cancellation_guard
     @annotations.lru_cache(scope='global')
     @timeline.event
     def get_command_runners(self,
@@ -3847,7 +3842,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         return dict(zip(job_ids, local_log_dirs))
 
-    @context_utils.cancellation_guard
     def tail_logs(self,
                   handle: CloudVmRayResourceHandle,
                   job_id: Optional[int],
@@ -4565,7 +4559,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     @timeline.event
-    @context_utils.cancellation_guard
     def run_on_head(
         self,
         handle: CloudVmRayResourceHandle,
