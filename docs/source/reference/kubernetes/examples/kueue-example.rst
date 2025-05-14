@@ -45,6 +45,10 @@ To install Kueue, run the following command:
     VERSION=v0.11.4
     kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/$VERSION/manifests.yaml
 
+
+Patch Kueue to support plain pods
+---------------------------------
+
 Kueue does not support scheduling plain pods out of the box. Since SkyPilot creates and manages workloads as pods,
 the kueue config needs to be patched to support plain pods.
 
@@ -59,6 +63,20 @@ the kueue config needs to be patched to support plain pods.
     kubectl -n kueue-system rollout restart deployment kueue-controller-manager
     # Wait for the restart to complete
     kubectl -n kueue-system rollout status deployment kueue-controller-manager
+
+Check that the patch is applied by running the following command:
+
+.. code-block:: bash
+
+    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks'
+
+This should output:
+
+.. code-block:: bash
+
+    ...
+    - pod
+
 
 Create team namespaces
 ----------------------
