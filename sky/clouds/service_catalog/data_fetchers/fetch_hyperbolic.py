@@ -36,7 +36,7 @@ def create_catalog() -> None:
             timeout=30)
         if not response.ok:
             raise RuntimeError(f'API request failed: {response.text}')
-        instances = response.json()["vms"]
+        instances = response.json()['vms']
     except requests.exceptions.RequestException as request_error:
         raise RuntimeError(f'Failed to fetch instance data: {request_error}'
                           ) from request_error
