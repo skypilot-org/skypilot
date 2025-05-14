@@ -627,7 +627,7 @@ export function GPUs() {
                 </div>
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No detailed information found for "{filterValue}" {detailedCloudFilter !== 'All Clouds' ? `in ${detailedCloudFilter}` : ''}.
+                  No detailed information found for &quot;{filterValue}&quot; {detailedCloudFilter !== 'All Clouds' ? `in ${detailedCloudFilter}` : ''}.
                 </div>
               )}
             </div>
