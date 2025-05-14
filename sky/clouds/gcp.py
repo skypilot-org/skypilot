@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.provision.gcp import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -112,6 +113,10 @@ _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
 # For GPU-related package version, see sky/clouds/service_catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
+# Use COS image with GPU Direct support.
+# Need to contact GCP support to build our own image for GPUDirect-TCPX support.
+# Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
+_DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 
 
 def _run_output(cmd):
@@ -488,6 +493,11 @@ class GCP(clouds.Cloud):
             'gcp_project_id': self.get_project_id(dryrun),
             **GCP._get_disk_specs(r.instance_type, _failover_disk_tier()),
         }
+        enable_gpu_direct = skypilot_config.get_nested(
+            ('gcp', 'enable_gpu_direct'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+        resources_vars['enable_gpu_direct'] = enable_gpu_direct
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
@@ -511,23 +521,28 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc in ('A100-80GB', 'L4'):
+                if acc in ('A100-80GB', 'L4', 'B200'):
                     # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}'
                 elif acc in ('H100', 'H100-MEGA'):
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
+                elif acc in ('H200',):
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}-141gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if acc == 'K80':
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = _DEFAULT_GPU_K80_IMAGE_ID
+                if enable_gpu_direct:
+                    image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
-                    # CUDA driver version 535.86.10, CUDA Library 12.2
-                    image_id = _DEFAULT_GPU_IMAGE_ID
+                    if acc == 'K80':
+                        # Though the image is called cu113, it actually has later
+                        # versions of CUDA as noted below.
+                        # CUDA driver version 470.57.02, CUDA Library 11.4
+                        image_id = _DEFAULT_GPU_K80_IMAGE_ID
+                    else:
+                        # CUDA driver version 535.86.10, CUDA Library 12.2
+                        image_id = _DEFAULT_GPU_IMAGE_ID
 
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
@@ -580,7 +595,21 @@ class GCP(clouds.Cloud):
 
         # Add gVNIC from config
         resources_vars['enable_gvnic'] = skypilot_config.get_nested(
-            ('gcp', 'enable_gvnic'), False)
+            ('gcp', 'enable_gvnic'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+        placement_policy = skypilot_config.get_nested(
+            ('gcp', 'placement_policy'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+        resources_vars['user_data'] = None
+        if enable_gpu_direct:
+            resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
+            resources_vars[
+                'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+            if placement_policy is None:
+                placement_policy = constants.COMPACT_GROUP_PLACEMENT_POLICY
+        resources_vars['placement_policy'] = placement_policy
 
         return resources_vars
 
@@ -1032,15 +1061,24 @@ class GCP(clouds.Cloud):
                 raise exceptions.NotSupportedError(msg)
 
     @classmethod
-    def _get_disk_type(cls, instance_type: Optional[str],
-                       disk_tier: Optional[resources_utils.DiskTier]) -> str:
+    def _get_disk_type(
+        cls,
+        instance_type: Optional[str],
+        disk_tier: Optional[resources_utils.DiskTier],
+    ) -> str:
 
-        def _propagate_disk_type(lowest: Optional[str] = None,
-                                 highest: Optional[str] = None) -> None:
+        def _propagate_disk_type(
+            lowest: Optional[str] = None,
+            highest: Optional[str] = None,
+            # pylint: disable=redefined-builtin
+            all: Optional[str] = None) -> None:
             if lowest is not None:
                 tier2name[resources_utils.DiskTier.LOW] = lowest
             if highest is not None:
                 tier2name[resources_utils.DiskTier.ULTRA] = highest
+            if all is not None:
+                for tier in tier2name:
+                    tier2name[tier] = all
 
         tier = cls._translate_disk_tier(disk_tier)
 
@@ -1054,7 +1092,8 @@ class GCP(clouds.Cloud):
 
         # Remap series-specific disk types.
         # Reference: https://github.com/skypilot-org/skypilot/issues/4705
-        series = instance_type.split('-')[0]  # type: ignore
+        assert instance_type is not None, (instance_type, disk_tier)
+        series = instance_type.split('-')[0]
 
         # General handling of unsupported disk types
         if series in ['n1', 'a2', 'g2']:
@@ -1065,6 +1104,9 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
+        if instance_type.startswith('a3-ultragpu'):
+            # a3-ultragpu instances only support hyperdisk-balanced.
+            _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling
         if series == 'n2':
@@ -1087,7 +1129,8 @@ class GCP(clouds.Cloud):
         specs: Dict[str, Any] = {
             'disk_tier': cls._get_disk_type(instance_type, disk_tier)
         }
-        if disk_tier == resources_utils.DiskTier.ULTRA:
+        if (disk_tier == resources_utils.DiskTier.ULTRA and
+                specs['disk_tier'] == 'pd-extreme'):
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
             specs['disk_iops'] = 20000
