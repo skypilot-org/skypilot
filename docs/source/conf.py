@@ -36,6 +36,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx_autodoc_typehints',
     'sphinx_click',
+    'sphinx_tabs.tabs',
     'sphinx_copybutton',
     "sphinx_togglebutton",  # Used for collapsible sections in examples.
     'sphinxcontrib.googleanalytics',
