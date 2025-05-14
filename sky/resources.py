@@ -501,7 +501,7 @@ class Resources:
         Args:
             value: Whether the resource requires FUSE mounting support.
         """
-        # TODO(username): This violates the immutability of Resources.
+        # TODO(zeping): This violates the immutability of Resources.
         #  Refactor to use Resources.copy instead.
         self._requires_fuse = value
 
@@ -1789,7 +1789,7 @@ class LaunchableResources(Resources):
     None). It should not be instantiated directly.
     """
 
-    def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called
+    def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called,unused-argument
         assert False, (
             'LaunchableResources should not be instantiated directly. '
             'It is only used for type checking by MyPy.')
