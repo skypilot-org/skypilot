@@ -194,6 +194,16 @@ export function TopBar() {
           </div>
 
           <div className="border-l border-gray-200 h-6 mx-1"></div>
+          
+          {/* GPUs Link */}
+          <Link
+            href="/gpus"
+            className={getLinkClasses('/gpus')}
+            prefetch={false}
+          >
+            <ChipIcon className="w-4 h-4" />
+            {!isMobile && <span>GPUs</span>}
+          </Link>
 
           {/* Workspaces Link */}
           <Link
@@ -205,15 +215,6 @@ export function TopBar() {
             {!isMobile && <span>Workspaces</span>}
           </Link>
 
-          {/* GPUs Link */}
-          <Link
-            href="/gpus"
-            className={getLinkClasses('/gpus')}
-            prefetch={false}
-          >
-            <ChipIcon className="w-4 h-4" />
-            {!isMobile && <span>GPUs</span>}
-          </Link>
         </div>
 
         {/* External links - now shows only icons on mobile */}
