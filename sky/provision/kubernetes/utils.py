@@ -3100,7 +3100,8 @@ def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
         if current_command:
             # Strip the path and keep only the executable name
             executable = os.path.basename(current_command)
-            exec_info['command'] = kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER
+            exec_info[
+                'command'] = kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER
             if exec_info.get('args') is None:
                 exec_info['args'] = []
             exec_info['args'].insert(0, executable)
