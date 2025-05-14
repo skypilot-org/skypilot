@@ -62,6 +62,16 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 
+def _get_context():
+    # TODO(aylei): remove this after we drop the backward-compatibility for
+    # 0.9.x in 0.12.0
+    # Keep backward-compatibility for the old version of SkyPilot runtimes.
+    if 'context' in globals():
+        return context.get()
+    else:
+        return None
+
+
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
     out_io = io.TextIOWrapper(io_stream,
@@ -80,7 +90,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
-                ctx = context.get()
+                ctx = _get_context()
                 if ctx is not None and ctx.is_canceled():
                     return
                 line = out_io.readline()
@@ -139,7 +149,6 @@ def process_subprocess_stream(proc, stdout_stream_handler,
     return stdout, stderr
 
 
-@context_utils.cancellation_guard
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
@@ -181,7 +190,7 @@ def run_with_log(
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None
-    ctx = context.get()
+    ctx = _get_context()
     if process_stream or ctx is not None:
         # Capture stdout/stderr of the subprocess if:
         # 1. Post-processing is needed (process_stream=True)

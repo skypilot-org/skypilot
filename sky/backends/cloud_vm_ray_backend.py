@@ -303,8 +303,6 @@ class RayCodeGen:
             from sky.skylet import autostop_lib
             from sky.skylet import constants
             from sky.skylet import job_lib
-            from sky.utils import context
-            from sky.utils import context_utils
             from sky.utils import log_utils
             from sky.utils import subprocess_utils
 
@@ -367,6 +365,7 @@ class RayCodeGen:
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
             inspect.getsource(log_lib._ProcessingArgs),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._get_context),  # pylint: disable=protected-access
             inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
