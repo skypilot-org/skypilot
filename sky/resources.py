@@ -1790,9 +1790,9 @@ class LaunchableResources(Resources):
     """
 
     def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called
-        raise RuntimeError(
+        assert False, (
             'LaunchableResources should not be instantiated directly. '
-            'It is a type hint for MyPy.')
+            'It is only used for type checking by MyPy.')
 
     @property
     def cloud(self) -> clouds.Cloud:
