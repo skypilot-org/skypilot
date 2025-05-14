@@ -244,9 +244,8 @@ def _execute(
             # Blockers:
             # - Need autostop config to set requested_features before
             #   provisioning.
-            # - Need to send info message here.
+            # - Need to send info message about idle_minutes_to_autostop==0 here
             # - Need to check if autostop is supported by the backend.
-            # - Need to
             resources = list(task.resources)
             for resource in resources:
                 if resource.autostop_config != resources[0].autostop_config:

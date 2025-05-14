@@ -172,9 +172,6 @@ def launch(
         controller_resources = controller_utils.get_controller_resources(
             controller=controller,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
-        controller_idle_minutes_to_autostop, controller_down = (
-            controller_utils.get_controller_autostop_config(
-                controller=controller))
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
@@ -216,15 +213,12 @@ def launch(
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
         with common.with_server_user_hash():
-            return execution.launch(
-                task=controller_task,
-                cluster_name=controller_name,
-                stream_logs=stream_logs,
-                idle_minutes_to_autostop=controller_idle_minutes_to_autostop,
-                down=controller_down,
-                retry_until_up=True,
-                fast=True,
-                _disable_controller_check=True)
+            return execution.launch(task=controller_task,
+                                    cluster_name=controller_name,
+                                    stream_logs=stream_logs,
+                                    retry_until_up=True,
+                                    fast=True,
+                                    _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
