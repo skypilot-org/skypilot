@@ -17,6 +17,7 @@ from sky.clouds.cudo import Cudo
 from sky.clouds.do import DO
 from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.gcp import GCP
+from sky.clouds.hyperbolic import Hyperbolic
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
@@ -51,6 +52,7 @@ __all__ = [
     'StatusVersion',
     'Fluidstack',
     'Nebius',
+    'Hyperbolic',
     # Utility functions
     'cloud_in_iterable',
 ]
