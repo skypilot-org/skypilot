@@ -1,7 +1,8 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import textwrap
-from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
+import typing
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -211,7 +212,7 @@ class Resources:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
-                    cast(str, k).strip(): v.strip()
+                    typing.cast(str, k).strip(): v.strip()
                     for k, v in image_id.items()
                 }
         else:
@@ -500,6 +501,8 @@ class Resources:
         Args:
             value: Whether the resource requires FUSE mounting support.
         """
+        # TODO(username): This violates the immutability of Resources.
+        #  Refactor to use Resources.copy instead.
         self._requires_fuse = value
 
     @property
@@ -667,7 +670,7 @@ class Resources:
         types, and the returned object will still be an instance of `Resources`.
         """
         assert self.is_launchable(), self
-        return cast(LaunchableResources, self)
+        return typing.cast(LaunchableResources, self)
 
     def need_cleanup_after_preemption_or_failure(self) -> bool:
         """Whether a resource needs cleanup after preemption or failure."""
@@ -1810,4 +1813,4 @@ class LaunchableResources(Resources):
         serves as a type hint for static analysis.
         """
         self.assert_launchable()
-        return cast(LaunchableResources, super().copy(**override))
+        return typing.cast(LaunchableResources, super().copy(**override))
