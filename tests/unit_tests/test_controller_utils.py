@@ -8,11 +8,12 @@ from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.utils import controller_utils
 
-
 _DEFAULT_AUTOSTOP = {
     'down': False,
     'idle_minutes': 10,
 }
+
+
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
