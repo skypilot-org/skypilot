@@ -11,7 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
-import { getGPUs, getCloudGPUs, getDetailedGpuInfo } from '@/data/connectors/gpus';
+import {
+  getGPUs,
+  getCloudGPUs,
+  getDetailedGpuInfo,
+} from '@/data/connectors/gpus';
 
 // Set the refresh interval to 1 minute for GPU data
 const GPU_REFRESH_INTERVAL = 60000;
@@ -38,7 +42,7 @@ export function GPUs() {
   });
   const [cloudInitialLoad, setCloudInitialLoad] = useState(true);
   // Filter state for cloud GPUs (top-level filter box)
-  const [filterValue, setFilterValue] = useState("");
+  const [filterValue, setFilterValue] = useState('');
 
   // Detailed search results state
   const [showDetailedResults, setShowDetailedResults] = useState(false);
@@ -170,13 +174,13 @@ export function GPUs() {
       const data = await getDetailedGpuInfo(filter);
       setDetailedGpuData(data);
     } catch (error) {
-      console.error("Error fetching detailed GPU info:", error);
+      console.error('Error fetching detailed GPU info:', error);
       setDetailedGpuData([]);
     } finally {
       setDetailedGpuLoading(false);
     }
   };
-  
+
   // Handler for search button click
   const handleDetailedSearch = () => {
     setShowDetailedResults(true);
@@ -187,7 +191,7 @@ export function GPUs() {
   // Prepare cloud filter options for detailed results - MOVED TO TOP LEVEL
   const detailedCloudOptions = React.useMemo(() => {
     if (!detailedGpuData || detailedGpuData.length === 0) return ['All Clouds'];
-    const clouds = new Set(detailedGpuData.map(gpu => gpu.cloud));
+    const clouds = new Set(detailedGpuData.map((gpu) => gpu.cloud));
     return ['All Clouds', ...Array.from(clouds).sort()];
   }, [detailedGpuData]);
 
@@ -196,7 +200,7 @@ export function GPUs() {
     if (detailedCloudFilter === 'All Clouds') {
       return detailedGpuData;
     }
-    return detailedGpuData.filter(gpu => gpu.cloud === detailedCloudFilter);
+    return detailedGpuData.filter((gpu) => gpu.cloud === detailedCloudFilter);
   }, [detailedGpuData, detailedCloudFilter]);
 
   const renderKubernetesTab = () => {
@@ -231,7 +235,9 @@ export function GPUs() {
                 <div>
                   <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
                     <div className="p-4">
-                      <p className="text-sm text-gray-500">Total GPUs (All Types)</p>
+                      <p className="text-sm text-gray-500">
+                        Total GPUs (All Types)
+                      </p>
                       <p className="text-2xl font-bold">{grandTotalGPUs}</p>
                     </div>
                   </div>
@@ -239,7 +245,9 @@ export function GPUs() {
                 <div>
                   <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
                     <div className="p-4">
-                      <p className="text-sm text-gray-500">Total Free GPUs (All Types)</p>
+                      <p className="text-sm text-gray-500">
+                        Total Free GPUs (All Types)
+                      </p>
                       <p className="text-2xl font-bold">{grandTotalFreeGPUs}</p>
                     </div>
                   </div>
@@ -250,9 +258,13 @@ export function GPUs() {
               <div
                 className={`
                   grid gap-4
-                  ${allGPUs.length === 1 ? 'grid-cols-1' : 
-                    allGPUs.length === 2 ? 'grid-cols-2' : 
-                    'md:grid-cols-2 xl:grid-cols-3'}
+                  ${
+                    allGPUs.length === 1
+                      ? 'grid-cols-1'
+                      : allGPUs.length === 2
+                        ? 'grid-cols-2'
+                        : 'md:grid-cols-2 xl:grid-cols-3'
+                  }
                 `}
               >
                 {allGPUs.map((gpu) => {
@@ -262,18 +274,14 @@ export function GPUs() {
                       ? (gpu.gpu_free / gpu.gpu_total) * 100
                       : 0;
                   const usedPercentage =
-                    gpu.gpu_total > 0
-                      ? (usedGpus / gpu.gpu_total) * 100
-                      : 0;
+                    gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
                   return (
                     <div
                       key={gpu.gpu_name}
                       className="p-2 border rounded w-full"
                     >
                       <div className="flex justify-between items-center mb-1">
-                        <span className="font-medium">
-                          {gpu.gpu_name}
-                        </span>
+                        <span className="font-medium">{gpu.gpu_name}</span>
                         <span className="text-sm text-gray-600">
                           {gpu.gpu_free} free / {gpu.gpu_total} total
                         </span>
@@ -326,12 +334,10 @@ export function GPUs() {
                             <div className="p-4 pt-2 overflow-y-auto flex-1">
                               <div className="space-y-3">
                                 {gpusInContext.map((gpu) => {
-                                  const usedGpus =
-                                    gpu.gpu_total - gpu.gpu_free;
+                                  const usedGpus = gpu.gpu_total - gpu.gpu_free;
                                   const freePercentage =
                                     gpu.gpu_total > 0
-                                      ? (gpu.gpu_free / gpu.gpu_total) *
-                                        100
+                                      ? (gpu.gpu_free / gpu.gpu_total) * 100
                                       : 0;
                                   const usedPercentage =
                                     gpu.gpu_total > 0
@@ -349,13 +355,13 @@ export function GPUs() {
                                           </span>
                                           <span className="text-xs text-gray-500 ml-2">
                                             (Requestable:{' '}
-                                            {gpu.gpu_requestable_qty_per_node}{' '}
-                                            / Node)
+                                            {gpu.gpu_requestable_qty_per_node} /
+                                            Node)
                                           </span>
                                         </div>
                                         <span className="text-sm text-gray-600">
-                                          {gpu.gpu_free} free /{' '}
-                                          {gpu.gpu_total} total
+                                          {gpu.gpu_free} free / {gpu.gpu_total}{' '}
+                                          total
                                         </span>
                                       </div>
                                       <div className="w-full bg-gray-200 rounded h-6 flex overflow-hidden mt-1">
@@ -366,8 +372,7 @@ export function GPUs() {
                                           className="bg-sky-500 h-full flex items-center justify-center text-white text-xs"
                                           title={`Used: ${usedGpus} (${usedPercentage.toFixed(1)}%)`}
                                         >
-                                          {usedGpus > 0 &&
-                                            usedPercentage > 10
+                                          {usedGpus > 0 && usedPercentage > 10
                                             ? `${usedGpus} Used`
                                             : ''}
                                         </div>
@@ -379,7 +384,7 @@ export function GPUs() {
                                           title={`Free: ${gpu.gpu_free} (${freePercentage.toFixed(1)}%)`}
                                         >
                                           {gpu.gpu_free > 0 &&
-                                            freePercentage > 10
+                                          freePercentage > 10
                                             ? `${gpu.gpu_free} Free`
                                             : ''}
                                         </div>
@@ -468,11 +473,11 @@ export function GPUs() {
     const filterGpuData = (data) => {
       if (!data) return [];
       if (!filterValue.trim()) return data;
-      
+
       const filter = filterValue.trim().toLowerCase();
       let filterType = null;
       let filterCount = null;
-      
+
       // Parse filter like "A100:2" into type and count
       if (filter.includes(':')) {
         const [type, count] = filter.split(':');
@@ -482,22 +487,22 @@ export function GPUs() {
       } else {
         filterType = filter;
       }
-      
-      return data.filter(item => {
+
+      return data.filter((item) => {
         const gpuType = (item.gpu_name || '').toLowerCase();
         if (!gpuType.includes(filterType)) return false;
-        
+
         // If count is specified, check if any available quantity matches
         if (filterCount !== null) {
           // Check if gpu_quantities is available and contains the filtered count
           const quantities = item.gpu_quantities || '';
           return quantities.includes(filterCount.toString());
         }
-        
+
         return true;
       });
     };
-    
+
     const filteredCommonGpus = filterGpuData(cloudData.commonGPUs);
     const filteredTpus = filterGpuData(cloudData.tpus);
     const filteredOtherGpus = filterGpuData(cloudData.otherGPUs);
@@ -506,16 +511,16 @@ export function GPUs() {
       return (
         <div className="flex flex-col items-center justify-center h-64">
           <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 text-lg">
-            Loading Cloud GPUs...
-          </span>
+          <span className="text-gray-500 text-lg">Loading Cloud GPUs...</span>
         </div>
       );
     }
 
-    if ((cloudData.commonGPUs && cloudData.commonGPUs.length > 0) ||
-        (cloudData.tpus && cloudData.tpus.length > 0) ||
-        (cloudData.otherGPUs && cloudData.otherGPUs.length > 0)) {
+    if (
+      (cloudData.commonGPUs && cloudData.commonGPUs.length > 0) ||
+      (cloudData.tpus && cloudData.tpus.length > 0) ||
+      (cloudData.otherGPUs && cloudData.otherGPUs.length > 0)
+    ) {
       return (
         <div className="px-4 py-2">
           <div className="mt-2 mb-4">
@@ -531,7 +536,7 @@ export function GPUs() {
                 {filterValue.trim() && (
                   <button
                     onClick={() => {
-                      setFilterValue("");
+                      setFilterValue('');
                       setShowDetailedResults(false);
                       setDetailedCloudFilter('All Clouds');
                     }}
@@ -553,7 +558,7 @@ export function GPUs() {
               )}
             </div>
           </div>
-          
+
           {/* Detailed GPU Results Section */}
           {showDetailedResults && (
             <div className="mb-6 border rounded-lg p-4 bg-white">
@@ -563,13 +568,15 @@ export function GPUs() {
                     Detailed GPU Info: {filterValue}
                   </h3>
                   {detailedGpuData && detailedGpuData.length > 0 && (
-                    <select 
-                      value={detailedCloudFilter} 
+                    <select
+                      value={detailedCloudFilter}
                       onChange={(e) => setDetailedCloudFilter(e.target.value)}
                       className="px-2 py-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                     >
-                      {detailedCloudOptions.map(cloud => (
-                        <option key={cloud} value={cloud}>{cloud}</option>
+                      {detailedCloudOptions.map((cloud) => (
+                        <option key={cloud} value={cloud}>
+                          {cloud}
+                        </option>
                       ))}
                     </select>
                   )}
@@ -584,42 +591,87 @@ export function GPUs() {
                   <XIcon size={18} />
                 </button>
               </div>
-              
+
               {detailedGpuLoading ? (
                 <div className="flex flex-col items-center justify-center py-10">
                   <CircularProgress size={32} className="mb-4" />
-                  <span className="text-gray-500">Loading detailed GPU information...</span>
+                  <span className="text-gray-500">
+                    Loading detailed GPU information...
+                  </span>
                 </div>
-              ) : currentDetailedGpuData && currentDetailedGpuData.length > 0 ? (
+              ) : currentDetailedGpuData &&
+                currentDetailedGpuData.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm border-b border-gray-200">
                     <thead className="bg-gray-100">
                       <tr>
-                        <th className="p-2 text-left font-medium text-gray-600">GPU</th>
-                        <th className="p-2 text-left font-medium text-gray-600">QTY</th>
-                        <th className="p-2 text-left font-medium text-gray-600">CLOUD</th>
-                        <th className="p-2 text-left font-medium text-gray-600">INSTANCE TYPE</th>
-                        <th className="p-2 text-left font-medium text-gray-600">DEVICE MEM</th>
-                        <th className="p-2 text-left font-medium text-gray-600">vCPUs</th>
-                        <th className="p-2 text-left font-medium text-gray-600">HOST MEM</th>
-                        <th className="p-2 text-left font-medium text-gray-600">HOURLY PRICE</th>
-                        <th className="p-2 text-left font-medium text-gray-600">HOURLY SPOT PRICE</th>
-                        <th className="p-2 text-left font-medium text-gray-600">REGION</th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          GPU
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          QTY
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          CLOUD
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          INSTANCE TYPE
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          DEVICE MEM
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          vCPUs
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          HOST MEM
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          HOURLY PRICE
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          HOURLY SPOT PRICE
+                        </th>
+                        <th className="p-2 text-left font-medium text-gray-600">
+                          REGION
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {currentDetailedGpuData.map((gpu, idx) => (
-                        <tr key={`detailed-gpu-${idx}-${gpu.cloud}-${gpu.instance_type}-${gpu.region}`}>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.accelerator_name}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.accelerator_count}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.cloud}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.instance_type}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.device_memory}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.cpu_count}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.memory}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.price}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.spot_price}</td>
-                          <td className="p-2 whitespace-nowrap text-gray-700">{gpu.region}</td>
+                        <tr
+                          key={`detailed-gpu-${idx}-${gpu.cloud}-${gpu.instance_type}-${gpu.region}`}
+                        >
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.accelerator_name}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.accelerator_count}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.cloud}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.instance_type}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.device_memory}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.cpu_count}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.memory}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.price}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.spot_price}
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-gray-700">
+                            {gpu.region}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -627,12 +679,16 @@ export function GPUs() {
                 </div>
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No detailed information found for "{filterValue}" {detailedCloudFilter !== 'All Clouds' ? `in ${detailedCloudFilter}` : ''}.
+                  No detailed information found for &quot;{filterValue}&quot;{' '}
+                  {detailedCloudFilter !== 'All Clouds'
+                    ? `in ${detailedCloudFilter}`
+                    : ''}
+                  .
                 </div>
               )}
             </div>
           )}
-          
+
           {/* Display cloud GPUs in a grid layout */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Common GPUs and Other GPUs in the first column/row */}
@@ -640,19 +696,25 @@ export function GPUs() {
               {filteredCommonGpus && filteredCommonGpus.length > 0 && (
                 <div className="mb-4">
                   <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4 h-full">
-                    <CloudGpuTable data={filteredCommonGpus} title="Common GPUs" />
+                    <CloudGpuTable
+                      data={filteredCommonGpus}
+                      title="Common GPUs"
+                    />
                   </div>
                 </div>
               )}
               {filteredOtherGpus && filteredOtherGpus.length > 0 && (
                 <div className="mb-4">
                   <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4 h-full">
-                    <CloudGpuTable data={filteredOtherGpus} title="Other GPUs" />
+                    <CloudGpuTable
+                      data={filteredOtherGpus}
+                      title="Other GPUs"
+                    />
                   </div>
                 </div>
               )}
             </div>
-            
+
             {/* TPUs in the second column/row */}
             <div>
               {filteredTpus && filteredTpus.length > 0 && (
@@ -718,8 +780,10 @@ export function GPUs() {
           <button
             className="text-sky-blue hover:text-sky-blue-bright inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium h-9 rounded-md px-3 hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
             onClick={handleRefresh}
-            disabled={(selectedTab === 'kubernetes' && loading) ||
-              (selectedTab === 'cloud' && cloudLoading)}
+            disabled={
+              (selectedTab === 'kubernetes' && loading) ||
+              (selectedTab === 'cloud' && cloudLoading)
+            }
             title="Refresh"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
