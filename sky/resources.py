@@ -53,27 +53,29 @@ class AutostopConfig:
         }
 
     @classmethod
-    def from_bool(cls, value: bool) -> 'AutostopConfig':
-        # Default values for enabled/disabled.
-        if value:
-            return cls(enabled=True)
-        else:
-            return cls(enabled=False)
+    def from_yaml_config(
+        cls, config: Union[bool, int, Dict[str, Any], None]
+    ) -> Optional['AutostopConfig']:
+        if isinstance(config, bool):
+            if config:
+                return cls(enabled=True)
+            else:
+                return cls(enabled=False)
 
-    @classmethod
-    def from_int(cls, value: int) -> 'AutostopConfig':
-        return cls(idle_minutes=value, down=False, enabled=True)
+        if isinstance(config, int):
+            return cls(idle_minutes=config, down=False, enabled=True)
 
-    @classmethod
-    def from_yaml_config(cls, config: Dict[str, Any]) -> 'AutostopConfig':
-        # If we have a dict, autostop is enabled. (Only way to disable is with
-        # `false`, a bool.)
-        autostop_config = cls(enabled=True)
-        if 'idle_minutes' in config:
-            autostop_config.idle_minutes = config['idle_minutes']
-        if 'down' in config:
-            autostop_config.down = config['down']
-        return autostop_config
+        if isinstance(config, dict):
+            # If we have a dict, autostop is enabled. (Only way to disable is
+            # with `false`, a bool.)
+            autostop_config = cls(enabled=True)
+            if 'idle_minutes' in config:
+                autostop_config.idle_minutes = config['idle_minutes']
+            if 'down' in config:
+                autostop_config.down = config['down']
+            return autostop_config
+
+        return None
 
 
 class Resources:
@@ -708,15 +710,7 @@ class Resources:
         self,
         autostop: Union[bool, int, Dict[str, Any], None],
     ) -> None:
-        # Unset, use default (usually disabled, but enabled for controllers.)
-        self._autostop_config: Optional[AutostopConfig] = None
-        # Otherwise, convert based on the type of config schema.
-        if isinstance(autostop, bool):
-            self._autostop_config = AutostopConfig.from_bool(autostop)
-        elif isinstance(autostop, int):
-            self._autostop_config = AutostopConfig.from_int(autostop)
-        elif isinstance(autostop, dict):
-            self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+        self._autostop_config = AutostopConfig.from_yaml_config(autostop)
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
