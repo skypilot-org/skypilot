@@ -116,6 +116,15 @@ jobs:
       package_name: 'skypilot'
       version: ${{ needs.extract-version.outputs.version }}
     secrets: inherit
+  
+  publish-helm:
+    needs: [extract-version, publish-to-pypi, trigger-docker-build]
+    uses: ./.github/workflows/publish-helm.yml
+    with:
+      version: ${{ needs.extract-version.outputs.version }}
+      commit_message: 'Update Helm charts for skypilot version ${{ needs.extract-version.outputs.version }}'
+      package_name: 'skypilot'
+    secrets: inherit
 
   cleanup-branches:
     needs: extract-version

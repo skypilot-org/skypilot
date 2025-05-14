@@ -32,7 +32,7 @@ With `enable_gpu_direct: true`, SkyPilot automatically:
 
 ## Running NCCL Tests with GPUDirect-TCPX
 
-The complete configuration is available in `gpu_direct_tcpx.yaml`. The configuration includes:
+The complete configuration is available in [`gpu_direct_tcpx.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/gpu_direct_tcpx.yaml). The configuration includes:
 - `image_id`: Pre-configured environment for NCCL testing
 - `instance_type`: Set to `a3-highgpu-8g`
 
@@ -43,7 +43,7 @@ sky launch -c tcpx gpu_direct_tcpx.yaml
 ```
 
 SkyPilot will:
-1. Deploy a GCP cluster with GPUDirect-TCPX-enabled nodes
+1. Deploy a GCP cluster with GPUDirect-TCPX enabled nodes
 2. Execute NCCL performance tests
 3. Output detailed performance metrics
 
