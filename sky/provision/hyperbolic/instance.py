@@ -16,8 +16,8 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _filter_instances(cluster_name_on_cloud: str,
-                     status_filters: Optional[List[str]],
-                     head_only: bool = False) -> Dict[str, Any]:
+                      status_filters: Optional[List[str]],
+                      head_only: bool = False) -> Dict[str, Any]:
     """Filter instances by cluster name and status."""
     instances = utils.list_instances()
     possible_names = [f'{cluster_name_on_cloud}-head']
@@ -45,7 +45,7 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
-                 config: common.ProvisionConfig) -> common.ProvisionRecord:
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     # Define pending statuses for Hyperbolic
     pending_status = ['CREATING', 'STARTING']
@@ -73,15 +73,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             raise RuntimeError(
                 f'Cluster {cluster_name_on_cloud} has no head node.')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
-                   f'{len(exist_instances)} nodes, no need to start more.')
-        return common.ProvisionRecord(
-            provider_name='hyperbolic',
-            cluster_name=cluster_name_on_cloud,
-            region=region,
-            zone=None,
-            head_instance_id=head_instance_id,
-            resumed_instance_ids=[],
-            created_instance_ids=[])
+                    f'{len(exist_instances)} nodes, no need to start more.')
+        return common.ProvisionRecord(provider_name='hyperbolic',
+                                      cluster_name=cluster_name_on_cloud,
+                                      region=region,
+                                      zone=None,
+                                      head_instance_id=head_instance_id,
+                                      resumed_instance_ids=[],
+                                      created_instance_ids=[])
 
     # Launch new instances
     created_instance_ids = []
@@ -95,12 +94,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             gpu_model = instance_type.split('_')[2].upper()
             if gpu_model == 'T4':
                 gpu_model = 'Tesla-T4'
-            
+
             instance_id = utils.launch_instance(
                 gpu_model=gpu_model,
                 gpu_count=gpu_count,
-                name=f'{cluster_name_on_cloud}-{node_type}'
-            )
+                name=f'{cluster_name_on_cloud}-{node_type}')
             logger.info(f'Launched instance {instance_id}.')
             created_instance_ids.append(instance_id)
             if head_instance_id is None:
@@ -117,20 +115,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             if instance.get('ssh_port') is not None:
                 ready_instance_cnt += 1
         logger.info('Waiting for instances to be ready: '
-                   f'({ready_instance_cnt}/{config.count}).')
+                    f'({ready_instance_cnt}/{config.count}).')
         if ready_instance_cnt == config.count:
             break
         time.sleep(POLL_INTERVAL)
 
     assert head_instance_id is not None, 'head_instance_id should not be None'
-    return common.ProvisionRecord(
-        provider_name='hyperbolic',
-        cluster_name=cluster_name_on_cloud,
-        region=region,
-        zone=None,
-        head_instance_id=head_instance_id,
-        resumed_instance_ids=[],
-        created_instance_ids=created_instance_ids)
+    return common.ProvisionRecord(provider_name='hyperbolic',
+                                  cluster_name=cluster_name_on_cloud,
+                                  region=region,
+                                  zone=None,
+                                  head_instance_id=head_instance_id,
+                                  resumed_instance_ids=[],
+                                  created_instance_ids=created_instance_ids)
 
 
 def terminate_instances(

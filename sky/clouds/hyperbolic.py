@@ -1,11 +1,15 @@
+"""Hyperbolic Cloud provider implementation for SkyPilot."""
 import os
+import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky import clouds
-from sky import resources
 from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils.resources_utils import DiskTier
+
+if typing.TYPE_CHECKING:
+    from sky.resources import Resources
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['Hyperbolic'])
@@ -23,30 +27,26 @@ class Hyperbolic(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Hyperbolic.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            ('Mounting object stores is not supported on Hyperbolic. To read data '
-             'from object stores on Hyperbolic, use `mode: COPY` to copy the data '
-             'to local disk.'),
+            ('Mounting object stores is not supported on Hyperbolic. '
+             'To read data from object stores on Hyperbolic, use `mode: COPY` '
+             'to copy the data to local disk.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Hyperbolic.'),
-        clouds.CloudImplementationFeatures.REGION:
-            ('Region selection is not supported on Hyperbolic; all resources are provisioned in a single region.'),
-        clouds.CloudImplementationFeatures.SPOT_INSTANCES:
-            ('Spot instances are not supported on Hyperbolic; only on-demand instances are available.'),
-        clouds.CloudImplementationFeatures.ZONE:
-            'Zone selection is not supported on Hyperbolic; all resources are provisioned without zones.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            ('Spot instances are not supported on Hyperbolic; only on-demand '
+             'instances are available.'),
     }
+    # Note: Region and zone selection are not supported on Hyperbolic.
+    # All resources are provisioned in a single region without zones.
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
     OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
 
-    def __init__(self):
-        super().__init__()
-
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources.Resources'
+        cls, resources: 'Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         del resources
         return cls._CLOUD_UNSUPPORTED_FEATURES
@@ -56,10 +56,10 @@ class Hyperbolic(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(
-        cls, instance_type: str, accelerators: Optional[Dict[str, int]],
-        use_spot: bool, region: Optional[str], zone: Optional[str]
-    ) -> List[clouds.Region]:
+    def regions_with_offering(cls, instance_type: str,
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
         regions = service_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'hyperbolic')
         if region is not None:
@@ -73,30 +73,35 @@ class Hyperbolic(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-        cls, instance_type: str
-    ) -> Tuple[Optional[float], Optional[float]]:
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         return service_catalog.get_vcpus_mem_from_instance_type(
             instance_type, clouds='hyperbolic')
 
-    def instance_type_to_hourly_cost(
-        self, instance_type: str, use_spot: bool,
-        region: Optional[str] = None, zone: Optional[str] = None
-    ) -> float:
-        return service_catalog.get_hourly_cost(
-            instance_type, use_spot=use_spot, region=region, zone=zone, clouds='hyperbolic')
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
+        return service_catalog.get_hourly_cost(instance_type,
+                                               use_spot=use_spot,
+                                               region=region,
+                                               zone=zone,
+                                               clouds='hyperbolic')
 
     @classmethod
     def get_default_instance_type(
-        cls, cpus: Optional[str] = None, memory: Optional[str] = None,
-        disk_tier: Optional[DiskTier] = None
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(
-            cpus=cpus, memory=memory, disk_tier=disk_tier, clouds='hyperbolic')
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[DiskTier] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
+                                                         clouds='hyperbolic')
 
     @classmethod
     def get_accelerators_from_instance_type(
-        cls, instance_type: str
-    ) -> Optional[Dict[str, Union[int, float]]]:
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='hyperbolic')
 
@@ -108,7 +113,7 @@ class Hyperbolic(clouds.Cloud):
         return False, f'API key not found at {api_key_path}'
 
     @classmethod
-    def _check_compute_credentials(cls) -> tuple[bool, str | None]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         return cls._check_credentials()
 
     def __repr__(self):
