@@ -143,13 +143,7 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 
 ## Kubernetes development
 
-The following guide provides details on Kubernetes-specific development, including scripts and setup:
-
-```{toctree}
-:maxdepth: 1
-
-KUBERNETES_DEV_SCRIPTS
-```
+The following [guide](https://github.com/skypilot-org/skypilot/blob/master/tests/kubernetes/README.md) provides details on Kubernetes-specific development, including scripts and setup.
 
 ### Environment variables for developers
 
