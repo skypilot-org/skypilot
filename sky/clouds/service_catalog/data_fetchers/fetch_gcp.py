@@ -516,9 +516,6 @@ def get_gpu_df(skus: List[Dict[str, Any]],
     df = _get_gpus(region_prefix)
     if df.empty:
         return df
-    for sku in gpu_skus:
-        if sku['skuId'] == 'A0AD-E652-D4F9':
-            print(sku)
 
     def get_gpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
