@@ -64,7 +64,11 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo systemctl stop unattended-upgrades || true;
+  # TODO(jwj): Restore conda installation command.
+  - {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
@@ -72,17 +76,11 @@ setup_commands:
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {{ conda_installation_commands }}
-    (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
-    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    source ~/.bashrc;
-    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
-    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[fluffycloud,remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
-    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
-    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
-    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
-    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    UV_SYSTEM_PYTHON=false "$HOME/.local/bin"/uv -V >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh;
+    [ -d ~/skypilot-runtime ] || "$HOME/.local/bin"/uv venv --seed ~/skypilot-runtime --python 3.10;
+    echo "$(echo ~/skypilot-runtime)/bin/python" > "~/.sky/python_path";
+    VIRTUAL_ENV=~/skypilot-runtime USE_SYSTEM_PYTHON=false $HOME/.local/bin/uv pip install paramiko;
+    {{ ray_skypilot_installation_commands }}
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
