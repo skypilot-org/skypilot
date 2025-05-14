@@ -91,8 +91,14 @@ def _check_controller_resources(
 
 
 @pytest.mark.parametrize(('controller_type', 'default_controller_resources'), [
-    ('jobs', managed_job_constants.CONTROLLER_RESOURCES),
-    ('serve', serve_constants.CONTROLLER_RESOURCES),
+    ('jobs', {
+        **managed_job_constants.CONTROLLER_RESOURCES,
+        'autostop': _DEFAULT_AUTOSTOP
+    }),
+    ('serve', {
+        **serve_constants.CONTROLLER_RESOURCES,
+        'autostop': _DEFAULT_AUTOSTOP
+    }),
 ])
 def test_get_controller_resources_with_task_resources(
         controller_type: str, default_controller_resources: Dict[str, Any],

@@ -536,11 +536,11 @@ def get_controller_resources(
                 logger.warning(f'{colorama.Fore.YELLOW}Ignoring the old '
                                'config, since it is already specified in '
                                f'resources.{colorama.Style.RESET_ALL}')
-        # Set the default autostop config for the controller, if not already
-        # specified.
-        if controller_resources_config_copied.get('autostop') is None:
-            controller_resources_config_copied['autostop'] = (
-                controller.value.default_autostop_config)
+    # Set the default autostop config for the controller, if not already
+    # specified.
+    if controller_resources_config_copied.get('autostop') is None:
+        controller_resources_config_copied['autostop'] = (
+            controller.value.default_autostop_config)
 
     try:
         controller_resources = resources.Resources.from_yaml_config(
