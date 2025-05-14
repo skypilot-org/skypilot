@@ -526,6 +526,7 @@ class Kubernetes(clouds.Cloud):
                 != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
             k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
         else:
+            # If using local credentials, the remote cluster will get the context name from the kubeconfig
             k8s_env_vars = {}
 
         # We specify object-store-memory to be 500MB to avoid taking up too
