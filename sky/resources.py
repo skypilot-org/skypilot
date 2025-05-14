@@ -1803,5 +1803,11 @@ class LaunchableResources(Resources):
         return self._instance_type
 
     def copy(self, **override) -> 'LaunchableResources':
+        """Ensure MyPy understands the return type is LaunchableResources.
+
+        This method is not expected to be called at runtime, as
+        LaunchableResources should not be directly instantiated. It primarily
+        serves as a type hint for static analysis.
+        """
         self.assert_launchable()
         return cast(LaunchableResources, super().copy(**override))
