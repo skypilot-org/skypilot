@@ -3,7 +3,6 @@
 This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
-import functools
 import os
 import threading
 from typing import Optional
@@ -11,7 +10,6 @@ from typing import Optional
 import uvicorn
 from uvicorn.supervisors import multiprocess
 
-from sky.utils import context_utils
 from sky.utils import subprocess_utils
 
 
@@ -23,25 +21,17 @@ def run(config: uvicorn.Config):
         # guard by an exception.
         raise ValueError('Reload is not supported yet.')
     server = uvicorn.Server(config=config)
-    run_server_process = functools.partial(_run_server_process, server)
     try:
         if config.workers is not None and config.workers > 1:
             sock = config.bind_socket()
-            SlowStartMultiprocess(config,
-                                  target=run_server_process,
+            SlowStartMultiprocess(config, target=server.run,
                                   sockets=[sock]).run()
         else:
-            run_server_process()
+            server.run()
     finally:
         # Copied from unvicorn.run()
         if config.uds and os.path.exists(config.uds):
             os.remove(config.uds)
-
-
-def _run_server_process(server: uvicorn.Server, *args, **kwargs):
-    """Run the server process with contextually aware."""
-    context_utils.hijack_sys_attrs()
-    server.run(*args, **kwargs)
 
 
 class SlowStartMultiprocess(multiprocess.Multiprocess):
