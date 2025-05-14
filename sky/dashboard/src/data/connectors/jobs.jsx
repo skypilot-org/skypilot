@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   ENDPOINT,
-  NotSupportedError,
-  ClusterDoesNotExist,
-  ClusterNotUpError,
+  CLUSTER_NOT_UP_ERROR,
+  CLUSTER_DOES_NOT_EXIST,
+  NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 
 export async function getManagedJobs({ allUsers = true } = {}) {
@@ -27,7 +27,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           try {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
-            if (error.type && error.type === ClusterNotUpError) {
+            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], controllerStopped: true };
             }
           } catch (jsonError) {
@@ -246,15 +246,18 @@ export async function handleJobAction(action, jobId, cluster) {
                 const error = JSON.parse(data.detail.error);
 
                 // Handle specific error types
-                if (error.type && error.type === NotSupportedError) {
+                if (error.type && error.type === NOT_SUPPORTED_ERROR) {
                   showToast(
                     `${logStarter} job ${jobId} is not supported!`,
                     'error',
                     10000
                   );
-                } else if (error.type && error.type === ClusterDoesNotExist) {
+                } else if (
+                  error.type &&
+                  error.type === CLUSTER_DOES_NOT_EXIST
+                ) {
                   showToast(`Cluster ${cluster} does not exist.`, 'error');
-                } else if (error.type && error.type === ClusterNotUpError) {
+                } else if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
                   showToast(`Cluster ${cluster} is not up.`, 'error');
                 } else {
                   showToast(

@@ -10,6 +10,7 @@ import { useRouter } from 'next/router';
 
 import Link from 'next/link';
 import {
+  ChipIcon,
   ServerIcon,
   BriefcaseIcon,
   ServiceBellIcon,
@@ -192,8 +193,7 @@ export function TopBar() {
             )}
           </div>
 
-          {/* Separator Re-added */}
-          {!isMobile && <span className="text-gray-300 px-1">|</span>}
+          <div className="border-l border-gray-200 h-6 mx-1"></div>
 
           {/* Workspaces Link */}
           <Link
@@ -203,6 +203,16 @@ export function TopBar() {
           >
             <BookDocIcon className="w-4 h-4" />
             {!isMobile && <span>Workspaces</span>}
+          </Link>
+
+          {/* GPUs Link */}
+          <Link
+            href="/gpus"
+            className={getLinkClasses('/gpus')}
+            prefetch={false}
+          >
+            <ChipIcon className="w-4 h-4" />
+            {!isMobile && <span>GPUs</span>}
           </Link>
         </div>
 
