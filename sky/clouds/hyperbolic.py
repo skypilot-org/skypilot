@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
 
 if typing.TYPE_CHECKING:
@@ -125,5 +126,13 @@ class Hyperbolic(clouds.Cloud):
 
     def __repr__(self):
         return self._REPR
+
+    def _get_feasible_launchable_resources(
+            self,
+            resources: 'Resources') -> 'resources_utils.FeasibleResources':
+        return resources_utils.FeasibleResources(
+            resources_list=[],
+            fuzzy_candidate_list=[],
+            hint='Not implemented for Hyperbolic.')
 
     # Add more methods as needed for your cloud's features.
