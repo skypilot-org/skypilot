@@ -9,31 +9,39 @@ from sky.serve import constants as serve_constants
 from sky.utils import controller_utils
 
 
+_DEFAULT_AUTOSTOP = {
+    'down': False,
+    'idle_minutes': 10,
+}
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
             'cpus': '4+',
             'memory': '8x',
-            'disk_size': 50
+            'disk_size': 50,
+            'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('jobs', {
             'cpus': '4+',
-            'disk_size': 100
+            'disk_size': 100,
         }, {
             'cpus': '4+',
             'memory': '8x',
-            'disk_size': 100
+            'disk_size': 100,
+            'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('serve', {}, {
             'cpus': '4+',
-            'disk_size': 200
+            'disk_size': 200,
+            'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('serve', {
             'memory': '32+',
         }, {
             'cpus': '4+',
             'memory': '32+',
-            'disk_size': 200
+            'disk_size': 200,
+            'autostop': _DEFAULT_AUTOSTOP,
         }),
     ])
 def test_get_controller_resources(controller_type: str,
