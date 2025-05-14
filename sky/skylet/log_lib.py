@@ -4,7 +4,6 @@ This is a remote utility module that provides logging functionality.
 """
 import collections
 import copy
-import functools
 import io
 import multiprocessing.pool
 import os
@@ -22,8 +21,6 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import context
-from sky.utils import context_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -80,9 +77,6 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
-                ctx = context.get()
-                if ctx is not None and ctx.is_canceled():
-                    return
                 line = out_io.readline()
                 if not line:
                     break
@@ -117,29 +111,30 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     return ''.join(out)
 
 
-def process_subprocess_stream(proc, stdout_stream_handler,
-                              stderr_stream_handler) -> Tuple[str, str]:
-    """Process the stream of a process in threads, blocking."""
+def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
+    """Redirect the process's filtered stdout/stderr to both stream and file"""
     if proc.stderr is not None:
         # Asyncio does not work as the output processing can be executed in a
         # different thread.
         # selectors is possible to handle the multiplexing of stdout/stderr,
         # but it introduces buffering making the output not streaming.
         with multiprocessing.pool.ThreadPool(processes=1) as pool:
-            stderr_fut = pool.apply_async(stderr_stream_handler,
-                                          args=(proc.stderr, sys.stderr))
+            err_args = copy.copy(args)
+            err_args.line_processor = None
+            stderr_fut = pool.apply_async(_handle_io_stream,
+                                          args=(proc.stderr, sys.stderr,
+                                                err_args))
             # Do not launch a thread for stdout as the rich.status does not
             # work in a thread, which is used in
             # log_utils.RayUpLineProcessor.
-            stdout = stdout_stream_handler(proc.stdout, sys.stdout)
+            stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
             stderr = stderr_fut.get()
     else:
-        stdout = stdout_stream_handler(proc.stdout, sys.stdout)
+        stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
         stderr = ''
     return stdout, stderr
 
 
-@context_utils.cancellation_guard
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
@@ -181,12 +176,7 @@ def run_with_log(
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None
-    ctx = context.get()
-    if process_stream or ctx is not None:
-        # Capture stdout/stderr of the subprocess if:
-        # 1. Post-processing is needed (process_stream=True)
-        # 2. Potential contextual handling is needed (ctx is not None)
-        # TODO(aylei): can we always capture the stdout/stderr?
+    if process_stream:
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
     # Use stdin=subprocess.DEVNULL by default, as allowing inputs will mess up
@@ -207,8 +197,6 @@ def run_with_log(
             subprocess_utils.kill_process_daemon(proc.pid)
             stdout = ''
             stderr = ''
-            stdout_stream_handler = None
-            stderr_stream_handler = None
 
             if process_stream:
                 if skip_lines is None:
@@ -235,35 +223,7 @@ def run_with_log(
                     replace_crlf=with_ray,
                     streaming_prefix=streaming_prefix,
                 )
-                stdout_stream_handler = functools.partial(
-                    _handle_io_stream,
-                    args=args,
-                )
-                if proc.stderr is not None:
-                    err_args = copy.copy(args)
-                    err_args.line_processor = None
-                    stderr_stream_handler = functools.partial(
-                        _handle_io_stream,
-                        args=err_args,
-                    )
-            if ctx is not None:
-                # When runs in a coroutine, always process the subprocess
-                # stream to:
-                # 1. handle context cancellation
-                # 2. redirect subprocess stdout/stderr to the contextual
-                #    stdout/stderr of current coroutine.
-                stdout, stderr = context_utils.pipe_and_wait_process(
-                    ctx,
-                    proc,
-                    cancel_callback=subprocess_utils.kill_children_processes,
-                    stdout_stream_handler=stdout_stream_handler,
-                    stderr_stream_handler=stderr_stream_handler)
-            elif process_stream:
-                # When runs in a process, only process subprocess stream if
-                # necessary to avoid unnecessary stream handling overhead.
-                stdout, stderr = process_subprocess_stream(
-                    proc, stdout_stream_handler, stderr_stream_handler)
-            # Ensure returncode is set.
+                stdout, stderr = process_subprocess_stream(proc, args)
             proc.wait()
             if require_outputs:
                 return proc.returncode, stdout, stderr
