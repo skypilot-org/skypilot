@@ -28,6 +28,12 @@ class Hyperbolic(clouds.Cloud):
              'to local disk.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Hyperbolic.'),
+        clouds.CloudImplementationFeatures.REGION:
+            ('Region selection is not supported on Hyperbolic; all resources are provisioned in a single region.'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCES:
+            ('Spot instances are not supported on Hyperbolic; only on-demand instances are available.'),
+        clouds.CloudImplementationFeatures.ZONE:
+            'Zone selection is not supported on Hyperbolic; all resources are provisioned without zones.',
     }
     _regions: List[clouds.Region] = []
 
