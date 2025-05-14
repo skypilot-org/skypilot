@@ -66,7 +66,7 @@ class Resources:
                                      str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Union[Optional[Dict[Optional[str], str]], str, None] = None,
+        image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
@@ -211,7 +211,7 @@ class Resources:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
-                    k.strip() if k is not None else k: v.strip()
+                    cast(str, k).strip(): v.strip()
                     for k, v in image_id.items()
                 }
         else:
@@ -660,7 +660,12 @@ class Resources:
         return self.cloud is not None and self._instance_type is not None
 
     def assert_launchable(self) -> 'LaunchableResources':
-        """A workaround to make mypy understand that is_launchable() is true."""
+        """A workaround to make mypy understand that is_launchable() is true.
+
+        Note: The `cast` to `LaunchableResources` is only for static type
+        checking with MyPy. At runtime, the Python interpreter does not enforce
+        types, and the returned object will still be an instance of `Resources`.
+        """
         assert self.is_launchable(), self
         return cast(LaunchableResources, self)
 
@@ -1776,10 +1781,15 @@ class Resources:
 class LaunchableResources(Resources):
     """A class representing resources that can be launched on a cloud provider.
 
-    This class extends the base Resources class and adds properties for
-    accessing the cloud provider and instance type, with validation to ensure
-    these required fields are specified.
+    This class is primarily a type hint for MyPy to indicate that an instance
+    of `Resources` is launchable (i.e., `cloud` and `instance_type` are not
+    None). It should not be instantiated directly.
     """
+
+    def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called
+        raise RuntimeError(
+            'LaunchableResources should not be instantiated directly. '
+            'It is a type hint for MyPy.')
 
     @property
     def cloud(self) -> clouds.Cloud:
