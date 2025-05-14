@@ -58,6 +58,7 @@ def test_kubernetes_instance_type():
     # Before https://github.com/skypilot-org/skypilot/pull/4756, the
     # accelerators are appended with format "--{a}{type}",
     # e.g. "4CPU--16GB--1V100".
+    # TODO(romilb): Backward compatibility, remove after 0.11.0.
     prev_instance_type_name = '4CPU--16GB--1V100'
     assert KubernetesInstanceType.is_valid_instance_type(
         prev_instance_type_name

@@ -1740,6 +1740,7 @@ class KubernetesInstanceType:
         # the accelerators are appended with format "--{a}{type}",
         # e.g. "4CPU--16GB--1V100".
         # Check both patterns to keep backward compatibility.
+        # TODO(romilb): Backward compatibility, remove after 0.11.0.
         prev_pattern = re.compile(
             r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
         pattern = re.compile(
@@ -1761,6 +1762,7 @@ class KubernetesInstanceType:
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
         )
         match = pattern.match(name)
+        # TODO(romilb): Backward compatibility, remove after 0.11.0.
         prev_pattern = re.compile(
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
         )
@@ -1779,6 +1781,7 @@ class KubernetesInstanceType:
                 accelerator_count = None
                 accelerator_type = None
             return cpus, memory, accelerator_count, accelerator_type
+        # TODO(romilb): Backward compatibility, remove after 0.11.0.
         elif prev_match:
             cpus = float(prev_match.group('cpus'))
             memory = float(prev_match.group('memory'))
