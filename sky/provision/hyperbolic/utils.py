@@ -4,6 +4,8 @@ import time
 from typing import Any, Dict, List, Optional
 import requests
 from sky import sky_logging
+import pprint
+import json
 
 CREDENTIALS_PATH = '~/.hyperbolic/api_key'
 CASTLE_BASE_URL = 'http://localhost:8080'
@@ -25,35 +27,61 @@ class HyperbolicClient:
         with open(cred_path, 'r') as f:
             self.api_key = f.read().strip()
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
+        self.api_url = GATEWAY_BASE_URL
 
-    def _make_request(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
-        """Make an HTTP request with retries."""
-        for attempt in range(MAX_RETRIES):
+    def _make_request(self, method: str, endpoint: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Make an API request to Hyperbolic."""
+        # Select base URL based on endpoint version
+        if endpoint.startswith('/v2/'):
+            base_url = CASTLE_BASE_URL
+        else:
+            base_url = GATEWAY_BASE_URL
+            
+        url = f'{base_url}{endpoint}'
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Debug logging for request
+        logger.debug(f'Making {method} request to {url}')
+        if payload:
+            logger.debug(f'Request payload: {json.dumps(payload, indent=2)}')
+        
+        try:
+            if method == 'GET':
+                response = requests.get(url, headers=headers, timeout=30)
+            elif method == 'POST':
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+            else:
+                raise HyperbolicError(f'Unsupported HTTP method: {method}')
+            
+            # Debug logging for response
+            logger.debug(f'Response status code: {response.status_code}')
+            logger.debug(f'Response headers: {dict(response.headers)}')
             try:
-                response = requests.request(method, url, headers=self.headers, **kwargs)
-                response.raise_for_status()
-                return response.json()
-            except requests.exceptions.RequestException as e:
-                if attempt == MAX_RETRIES - 1:
-                    raise HyperbolicError(f'API request failed after {MAX_RETRIES} attempts: {str(e)}')
-                logger.warning(f'Request failed (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}')
-                time.sleep(RETRY_DELAY)
-        raise HyperbolicError('Unexpected error in _make_request')
+                response_data = response.json()
+                logger.debug(f'Response body: {json.dumps(response_data, indent=2)}')
+            except json.JSONDecodeError:
+                logger.debug(f'Response body (raw): {response.text}')
+            
+            if not response.ok:
+                error_msg = response_data.get('error', response_data.get('message', response.text))
+                raise HyperbolicError(f'API request failed: {error_msg}')
+            
+            return response_data
+        except requests.exceptions.RequestException as e:
+            raise HyperbolicError(f'Request failed: {str(e)}')
 
     def launch_instance(self, gpu_model: str, gpu_count: int, name: str) -> str:
         """Launch a new instance with the specified configuration."""
         data = {
             'gpuModel': gpu_model,
-            'gpuCount': str(gpu_count),
-            'name': name,
-            'source': 'skypilot'  # Add source identifier
+            'gpuCount': str(gpu_count)
         }
         endpoint = '/v2/marketplace/instances/create-cheapest'
-        url = f'{CASTLE_BASE_URL}{endpoint}'
-        logger.debug(f'POST {url} with {data}')
-        
         try:
-            response = self._make_request('POST', url, json=data)
+            response = self._make_request('POST', endpoint, payload=data)
             instance_id = response.get('instanceId', response.get('id'))
             if not instance_id:
                 raise HyperbolicError('No instance ID returned from API')
@@ -64,11 +92,8 @@ class HyperbolicClient:
     def list_instances(self, status: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status."""
         endpoint = '/v1/marketplace/instances'
-        url = f'{GATEWAY_BASE_URL}{endpoint}'
-        logger.debug(f'GET {url}')
-        
         try:
-            response = self._make_request('GET', url)
+            response = self._make_request('GET', endpoint)
             instances = {}
             for instance in response.get('instances', []):
                 if status and instance['status'] != status:
@@ -90,23 +115,17 @@ class HyperbolicClient:
     def terminate_instance(self, instance_id: str) -> None:
         """Terminate an instance by ID."""
         endpoint = '/v1/marketplace/instances/terminate'
-        url = f'{GATEWAY_BASE_URL}{endpoint}'
         data = {'id': instance_id}
-        logger.debug(f'POST {url} with {data}')
-        
         try:
-            self._make_request('POST', url, json=data)
+            self._make_request('POST', endpoint, payload=data)
         except Exception as e:
             raise HyperbolicError(f'Failed to terminate instance {instance_id}: {str(e)}')
 
     def get_instance(self, instance_id: str) -> Dict[str, Any]:
         """Get detailed information about a specific instance."""
         endpoint = f'/v1/marketplace/instances/{instance_id}'
-        url = f'{GATEWAY_BASE_URL}{endpoint}'
-        logger.debug(f'GET {url}')
-        
         try:
-            data = self._make_request('GET', url)
+            data = self._make_request('GET', endpoint)
             return {
                 'status': data['status'],
                 'name': data['name'],

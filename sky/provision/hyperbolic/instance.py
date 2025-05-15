@@ -121,9 +121,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     'V100': 'Tesla-V100',
                     'P100': 'Tesla-P100',
                     'K80': 'Tesla-K80',
+                    'RTX3090': 'RTX-3090',
+                    'RTX4090': 'RTX-4090',
+                    'RTX4080': 'RTX-4080',
+                    'RTX4070': 'RTX-4070',
+                    'RTX4060': 'RTX-4060',
+                    'RTX3080': 'RTX-3080',
+                    'RTX3070': 'RTX-3070',
+                    'RTX3060': 'RTX-3060',
                 }
+                
                 if gpu_model in gpu_model_map:
                     gpu_model = gpu_model_map[gpu_model]
+                else:
+                    # If not in map, assume it's already in the correct format
+                    logger.warning(f'GPU model {gpu_model} not found in mapping, using as-is')
                 
                 # Validate CPU and memory values
                 cpu_count = int(parts[2])
