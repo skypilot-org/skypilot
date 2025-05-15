@@ -48,13 +48,18 @@ def _route_to_cloud_impl(func):
         else:
             provider_name = kwargs.pop('provider_name')
 
+        print(
+            f'DEBUG: _route_to_cloud_impl called with provider_name={provider_name}, func={func.__name__}'
+        )
         module_name = provider_name.lower()
         if module_name == 'lambda':
             module_name = 'lambda_cloud'
         module = globals().get(module_name)
+        print(f'DEBUG: module_name={module_name}, module={module}')
         assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__, None)
+        print(f'DEBUG: impl={impl}')
         if impl is not None:
             return impl(*args, **kwargs)
 

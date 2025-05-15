@@ -13,7 +13,7 @@ if typing.TYPE_CHECKING:
     from sky.resources import Resources
 
 
-@registry.CLOUD_REGISTRY.register(aliases=['Hyperbolic'])
+@registry.CLOUD_REGISTRY.register
 class Hyperbolic(clouds.Cloud):
     """Hyperbolic Cloud Provider."""
 
@@ -249,5 +249,3 @@ class Hyperbolic(clouds.Cloud):
         if cluster_name_on_cloud is None:
             return False
         return cluster_name_on_cloud.startswith(cluster_name)
-
-    # Add more methods as needed for your cloud's features.

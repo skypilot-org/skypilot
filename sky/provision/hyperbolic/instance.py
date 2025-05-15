@@ -19,6 +19,9 @@ def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
                       head_only: bool = False) -> Dict[str, Any]:
     """Filter instances by cluster name and status."""
+    print(
+        f'DEBUG: _filter_instances called with cluster_name_on_cloud={cluster_name_on_cloud}, status_filters={status_filters}, head_only={head_only}'
+    )
     instances = utils.list_instances()
     possible_names = [f'{cluster_name_on_cloud}-head']
     if not head_only:
@@ -47,6 +50,11 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
+    print('DEBUG: ENTERED run_instances')
+    print(
+        f'DEBUG: region={region}, cluster_name_on_cloud={cluster_name_on_cloud}'
+    )
+    print(f'DEBUG: config={config}')
     # Define pending statuses for Hyperbolic
     pending_status = ['CREATING', 'STARTING']
 
@@ -76,7 +84,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     f'{len(exist_instances)} nodes, no need to start more.')
         return common.ProvisionRecord(provider_name='hyperbolic',
                                       cluster_name=cluster_name_on_cloud,
-                                      region=region,
+                                      region='default',
                                       zone=None,
                                       head_instance_id=head_instance_id,
                                       resumed_instance_ids=[],
@@ -123,7 +131,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(provider_name='hyperbolic',
                                   cluster_name=cluster_name_on_cloud,
-                                  region=region,
+                                  region='default',
                                   zone=None,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=[],

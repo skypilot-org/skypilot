@@ -11,6 +11,7 @@ import os
 
 import requests
 
+#TODO: Update the endpoint to the correct one
 ENDPOINT = 'http://localhost:8080/v2/skypilot/catalog'
 API_KEY_PATH = os.path.expanduser('~/.hyperbolic/api_key')
 
