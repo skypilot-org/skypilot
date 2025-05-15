@@ -139,9 +139,9 @@ jobs:
           sky -c
           sky check
           sky show-gpus
-          sky dashboard
+          sky dashboard || (echo "Launch dashboard failed" && exit 1)
           # Verify dashboard endpoint is accessible
-          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || echo "Dashboard endpoint is not accessible" && exit 1
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || (echo "Dashboard endpoint is not accessible" && exit 1)
           # Verify version
           EXPECTED_VERSION="${{ needs.nightly-build-pypi.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot-nightly | grep Version | awk '{print $2}')
