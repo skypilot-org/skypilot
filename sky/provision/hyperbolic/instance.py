@@ -95,14 +95,50 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
-            # Extract GPU configuration from instance type
-            # Format: gpu_1x_t4 -> gpu_count=1, gpu_model=Tesla-T4
-            instance_type = config.node_config['InstanceType']
-            gpu_count = int(instance_type.split('_')[1].replace('x', ''))
-            gpu_model = instance_type.split('_')[2].upper()
-            if gpu_model == 'T4':
-                gpu_model = 'Tesla-T4'
+            # Get instance type from node_config
+            instance_type = config.node_config.get('InstanceType')
+            if not instance_type:
+                raise RuntimeError(
+                    'InstanceType is not set in node_config. '
+                    'Please specify an instance type for Hyperbolic.')
 
+            # Extract GPU configuration from instance type
+            # Format: 1x-T4-4-17 -> gpu_count=1, gpu_model=Tesla-T4
+            try:
+                parts = instance_type.split('-')
+                if len(parts) != 4:
+                    raise ValueError(
+                        f'Invalid instance type format: {instance_type}. '
+                        'Expected format: <gpu_count>x-<gpu_model>-<cpu>-<memory>')
+                
+                gpu_count = int(parts[0].replace('x', ''))
+                gpu_model = parts[1].upper()
+                
+                # Map GPU model to Hyperbolic's expected format
+                gpu_model_map = {
+                    'T4': 'Tesla-T4',
+                    'A100': 'NVIDIA-A100',
+                    'V100': 'Tesla-V100',
+                    'P100': 'Tesla-P100',
+                    'K80': 'Tesla-K80',
+                }
+                if gpu_model in gpu_model_map:
+                    gpu_model = gpu_model_map[gpu_model]
+                
+                # Validate CPU and memory values
+                cpu_count = int(parts[2])
+                memory_gb = int(parts[3])
+                
+                if cpu_count < 1 or memory_gb < 1:
+                    raise ValueError(
+                        f'Invalid CPU count ({cpu_count}) or memory ({memory_gb}GB). '
+                        'Both must be positive integers.')
+                
+            except ValueError as e:
+                raise RuntimeError(
+                    f'Failed to parse instance type {instance_type}: {str(e)}')
+
+            # Launch instance with GPU configuration
             instance_id = utils.launch_instance(
                 gpu_model=gpu_model,
                 gpu_count=gpu_count,
@@ -120,12 +156,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
         ready_instance_cnt = 0
         for instance_id, instance in instances.items():
-            if instance.get('ssh_port') is not None:
-                ready_instance_cnt += 1
+            # Wait for each instance to be fully ready
+            if utils.wait_for_instance(instance_id, 'RUNNING', timeout=300):
+                if instance.get('ssh_port') is not None:
+                    ready_instance_cnt += 1
         logger.info('Waiting for instances to be ready: '
                     f'({ready_instance_cnt}/{config.count}).')
         if ready_instance_cnt == config.count:
             break
+
         time.sleep(POLL_INTERVAL)
 
     assert head_instance_id is not None, 'head_instance_id should not be None'
