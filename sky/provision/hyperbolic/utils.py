@@ -49,13 +49,18 @@ def launch_instance(gpu_model: str,
         endpoint = '/v2/marketplace/instances/create/cheapest'
     else:
         endpoint = '/v1/marketplace/instances/create'
+    print(
+        f'DEBUG: launch_instance sending POST to {endpoint} with data: {data}')
     response = _make_request('POST', endpoint, data)
+    print(f'DEBUG: launch_instance response: {response}')
     return response.get('instanceId', response.get('id'))
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """List all instances."""
+    print('DEBUG: list_instances sending GET to /v1/marketplace/instances')
     response = _make_request('GET', '/v1/marketplace/instances')
+    print(f'DEBUG: list_instances response: {response}')
     instances = {}
     for instance in response.get('instances', []):
         instances[instance['id']] = {
@@ -65,6 +70,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
             'external_ip': instance.get('externalIp'),
             'ssh_port': instance.get('sshPort', 22)
         }
+    print(f'DEBUG: list_instances parsed: {instances}')
     return instances
 
 
