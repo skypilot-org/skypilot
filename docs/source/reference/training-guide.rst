@@ -62,7 +62,7 @@ Use high-performance networking
                       requests:
                         vpc.amazonaws.com/efa: 4
 
-        See `EFA example <https://github.com/skypilot-org/skypilot/tree/master/examples/aws_efa>`_ for more details.
+        See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
 
     .. tab-item:: GCP GPUDirect-TCPX
         :sync: gcp-gpu-direct-tcpx-tab
@@ -77,7 +77,7 @@ Use high-performance networking
             gcp:
               enable_gpu_direct: true
 
-        See `GPUDirect-TCPX example <https://github.com/skypilot-org/skypilot/tree/master/examples/gcp_gpu_direct_tcpx>`_ for more details.
+        See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
 
 Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~
