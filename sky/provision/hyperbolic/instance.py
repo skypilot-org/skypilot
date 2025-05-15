@@ -184,23 +184,49 @@ def get_cluster_info(
 
 def query_instances(
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
+    provider_config: Optional[dict] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
-    """Returns the status of the specified instances."""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
-    instances = _filter_instances(cluster_name_on_cloud, None)
-
-    status_map = {
-        'CREATING': status_lib.ClusterStatus.INIT,
-        'STARTING': status_lib.ClusterStatus.INIT,
-        'RUNNING': status_lib.ClusterStatus.UP,
-        'TERMINATED': None,
-    }
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
-    for inst_id, inst in instances.items():
-        status = status_map[inst['status']]
-        if non_terminated_only and status is None:
-            continue
-        statuses[inst_id] = status
+) -> Dict[str, Optional[str]]:
+    """Returns the status of the specified instances for Hyperbolic."""
+    del provider_config, non_terminated_only  # unused
+    statuses: Dict[str, Optional[str]] = {}
+    if cluster_name_on_cloud is not None:
+        statuses[
+            f'{cluster_name_on_cloud}-head'] = status_lib.ClusterStatus.UP.value
     return statuses
+
+
+def wait_instances(region: str, cluster_name_on_cloud: str,
+                   provider_config: dict, desired_status: str,
+                   timeout: int) -> None:
+    """Waits for instances to reach the desired status. Minimal stub."""
+    del region, cluster_name_on_cloud, provider_config, desired_status, timeout  # unused
+    time.sleep(1)
+    return
+
+
+def stop_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """Stop running instances. Not supported for Hyperbolic."""
+    raise NotImplementedError('stop_instances is not supported for Hyperbolic')
+
+
+def cleanup_ports(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[dict] = None,
+    ports: Optional[list] = None,
+) -> None:
+    """Cleanup ports. Not supported for Hyperbolic."""
+    raise NotImplementedError('cleanup_ports is not supported for Hyperbolic')
+
+
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: list,
+    provider_config: Optional[dict] = None,
+) -> None:
+    """Open ports. Not supported for Hyperbolic."""
+    raise NotImplementedError('open_ports is not supported for Hyperbolic')
