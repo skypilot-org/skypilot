@@ -30,12 +30,12 @@ class Simplepod(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trivial on SimplePod.'),
+             'are non-trivial on {_REPR} .'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Customizing disk tier is not supported yet on SimplePod.'),
+            ('Customizing disk tier is not supported yet on {_REPR}.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            ('Mounting object stores is not supported on SimplePod. To read data '
-             'from object stores on SimplePod, use `mode: COPY` to copy the data '
+            ('Mounting object stores is not supported on {_REPR}. To read data '
+             'from object stores on {_REPR}, use `mode: COPY` to copy the data '
              'to local disk.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120 # 120 characters limit for SimplePod cluster names
