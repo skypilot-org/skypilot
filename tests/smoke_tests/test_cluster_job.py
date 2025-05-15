@@ -23,7 +23,7 @@ import pathlib
 import re
 import tempfile
 import textwrap
-from typing import Dict
+from typing import Dict, List
 
 import jinja2
 import pytest
@@ -1701,9 +1701,19 @@ def test_aws_disk_tier():
 
 
 @pytest.mark.gcp
-@pytest.mark.parametrize('instance_type', ['n2-standard-64'])
-def test_gcp_disk_tier(instance_type: str):
+@pytest.mark.parametrize('instance_types',
+                         [['n2-standard-2', 'n2-standard-64']])
+def test_gcp_disk_tier(instance_types: List[str]):
+    instance_type_low, instance_type_high = instance_types
     for disk_tier in list(resources_utils.DiskTier):
+        # GCP._get_disk_type returns pd-extreme only for instance types with >= 64
+        # CPUs. We must ensure the launched instance type matches what we pass to
+        # GCP._get_disk_type.
+        if disk_tier == resources_utils.DiskTier.BEST:
+            instance_type = instance_type_high
+        else:
+            instance_type = instance_type_low
+
         disk_types = [GCP._get_disk_type(instance_type, disk_tier)]
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
