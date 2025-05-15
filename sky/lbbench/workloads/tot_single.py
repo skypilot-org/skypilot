@@ -169,6 +169,10 @@ seed2idx = {
     'us-east-2': 0,
     'ap-northeast-1': 1,
     'eu-central-1': 2,
+
+    'us-central1': 0,
+    'asia-northeast1': 1,
+    'europe-west1': 2,
 }
 
 

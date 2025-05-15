@@ -85,7 +85,7 @@ enabled_systems = [
     16, # gke_gateway
 ]
 
-enabled_systems = [6, 7, 15]
+enabled_systems = [16]
 # enabled_systems = [15]
 
 describes = [raw_describes[i] for i in enabled_systems]
@@ -133,7 +133,7 @@ def _region_cluster_name(r: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--service-names', type=str, nargs='+', required=True)
+    parser.add_argument('--service-names', type=str, nargs='+', required=False)
     parser.add_argument('--exp-name', type=str, required=True)
     parser.add_argument('--extra-args', type=str, default='')
     parser.add_argument('--output-dir', type=str, default='@temp')
@@ -144,13 +144,13 @@ def main():
     
     args = parser.parse_args()
     sns = args.service_names
-    if len(sns) != len(describes):
-        raise ValueError(f'Expected {len(describes)} service names for '
-                         f'{", ".join(describes)}')
+    # if len(sns) != len(describes):
+    #     raise ValueError(f'Expected {len(describes)} service names for '
+    #                      f'{", ".join(describes)}')
 
-    print(endpoints)
-    if any('None' in e for e in endpoints):
-        raise ValueError('Some endpoints are not found')
+    # print(endpoints)
+    # if any('None' in e for e in endpoints):
+    #     raise ValueError('Some endpoints are not found')
 
     name_mapping = []
     ens = []
@@ -181,6 +181,7 @@ def main():
     signal_file = tempfile.NamedTemporaryFile(delete=False).name
     queue_status_file = tempfile.NamedTemporaryFile(delete=False).name
 
+    endpoints = ['34.117.239.237']
     for e, d, p in zip(endpoints, describes, presents):
         en = f'{args.exp_name}_{d}'
         ens.append(en)
@@ -277,7 +278,7 @@ def main():
         f.write('# Wait for queue status puller to initialize\n')
         f.write('echo "Waiting for queue status puller to initialize..."\n')
         f.write(f'echo "Check log file: tail -f {queue_status_file}"\n')
-        f.write('while ! grep -q "Pulling queue status" '
+        f.write('while ! grep -q "Skipping queue polling for GKE baseline" '
                 f'{queue_status_file}; do\n')
         f.write('  sleep 1\n')
         f.write('  echo -n "."\n')

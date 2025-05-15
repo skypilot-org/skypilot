@@ -3,7 +3,7 @@ envs:
   CMD:
 
 resources:
-  cloud: aws
+  cloud: gcp
   cpus: 8+
 
 setup: |
