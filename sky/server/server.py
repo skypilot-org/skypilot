@@ -172,7 +172,7 @@ class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/dashboard/_next'):
             response = await call_next(request)
-            response.headers['Cache-Control'] = 'max-age=86400'
+            response.headers['Cache-Control'] = 'max-age=3600'
             return response
         return await call_next(request)
 
