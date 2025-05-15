@@ -15,6 +15,8 @@ Usage:
 import argparse
 import os
 
+import yaml
+
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 
@@ -35,13 +37,17 @@ def main():
         help='Output kubeconfig file path (default: %(default)s)')
 
     args = parser.parse_args()
-    updated = kubernetes_utils.format_kubeconfig_exec_auth(
-        args.input, args.output)
+
+    with open(args.input, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+
+    updated = kubernetes_utils.format_kubeconfig_exec_auth(config, args.output)
+
     if updated:
         print('Kubeconfig updated with path-less exec auth. '
               f'Saved to {args.output}')
     else:
-        print('No updates made. No exec-based auth commands paths found.')
+        print('No updates made.')
 
 
 if __name__ == '__main__':

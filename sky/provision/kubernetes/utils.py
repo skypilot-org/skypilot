@@ -1,6 +1,7 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
 import functools
+import hashlib
 import json
 import math
 import os
@@ -3080,10 +3081,10 @@ def _get_kubeconfig_path() -> str:
     return kubeconfig_path
 
 
-def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
-    """Reformat the kubeconfig file so that exec-based authentication can be
-    used with SkyPilot. Will create a new kubeconfig file under <output_path>
-    regardless of whether a change has been made
+def format_kubeconfig_exec_auth(config: Any, output_path: str) -> bool:
+    """Reformat the kubeconfig so that exec-based authentication can be used
+    with SkyPilot. Will create a new kubeconfig file under <output_path>
+    regardless of whether a change has been made.
 
     kubectl internally strips all environment variables except for system
     defaults, so a wrapper executable injects the relevant PATH information
@@ -3098,14 +3099,11 @@ def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
     refer to `skylet/constants.py` for more information.
 
     Args:
-        kubeconfig_path (str): Path to the input kubeconfig file
+        config (dict): kubeconfig parsed by yaml.safe_load
         output_path (str): Path where the potentially modified kubeconfig file
           will be saved
     Returns: whether config was updated, for logging purposes
     """
-    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
-
     updated = False
     for user in config.get('users', []):
         exec_info = user.get('user', {}).get('exec', {})
@@ -3128,3 +3126,36 @@ def format_kubeconfig_exec_auth(kubeconfig_path: str, output_path: str) -> bool:
         yaml.safe_dump(config, file)
 
     return updated
+
+
+def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
+    """Reformat the kubeconfig file or retrieve it from cache if it has already
+    been formatted before. Store it in the cache directory if necessary.
+
+    Having a cache for this is good if users spawn an extreme number of jobs
+    concurrently.
+
+    Args:
+        kubeconfig_path (str): kubeconfig path
+    Returns: updated kubeconfig path
+    """
+    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+    normalized = yaml.dump(config, sort_keys=True)
+    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    path = os.path.expanduser(
+        f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
+    )
+
+    # If we have already converted the same kubeconfig before, just return.
+    if os.path.isfile(path):
+        return path
+
+    # Make directory as it may not exist. This operation will only happen
+    # once for every new kubeconfig.
+    os.makedirs(os.path.dirname(
+        os.path.expanduser(
+            kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE)),
+                exist_ok=True)
+    format_kubeconfig_exec_auth(config, path)
+    return path

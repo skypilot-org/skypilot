@@ -28,7 +28,6 @@ logger = sky_logging.init_logger(__name__)
 
 # Check if KUBECONFIG is set, and use it if it is.
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
-CONVERTED_KUBECONFIG_PATH = '~/.sky/kubeconfig.converted'
 CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
@@ -765,14 +764,13 @@ class Kubernetes(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
-            # strip auth plugin paths (e.g.: gke-gcloud-auth-plugin)
-            kubernetes_utils.format_kubeconfig_exec_auth(
-                os.path.expanduser(CREDENTIAL_PATH),
-                os.path.expanduser(CONVERTED_KUBECONFIG_PATH))
+            # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
+            converted = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(
+                os.path.expanduser(CREDENTIAL_PATH))
 
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CONVERTED_KUBECONFIG_PATH}
+            return {DEFAULT_KUBECONFIG_PATH: converted}
         else:
             return {}
 
