@@ -41,7 +41,7 @@ hyperpod-i-0da69b9076c7ff6a4   ml.p4d.24xlarge   8     4
 
 ## Access HyperPod and run distributed job with SkyPilot
 
-To accesss HyperPod and run distributed job with SkyPilot, see the SkyPilot [HyperPod example](../hyperpod-eks/).
+To access HyperPod and run distributed job with SkyPilot, see the SkyPilot [HyperPod example](https://github.com/skypilot-org/skypilot/blob/master/examples/hyperpod-eks).
 
 ### Adding EFA configurations in SkyPilot YAML
 
@@ -101,11 +101,11 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 | g6e.48xlarge  | L40S:8   | 4    |
 
 
-Update the EFA number in the [nccl_efa.yaml](nccl_efa.yaml) for the GPUs you used.
+Update the EFA number in the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the GPUs you use.
 
 ## Running NCCL test with EFA using SkyPilot
 
-Check the [nccl_efa.yaml](nccl_efa.yaml) for the complete SkyPilot cluster yaml cofnigurations.
+Check the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot cluster yaml configurations.
 
 The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
@@ -121,7 +121,7 @@ SkyPilot will:
 3. Execute the NCCL performance test with EFA networking
 4. Output performance metrics showing the benefits of EFA for distributed training
 
-> [!NOTE]
+> **NOTE:**
 > We can turn off EFA with `nccl_efa.yaml` by passing an env:
 > ```bash
 > sky launch -c efa --env USE_EFA=false nccl_efa.yaml

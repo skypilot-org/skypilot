@@ -46,6 +46,8 @@ class Location:
 
     @classmethod
     def from_resources(cls, resources: 'resources_lib.Resources') -> 'Location':
+        assert resources.cloud is not None, 'Cloud must be specified'
+        assert resources.region is not None, 'Region must be specified'
         return cls(resources.cloud, resources.region, resources.zone)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -147,6 +149,7 @@ def _get_possible_location_from_task(task: 'task_lib.Task') -> List[Location]:
                 cloud_str = str(launchable.cloud)
                 region = launchable.region
                 zone = launchable.zone
+                assert region is not None, 'Region must be specified'
                 if (cloud_str not in location_requirements and
                         location_requirements):
                     continue

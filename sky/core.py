@@ -369,9 +369,18 @@ def _start(
                 'supported when starting SkyPilot controllers. To '
                 f'fix: omit the {arguments_str} to use the '
                 f'default autostop settings from config.')
-        idle_minutes_to_autostop, down = (
-            controller_utils.get_controller_autostop_config(
-                controller=controller))
+
+        # Get the autostop resources, from which we extract the correct autostop
+        # config.
+        controller_resources = controller_utils.get_controller_resources(
+            controller, [])
+        # All resources should have the same autostop config.
+        controller_autostop_config = list(
+            controller_resources)[0].autostop_config
+        if (controller_autostop_config is not None and
+                controller_autostop_config.enabled):
+            idle_minutes_to_autostop = controller_autostop_config.idle_minutes
+            down = controller_autostop_config.down
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
@@ -627,29 +636,26 @@ def autostop(
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
+    resources = handle.launched_resources.assert_launchable()
     # Check cloud supports stopping spot instances
-    cloud = handle.launched_resources.cloud
-    assert cloud is not None, handle
+    cloud = resources.cloud
 
     if not isinstance(backend, backends.CloudVmRayBackend):
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
-    cloud = handle.launched_resources.cloud
+
     # Check if autostop/autodown is required and supported
     if not is_cancel:
         try:
             if down:
                 cloud.check_features_are_supported(
-                    handle.launched_resources,
-                    {clouds.CloudImplementationFeatures.AUTODOWN})
+                    resources, {clouds.CloudImplementationFeatures.AUTODOWN})
             else:
                 cloud.check_features_are_supported(
-                    handle.launched_resources,
-                    {clouds.CloudImplementationFeatures.STOP})
+                    resources, {clouds.CloudImplementationFeatures.STOP})
                 cloud.check_features_are_supported(
-                    handle.launched_resources,
-                    {clouds.CloudImplementationFeatures.AUTOSTOP})
+                    resources, {clouds.CloudImplementationFeatures.AUTOSTOP})
         except exceptions.NotSupportedError as e:
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '

@@ -167,27 +167,27 @@ class RunPod(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Optional[Union[str, bool]]]:
         del dryrun, cluster_name  # unused
         assert zones is not None, (region, zones)
 
         zone_names = [zone.name for zone in zones]
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if r.image_id is None:
-            image_id = 'runpod/base:0.0.2'
-        elif r.extract_docker_image() is not None:
-            image_id = r.extract_docker_image()
+        if resources.image_id is None:
+            image_id: Optional[str] = 'runpod/base:0.0.2'
+        elif resources.extract_docker_image() is not None:
+            image_id = resources.extract_docker_image()
         else:
-            image_id = r.image_id[r.region]
+            image_id = resources.image_id[resources.region]
 
         instance_type = resources.instance_type
         use_spot = resources.use_spot
-
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
