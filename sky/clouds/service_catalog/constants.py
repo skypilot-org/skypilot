@@ -7,7 +7,9 @@ CATALOG_DIR = os.getenv('SKY_CATALOG_DIR',
                         str(Path.home() / '.sky' / 'catalogs' / 'v7'))
 
 # The URL of the hosted catalog directory.
-HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs/v7'
+HOSTED_CATALOG_DIR_URL = (
+    'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'
+)  # pylint: disable=line-too-long
 
 # The schema version of the catalog.
 CATALOG_SCHEMA_VERSION = 'v7'

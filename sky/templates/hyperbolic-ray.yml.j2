@@ -1,42 +1,57 @@
 # Ray cluster config template for Hyperbolic Cloud
 
-cluster_name: {{ cluster_name }}
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
 
 provider:
-  type: hyperbolic
+  type: external
   module: sky.provision.hyperbolic
-
-available_node_types:
-  ray.head.default:
-    node_config:
-      InstanceType: {{ head_instance_type }}
-      # Add any Hyperbolic-specific config here
-    resources: {{ head_resources }}
-    min_workers: 0
-    max_workers: 0
-
-  ray.worker.default:
-    node_config:
-      InstanceType: {{ worker_instance_type }}
-      # Add any Hyperbolic-specific config here
-    resources: {{ worker_resources }}
-    min_workers: {{ min_workers }}
-    max_workers: {{ max_workers }}
+  region: {{region}}
 
 auth:
   ssh_user: ubuntu
-  ssh_private_key: skypilot:ssh_private_key
-  ssh_proxy_command: skypilot:ssh_proxy_command
+  ssh_private_key: {{ssh_private_key}}
 
-setup_commands:
-  - echo "Setup commands for Hyperbolic"
+available_node_types:
+  ray_head_default:
+    resources: {{head_resources}}
+    node_config:
+      InstanceType: {{head_instance_type}}
+      # Add any Hyperbolic-specific config here
+  ray_worker_default:
+    min_workers: {{min_workers}}
+    max_workers: {{max_workers}}
+    resources: {{worker_resources}}
+    node_config:
+      InstanceType: {{worker_instance_type}}
+      # Add any Hyperbolic-specific config here
 
-head_setup_commands:
-  - echo "Head node setup for Hyperbolic"
+head_node_type: ray_head_default
 
-worker_setup_commands:
-  - echo "Worker node setup for Hyperbolic"
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+{%- endfor %}
+}
 
-file_mounts: {}
+rsync_exclude: []
+
+initialization_commands: []
+
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+setup_commands: []
+head_setup_commands: []
+worker_setup_commands: []
 
 # Add more fields as needed for your cloud
