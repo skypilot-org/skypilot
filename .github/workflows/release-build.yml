@@ -253,6 +253,7 @@ jobs:
           # Commit the version change on the new test branch
           git add sky/__init__.py
           git add Dockerfile
+          git add charts/skypilot/values.yaml
           git commit -m "Release ${RELEASE_VERSION}"
 
           # Get the new commit SHA from the test branch
