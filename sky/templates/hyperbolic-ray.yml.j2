@@ -2,33 +2,29 @@
 
 cluster_name: {{cluster_name_on_cloud}}
 
-# The maximum number of workers nodes to launch in addition to the head node.
-max_workers: {{num_nodes - 1}}
-upscaling_speed: {{num_nodes - 1}}
+# Hyperbolic only supports a single node (the head node).
+max_workers: 0
+upscaling_speed: 0
 idle_timeout_minutes: 60
 
 provider:
   type: external
   module: sky.provision.hyperbolic
-  region: {{region}}
+  region: "default"
 
 auth:
-  ssh_user: ubuntu
+  ssh_user: root
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
   ray_head_default:
-    resources: {{head_resources}}
+    resources: {}
     node_config:
-      InstanceType: {{head_instance_type}}
-      # Add any Hyperbolic-specific config here
-  ray_worker_default:
-    min_workers: {{min_workers}}
-    max_workers: {{max_workers}}
-    resources: {{worker_resources}}
-    node_config:
-      InstanceType: {{worker_instance_type}}
-      # Add any Hyperbolic-specific config here
+      InstanceType: "{{instance_type}}"
+      # Extract GPU configuration from instance type
+      # Format: 1x-T4-4-17 -> gpu_count=1, gpu_model=Tesla-T4
+      GPUCount: {{instance_type.split('-')[0].replace('x', '')}}
+      GPUModel: {{instance_type.split('-')[1].upper()}}
 
 head_node_type: ray_head_default
 
@@ -50,8 +46,8 @@ initialization_commands: []
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
 # connection, which is expensive. Try your best to co-locate commands into fewer
 # items!
-setup_commands: []
-head_setup_commands: []
-worker_setup_commands: []
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
 
 # Add more fields as needed for your cloud
