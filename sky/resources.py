@@ -1,6 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import textwrap
+import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
@@ -103,13 +104,14 @@ class Resources:
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
+        job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
+                                     str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Union[Dict[str, str], str, None] = None,
+        image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
@@ -224,7 +226,8 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
+        self._job_recovery: Optional[Dict[str, Optional[Union[str,
+                                                              int]]]] = None
         if job_recovery is not None:
             if isinstance(job_recovery, str):
                 job_recovery = {'strategy': job_recovery}
@@ -235,7 +238,7 @@ class Resources:
             if strategy_name == 'none':
                 self._job_recovery = None
             else:
-                if strategy_name is not None:
+                if isinstance(strategy_name, str):
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
@@ -248,7 +251,7 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._image_id = image_id
+        self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
@@ -256,8 +259,11 @@ class Resources:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
-                    k.strip(): v.strip() for k, v in image_id.items()
+                    typing.cast(str, k).strip(): v.strip()
+                    for k, v in image_id.items()
                 }
+        else:
+            self._image_id = image_id
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
@@ -275,7 +281,7 @@ class Resources:
             if isinstance(ports, tuple):
                 ports = list(ports)
             if not isinstance(ports, list):
-                ports = [ports]
+                ports = [str(ports)]
             ports = resources_utils.simplify_ports(
                 [str(port) for port in ports])
             if not ports:
@@ -297,7 +303,7 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
-        self._cached_repr = None
+        self._cached_repr: Optional[str] = None
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -426,19 +432,19 @@ class Resources:
         return repr_str
 
     @property
-    def cloud(self):
+    def cloud(self) -> Optional[clouds.Cloud]:
         return self._cloud
 
     @property
-    def region(self):
+    def region(self) -> Optional[str]:
         return self._region
 
     @property
-    def zone(self):
+    def zone(self) -> Optional[str]:
         return self._zone
 
     @property
-    def instance_type(self):
+    def instance_type(self) -> Optional[str]:
         return self._instance_type
 
     @property
@@ -492,7 +498,7 @@ class Resources:
         return None
 
     @property
-    def accelerator_args(self) -> Optional[Dict[str, str]]:
+    def accelerator_args(self) -> Optional[Dict[str, Any]]:
         return self._accelerator_args
 
     @property
@@ -504,7 +510,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
+    def job_recovery(self) -> Optional[Dict[str, Optional[Union[str, int]]]]:
         return self._job_recovery
 
     @property
@@ -512,11 +518,11 @@ class Resources:
         return self._disk_size
 
     @property
-    def image_id(self) -> Optional[Dict[str, str]]:
+    def image_id(self) -> Optional[Dict[Optional[str], str]]:
         return self._image_id
 
     @property
-    def disk_tier(self) -> resources_utils.DiskTier:
+    def disk_tier(self) -> Optional[resources_utils.DiskTier]:
         return self._disk_tier
 
     @property
@@ -547,15 +553,21 @@ class Resources:
             return False
         return self._requires_fuse
 
+    def set_requires_fuse(self, value: bool) -> None:
+        """Sets whether this resource requires FUSE mounting support.
+
+        Args:
+            value: Whether the resource requires FUSE mounting support.
+        """
+        # TODO(zeping): This violates the immutability of Resources.
+        #  Refactor to use Resources.copy instead.
+        self._requires_fuse = value
+
     @property
     def cluster_config_overrides(self) -> Dict[str, Any]:
         if self._cluster_config_overrides is None:
             return {}
         return self._cluster_config_overrides
-
-    @requires_fuse.setter
-    def requires_fuse(self, value: Optional[bool]) -> None:
-        self._requires_fuse = value
 
     @property
     def docker_login_config(self) -> Optional[docker_utils.DockerLoginConfig]:
@@ -630,8 +642,8 @@ class Resources:
 
     def _set_accelerators(
         self,
-        accelerators: Union[None, str, Dict[str, int]],
-        accelerator_args: Optional[Dict[str, str]],
+        accelerators: Union[None, str, Dict[str, Union[int, float]]],
+        accelerator_args: Optional[Dict[str, Any]],
     ) -> None:
         """Sets accelerators.
 
@@ -666,10 +678,11 @@ class Resources:
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
-                assert (self.cloud.is_same_cloud(clouds.GCP()) or
-                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
-                            'Cloud must be GCP or Kubernetes for TPU '
-                            'accelerators.')
+                assert self.cloud is not None and (
+                    self.cloud.is_same_cloud(clouds.GCP()) or
+                    self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                        'Cloud must be GCP or Kubernetes for TPU '
+                        'accelerators.')
 
                 if accelerator_args is None:
                     accelerator_args = {}
@@ -703,8 +716,9 @@ class Resources:
                                     'Cannot specify instance type (got '
                                     f'{self.instance_type!r}) for TPU VM.')
 
-        self._accelerators = accelerators
-        self._accelerator_args = accelerator_args
+        self._accelerators: Optional[Dict[str, Union[int,
+                                                     float]]] = accelerators
+        self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
 
     def _set_autostop_config(
         self,
@@ -713,11 +727,23 @@ class Resources:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
 
     def is_launchable(self) -> bool:
+        """Returns whether the resource is launchable."""
         return self.cloud is not None and self._instance_type is not None
+
+    def assert_launchable(self) -> 'LaunchableResources':
+        """A workaround to make mypy understand that is_launchable() is true.
+
+        Note: The `cast` to `LaunchableResources` is only for static type
+        checking with MyPy. At runtime, the Python interpreter does not enforce
+        types, and the returned object will still be an instance of `Resources`.
+        """
+        assert self.is_launchable(), self
+        return typing.cast(LaunchableResources, self)
 
     def need_cleanup_after_preemption_or_failure(self) -> bool:
         """Whether a resource needs cleanup after preemption or failure."""
         assert self.is_launchable(), self
+        assert self.cloud is not None, 'Cloud must be specified'
         return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
     def _try_canonicalize_accelerators(self) -> None:
@@ -774,10 +800,10 @@ class Resources:
                     else:
                         table = log_utils.create_table(['Cloud', 'Hint'])
                         table.add_row(['-----', '----'])
-                        for cloud, error in cloud_to_errors.items():
+                        for cloud_msg, error in cloud_to_errors.items():
                             reason_str = '\n'.join(textwrap.wrap(
                                 str(error), 80))
-                            table.add_row([str(cloud), reason_str])
+                            table.add_row([cloud_msg, reason_str])
                         hint = table.get_string()
                     raise ValueError(
                         f'Invalid (region {self._region!r}, zone '
@@ -809,11 +835,13 @@ class Resources:
         ssh_proxy_command dict with region names as keys).
         """
         assert self.is_launchable(), self
-
-        regions = self._cloud.regions_with_offering(self._instance_type,
-                                                    self.accelerators,
-                                                    self._use_spot,
-                                                    self._region, self._zone)
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        regions = self.cloud.regions_with_offering(self._instance_type,
+                                                   self.accelerators,
+                                                   self._use_spot, self._region,
+                                                   self._zone)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 
@@ -913,6 +941,10 @@ class Resources:
             cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
             if self._cpus is not None:
+                assert cpus is not None, (
+                    f'Can\'t get vCPUs from instance type: '
+                    f'{self._instance_type}, check catalog or '
+                    f'specify cpus directly.')
                 if self._cpus.endswith('+'):
                     if cpus < float(self._cpus[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -927,6 +959,10 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
+                assert mem is not None, (
+                    f'Can\'t get memory from instance type: '
+                    f'{self._instance_type}, check catalog or '
+                    f'specify memory directly.')
                 if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -950,6 +986,8 @@ class Resources:
         if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
         # Validate the job recovery strategy
+        assert isinstance(self._job_recovery['strategy'],
+                          str), 'Job recovery strategy must be a string'
         registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
             self._job_recovery['strategy'])
 
@@ -984,7 +1022,7 @@ class Resources:
                     'Cloud must be specified when image_id is provided.')
 
         try:
-            self._cloud.check_features_are_supported(
+            self.cloud.check_features_are_supported(
                 self,
                 requested_features={
                     clouds.CloudImplementationFeatures.IMAGE_ID
@@ -1007,14 +1045,14 @@ class Resources:
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
             if (image_id.startswith('skypilot:') and
-                    not self._cloud.is_image_tag_valid(image_id, region)):
+                    not self.cloud.is_image_tag_valid(image_id, region)):
                 region_str = f' ({region})' if region else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Image tag {image_id!r} is not valid, please make sure'
                         f' the tag exists in {self._cloud}{region_str}.')
 
-            if (self._cloud.is_same_cloud(clouds.AWS()) and
+            if (self.cloud.is_same_cloud(clouds.AWS()) and
                     not image_id.startswith('skypilot:') and region is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1119,6 +1157,9 @@ class Resources:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
@@ -1163,6 +1204,7 @@ class Resources:
         docker_image = self.extract_docker_image()
 
         # Cloud specific variables
+        assert self.cloud is not None, 'Cloud must be specified'
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun)
 
@@ -1217,9 +1259,12 @@ class Resources:
         specific_reservations = set(
             skypilot_config.get_nested(
                 (str(self.cloud).lower(), 'specific_reservations'), set()))
+
+        assert (self.cloud is not None and self.instance_type is not None and
+                self.region
+                is not None), ('Cloud, instance type, region must be specified')
         return self.cloud.get_reservations_available_resources(
-            self._instance_type, self._region, self._zone,
-            specific_reservations)
+            self.instance_type, self.region, self.zone, specific_reservations)
 
     def less_demanding_than(
         self,
@@ -1239,6 +1284,9 @@ class Resources:
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
+
+        assert other.cloud is not None, 'Other cloud must be specified'
+
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
@@ -1327,6 +1375,7 @@ class Resources:
         If a field in `blocked` is None, it should be considered as a wildcard
         for that field.
         """
+        assert self.cloud is not None, 'Cloud must be specified'
         is_matched = True
         if (blocked.cloud is not None and
                 not self.cloud.is_same_cloud(blocked.cloud)):
@@ -1365,7 +1414,7 @@ class Resources:
         use_spot = self.use_spot if self._use_spot_specified else None
 
         current_override_configs = self._cluster_config_overrides
-        if self._cluster_config_overrides is None:
+        if current_override_configs is None:
             current_override_configs = {}
         new_override_configs = override.pop('_cluster_config_overrides', {})
         overlaid_configs = skypilot_config.overlay_skypilot_config(
@@ -1809,3 +1858,38 @@ class Resources:
             self._autostop_config = None
 
         self.__dict__.update(state)
+
+
+class LaunchableResources(Resources):
+    """A class representing resources that can be launched on a cloud provider.
+
+    This class is primarily a type hint for MyPy to indicate that an instance
+    of `Resources` is launchable (i.e., `cloud` and `instance_type` are not
+    None). It should not be instantiated directly.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called,unused-argument
+        assert False, (
+            'LaunchableResources should not be instantiated directly. '
+            'It is only used for type checking by MyPy.')
+
+    @property
+    def cloud(self) -> clouds.Cloud:
+        assert self._cloud is not None, 'Cloud must be specified'
+        return self._cloud
+
+    @property
+    def instance_type(self) -> str:
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        return self._instance_type
+
+    def copy(self, **override) -> 'LaunchableResources':
+        """Ensure MyPy understands the return type is LaunchableResources.
+
+        This method is not expected to be called at runtime, as
+        LaunchableResources should not be directly instantiated. It primarily
+        serves as a type hint for static analysis.
+        """
+        self.assert_launchable()
+        return typing.cast(LaunchableResources, super().copy(**override))

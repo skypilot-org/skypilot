@@ -5,7 +5,11 @@ export default function Index() {
   const router = useRouter();
 
   useEffect(() => {
-    router.push('/clusters');
+    if (router.asPath === '/') {
+      router.push('/clusters');
+    } else {
+      router.push(router.asPath);
+    }
   }, [router]);
 
   // Return null or a loading state while redirecting
