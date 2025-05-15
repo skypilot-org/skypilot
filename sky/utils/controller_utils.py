@@ -608,8 +608,9 @@ def get_controller_resources(
     controller_zone = controller_resources_to_use.zone
 
     # Filter clouds if controller_resources_to_use.cloud is specified.
-    filtered_clouds = ({controller_cloud} if controller_cloud is not None else
-                       requested_clouds_with_region_zone.keys())
+    filtered_clouds: Set[str] = {controller_cloud
+                                } if controller_cloud is not None else set(
+                                    requested_clouds_with_region_zone.keys())
 
     # Filter regions and zones and construct the result.
     result: Set[resources.Resources] = set()
@@ -618,15 +619,17 @@ def get_controller_resources(
                                                         {None: {None}})
 
         # Filter regions if controller_resources_to_use.region is specified.
-        filtered_regions = ({controller_region} if controller_region is not None
-                            else regions.keys())
+        filtered_regions: Set[Optional[str]] = ({
+            controller_region
+        } if controller_region is not None else set(regions.keys()))
 
         for region in filtered_regions:
             zones = regions.get(region, {None})
 
             # Filter zones if controller_resources_to_use.zone is specified.
-            filtered_zones = ({controller_zone}
-                              if controller_zone is not None else zones)
+            filtered_zones: Set[Optional[str]] = ({
+                controller_zone
+            } if controller_zone is not None else set(zones))
 
             # Create combinations of cloud, region, and zone.
             for zone in filtered_zones:
@@ -703,7 +706,7 @@ def _setup_proxy_command_on_controller(
     # NOTE: suppose that we have a controller in old VPC, then user
     # changes 'vpc_name' in the config and does a 'job launch' /
     # 'serve up'. In general, the old controller may not successfully
-    # launch the job in the new VPC. This happens if the two VPCs don’t
+    # launch the job in the new VPC. This happens if the two VPCs don't
     # have peering set up. Like other places in the code, we assume
     # properly setting up networking is user's responsibilities.
     # TODO(zongheng): consider adding a basic check that checks

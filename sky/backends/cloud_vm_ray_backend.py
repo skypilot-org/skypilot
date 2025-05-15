@@ -1358,6 +1358,8 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
 
+        to_provision = to_provision.assert_launchable()
+
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
@@ -2033,6 +2035,7 @@ class RetryingVmProvisioner(object):
                             f' that never expire or a service account.\033[0m')
                 logger.warning(warnings)
 
+        to_provision = to_provision.assert_launchable()
         # Retrying launchable resources.
         while True:
             try:
@@ -2162,9 +2165,10 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
-            to_provision = task.best_resources
+            best_resources = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
-            assert to_provision is not None, task
+            assert best_resources is not None, task
+            to_provision = best_resources
         return config_dict
 
 
@@ -2430,19 +2434,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+
+        launched_resources = self.launched_resources.assert_launchable()
         updated_to_skypilot_provisioner_after_provisioned = (
-            self.launched_resources.cloud.PROVISIONER_VERSION >=
+            launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
             self.cached_external_ips is not None and
             self.cached_cluster_info is None)
         if updated_to_skypilot_provisioner_after_provisioned:
             logger.debug(
-                f'{self.launched_resources.cloud} has been updated to the new '
+                f'{launched_resources.cloud} has been updated to the new '
                 f'provisioner after cluster {self.cluster_name} was '
                 f'provisioned. Cached IPs are used for connecting to the '
                 'cluster.')
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                self.launched_resources.cloud.PROVISIONER_VERSION or
+                launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
@@ -3146,8 +3152,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
-            cloud = handle.launched_resources.cloud
-            if not (cloud.OPEN_PORTS_VERSION <=
+            launched_resources = handle.launched_resources.assert_launchable()
+            if not (launched_resources.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
@@ -3251,9 +3257,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
+        launched_resources = handle.launched_resources.assert_launchable()
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
-                handle.launched_resources.cloud, all_file_mounts)
+                launched_resources.cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
             self._execute_storage_mounts(handle, storage_mounts)
             self._set_storage_mounts_metadata(handle.cluster_name,
@@ -4153,7 +4160,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
-        cloud = handle.launched_resources.cloud
+        launched_resources = handle.launched_resources.assert_launchable()
+        cloud = launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
@@ -4365,10 +4373,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the right resource to provision the cluster.
             if handle.cluster_yaml is not None:
                 try:
-                    cloud = handle.launched_resources.cloud
+                    launched_resources = (
+                        handle.launched_resources.assert_launchable())
+                    cloud = launched_resources.cloud
                     config = common_utils.read_yaml(handle.cluster_yaml)
                     cloud.check_features_are_supported(
-                        handle.launched_resources,
+                        launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
                     provision_lib.cleanup_ports(repr(cloud),
                                                 cluster_name_on_cloud,
@@ -4710,6 +4720,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
                                                            requested_ports_set)
             to_provision = handle.launched_resources
+            assert to_provision is not None
+            to_provision = to_provision.assert_launchable()
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
