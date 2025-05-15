@@ -11,7 +11,8 @@ import collections
 import enum
 import math
 import typing
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
+                    Union)
 
 from typing_extensions import assert_never
 
@@ -302,7 +303,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -721,7 +722,7 @@ class Cloud:
         Raises:
             ResourcesMismatchError: If the accelerator is not supported.
         """
-        assert resources.is_launchable(), resources
+        resources = resources.assert_launchable()
 
         def _equal_accelerators(
             acc_requested: Optional[Dict[str, Union[int, float]]],
