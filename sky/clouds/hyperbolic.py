@@ -241,7 +241,19 @@ class Hyperbolic(clouds.Cloud):
                                         zones,
                                         num_nodes,
                                         dryrun=False):
-        return {}
+        print(f"DEBUG: r.instance_type = {resources.instance_type}")
+        """Converts planned sky.Resources to cloud-specific resource variables."""
+        del cluster_name, dryrun  # unused
+        r = resources
+        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        custom_resources = resources_utils.make_ray_custom_resources_str(acc_dict)
+
+        return {
+            'instance_type': r.instance_type,
+            'custom_resources': custom_resources,
+            'region': region.name,
+            'use_spot': r.use_spot,
+        }
 
     def cluster_name_in_hint(self, cluster_name_on_cloud: Optional[str],
                              cluster_name: str) -> bool:
