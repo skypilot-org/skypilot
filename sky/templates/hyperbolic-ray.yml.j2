@@ -4,6 +4,7 @@ cluster_name: {{ cluster_name }}
 
 provider:
   type: hyperbolic
+  module: sky.provision.hyperbolic
 
 available_node_types:
   ray.head.default:
@@ -23,8 +24,9 @@ available_node_types:
     max_workers: {{ max_workers }}
 
 auth:
-  ssh_user: {{ ssh_user }}
-  ssh_private_key: {{ ssh_private_key }}
+  ssh_user: ubuntu
+  ssh_private_key: skypilot:ssh_private_key
+  ssh_proxy_command: skypilot:ssh_proxy_command
 
 setup_commands:
   - echo "Setup commands for Hyperbolic"

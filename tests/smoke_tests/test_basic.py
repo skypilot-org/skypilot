@@ -1131,3 +1131,28 @@ def test_lambda_cloud_open_ports():
             except Exception as e:
                 print(f'Warning: Failed to clean up test firewall rule: {e}')
                 # Don't fail the test if cleanup fails
+
+
+def test_hyperbolic_basic():
+    """Test basic Hyperbolic cloud functionality."""
+    # Test that we can create a task with Hyperbolic resources
+    task = sky.Task('echo "Hello, Hyperbolic!"')
+    task.set_resources(
+        sky.Resources(cloud=sky.clouds.Hyperbolic(),
+                      instance_type='1x-T4-4-17',
+                      accelerators={'T4': 1}))
+
+    # Test that we can create a DAG with Hyperbolic resources
+    with sky.Dag() as dag:
+        task = sky.Task('echo "Hello, Hyperbolic!"')
+        task.set_resources(
+            sky.Resources(cloud=sky.clouds.Hyperbolic(),
+                          instance_type='1x-T4-4-17',
+                          accelerators={'T4': 1}))
+
+    # Test that we can get the cost for Hyperbolic resources
+    resources = sky.Resources(cloud=sky.clouds.Hyperbolic(),
+                              instance_type='1x-T4-4-17',
+                              accelerators={'T4': 1})
+    cost = resources.get_cost(1)  # 1 hour
+    assert cost > 0
