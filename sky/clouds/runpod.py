@@ -38,7 +38,7 @@ class RunPod(clouds.Cloud):
             ('High availability controllers are not supported on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on '
-             f'{_REPR}.'),
+             'RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

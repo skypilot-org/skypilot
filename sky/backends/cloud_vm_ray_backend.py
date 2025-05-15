@@ -4375,7 +4375,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the right resource to provision the cluster.
             if handle.cluster_yaml is not None:
                 launched_resources = (
-                        handle.launched_resources.assert_launchable())
+                    handle.launched_resources.assert_launchable())
                 cloud = launched_resources.cloud
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 resource_cleaned_up = True
@@ -4402,7 +4402,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         raise
 
                 # Clean up custom multi networks, e.g. the subnets, firewalls,
-                # and vpc created for GCP GPUDirect TCPX
+                # and VPCs created for GCP GPUDirect TCPX
                 try:
                     cloud.check_features_are_supported(
                         handle.launched_resources, {
