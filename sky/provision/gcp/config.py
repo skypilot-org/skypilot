@@ -543,7 +543,11 @@ def _delete_rules(project_id: str, compute, rules, vpc_name: str):
             _delete_firewall_rule(project_id, compute, rule['name'])
 
 
-def _create_rules(project_id: str, compute, rules, vpc_name):
+def _create_rules(project_id: str,
+                  compute,
+                  rules,
+                  vpc_name,
+                  recreate: bool = True):
     opertaions = []
     for rule in rules:
         # Query firewall rule by its name (unique in a project).
@@ -553,7 +557,11 @@ def _create_rules(project_id: str, compute, rules, vpc_name):
                                          compute,
                                          filter=f'(name={rule_name})')
         if rule_list:
-            _delete_firewall_rule(project_id, compute, rule_name)
+            if recreate:
+                _delete_firewall_rule(project_id, compute, rule_name)
+            else:
+                logger.info(f'Rule {rule_name} already exists')
+                continue
 
         body = rule.copy()
         body['name'] = body['name'].format(VPC_NAME=vpc_name)
@@ -706,7 +714,7 @@ def get_gpu_direct_usable_vpcs_and_subnets(
     """Return a list of usable VPCs and subnets for GPU Direct."""
     project_id = config.provider_config['project_id']
     vpc_prefix = constants.SKYPILOT
-    cluster_prefix = cluster_name[:constants.CLUSTER_PREFIX_LENGTH]
+    cluster_prefix = cluster_name
     vpc_subnet_pairs = []
 
     # TODO(hailong): Determine the num_vpcs per different GPU Direct types
@@ -740,8 +748,14 @@ def get_gpu_direct_usable_vpcs_and_subnets(
                                     compute,
                                     network=vpc_name)
         # Apply firewall rules
-        _create_rules(project_id, compute, constants.FIREWALL_RULES_TEMPLATE,
-                      vpc_name)
+        # No need to recreate the rules if exist,
+        # as they are totally managed by SkyPilot,
+        # in this case, we can skip the rules creation during failover
+        _create_rules(project_id,
+                      compute,
+                      constants.FIREWALL_RULES_TEMPLATE,
+                      vpc_name,
+                      recreate=False)
         vpc_subnet_pairs.append((vpc_name, subnets[0]))
     return vpc_subnet_pairs
 
@@ -750,11 +764,12 @@ def delete_gpu_direct_vpcs_and_subnets(
     cluster_name: str,
     project_id: str,
     region: str,
+    failover: bool = False,
 ):
     """Delete GPU Direct subnets, firewalls, and VPCs."""
     compute = _create_compute()
     vpc_prefix = constants.SKYPILOT
-    cluster_prefix = cluster_name[:constants.CLUSTER_PREFIX_LENGTH]
+    cluster_prefix = cluster_name
 
     # TODO(hailong): Determine the num_vpcs per different GPU Direct types
     num_vpcs = constants.SKYPILOT_GPU_DIRECT_VPC_NUM
@@ -777,10 +792,13 @@ def delete_gpu_direct_vpcs_and_subnets(
                 logger.info(f'Deleting subnet {subnet["name"]}')
                 _delete_subnet(project_id, region, compute, subnet['name'])
 
-            _delete_rules(project_id, compute,
-                          constants.FIREWALL_RULES_TEMPLATE, vpc['name'])
-            logger.info(f'Deleting VPC {vpc["name"]}')
-            _delete_vpcnet(project_id, compute, vpc['name'])
+            if not failover:
+                # For failover, we don't delete the rules and VPCs,
+                # which are global resources and can be reused.
+                _delete_rules(project_id, compute,
+                              constants.FIREWALL_RULES_TEMPLATE, vpc['name'])
+                logger.info(f'Deleting VPC {vpc["name"]}')
+                _delete_vpcnet(project_id, compute, vpc['name'])
 
 
 def _configure_placement_policy(region: str, cluster_name: str,
@@ -804,7 +822,7 @@ def _configure_placement_policy(region: str, cluster_name: str,
             constants.COMPACT_GROUP_PLACEMENT_POLICY or mig_configuration):
         return config
 
-    cluster_prefix = cluster_name[:constants.CLUSTER_PREFIX_LENGTH]
+    cluster_prefix = cluster_name
     policy_name = f'{cluster_prefix}-placement-policy'
     resource_policy = {
         'name': policy_name,

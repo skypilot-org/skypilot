@@ -56,6 +56,9 @@ class Vsphere(clouds.Cloud):
             (f'Opening ports is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             (f'High availability controllers are not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            (f'Customized multiple network interfaces '
+             f'are not supported on {_REPR}.'),
     }
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 80  # The name can't exceeds 80 characters

@@ -52,6 +52,9 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
     AUTOSTOP = 'autostop'  # Pod/VM can stop itself
     AUTODOWN = 'autodown'  # Pod/VM can down itself
+    # Pod/VM can have customized multiple network interfaces
+    # e.g. GCP GPUDirect TCPX
+    CUSTOM_MULTI_NETWORK = 'custom_multi_network'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.

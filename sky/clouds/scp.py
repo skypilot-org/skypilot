@@ -60,6 +60,9 @@ class SCP(clouds.Cloud):
             (f'Opening ports is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             (f'High availability controllers are not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on '
+             f'{_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '

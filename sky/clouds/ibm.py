@@ -52,6 +52,9 @@ class IBM(clouds.Cloud):
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
                 ('High availability controllers are not supported on IBM.'),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+                ('Customized multiple network interfaces are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (

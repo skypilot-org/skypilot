@@ -36,6 +36,9 @@ class DO(clouds.Cloud):
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported in '
              f'{_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported in '
+             f'{_REPR}.'),
     }
     # DO maximum node name length defined as <= 255
     # https://docs.digitalocean.com/reference/api/api-reference/#operation/droplets_create
