@@ -767,18 +767,36 @@ def fill_template(template_name: str, variables: Dict[str, Any],
     assert template_name.endswith('.j2'), template_name
     root_dir = os.path.dirname(os.path.dirname(__file__))
     template_path = os.path.join(root_dir, 'templates', template_name)
+    print(f"[DEBUG] fill_template: template_path={template_path}")
     if not os.path.exists(template_path):
+        print(f"[ERROR] Template file does not exist: {template_path}")
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
+    print(f"[DEBUG] fill_template: output_path={output_path}")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
+    # Debug print for variables passed to the template
+    import pprint
+    print(f"[DEBUG] Variables passed to {template_name}:")
+    pprint.pprint(variables)
+
     # Write out yaml config.
-    j2_template = jinja2.Template(template)
-    content = j2_template.render(**variables)
-    with open(output_path, 'w', encoding='utf-8') as fout:
-        fout.write(content)
+    try:
+        j2_template = jinja2.Template(template)
+        content = j2_template.render(**variables)
+        print(f"[DEBUG] Template rendered successfully for {template_name}")
+    except Exception as e:
+        print(f"[ERROR] Failed to render template {template_name}: {e}")
+        raise
+    try:
+        with open(output_path, 'w', encoding='utf-8') as fout:
+            fout.write(content)
+        print(f"[DEBUG] Output file written: {output_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to write output file {output_path}: {e}")
+        raise
 
 
 def deprecated_function(

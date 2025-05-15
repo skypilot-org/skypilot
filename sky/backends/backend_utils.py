@@ -543,6 +543,7 @@ def write_cluster_config(
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
         keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+    print(f"[DEBUG] write_cluster_config called with template={cluster_config_template}, cluster_name={cluster_name}, output_dir={os.path.dirname(local_wheel_path)}")
     """Fills in cluster configuration templates and writes them out.
 
     Returns:
