@@ -554,7 +554,7 @@ def _get_tpu_response_for_zone(zone: str) -> list:
     # Sometimes the response is empty ({}) even for enabled zones. Here we
     # retry the request for a few times.
     backoff = common_utils.Backoff(initial_backoff=1)
-    for _ in range(TPU_RETRY_CNT):
+    for retry_cnt in range(TPU_RETRY_CNT):
         tpus_request = (
             tpu_client.projects().locations().acceleratorTypes().list(
                 parent=parent))
@@ -570,6 +570,10 @@ def _get_tpu_response_for_zone(zone: str) -> list:
                 print(f'  An error occurred: {error}')
             # If error happens, fail early.
             return []
+        except TimeoutError:
+            print(f'  TimeoutError: Failed to fetch TPUs for zone {zone!r}, '
+                  f'retry {retry_cnt + 1} of {TPU_RETRY_CNT}')
+
         time_to_sleep = backoff.current_backoff()
         print(f'  Retry zone {zone!r} in {time_to_sleep} seconds...')
         time.sleep(time_to_sleep)
