@@ -907,7 +907,9 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     """
     config = common_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (
+    if isinstance(
+            cloud,
+        (
             clouds.AWS,
             clouds.OCI,
             clouds.SCP,
@@ -917,7 +919,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
-    )):
+            clouds.Hyperbolic,  # Add Hyperbolic here
+        )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)

@@ -36,6 +36,12 @@ class Hyperbolic(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot instances are not supported on Hyperbolic; only on-demand '
              'instances are available.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ('Hyperbolic does not support cloning disk from cluster.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Hyperbolic does not support Docker images.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Hyperbolic does not support opening ports.'),
     }
     # Note: Region and zone selection are not supported on Hyperbolic.
     # All resources are provisioned in a single region without zones.
@@ -61,15 +67,12 @@ class Hyperbolic(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
+        assert zone is None, 'Hyperbolic does not support zones.'
+        del accelerators, zone  # unused
         regions = service_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'hyperbolic')
         if region is not None:
             regions = [r for r in regions if r.name == region]
-        if zone is not None:
-            for r in regions:
-                assert r.zones is not None, r
-                r.set_zones([z for z in r.zones if z.name == zone])
-            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
@@ -130,9 +133,121 @@ class Hyperbolic(clouds.Cloud):
     def _get_feasible_launchable_resources(
             self,
             resources: 'Resources') -> 'resources_utils.FeasibleResources':
-        return resources_utils.FeasibleResources(
-            resources_list=[],
-            fuzzy_candidate_list=[],
-            hint='Not implemented for Hyperbolic.')
+        # Check if the instance type exists in the catalog
+        if resources.instance_type is not None:
+            if service_catalog.instance_type_exists(resources.instance_type,
+                                                    'hyperbolic'):
+                # Remove accelerators for launchable resources
+                resources_launch = resources.copy(accelerators=None)
+                return resources_utils.FeasibleResources([resources_launch], [],
+                                                         None)
+            else:
+                return resources_utils.FeasibleResources(
+                    [], [], 'No matching instance type in Hyperbolic catalog.')
+
+        # If accelerators are specified
+        accelerators = resources.accelerators
+        if accelerators is not None:
+            assert len(accelerators) == 1, resources
+            acc, acc_count = list(accelerators.items())[0]
+            (instance_list, fuzzy_candidate_list
+            ) = service_catalog.get_instance_type_for_accelerator(
+                acc,
+                acc_count,
+                use_spot=resources.use_spot,
+                cpus=resources.cpus,
+                memory=resources.memory,
+                region=resources.region,
+                zone=resources.zone,
+                clouds='hyperbolic')
+            if instance_list is None:
+                return resources_utils.FeasibleResources([],
+                                                         fuzzy_candidate_list,
+                                                         None)
+
+            def _make(instance_list):
+                resource_list = []
+                for instance_type in instance_list:
+                    r = resources.copy(
+                        cloud=self,
+                        instance_type=instance_type,
+                        accelerators=None,
+                        cpus=None,
+                        memory=None,
+                    )
+                    resource_list.append(r)
+                return resource_list
+
+            return resources_utils.FeasibleResources(_make(instance_list),
+                                                     fuzzy_candidate_list, None)
+
+        # If nothing is specified, return a default instance type
+        default_instance_type = self.get_default_instance_type(
+            cpus=resources.cpus,
+            memory=resources.memory,
+            disk_tier=resources.disk_tier)
+        if default_instance_type is None:
+            return resources_utils.FeasibleResources([], [], None)
+        else:
+            r = resources.copy(
+                cloud=self,
+                instance_type=default_instance_type,
+                accelerators=None,
+                cpus=None,
+                memory=None,
+            )
+            return resources_utils.FeasibleResources([r], [], None)
+
+    def instance_type_exists(self, instance_type: str) -> bool:
+        return True
+
+    def validate_region_zone(
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        if zone is not None:
+            raise ValueError('Hyperbolic does not support zones.')
+        return region, None
+
+    @classmethod
+    def regions(cls) -> List['clouds.Region']:
+        return [clouds.Region('default')]
+
+    @classmethod
+    def zones_provision_loop(cls,
+                             *,
+                             region: str,
+                             num_nodes: int,
+                             instance_type: str,
+                             accelerators: Optional[Dict[str, int]] = None,
+                             use_spot: bool = False):
+        yield None
+
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        return None
+
+    def get_egress_cost(self, num_gigabytes: float):
+        return 0.0
+
+    def accelerators_to_hourly_cost(self, accelerators: Dict[str, int],
+                                    use_spot: bool, region: Optional[str],
+                                    zone: Optional[str]) -> float:
+        return 0.0
+
+    def make_deploy_resources_variables(self,
+                                        resources,
+                                        cluster_name,
+                                        region,
+                                        zones,
+                                        num_nodes,
+                                        dryrun=False):
+        return {}
+
+    def cluster_name_in_hint(self, cluster_name_on_cloud: Optional[str],
+                             cluster_name: str) -> bool:
+        """Check if a node's name matches the cluster name pattern."""
+        if cluster_name_on_cloud is None:
+            return False
+        return cluster_name_on_cloud.startswith(cluster_name)
 
     # Add more methods as needed for your cloud's features.

@@ -4,11 +4,12 @@ This module loads and queries the service catalog for Hyperbolic Cloud.
 """
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
+from sky.clouds import cloud  # Import cloud here for Region
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-if TYPE_CHECKING:
-    from sky.clouds import cloud
+# Initialize cloud variable at module level
+CLOUD = 'hyperbolic'
 
 _df = common.read_catalog('hyperbolic/vms.csv')
 
@@ -30,12 +31,35 @@ def get_hourly_cost(instance_type: str,
                     use_spot: bool,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    """Returns the hourly on-demand price for the instance type."""
+    """Returns the hourly on-demand price for the instance type.
+    
+    Args:
+        instance_type: The instance type in format 'Nx-MODEL-CPU-MEM' (e.g., '1x-T4-4-17')
+        use_spot: Whether to use spot instances
+        region: Ignored for Hyperbolic
+        zone: The zone to get the price for (not supported)
+    """
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Hyperbolic Cloud does not support zones.')
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    
+    # DEBUG: Print all instance types in the DataFrame
+    print('DEBUG: All InstanceTypes:', list(_df['InstanceType'].unique()))
+    print(f'DEBUG: Filtering for InstanceType={instance_type!r}')
+    
+    df = _df[_df['InstanceType'] == instance_type]
+    print('DEBUG: Filtered DataFrame shape:', df.shape)
+    if len(df) == 0:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Instance type {instance_type!r} not found. '
+                'Please check the instance type format and ensure it exists in the catalog.')
+    
+    if len(df) > 1:
+        cheapest_idx = df['Price'].idxmin()  # Select the cheapest instance
+        df = df.loc[[cheapest_idx]]
+    
+    return common.get_hourly_cost_impl(df, instance_type, use_spot, None, zone)
 
 
 def get_vcpus_mem_from_instance_type(
@@ -78,12 +102,14 @@ def get_instance_type_for_accelerator(
     return instance_types, None
 
 
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
-    region_list = common.get_region_zones(df, use_spot)
-    # Hack: Enforce US regions are always tried first
-    return sorted(region_list, key=lambda r: (not r.name.startswith('us-'), r.name))  # pylint: disable=line-too-long
+def get_region_zones_for_instance_type(
+    _instance_type: str,
+    _use_spot: bool,
+    clouds: Optional[str] = None,
+) -> List[cloud.Region]:
+    """Returns a dummy region for the given instance type (regionless cloud)."""
+    del clouds, _instance_type, _use_spot  # unused
+    return [cloud.Region('default')]
 
 
 def list_accelerators(
@@ -112,3 +138,7 @@ def list_accelerators(
 def get_instance_type_from_catalog() -> dict:
     # TODO: Implement this function
     return {}
+
+
+def regions() -> List[cloud.Region]:
+    return [cloud.Region('default')]
