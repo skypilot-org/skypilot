@@ -40,9 +40,10 @@ Example configuration:
 Use high-performance networking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. tabs::
+.. tab-set::
 
-    .. tab:: AWS EFA
+    .. tab-item:: AWS EFA
+        :sync: aws-efa-tab
 
         AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia Infiniband that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters with a simple additional setting in your SkyPilot YAML.
 
@@ -63,7 +64,8 @@ Use high-performance networking
 
         See `EFA example <https://github.com/skypilot-org/skypilot/tree/master/examples/aws_efa>`_ for more details.
 
-    .. tab:: GCP GPUDirect-TCPX
+    .. tab-item:: GCP GPUDirect-TCPX
+        :sync: gcp-gpu-direct-tcpx-tab
 
         `GPUDirect-TCPX <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` VMs. You can enable it with the following additional setting in your SkyPilot YAML.
 
