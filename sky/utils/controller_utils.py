@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set
 import uuid
 
 import colorama
@@ -517,6 +517,30 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
+        # Compatibility with the old way of specifying the controller autostop
+        # config. TODO(cooperc): Remove this before 0.12.0.
+        custom_controller_autostop_config = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller', 'autostop'), None)
+        if custom_controller_autostop_config is not None:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Warning: Config value '
+                f'`{controller.value.controller_type}.controller.autostop` '
+                'is deprecated. Please use '
+                f'`{controller.value.controller_type}.controller.resources.'
+                f'autostop` instead.{colorama.Style.RESET_ALL}')
+            # Only set the autostop config if it is not already specified.
+            if controller_resources_config_copied.get('autostop') is None:
+                controller_resources_config_copied['autostop'] = (
+                    custom_controller_autostop_config)
+            else:
+                logger.warning(f'{colorama.Fore.YELLOW}Ignoring the old '
+                               'config, since it is already specified in '
+                               f'resources.{colorama.Style.RESET_ALL}')
+    # Set the default autostop config for the controller, if not already
+    # specified.
+    if controller_resources_config_copied.get('autostop') is None:
+        controller_resources_config_copied['autostop'] = (
+            controller.value.default_autostop_config)
 
     try:
         controller_resources = resources.Resources.from_yaml_config(
@@ -547,7 +571,10 @@ def get_controller_resources(
     if controller_record is not None:
         handle = controller_record.get('handle', None)
         if handle is not None:
-            controller_resources_to_use = handle.launched_resources
+            # Use the existing resources, but override the autostop config with
+            # the one currently specified in the config.
+            controller_resources_to_use = handle.launched_resources.copy(
+                autostop=controller_resources_config_copied.get('autostop'))
 
     # If the controller and replicas are from the same cloud (and region/zone),
     # it should provide better connectivity. We will let the controller choose
@@ -642,40 +669,6 @@ def get_controller_resources(
     if not result:
         return {controller_resources_to_use}
     return result
-
-
-def get_controller_autostop_config(
-        controller: Controllers) -> Tuple[Optional[int], bool]:
-    """Get the autostop config for the controller.
-
-    Returns:
-      A tuple of (idle_minutes_to_autostop, down), which correspond to the
-      values passed to execution.launch().
-    """
-    controller_autostop_config_copied: Dict[str, Any] = copy.copy(
-        controller.value.default_autostop_config)
-    if skypilot_config.loaded():
-        custom_controller_autostop_config = skypilot_config.get_nested(
-            (controller.value.controller_type, 'controller', 'autostop'), None)
-        if custom_controller_autostop_config is False:
-            # Disabled with `autostop: false` in config.
-            # To indicate autostop is disabled, we return None for
-            # idle_minutes_to_autostop.
-            return None, False
-        elif custom_controller_autostop_config is True:
-            # Enabled with default values. There is no change in behavior, but
-            # this is included by for completeness, since `False` is valid.
-            pass
-        elif custom_controller_autostop_config is not None:
-            # We have specific config values.
-            # Override the controller autostop config with the ones specified in
-            # the config.
-            assert isinstance(custom_controller_autostop_config, dict)
-            controller_autostop_config_copied.update(
-                custom_controller_autostop_config)
-
-    return (controller_autostop_config_copied['idle_minutes'],
-            controller_autostop_config_copied['down'])
 
 
 def _setup_proxy_command_on_controller(

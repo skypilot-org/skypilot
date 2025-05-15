@@ -2,7 +2,7 @@
 import dataclasses
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -35,6 +35,50 @@ RESOURCE_CONFIG_ALIASES = {
 }
 
 
+@dataclasses.dataclass
+class AutostopConfig:
+    """Configuration for autostop."""
+    # enabled isn't present in the yaml config, but it's needed for this class
+    # to be complete.
+    enabled: bool
+    # If enabled is False, these values are ignored.
+    idle_minutes: int = 5
+    down: bool = False
+
+    def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
+        if not self.enabled:
+            return False
+        return {
+            'idle_minutes': self.idle_minutes,
+            'down': self.down,
+        }
+
+    @classmethod
+    def from_yaml_config(
+        cls, config: Union[bool, int, Dict[str, Any], None]
+    ) -> Optional['AutostopConfig']:
+        if isinstance(config, bool):
+            if config:
+                return cls(enabled=True)
+            else:
+                return cls(enabled=False)
+
+        if isinstance(config, int):
+            return cls(idle_minutes=config, down=False, enabled=True)
+
+        if isinstance(config, dict):
+            # If we have a dict, autostop is enabled. (Only way to disable is
+            # with `false`, a bool.)
+            autostop_config = cls(enabled=True)
+            if 'idle_minutes' in config:
+                autostop_config.idle_minutes = config['idle_minutes']
+            if 'down' in config:
+                autostop_config.down = config['down']
+            return autostop_config
+
+        return None
+
+
 class Resources:
     """Resources: compute requirements of Tasks.
 
@@ -52,7 +96,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 22
+    _VERSION = 23
 
     def __init__(
         self,
@@ -72,6 +116,7 @@ class Resources:
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
+        autostop: Union[bool, int, Dict[str, Any], None] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -154,6 +199,8 @@ class Resources:
             instance tags. On GCP, labels map to instance labels. On
             Kubernetes, labels map to pod labels. On other clouds, labels are
             not supported and will be ignored.
+          autostop: the autostop configuration to use. For launched resources,
+            may or may not correspond to the actual current autostop config.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
@@ -261,6 +308,7 @@ class Resources:
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
+        self._set_autostop_config(autostop)
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -486,6 +534,16 @@ class Resources:
         return self._labels
 
     @property
+    def autostop_config(self) -> Optional[AutostopConfig]:
+        """The requested autostop config.
+
+        Warning: This is the autostop config that was originally used to
+        launch the resources. It may not correspond to the actual current
+        autostop config.
+        """
+        return self._autostop_config
+
+    @property
     def is_image_managed(self) -> Optional[bool]:
         return self._is_image_managed
 
@@ -661,6 +719,12 @@ class Resources:
         self._accelerators: Optional[Dict[str, Union[int,
                                                      float]]] = accelerators
         self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
+
+    def _set_autostop_config(
+        self,
+        autostop: Union[bool, int, Dict[str, Any], None],
+    ) -> None:
+        self._autostop_config = AutostopConfig.from_yaml_config(autostop)
 
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""
@@ -1363,6 +1427,10 @@ class Resources:
             if elem is not None:
                 override_configs.set_nested(key, elem)
 
+        current_autostop_config = None
+        if self.autostop_config is not None:
+            current_autostop_config = self.autostop_config.to_yaml_config()
+
         override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
@@ -1381,6 +1449,7 @@ class Resources:
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
+            autostop=override.pop('autostop', current_autostop_config),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -1578,6 +1647,7 @@ class Resources:
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
+        resources_fields['autostop'] = config.pop('autostop', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_docker_username_for_runpod'] = config.pop(
@@ -1627,6 +1697,8 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
+        if self._autostop_config is not None:
+            config['autostop'] = self._autostop_config.to_yaml_config()
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -1781,6 +1853,9 @@ class Resources:
         if version < 22:
             self._docker_username_for_runpod = state.pop(
                 '_docker_username_for_runpod', None)
+
+        if version < 23:
+            self._autostop_config = None
 
         self.__dict__.update(state)
 
