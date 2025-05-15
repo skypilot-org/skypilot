@@ -2819,6 +2819,7 @@ def start(
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
+            sys.exit(1)
         else:
             if not async_call:
                 click.secho(f'Cluster {name} started.', fg='green')
@@ -3198,6 +3199,7 @@ def _down_or_stop_clusters(
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
+                sys.exit(1)
             else:  # no exception raised
                 success_progress = True
                 message = (f'{colorama.Fore.GREEN}{operation} '
@@ -3236,6 +3238,7 @@ def _down_or_stop_clusters(
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
+                sys.exit(1)
             else:  # no exception raised
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
