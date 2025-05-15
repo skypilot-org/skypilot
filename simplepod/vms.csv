@@ -1,5 +1,0 @@
-InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice
-gpu_1x_p104-100,P104-100,1,42,170,0.500,Europe-PL,"{'Gpus': [{'Name': 'P104-100', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",
-gpu_1x_p104-100,P104-100,1,42,170,0.500,Europe-PL,"{'Gpus': [{'Name': 'P104-100', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",
-gpu_2x_p104-100,P104-100,2,85,341,1.000,Europe-PL,"{'Gpus': [{'Name': 'P104-100', 'Manufacturer': 'NVIDIA', 'Count': 2, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",
-gpu_3x_p104-100,P104-100,3,128,512,1.500,Europe-PL,"{'Gpus': [{'Name': 'P104-100', 'Manufacturer': 'NVIDIA', 'Count': 3, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",

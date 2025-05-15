@@ -38,7 +38,7 @@ class Simplepod(clouds.Cloud):
              'from object stores on SimplePod, use `mode: COPY` to copy the data '
              'to local disk.'),
     }
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 120 # 120 characters limit for SimplePod cluster names
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -121,6 +121,7 @@ class Simplepod(clouds.Cloud):
         """
         try:
             # Import check
+            # pylint: disable=import-outside-toplevel
             from sky.provision.simplepod import utils
         except ImportError:
             return False, ('Failed to import simplepod. '

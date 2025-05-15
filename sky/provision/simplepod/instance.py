@@ -90,7 +90,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instances = [client.get_instance(inst_id) for inst_id in instance_ids]
         return all(inst and inst.get('status') in ['running', 'active'] for inst in instances)
 
-    for _ in range(30):  # 5 minut timeout
+    for _ in range(30):  # 5 minute timeout
         if are_instances_ready(created_instance_ids):
             break
         time.sleep(10)

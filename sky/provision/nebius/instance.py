@@ -132,7 +132,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 region=region,
                 image_family=config.node_config['ImageId'],
                 disk_size=config.node_config['DiskSize'],
-                user_data=config.node_config['UserData'])
+                user_data=config.node_config['UserData'],
+                associate_public_ip_address=(
+                    not config.provider_config['use_internal_ips']))
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -245,31 +247,24 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
-    """Query instances.
-
-    Returns a dictionary of instance IDs and status.
-
-    A None status means the instance is marked as "terminated"
-    or "terminating".
-    """
-    assert provider_config is not None, cluster_name_on_cloud
-    region = provider_config['region']
-    project_id = utils.get_project_by_region(region)
-    instances = utils.list_instances(project_id)
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    instances = _filter_instances(provider_config['region'],
+                                  cluster_name_on_cloud, None)
 
     status_map = {
+        'STARTING': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
-        'STOPPED': None,
-        'TERMINATED': None,
+        'STOPPED': status_lib.ClusterStatus.STOPPED,
+        'STOPPING': status_lib.ClusterStatus.STOPPED,
+        'DELETING': status_lib.ClusterStatus.STOPPED,
     }
-
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
-    for instance_id, instance in instances.items():
-        status = status_map.get(instance['status'], None)
+    for inst_id, inst in instances.items():
+        status = status_map[inst['status']]
         if non_terminated_only and status is None:
             continue
-        statuses[instance_id] = status
-
+        statuses[inst_id] = status
     return statuses
 
 
