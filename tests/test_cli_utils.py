@@ -128,19 +128,25 @@ def test_show_status_table():
         }
 
         # Test basic table
-        num_pending = status_utils.show_status_table(
-            [mock_record], show_all=False, show_user=False)
-        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED else 0)
+        num_pending = status_utils.show_status_table([mock_record],
+                                                     show_all=False,
+                                                     show_user=False)
+        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED
+                               else 0)
 
         # Test with user info
-        num_pending = status_utils.show_status_table(
-            [mock_record], show_all=False, show_user=True)
-        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED else 0)
+        num_pending = status_utils.show_status_table([mock_record],
+                                                     show_all=False,
+                                                     show_user=True)
+        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED
+                               else 0)
 
         # Test with show_all
-        num_pending = status_utils.show_status_table(
-            [mock_record], show_all=True, show_user=True)
-        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED else 0)
+        num_pending = status_utils.show_status_table([mock_record],
+                                                     show_all=True,
+                                                     show_user=True)
+        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED
+                               else 0)
 
         # Test with query_clusters
         num_pending = status_utils.show_status_table(
@@ -148,7 +154,8 @@ def test_show_status_table():
             show_all=False,
             show_user=False,
             query_clusters=['test-cluster'])
-        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED else 0)
+        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED
+                               else 0)
 
         # Test with non-existent query_clusters
         num_pending = status_utils.show_status_table(
@@ -156,7 +163,8 @@ def test_show_status_table():
             show_all=False,
             show_user=False,
             query_clusters=['non-existent'])
-        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED else 0)
+        assert num_pending == (1 if status != status_lib.ClusterStatus.STOPPED
+                               else 0)
 
 
 def test_get_command():
