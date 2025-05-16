@@ -113,6 +113,7 @@ def run_command(cmd, shell=False):
     process = subprocess.run(cmd, shell=shell, capture_output=True, text=True)
     if process.returncode != 0:
         print(f"{RED}Error executing command: {cmd}{NC}")
+        print(f"STDOUT: {process.stdout}")
         print(f"STDERR: {process.stderr}")
         return None
     return process.stdout.strip()
@@ -130,7 +131,7 @@ def run_remote(node_ip, cmd, user, ssh_key, connect_timeout=30):
                cmd]
     process = subprocess.run(ssh_cmd, capture_output=True, text=True)
     if process.returncode != 0:
-        print(f"{RED}Error executing command on {node_ip}:{NC}")
+        print(f"{RED}Error executing command {cmd} on {node_ip}:{NC}")
         print(f"STDERR: {process.stderr}")
         return None
     return process.stdout.strip()
