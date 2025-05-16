@@ -6025,13 +6025,6 @@ def ssh_up(cluster, kubeconfig, async_call):
     This command sets up a Kubernetes cluster on the machines specified in
     ~/.sky/ssh_targets.yaml and configures SkyPilot to use it.
     """
-    if not os.path.exists(SSH_TARGETS_PATH):
-        print(f'Error: SSH targets file not found: {SSH_TARGETS_PATH}')
-        print(f'Please create this file with your SSH targets.')
-        print(
-            'See https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details.')
-        sys.exit(1)
-
     kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
 
     try:
@@ -6059,13 +6052,6 @@ def ssh_down(cluster, kubeconfig, async_call):
     This command removes the Kubernetes installation from the machines specified
     in ~/.sky/ssh_targets.yaml.
     """
-    if not os.path.exists(SSH_TARGETS_PATH):
-        print(f'Error: SSH targets file not found: {SSH_TARGETS_PATH}')
-        print(f'Please create this file with your SSH targets.')
-        print(
-            'See https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details.')
-        sys.exit(1)
-
     kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
 
     try:
