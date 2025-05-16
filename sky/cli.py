@@ -6001,8 +6001,7 @@ def api_info():
                f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
 
 
-# Add this to the end of the file, with the other cli.group registrations
-
+# TODO: Move these constants out
 SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_targets.yaml')
 # TODO: Add support for custom kubeconfig path.
 SSH_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
