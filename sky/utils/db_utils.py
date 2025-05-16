@@ -28,6 +28,12 @@ if typing.TYPE_CHECKING:
 # For more info, see the PR description for #4552.
 _DB_TIMEOUT_S = 60
 
+# sqlite dialect
+SQLALCHEMY_DIALECT_SQLITE = 'sqlite'
+# postgresql dialect
+# this dialect is not supported yet.
+SQLALCHEMY_DIALECT_POSTGRESQL = 'postgresql'
+
 
 class SQLAlchemyDialect(enum.Enum):
     SQLITE = 'sqlite'
