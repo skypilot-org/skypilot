@@ -38,7 +38,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster1',
         cluster_yaml='/tmp/cluster1.yaml',
         launched_nodes=2,
-        launched_resources=sky.Resources(sky.AWS(),
+        launched_resources=sky.Resources(infra='aws',
                                          instance_type='p4d.24xlarge',
                                          region='us-east-1',
                                          zone='us-east-1a'),
@@ -53,7 +53,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster2',
         cluster_yaml='/tmp/cluster2.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.GCP(),
+        launched_resources=sky.Resources(infra='gcp',
                                          instance_type='n1-highmem-64',
                                          accelerators='V100:4',
                                          region='us-west1',
@@ -69,7 +69,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster3',
         cluster_yaml='/tmp/cluster3.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.Azure(),
+        launched_resources=sky.Resources(infra='azure',
                                          instance_type='Standard_D4s_v3',
                                          region='eastus'),
     )
@@ -84,7 +84,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_yaml='/tmp/disk-tier1.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(
-            sky.AWS(),
+            infra='aws',
             instance_type='m6i.2xlarge',
             region='us-east-1',
             zone='us-east-1a',
@@ -100,7 +100,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_yaml='/tmp/disk-tier2.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(
-            sky.GCP(),
+            infra='gcp',
             instance_type='n2-standard-8',
             region='us-west1',
             zone='us-west1-a',
@@ -150,7 +150,7 @@ class TestExecutionOnExistingClusters:
             sky.exec(task, cluster_name='test-cluster1', dryrun=True))
         task.set_resources(
             sky.Resources(
-                sky.AWS(),
+                infra='aws',
                 accelerators='A100:1',
                 region='us-east-1',
             ))
@@ -166,7 +166,8 @@ class TestExecutionOnExistingClusters:
         sky.stream_and_get(
             sky.exec(task, cluster_name='test-cluster2', dryrun=True))
         task.set_resources(
-            sky.Resources(sky.GCP(), accelerators='V100:3', region='us-west1'))
+            sky.Resources(infra='gcp', accelerators='V100:3',
+                          region='us-west1'))
         sky.stream_and_get(
             sky.launch(task, cluster_name='test-cluster2', dryrun=True))
         sky.stream_and_get(
@@ -217,10 +218,10 @@ class TestExecutionOnExistingClusters:
         self._run_launch_exec_with_error(task, 'test-cluster3')
 
         # Cloud mismatch
-        task.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
+        task.set_resources(sky.Resources(infra='aws', accelerators='V100'))
         self._run_launch_exec_with_error(task, 'test-cluster2')
 
-        task.set_resources(sky.Resources(sky.GCP()))
+        task.set_resources(sky.Resources(infra='gcp'))
         self._run_launch_exec_with_error(task, 'test-cluster1')
 
         # Disk tier mismatch

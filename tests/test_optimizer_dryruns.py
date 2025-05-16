@@ -566,7 +566,7 @@ def test_invalid_accelerators_regions(enable_all_clouds):
     task = sky.Task(run='echo hi')
     task.set_resources(
         sky.Resources(
-            sky.AWS(),
+            infra='aws',
             accelerators='A100:8',
             region='us-west-1',
         ))
@@ -591,7 +591,7 @@ def _test_optimize_speed(resources: sky.Resources):
 def test_optimize_speed(enable_all_clouds):
     _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in registry.CLOUD_REGISTRY.values():
-        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
+        _test_optimize_speed(sky.Resources(infra=str(cloud), cpus='4+'))
     _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
         sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))

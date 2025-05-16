@@ -321,10 +321,10 @@ class Optimizer:
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
-                    #    Resources('V100')
+                    #    Resources(accelerators='V100')
                     # and treats their launchable versions
-                    #    Resources(AWS, 'p3.2xlarge'),
-                    #    Resources(GCP, '...', 'V100'),
+                    #    Resources(infra='aws', instance_type='p3.2xlarge'),
+                    #    Resources(infra='gcp', accelerators='V100'),
                     #    ...
                     # as having the same run time.
                     # FIXME(zongheng): take 'num_nodes' as an arg/into

@@ -137,13 +137,9 @@ class Resources:
           .. code-block:: python
 
             # Fully specified cloud and instance type (is_launchable() is True).
-            sky.Resources(clouds.AWS(), 'p3.2xlarge')
-            sky.Resources(clouds.GCP(), 'n1-standard-16')
-            sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
-            # Using the infra parameter
-            sky.Resources(infra='aws/us-east-1')
-            sky.Resources(infra='k8s/my-cluster-ctx')
-            sky.Resources(infra='aws/us-east-1/us-east-1a')
+            sky.Resources(infra='aws', instance_type='p3.2xlarge')
+            sky.Resources(infra='k8s/my-cluster-ctx', accelerators='V100')
+            sky.Resources(infra='gcp/us-central1', accelerators='V100')
 
             # Specifying required resources; the system decides the
             # cloud/instance type. The below are equivalent:
@@ -523,9 +519,9 @@ class Resources:
     def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
-        For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
-        set to None, but this function will infer {'V100': 1} from the instance
-        type.
+        For example, Resources(infra='aws', instance_type='p3.2xlarge') has its
+        accelerators field set to None, but this function will infer {'V100': 1}
+        from the instance type.
         """
         if self._accelerators is not None:
             return self._accelerators

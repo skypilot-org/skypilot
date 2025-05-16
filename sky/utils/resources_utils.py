@@ -152,7 +152,7 @@ def format_resource(resource: 'resources_lib.Resources',
     is_k8s = str(resource.cloud).lower() == 'kubernetes'
     if (resource.accelerators is None or is_k8s or not simplify):
         if vcpu is not None:
-            components.append(f'vCPUs={int(vcpu)}')
+            components.append(f'cpus={int(vcpu)}')
         if mem is not None:
             components.append(f'mem={int(mem)}')
 

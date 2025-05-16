@@ -26,8 +26,7 @@ def cli():
 @click.option("--command", type=str, help="The command to run on the cluster")
 def launch_cluster(cluster_name: str, cloud: str, command: str) -> None:
     task = sky.Task(run=command)
-    cloud = registry.CLOUD_REGISTRY.from_str(cloud)
-    resource = sky.Resources(cloud=cloud, **LOW_RESOURCE_PARAM)
+    resource = sky.Resources(infra=cloud, **LOW_RESOURCE_PARAM)
     task.set_resources(resource)
     request_id = sdk.launch(cluster_name=cluster_name, task=task)
     sdk.stream_and_get(request_id)
@@ -69,8 +68,7 @@ def cluster_logs(cluster_name: str, job_id: int) -> None:
 def launch_managed_job(job_name: str, cloud: str, command: str) -> None:
     task = sky.Task(run=command)
     task.name = job_name
-    cloud = registry.CLOUD_REGISTRY.from_str(cloud)
-    resource = sky.Resources(cloud=cloud, **LOW_RESOURCE_PARAM)
+    resource = sky.Resources(infra=cloud, **LOW_RESOURCE_PARAM)
     task.set_resources(resource)
     request_id = jobs_sdk.launch(
         name=job_name,

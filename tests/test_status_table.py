@@ -14,7 +14,7 @@ from sky.utils.cli_utils import status_utils
 @pytest.fixture
 def mock_aws_resources():
     """Create mock AWS resources."""
-    return Resources(cloud=sky.CLOUD_REGISTRY.from_str('aws'),
+    return Resources(infra='aws',
                      instance_type='m6i.2xlarge',
                      region='us-east-1')
 
@@ -22,13 +22,7 @@ def mock_aws_resources():
 @pytest.fixture
 def mock_k8s_resources():
     """Create mock Kubernetes resources."""
-    return Resources(cloud=sky.Kubernetes(), cpus='2+', memory='4+')
-
-
-@pytest.fixture
-def mock_ssh_resources():
-    """Create mock SSH resources."""
-    return Resources(infra='ssh/my-tobi-box')
+    return Resources(infra='k8s', cpus='2+', memory='4+')
 
 
 @pytest.fixture

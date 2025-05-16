@@ -1082,7 +1082,8 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     if cloud is not None or region is not None or zone is not None:
         click.secho(
             'The --cloud, --region, and --zone options are deprecated. '
-            'Use --infra instead.', fg='yellow')
+            'Use --infra instead.',
+            fg='yellow')
         if infra is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify both --infra and '
@@ -3442,7 +3443,6 @@ def show_gpus(
     if all_regions and region is not None:
         raise click.UsageError(
             '--all-regions and --region flags cannot be used simultaneously.')
-
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)

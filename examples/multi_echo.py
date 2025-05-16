@@ -21,12 +21,11 @@ def run(cluster: Optional[str] = None,
 
     if cloud is None:
         cloud = 'gcp'
-    cloud = sky.CLOUD_REGISTRY.from_str(cloud)
 
     # Create the cluster.
     with sky.Dag() as dag:
         cluster_resources = sky.Resources(
-            cloud,
+            infra=cloud,
             # We need to set CPUs to 5+ so that the total number of RUNNING jobs
             # is not limited by the number of CPU cores (5 x 2 x 2 = 20).
             cpus='5+',

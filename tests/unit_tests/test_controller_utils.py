@@ -104,11 +104,11 @@ def test_get_controller_resources_with_task_resources(
     # 1. All resources has cloud specified. All of them
     # could host controllers. Return a set, each item has
     # one cloud specified plus the default resources.
-    all_clouds = {sky.AWS(), sky.GCP(), sky.Azure()}
+    all_clouds = {'aws', 'gcp', 'azure'}
     expected_infra_set = {infra_utils.InfraInfo(cloud=c) for c in all_clouds}
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(cloud=c) for c in all_clouds])
+        task_resources=[sky.Resources(infra=c) for c in all_clouds])
     _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
@@ -116,13 +116,7 @@ def test_get_controller_resources_with_task_resources(
     # could NOT host controllers. Return a set, only
     # containing those could host controllers.
     all_clouds = {
-        sky.AWS(),
-        sky.GCP(),
-        sky.Azure(),
-        sky.Fluidstack(),
-        sky.Kubernetes(),
-        sky.Lambda(),
-        sky.RunPod()
+        'aws', 'gcp', 'azure', 'fluidstack', 'k8s', 'lambda', 'runpod'
     }
 
     def _could_host_controllers(cloud: sky.clouds.Cloud) -> bool:
@@ -139,7 +133,7 @@ def test_get_controller_resources_with_task_resources(
     }
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(cloud=c) for c in all_clouds])
+        task_resources=[sky.Resources(infra=c) for c in all_clouds])
     _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
@@ -149,7 +143,7 @@ def test_get_controller_resources_with_task_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
             sky.Resources(accelerators='L4'),
-            sky.Resources(cloud=sky.RunPod(), accelerators='A40'),
+            sky.Resources(infra='runpod', accelerators='A40'),
         ])
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()
@@ -167,7 +161,7 @@ def test_get_controller_resources_with_task_resources(
                       zone='us-central1-a'),
         sky.Resources(cloud=sky.GCP(),
                       region='europe-west1',
-                      zone='europe-west1-b')
+                      zone='europe-west1-b'),
     ]
     expected_infra_set = {
         'aws/us-east-1/us-east-1a',

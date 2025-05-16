@@ -490,7 +490,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
-    original_resources = sky.Resources(cloud=sky.AWS(),
+    original_resources = sky.Resources(infra='aws',
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
@@ -517,7 +517,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
-    original_resources = sky.Resources(cloud=sky.GCP(),
+    original_resources = sky.Resources(infra='gcp',
                                        instance_type='a2-ultragpu-1g',
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)

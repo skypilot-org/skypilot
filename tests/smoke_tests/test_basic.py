@@ -377,10 +377,10 @@ def test_scp_logs():
 # These tests are for testing the return value of the APIs not fully used in CLI.
 def test_core_api_sky_launch_exec(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     task = sky.Task(run="whoami")
     task.set_resources(
-        sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        sky.Resources(infra=generic_cloud,
+                      **smoke_tests_utils.LOW_RESOURCE_PARAM))
     try:
         job_id, handle = sky.get(sky.launch(task, cluster_name=name))
         assert job_id == 1
@@ -416,10 +416,10 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
 @pytest.mark.no_kubernetes
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     try:
         task = sky.Task(run="whoami").set_resources(
-            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
         sky.launch(task,
                    cluster_name=name,
                    idle_minutes_to_autostop=1,
@@ -444,9 +444,9 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
         name = smoke_tests_utils.get_cluster_name()
         task = sky.Task(run="echo start job; sleep 30; echo end job")
-        cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
         task.set_resources(
-            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
         job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
         assert handle is not None
         # Check the job status from the dashboard
