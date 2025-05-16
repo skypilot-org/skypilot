@@ -19,6 +19,9 @@ DEFAULT_SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 
+# Get the directory of this script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Deploy a Kubernetes cluster on remote machines.')
     parser.add_argument('--ips-file', dest='ips_file', help='File containing IP addresses or SSH host entries (one per line)')
@@ -244,6 +247,77 @@ def ensure_directory_exists(path):
     if directory and not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)
 
+def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh_config=False):
+    """Set up kubeconfig exec credential plugin for SSH tunnel"""
+    progress_message("Setting up SSH tunnel for Kubernetes API access...")
+    
+    # Paths to scripts
+    tunnel_script = os.path.join(SCRIPT_DIR, "ssh-tunnel.sh")
+    cleanup_script = os.path.join(SCRIPT_DIR, "cleanup-tunnel.sh")
+    
+    # Make sure scripts are executable
+    os.chmod(tunnel_script, 0o755)
+    os.chmod(cleanup_script, 0o755)
+    
+    # Build the credential exec command
+    if use_ssh_config:
+        exec_cmd = f"{tunnel_script} --use-ssh-config --context {context_name} {head_node}"
+    else:
+        exec_cmd = f"{tunnel_script} --ssh-key {ssh_key} --context {context_name} {head_node} {ssh_user}"
+    
+    # Update kubeconfig to use localhost instead of remote IP
+    run_command(["kubectl", "config", "set-cluster", context_name, 
+                "--server=https://localhost:6443",
+                "--insecure-skip-tls-verify=true"])
+    
+    # Set up exec credential plugin
+    run_command([
+        "kubectl", "config", "set-credentials", context_name,
+        f"--exec-command={tunnel_script}",
+        f"--exec-arg=--context",
+        f"--exec-arg={context_name}",
+        "--exec-api-version=client.authentication.k8s.io/v1beta1"
+    ])
+    
+    if use_ssh_config:
+        run_command([
+            "kubectl", "config", "set-credentials", context_name,
+            f"--exec-arg=--use-ssh-config",
+            f"--exec-arg={head_node}"
+        ])
+    else:
+        run_command([
+            "kubectl", "config", "set-credentials", context_name,
+            f"--exec-arg=--ssh-key",
+            f"--exec-arg={ssh_key}",
+            f"--exec-arg={head_node}",
+            f"--exec-arg={ssh_user}"
+        ])
+    
+    success_message("SSH tunnel configured through kubectl credential plugin")
+    print(f"{GREEN}Your kubectl connection is now tunneled through SSH (port 6443).{NC}", flush=True)
+    print(f"{GREEN}This tunnel will be automatically established when needed.{NC}", flush=True)
+
+def cleanup_kubectl_ssh_tunnel(context_name):
+    """Clean up the SSH tunnel for a specific context"""
+    progress_message(f"Cleaning up SSH tunnel for context {context_name}...")
+    
+    # Path to cleanup script
+    cleanup_script = os.path.join(SCRIPT_DIR, "cleanup-tunnel.sh")
+    
+    # Make sure script is executable
+    if os.path.exists(cleanup_script):
+        os.chmod(cleanup_script, 0o755)
+        
+        # Run the cleanup script
+        subprocess.run([cleanup_script, context_name], 
+                      stdout=subprocess.DEVNULL, 
+                      stderr=subprocess.DEVNULL)
+        
+        success_message(f"SSH tunnel for context {context_name} cleaned up")
+    else:
+        print(f"{YELLOW}Cleanup script not found: {cleanup_script}{NC}", flush=True)
+
 def main():
     args = parse_args()
     
@@ -341,6 +415,9 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     # If --cleanup flag is set, uninstall k3s and exit
     if cleanup:
         print(f"{YELLOW}Starting cleanup...{NC}", flush=True)
+        
+        # Clean up SSH tunnel first
+        cleanup_kubectl_ssh_tunnel(context_name)
         
         # Clean up head node
         cleanup_server_node(head_node, ssh_user, ssh_key, askpass_block, use_ssh_config=head_use_ssh_config)
@@ -483,7 +560,8 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                     if in_cluster and "certificate-authority-data:" in line:
                         continue
                     elif in_cluster and "server:" in line:
-                        # Use the effective IP address (resolved from SSH config if needed)
+                        # Initially just set to the effective master IP
+                        # (will be changed to localhost by setup_kubectl_ssh_tunnel later)
                         f_out.write(f"    server: https://{effective_master_ip}:6443\n")
                         f_out.write(f"    insecure-skip-tls-verify: true\n")
                         continue
@@ -516,6 +594,9 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         
         # Set the new context as the current context
         run_command(["kubectl", "config", "use-context", context_name], shell=False)
+    
+    # Always set up SSH tunnel since we assume only port 22 is accessible
+    setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh_config=head_use_ssh_config)
     
     success_message(f"kubectl configured with new context '{context_name}'.")
     
