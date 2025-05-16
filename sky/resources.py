@@ -102,6 +102,7 @@ class Resources:
 
     def __init__(
         self,
+        infra: Optional[str] = None,
         cloud: Optional[clouds.Cloud] = None,
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
@@ -119,7 +120,6 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, Dict[str, Any], None] = None,
-        infra: Optional[str] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -151,8 +151,14 @@ class Resources:
             sky.Resources(accelerators='V100:1')
             sky.Resources(accelerators={'V100': 1})
             sky.Resources(cpus='2+', memory='16+', accelerators='V100')
+          
 
         Args:
+          infra: a string specifying the infrastructure to use, in the format
+            of "cloud/region" or "cloud/region/zone". For example,
+            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
+            specifying cloud, region, and zone separately. If provided, it
+            takes precedence over cloud, region, and zone parameters.
           cloud: the cloud to use.
           instance_type: the instance type to use.
           cpus: the number of CPUs required for the task.
@@ -208,11 +214,6 @@ class Resources:
             not supported and will be ignored.
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
-          infra: a string specifying the infrastructure to use, in the format
-                        of "cloud/region" or "cloud/region/zone". For example,
-            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
-            specifying cloud, region, and zone separately. If provided, it
-            takes precedence over cloud, region, and zone parameters.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
