@@ -66,7 +66,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
             StatusColumn('USER_ID', _get_user_hash, show_by_default=False))
 
     status_columns += [
-        StatusColumn('INFRA', _get_infra),
+        StatusColumn('INFRA', _get_infra, truncate=not show_all),
         StatusColumn('RESOURCES', _get_resources, truncate=not show_all),
         StatusColumn('STATUS', _get_status_colored),
         StatusColumn('AUTOSTOP', _get_autostop),
