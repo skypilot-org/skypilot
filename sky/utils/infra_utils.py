@@ -37,7 +37,8 @@ class InfraInfo:
         Raises:
             ValueError: If the infra string is malformed.
         """
-        parts = infra.strip().split('/')  # Split only on the first / to get cloud
+        parts = infra.strip().split(
+            '/')  # Split only on the first / to get cloud
 
         if not parts:
             with ux_utils.print_exception_no_traceback():
@@ -45,7 +46,7 @@ class InfraInfo:
                     f'Invalid infra format: {infra}. Expected format is '
                     f'"cloud/region" or "cloud/region/zone".')
 
-        cloud_name = parts[0].lower()
+        cloud_name: Optional[str] = parts[0].lower()
 
         # Handle Kubernetes contexts specially, as they can contain slashes
         if cloud_name in ['k8s', 'kubernetes']:

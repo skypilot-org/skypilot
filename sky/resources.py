@@ -1657,7 +1657,7 @@ class Resources:
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
-        resources_fields = {}
+        resources_fields: Dict[str, Any] = {}
 
         # Extract infra field if present
         infra = config.pop('infra', None)

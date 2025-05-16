@@ -90,7 +90,9 @@ def _get_single_resources_schema():
                 'description': 'Infrastructure specification in format: cloud[/region[/zone]]. Use "*" as a wildcard.',
                 # Create a pattern validator that uses a big regex to match all valid formats
                 # This allows us to maintain JSON Schema validation while supporting all formats
-                'pattern': '^(?:(?i:(' + '|'.join(list(service_catalog.ALL_CLOUDS)) + '))(?:/[^/]+(?:/[^/]+)?)?|\\*(?:/[^/]+(?:/[^/]+)?|/\\*(?:/[^/]+)?)?|(?i:k8s|kubernetes)/.+)$'
+                'pattern':
+                    '^(?:(?i:(' + '|'.join(list(service_catalog.ALL_CLOUDS)) +
+                    '))(?:/[^/]+(?:/[^/]+)?)?|\\*(?:/[^/]+(?:/[^/]+)?|/\\*(?:/[^/]+)?)?|(?i:k8s|kubernetes)/.+)$'
             },
             'cpus': {
                 'anyOf': [{
@@ -1090,4 +1092,3 @@ def get_config_schema():
             **cloud_configs,
         },
     }
-

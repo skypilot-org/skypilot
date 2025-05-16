@@ -19,13 +19,13 @@ from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -801,12 +801,12 @@ class Optimizer:
                 region_or_zone = resources.region
             else:
                 region_or_zone = resources.zone
-                
+
             # Format infra as CLOUD (REGION/ZONE)
             infra = f'{cloud}'
             if region_or_zone:
                 infra = f'{cloud} ({region_or_zone})'
-                
+
             return [
                 infra,
                 resources.instance_type + spot,
@@ -816,8 +816,8 @@ class Optimizer:
             ]
 
         Row = collections.namedtuple('Row', [
-            'infra', 'instance', 'vcpus', 'mem', 'accelerators',
-            'cost_str', 'chosen_str'
+            'infra', 'instance', 'vcpus', 'mem', 'accelerators', 'cost_str',
+            'chosen_str'
         ])
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
@@ -852,7 +852,6 @@ class Optimizer:
                 truncated_region_or_zone = common_utils.truncate_long_string(
                     region_or_zone, _REGION_OR_ZONE_TRUNCATION_LENGTH)
                 infra = f'{cloud} ({truncated_region_or_zone})'
-                
 
             chosen_str = ''
             if chosen:
