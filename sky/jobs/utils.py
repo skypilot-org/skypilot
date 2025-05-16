@@ -1024,6 +1024,7 @@ def format_job_table(
     columns = [
         'ID',
         'TASK',
+        'WORKSPACE',
         'NAME',
         *user_cols,
         'RESOURCES',
@@ -1083,6 +1084,7 @@ def format_job_table(
     for job_hash, job_tasks in jobs.items():
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
+        workspace = job_tasks[0]['workspace']
 
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
@@ -1124,6 +1126,7 @@ def format_job_table(
             job_values = [
                 job_id,
                 '',
+                workspace,
                 job_name,
                 *user_values,
                 '-',
@@ -1156,6 +1159,7 @@ def format_job_table(
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
+                '-' if len(job_tasks) > 1 else workspace,
                 task['task_name'],
                 *user_values,
                 task['resources'],

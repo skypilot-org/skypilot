@@ -18,7 +18,6 @@ import uuid
 
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import registry
@@ -217,6 +216,9 @@ def add_or_update_cluster(cluster_name: str,
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
     """
+    # TODO(zhwu): have to be imported here to avoid circular import.
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
+
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -250,7 +252,7 @@ def add_or_update_cluster(cluster_name: str,
         usage_intervals.append((cluster_launched_at, None))
 
     user_hash = common_utils.get_user_hash()
-    workspace = skypilot_config.get_active_workspace()
+    active_workspace = skypilot_config.get_active_workspace()
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -348,7 +350,7 @@ def add_or_update_cluster(cluster_name: str,
             user_hash,
             # workspace
             cluster_name,
-            workspace,
+            active_workspace,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
