@@ -4,11 +4,11 @@ import enum
 import itertools
 import json
 import math
-import re
 import typing
 from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
 
@@ -139,34 +139,37 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
+    resource = resource.assert_launchable()
+    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+        resource.instance_type)
+
+    components = []
+    if resource.accelerators is None or not simplify:
+        if vcpu is not None:
+            components.append(f'vCPUs={int(vcpu)}')
+        if mem is not None:
+            components.append(f'mem={int(mem)}')
+
+    if resource.accelerators is not None:
+        acc, count = list(resource.accelerators.items())[0]
+        components.append(f'GPUs={acc}:{count}')
+
+    instance_type = resource.instance_type
     if simplify:
-        resource = resource.assert_launchable()
-        cloud = resource.cloud
-        if resource.accelerators is None:
-            vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-                resource.instance_type)
-            assert vcpu is not None, 'vCPU must be specified'
-            hardware = f'vCPU={int(vcpu)}'
-        else:
-            hardware = f'{resource.accelerators}'
-        spot = '[Spot]' if resource.use_spot else ''
-        return f'{cloud}({spot}{hardware})'
-    else:
-        # accelerator_args is way too long.
-        # Convert from:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-        # to:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-        pattern = ', accelerator_args={.*}'
-        launched_resource_str = re.sub(pattern, '...', str(resource))
-        return launched_resource_str
+        instance_type = common_utils.truncate_long_string(instance_type, 15)
+    components.append(f'type={instance_type}')
+    if not simplify:
+        components.append(f'disk={resource.disk_size}')
+
+    spot = '[Spot]' if resource.use_spot else ''
+    return f'({spot}{"" if not components else ", ".join(components)}, ...)'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                 simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x '
+        return (f'{handle.launched_nodes}x'
                 f'{format_resource(handle.launched_resources, simplify)}')
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
 

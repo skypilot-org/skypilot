@@ -463,6 +463,10 @@ class Resources:
         return repr_str
 
     @property
+    def infra(self) -> infra_utils.InfraInfo:
+        return infra_utils.InfraInfo(str(self.cloud), self.region, self.zone)
+
+    @property
     def cloud(self) -> Optional[clouds.Cloud]:
         return self._cloud
 
@@ -1719,8 +1723,7 @@ class Resources:
                 config[key] = value
 
         # Construct infra field if cloud is set
-        infra = infra_utils.format_infra(str(self.cloud), self.region,
-                                         self.zone)
+        infra = self.infra.to_str()
         add_if_not_none('infra', infra)
 
         add_if_not_none('instance_type', self.instance_type)

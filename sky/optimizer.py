@@ -19,7 +19,6 @@ from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
-from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -39,7 +38,6 @@ logger = sky_logging.init_logger(__name__)
 
 _DUMMY_SOURCE_NAME = 'skypilot-dummy-source'
 _DUMMY_SINK_NAME = 'skypilot-dummy-sink'
-_REGION_OR_ZONE_TRUNCATION_LENGTH = 15
 
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
@@ -796,16 +794,8 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
-            # Determine region or zone info
-            if resources.zone is None:
-                region_or_zone = resources.region
-            else:
-                region_or_zone = resources.zone
-
             # Format infra as CLOUD (REGION/ZONE)
-            infra = f'{cloud}'
-            if region_or_zone:
-                infra = f'{cloud} ({region_or_zone})'
+            infra = resources.infra.formatted_str()
 
             return [
                 infra,
@@ -841,17 +831,7 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
-            # Determine region or zone info
-            if resources.zone is None:
-                region_or_zone = resources.region
-            else:
-                region_or_zone = resources.zone
-
-            infra = f'{cloud}'
-            if region_or_zone:
-                truncated_region_or_zone = common_utils.truncate_long_string(
-                    region_or_zone, _REGION_OR_ZONE_TRUNCATION_LENGTH)
-                infra = f'{cloud} ({truncated_region_or_zone})'
+            infra = resources.infra.formatted_str()
 
             chosen_str = ''
             if chosen:
