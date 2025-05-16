@@ -151,7 +151,7 @@ class Resources:
             sky.Resources(accelerators='V100:1')
             sky.Resources(accelerators={'V100': 1})
             sky.Resources(cpus='2+', memory='16+', accelerators='V100')
-          
+
 
         Args:
           infra: a string specifying the infrastructure to use, in the format

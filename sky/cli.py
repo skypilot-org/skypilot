@@ -3337,7 +3337,7 @@ def check(infra_list: Tuple[str], verbose: bool):
       sky check aws gcp
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
-    request_id = sdk.check(infra=infra_arg, verbose=verbose)
+    request_id = sdk.check(infra_list=infra_arg, verbose=verbose)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()

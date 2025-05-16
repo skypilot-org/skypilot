@@ -125,7 +125,7 @@ class InfraInfo:
             zone = '*'
 
         # Build the parts list and filter out trailing wildcards
-        parts = [str(cloud), region, zone]
+        parts = [str(cloud).lower(), region, zone]
         while parts and parts[-1] == '*':
             parts.pop()
 

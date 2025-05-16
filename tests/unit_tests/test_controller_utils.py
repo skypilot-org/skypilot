@@ -7,6 +7,7 @@ import sky
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.utils import controller_utils
+from sky.utils import infra_utils
 
 _DEFAULT_AUTOSTOP = {
     'down': False,
@@ -74,20 +75,17 @@ def test_get_controller_resources(controller_type: str,
 
 def _check_controller_resources(
         controller_resources: Set[sky.Resources],
-        expected_combinations: Set[Tuple[Optional[str], Optional[str],
-                                         Optional[str]]],
+        expected_infra_list: Set[str],
         default_controller_resources: Dict[str, Any]) -> None:
     """Helper function to check that the controller resources match the
     expected combinations."""
     for r in controller_resources:
         config = r.to_yaml_config()
-        cloud = config.pop('cloud')
-        region = config.pop('region', None)
-        zone = config.pop('zone', None)
-        assert (cloud, region, zone) in expected_combinations
-        expected_combinations.remove((cloud, region, zone))
+        infra = config.pop('infra')
+        assert infra in expected_infra_list
+        expected_infra_list.remove(infra)
         assert config == default_controller_resources, config
-    assert not expected_combinations
+    assert not expected_infra_list
 
 
 @pytest.mark.parametrize(('controller_type', 'default_controller_resources'), [
@@ -108,11 +106,11 @@ def test_get_controller_resources_with_task_resources(
     # could host controllers. Return a set, each item has
     # one cloud specified plus the default resources.
     all_clouds = {sky.AWS(), sky.GCP(), sky.Azure()}
-    expected_combinations = {(str(c), None, None) for c in all_clouds}
+    expected_infra_set = {infra_utils.InfraInfo(cloud=c) for c in all_clouds}
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(cloud=c) for c in all_clouds])
-    _check_controller_resources(controller_resources, expected_combinations,
+    _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
     # 2. All resources has cloud specified. Some of them
@@ -137,13 +135,15 @@ def test_get_controller_resources_with_task_resources(
             return False
         return True
 
-    expected_combinations = {
-        (str(c), None, None) for c in all_clouds if _could_host_controllers(c)
+    expected_infra_set = {
+        str(c).lower()
+        for c in all_clouds
+        if _could_host_controllers(c)
     }
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(cloud=c) for c in all_clouds])
-    _check_controller_resources(controller_resources, expected_combinations,
+    _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
     # 3. Some resources does not have cloud specified.
@@ -172,14 +172,16 @@ def test_get_controller_resources_with_task_resources(
                       region='europe-west1',
                       zone='europe-west1-b')
     ]
-    expected_combinations = {('AWS', 'us-east-1', 'us-east-1a'),
-                             ('AWS', 'ap-south-1', 'ap-south-1b'),
-                             ('GCP', 'us-central1', 'us-central1-a'),
-                             ('GCP', 'europe-west1', 'europe-west1-b')}
+    expected_infra_set = {
+        'aws/us-east-1/us-east-1a',
+        'aws/ap-south-1/ap-south-1b',
+        'gcp/us-central1/us-central1-a',
+        'gcp/europe-west1/europe-west1-b',
+    }
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=all_cloud_regions_zones)
-    _check_controller_resources(controller_resources, expected_combinations,
+    _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
     # 5. Clouds and regions are specified, but zones are partially specified.
@@ -198,9 +200,12 @@ def test_get_controller_resources_with_task_resources(
                           region='us-central1',
                           zone='us-central1-a')
         ])
-    expected_combinations = {('AWS', 'us-west-2', None),
-                             ('GCP', 'us-central1', 'us-central1-a')}
-    _check_controller_resources(controller_resources, expected_combinations,
+    expected_infra_set = {
+        'aws/us-west-2',
+        'aws/us-west-2/us-west-2b',
+        'gcp/us-central1/us-central1-a',
+    }
+    _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
     # 6. Mixed case: Some resources have clouds and regions or zones, others do
@@ -219,11 +224,11 @@ def test_get_controller_resources_with_task_resources(
             sky.Resources(cloud=sky.AWS(), region='ap-south-1'),
             sky.Resources(cloud=sky.Azure()),
         ])
-    expected_combinations = {
-        ('AWS', 'eu-north-1', None),
-        ('AWS', 'ap-south-1', None),
-        ('GCP', None, None),
-        ('Azure', None, None),
+    expected_infra_set = {
+        'aws/eu-north-1',
+        'aws/ap-south-1',
+        'gcp',
+        'azure',
     }
-    _check_controller_resources(controller_resources, expected_combinations,
+    _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
