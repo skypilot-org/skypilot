@@ -167,7 +167,7 @@ class Optimizer:
 
         def make_dummy(name):
             dummy = task_lib.Task(name)
-            dummy.set_resources({DummyResources(DummyCloud(), None)})
+            dummy.set_resources({DummyResources(cloud=DummyCloud())})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
 
@@ -837,8 +837,8 @@ class Optimizer:
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(infra, vcpus, mem, str(accelerators),
-                      resources.instance_type + spot, cost_str, chosen_str)
+            row = Row(infra, vcpus, mem,
+                      str(accelerators), resources.instance_type + spot, cost_str, chosen_str)
 
             return row
 
@@ -856,7 +856,9 @@ class Optimizer:
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['INFRA', 'vCPUs', 'Mem(GB)', 'GPUS', 'INSTANCE']
+        resource_fields = [
+            'INFRA', 'vCPUs', 'Mem(GB)', 'GPUS', 'INSTANCE'
+        ]
         if len(ordered_best_plan) > 1:
             best_plan_rows = []
             for t, r in ordered_best_plan.items():
