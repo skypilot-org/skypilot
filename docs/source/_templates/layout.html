@@ -1,0 +1,56 @@
+{% extends "!layout.html" %}
+
+{# Define reusable variables to avoid duplication #}
+{% set tagline = "Cloud-agnostic ML/AI Infrastructure" %}
+{% set doc_description = "SkyPilot documentation for cloud-agnostic ML/AI infrastructure. Run workloads on any cloud with ease" %}
+{% set main_description = "Cloud-agnostic ML/AI infrastructure. Run ML/AI workloads on any cloud with ease, minimal configuration, and automatic cost optimization" %}
+
+{# Custom title format for better SEO #}
+{% block htmltitle %}
+    {% if title and not title == project %}
+        {% if project in title %}
+            <title>{{ title }} - {{ tagline }}</title>
+        {% else %}
+            <title>{{ title }} | {{ project }} - {{ tagline }}</title>
+        {% endif %}
+    {% else %}
+        <title>{{ project }} - {{ tagline }} | Run ML/AI workloads on any cloud</title>
+    {% endif %}
+{% endblock %} 
+
+{# Meta tags for SEO #}
+{% block extrahead %}
+    {{ super() }}
+    {% if title and not title == project %}
+        {% if project in title %}
+            <meta name="description" content="{{ title }} - {{ doc_description }}.">
+            {% set current_title = title %}
+            {% set current_description = title ~ " - " ~ doc_description %}
+        {% else %}
+            <meta name="description" content="{{ title }} | {{ project }} - {{ tagline }}. {{ main_description }}.">
+            {% set current_title = title ~ " | " ~ project %}
+            {% set current_description = title ~ " | " ~ project ~ " - " ~ tagline ~ ". " ~ main_description %}
+        {% endif %}
+    {% else %}
+        <meta name="description" content="{{ project }} - {{ main_description }}.">
+        {% set current_title = project ~ " - " ~ tagline %}
+        {% set current_description = project ~ " - " ~ main_description %}
+    {% endif %}
+    <meta name="keywords" content="SkyPilot, cloud computing, ML infrastructure, AI infrastructure, cloud-agnostic, machine learning, deep learning, GPU, TPU, AWS, GCP, Azure, cost optimization, ML workflows, AI training, LLama, DeepSeek, Qwen">
+    
+    {# Open Graph / Facebook meta tags #}
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{ current_title }}">
+    <meta property="og:description" content="{{ current_description }}">
+    <meta property="og:site_name" content="SkyPilot Documentation">
+    <meta property="og:url" content="{{ page_url | default(pathto('', 1)) }}">
+    <meta property="og:image" content="{{ pathto('_static/skypilot_og_image.png', 1) }}">
+    <meta property="og:image:alt" content="SkyPilot - Cloud-agnostic ML/AI Infrastructure">
+    
+    {# Twitter meta tags #}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ current_title }}">
+    <meta name="twitter:description" content="{{ current_description }}">
+    <meta name="twitter:image" content="{{ pathto('_static/skypilot_og_image.png', 1) }}">
+    <meta name="twitter:site" content="@skypilot_org">
+{% endblock %} 
