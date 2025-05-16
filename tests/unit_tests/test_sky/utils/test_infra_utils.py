@@ -8,8 +8,8 @@ from sky.utils import infra_utils
 class TestInfraUtils(unittest.TestCase):
     """Tests for infra_utils.py"""
 
-    def test_parse_infra(self):
-        """Test the parse_infra function with various inputs."""
+    def test_from_str(self):
+        """Test the from_str function with various inputs."""
         test_cases = [
             # Format: (infra_string, expected_cloud, expected_region, expected_zone)
             ("aws/us-east-1", "AWS", "us-east-1", None),
@@ -25,7 +25,7 @@ class TestInfraUtils(unittest.TestCase):
         ]
 
         for infra_str, expected_cloud, expected_region, expected_zone in test_cases:
-            info = infra_utils.parse_infra(infra_str)
+            info = infra_utils.InfraInfo.from_str(infra_str)
             cloud_str = str(info.cloud) if info.cloud else None
 
             self.assertEqual(
