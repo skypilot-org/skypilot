@@ -56,6 +56,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
+    'sqlalchemy',
 ]
 
 local_ray = [
