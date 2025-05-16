@@ -140,7 +140,6 @@ class Resources:
             sky.Resources(clouds.AWS(), 'p3.2xlarge')
             sky.Resources(clouds.GCP(), 'n1-standard-16')
             sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
-            
             # Using the infra parameter
             sky.Resources(infra='aws/us-east-1')
             sky.Resources(infra='k8s/my-cluster-ctx')
@@ -210,7 +209,7 @@ class Resources:
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
           infra: a string specifying the infrastructure to use, in the format
-            of "cloud/region" or "cloud/region/zone". For example, 
+                        of "cloud/region" or "cloud/region/zone". For example,
             `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
             specifying cloud, region, and zone separately. If provided, it
             takes precedence over cloud, region, and zone parameters.
@@ -234,10 +233,7 @@ class Resources:
 
         if infra is not None and (cloud is not None or region is not None or
                                   zone is not None):
-            import traceback
-            stacktrace = traceback.format_stack()
-            print(stacktrace)
-            with ux_utils.enable_traceback():
+            with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify both `infra` and `cloud`, '
                                  '`region`, or `zone` parameters. '
                                  f'Got: infra={infra}, cloud={cloud}, '

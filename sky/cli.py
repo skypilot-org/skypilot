@@ -1075,7 +1075,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                                             region: Optional[str],
                                             zone: Optional[str]):
     """Handle the backward compatibility for --infra and --cloud/region/zone.
-    
+
     Returns:
         cloud, region, zone
     """
