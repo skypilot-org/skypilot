@@ -4,6 +4,7 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.clouds import service_catalog
 from sky.utils import annotations
@@ -225,6 +226,12 @@ class Nebius(clouds.Cloud):
             # the docker run command. We patch this by adding it here.
             resources_vars['docker_run_options'] = ['--gpus all']
 
+        resources_vars['filesystem_id'] = skypilot_config.get_nested(
+            ('nebius', region.name, 'filesystem', 'filesystem_id'), '')
+        resources_vars['filesystem_attach_mode'] = skypilot_config.get_nested(
+            ('nebius', region.name, 'filesystem', 'attach_mode'), 'READ_WRITE')
+        resources_vars['filesystem_mount_path'] = skypilot_config.get_nested(
+            ('nebius', region.name, 'filesystem', 'mount_path'), '/mnt/fs')
         return resources_vars
 
     def _get_feasible_launchable_resources(

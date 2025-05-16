@@ -158,7 +158,8 @@ def start(instance_id: str) -> None:
 
 def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
            preset: str, region: str, image_family: str, disk_size: int,
-           user_data: str, associate_public_ip_address: bool) -> str:
+           user_data: str, associate_public_ip_address: bool,
+           filesystem_id: str, filesystem_attach_mode: str) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -237,6 +238,14 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
             cloud_init_user_data=user_data,
             resources=nebius.compute().ResourcesSpec(platform=platform,
                                                      preset=preset),
+            filesystems=[
+                nebius.compute().AttachedFilesystemSpec(
+                    mount_tag='filesystem-skypilot',
+                    attach_mode=nebius.compute(
+                    ).AttachedFilesystemSpec.AttachMode[filesystem_attach_mode],
+                    existing_filesystem=nebius.compute().ExistingFilesystem(
+                        id=filesystem_id)),
+            ] if filesystem_id is not None else None,
             network_interfaces=[
                 nebius.compute().NetworkInterfaceSpec(
                     subnet_id=sub_net.items[0].metadata.id,
