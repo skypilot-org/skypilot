@@ -33,6 +33,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
+_ALLOWED_CLOUDS_KEY = 'allowed_clouds'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
@@ -838,6 +839,20 @@ def set_enabled_clouds(enabled_clouds: List[str],
 
 def _get_capability_key(cloud_capability: 'cloud.CloudCapability') -> str:
     return _ENABLED_CLOUDS_KEY_PREFIX + cloud_capability.value
+
+
+def get_allowed_clouds() -> List[str]:
+    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
+                              (_ALLOWED_CLOUDS_KEY,))
+    for (value,) in rows:
+        return json.loads(value)
+    return []
+
+
+def set_allowed_clouds(allowed_clouds: List[str]) -> None:
+    _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
+                       (_ALLOWED_CLOUDS_KEY, json.dumps(allowed_clouds)))
+    _DB.conn.commit()
 
 
 def add_or_update_storage(storage_name: str,
