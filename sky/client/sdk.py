@@ -46,6 +46,7 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import infra_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -87,12 +88,12 @@ def stream_response(request_id: Optional[str],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def check(clouds: Optional[Tuple[str]],
+def check(infra: Optional[Tuple[str]],
           verbose: bool) -> server_common.RequestId:
     """Checks the credentials to enable clouds.
 
     Args:
-        clouds: The clouds to check.
+        infra: The infra to check.
         verbose: Whether to show verbose output.
 
     Returns:
@@ -101,7 +102,14 @@ def check(clouds: Optional[Tuple[str]],
     Request Returns:
         None
     """
-    body = payloads.CheckBody(clouds=clouds, verbose=verbose)
+    infra = infra_utils.InfraInfo.from_str(infra)
+    if infra.region is not None or infra.zone is not None:
+        infra_str = infra.to_str()
+        region_zone = infra_str.partition('/')[-1]
+        logger.warning(f'Infra {infra_str} is specified, but `check` only '
+                       f'supports checking {infra.cloud}, ignoring '
+                       f'{region_zone}')
+    body = payloads.CheckBody(clouds=infra.cloud, verbose=verbose)
     response = requests.post(f'{server_common.get_server_url()}/check',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())

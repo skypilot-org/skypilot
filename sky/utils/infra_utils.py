@@ -19,7 +19,7 @@ class InfraInfo:
     zone: Optional[str] = None
 
     @staticmethod
-    def from_str(infra: str) -> 'InfraInfo':
+    def from_str(infra: Optional[str]) -> 'InfraInfo':
         """Parse the infra string into cloud, region, and zone components.
 
         The format of the infra string is `cloud`, `cloud/region`, or
@@ -41,6 +41,9 @@ class InfraInfo:
         Raises:
             ValueError: If the infra string is malformed.
         """
+        if infra is None:
+            return InfraInfo()
+
         parts = infra.strip().split(
             '/')  # Split on / to get cloud, region, zone
 

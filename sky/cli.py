@@ -3306,7 +3306,7 @@ def _down_or_stop_clusters(
 
 @cli.command(cls=_DocumentedCodeCommand)
 @config_option(expose_value=False)
-@click.argument('clouds', required=False, type=str, nargs=-1)
+@click.argument('infra_list', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
               is_flag=True,
@@ -3314,7 +3314,7 @@ def _down_or_stop_clusters(
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
-def check(clouds: Tuple[str], verbose: bool):
+def check(infra_list: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3336,8 +3336,8 @@ def check(clouds: Tuple[str], verbose: bool):
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
     """
-    clouds_arg = clouds if len(clouds) > 0 else None
-    request_id = sdk.check(clouds=clouds_arg, verbose=verbose)
+    infra_arg = infra_list if len(infra_list) > 0 else None
+    request_id = sdk.check(infra=infra_arg, verbose=verbose)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()
