@@ -3122,6 +3122,7 @@ def format_kubeconfig_exec_auth(config: Any, output_path: str) -> bool:
             exec_info['args'].insert(0, executable)
             updated = True
 
+    os.makedirs(os.path.dirname(os.path.expanduser(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as file:
         yaml.safe_dump(config, file)
 
@@ -3151,11 +3152,5 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     if os.path.isfile(path):
         return path
 
-    # Make directory as it may not exist. This operation will only happen
-    # once for every new kubeconfig.
-    os.makedirs(os.path.dirname(
-        os.path.expanduser(
-            kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE)),
-                exist_ok=True)
     format_kubeconfig_exec_auth(config, path)
     return path
