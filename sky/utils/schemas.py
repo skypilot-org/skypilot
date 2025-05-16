@@ -88,23 +88,9 @@ def _get_single_resources_schema():
             'infra': {
                 'type': 'string',
                 'description': 'Infrastructure specification in format: cloud[/region[/zone]]. Use "*" as a wildcard.',
-                'oneOf': [
-                    {
-                        'pattern': '^\\*/.*$'  # Wildcard cloud (*/region[/zone])
-                    },
-                    {
-                        # Valid cloud name followed by optional region/zone
-                        'pattern': '^(' + '|'.join(list(service_catalog.ALL_CLOUDS)) + ')/.*$'
-                    },
-                    {
-                        # Just valid cloud name
-                        'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-                    },
-                    {
-                        # Special case for Kubernetes contexts which may contain slashes
-                        'pattern': '^k8s/.*$'
-                    }
-                ]
+                # Create a pattern validator that uses a big regex to match all valid formats
+                # This allows us to maintain JSON Schema validation while supporting all formats
+                'pattern': '^(?:(?i:(' + '|'.join(list(service_catalog.ALL_CLOUDS)) + '))(?:/[^/]+(?:/[^/]+)?)?|\\*(?:/[^/]+(?:/[^/]+)?|/\\*(?:/[^/]+)?)?|(?i:k8s|kubernetes)/.+)$'
             },
             'cpus': {
                 'anyOf': [{
@@ -1104,3 +1090,4 @@ def get_config_schema():
             **cloud_configs,
         },
     }
+
