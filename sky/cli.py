@@ -6002,7 +6002,6 @@ def api_info():
 
 
 # TODO: Move these constants out
-SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 # TODO: Add support for custom kubeconfig path.
 SSH_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
