@@ -19,14 +19,14 @@ Machine learning examples:
 - [**`detectron2_app.yaml`**](./detectron2_app.yaml): Run Detectron2 on a V100 GPU.
 
 - TPU examples
-  - [**`tpu/tpu_app.yaml`**](./tpu/tpu_app.yaml): Train on a **TPU node** on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
+  - [**`tpu/tpu_app.yaml`**](./tpu/tpu_app.yaml): Train on a **TPU VM** on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
   - [**`tpu/tpuvm_mnist.yaml`**](./tpu/tpuvm_mnist.yaml): Train on a **TPU VM** on GCP.  Train on MNIST in Flax (based on JAX).
 
-- [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu). 
-  
+- [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu).
+
     The training data is currently a public, "fake_imagenet" dataset (`gs://cloud-tpu-test-datasets/fake_imagenet`, 70GB).
 
-  
+
 - [**`resnet_distributed_tf_app.py`**](./resnet_distributed_tf_app.py): **Distributed training** variant of the above, via TensorFlow Distributed.
 
 - [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): **Grid search**: run many trials concurrently on the same VM.
