@@ -772,6 +772,15 @@ class Optimizer:
                     f'{colorama.Style.BRIGHT}Estimated total cost: '
                     f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
 
+        def _instance_type_str(resources: 'resources_lib.Resources') -> str:
+            instance_type = resources.instance_type
+            assert instance_type is not None, 'Instance type must be specified'
+            if isinstance(resources.cloud, clouds.Kubernetes):
+                instance_type = '-'
+                if resources.use_spot:
+                    instance_type = ''
+            return instance_type
+
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
             accelerators = resources.get_accelerators_str()
@@ -799,7 +808,7 @@ class Optimizer:
 
             return [
                 infra,
-                resources.instance_type + spot,
+                _instance_type_str(resources) + spot,
                 vcpus,
                 mem,
                 str(accelerators),
@@ -837,8 +846,9 @@ class Optimizer:
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(infra, vcpus, mem,
-                      str(accelerators), resources.instance_type + spot, cost_str, chosen_str)
+            row = Row(infra,
+                      _instance_type_str(resources) + spot, vcpus, mem,
+                      str(accelerators), cost_str, chosen_str)
 
             return row
 
@@ -856,9 +866,7 @@ class Optimizer:
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = [
-            'INFRA', 'vCPUs', 'Mem(GB)', 'GPUS', 'INSTANCE'
-        ]
+        resource_fields = ['INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS']
         if len(ordered_best_plan) > 1:
             best_plan_rows = []
             for t, r in ordered_best_plan.items():

@@ -18,6 +18,15 @@ class InfraInfo:
     region: Optional[str] = None
     zone: Optional[str] = None
 
+    def __init__(self,
+                 cloud: Optional[str] = None,
+                 region: Optional[str] = None,
+                 zone: Optional[str] = None):
+        assert cloud not in ['none', 'None', 'NONE'], 'cloud must be specified'
+        self.cloud = cloud
+        self.region = region
+        self.zone = zone
+
     @staticmethod
     def from_str(infra: Optional[str]) -> 'InfraInfo':
         """Parse the infra string into cloud, region, and zone components.

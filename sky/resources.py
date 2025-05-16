@@ -465,7 +465,8 @@ class Resources:
 
     @property
     def infra(self) -> infra_utils.InfraInfo:
-        return infra_utils.InfraInfo(str(self.cloud), self.region, self.zone)
+        cloud = str(self.cloud) if self.cloud is not None else None
+        return infra_utils.InfraInfo(cloud, self.region, self.zone)
 
     @property
     def cloud(self) -> Optional[clouds.Cloud]:

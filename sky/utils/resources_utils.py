@@ -144,20 +144,23 @@ def format_resource(resource: 'resources_lib.Resources',
         resource.instance_type)
 
     components = []
-    if resource.accelerators is None or not simplify:
-        if vcpu is not None:
-            components.append(f'vCPUs={int(vcpu)}')
-        if mem is not None:
-            components.append(f'mem={int(mem)}')
 
     if resource.accelerators is not None:
         acc, count = list(resource.accelerators.items())[0]
         components.append(f'GPUs={acc}:{count}')
 
+    is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    if (resource.accelerators is None or is_k8s or not simplify):
+        if vcpu is not None:
+            components.append(f'vCPUs={int(vcpu)}')
+        if mem is not None:
+            components.append(f'mem={int(mem)}')
+
     instance_type = resource.instance_type
     if simplify:
         instance_type = common_utils.truncate_long_string(instance_type, 15)
-    components.append(f'type={instance_type}')
+    if not is_k8s:
+        components.append(f'type={instance_type}')
     if not simplify:
         components.append(f'disk={resource.disk_size}')
 
