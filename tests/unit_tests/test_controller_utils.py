@@ -74,8 +74,7 @@ def test_get_controller_resources(controller_type: str,
 
 
 def _check_controller_resources(
-        controller_resources: Set[sky.Resources],
-        expected_infra_list: Set[str],
+        controller_resources: Set[sky.Resources], expected_infra_list: Set[str],
         default_controller_resources: Dict[str, Any]) -> None:
     """Helper function to check that the controller resources match the
     expected combinations."""
@@ -136,9 +135,7 @@ def test_get_controller_resources_with_task_resources(
         return True
 
     expected_infra_set = {
-        str(c).lower()
-        for c in all_clouds
-        if _could_host_controllers(c)
+        str(c).lower() for c in all_clouds if _could_host_controllers(c)
     }
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),

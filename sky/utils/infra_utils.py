@@ -87,14 +87,6 @@ class InfraInfo:
 
         if cloud_name == '*':
             cloud_name = None
-        elif cloud_name not in [
-                'aws', 'gcp', 'kubernetes', 'azure', 'lambda', 'local'
-        ]:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Invalid cloud provider: {cloud_name}. Expected one of: '
-                    'aws, gcp, kubernetes, azure, lambda, local')
-
         if region == '*':
             region = None
         if zone == '*':
