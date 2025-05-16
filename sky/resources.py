@@ -20,6 +20,7 @@ from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -117,6 +118,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, Dict[str, Any], None] = None,
+        infra: Optional[str] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -137,6 +139,11 @@ class Resources:
             sky.Resources(clouds.AWS(), 'p3.2xlarge')
             sky.Resources(clouds.GCP(), 'n1-standard-16')
             sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+            
+            # Using the infra parameter
+            sky.Resources(infra='aws/us-east-1')
+            sky.Resources(infra='k8s/my-cluster-ctx')
+            sky.Resources(infra='aws/us-east-1/us-east-1a')
 
             # Specifying required resources; the system decides the
             # cloud/instance type. The below are equivalent:
@@ -201,6 +208,11 @@ class Resources:
             not supported and will be ignored.
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
+          infra: a string specifying the infrastructure to use, in the format
+            of "cloud/region" or "cloud/region/zone". For example, 
+            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
+            specifying cloud, region, and zone separately. If provided, it
+            takes precedence over cloud, region, and zone parameters.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
@@ -218,6 +230,26 @@ class Resources:
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
         self._version = self._VERSION
+
+        if infra is not None and (cloud is not None or region is not None or zone is not None):
+            with ux_utils.print_exception_no_traceback():   
+                raise ValueError('Cannot specify both `infra` and `cloud`, '
+                                 '`region`, or `zone` parameters. '
+                                 'Please provide only one of these parameters.')
+
+        # Infra is user facing, and cloud, region, zone in parameters are for 
+        # backward compatibility. Internally, we keep using cloud, region, zone
+        # for simplicity.
+        if infra is not None:
+            infra_info = infra_utils.parse_infra(infra)
+            # Infra takes precedence over individually specified parameters
+            if cloud is None:
+                cloud = infra_info.cloud
+            if region is None:
+                region = infra_info.region
+            if zone is None:
+                zone = infra_info.zone
+
         self._cloud = cloud
         self._region: Optional[str] = region
         self._zone: Optional[str] = zone
@@ -1450,6 +1482,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -1622,8 +1655,17 @@ class Resources:
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
         resources_fields = {}
+        
+        # Extract infra field if present
+        infra = config.pop('infra', None)
+        resources_fields['infra'] = infra
+        
+        # Keep backward compatibility with cloud, region, zone
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
+        resources_fields['region'] = config.pop('region', None)
+        resources_fields['zone'] = config.pop('zone', None)
+        
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
@@ -1641,8 +1683,6 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
-        resources_fields['region'] = config.pop('region', None)
-        resources_fields['zone'] = config.pop('zone', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
@@ -1679,7 +1719,15 @@ class Resources:
             if value is not None and value != 'None':
                 config[key] = value
 
+        # Construct infra field if cloud is set
+        infra = infra_utils.format_infra(str(self.cloud), self.region, self.zone)
+        add_if_not_none('infra', infra)
+        
+        # Keep backward compatibility
         add_if_not_none('cloud', str(self.cloud))
+        add_if_not_none('region', self.region)
+        add_if_not_none('zone', self.zone)
+        
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
@@ -1690,8 +1738,6 @@ class Resources:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
-        add_if_not_none('region', self.region)
-        add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value

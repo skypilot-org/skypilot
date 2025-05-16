@@ -85,6 +85,7 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import infra_utils
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
@@ -345,6 +346,13 @@ _TASK_OPTIONS = [
               'where the task will be invoked. '
               'Overrides the "workdir" config in the YAML if both are supplied.'
              )),
+    click.option(
+        '--infra',
+        required=False,
+        type=str,
+        help='Infrastructure to use. '
+        'Format: cloud, cloud/region, or cloud/region/zone. '
+        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a'),
     click.option(
         '--cloud',
         required=False,
@@ -668,9 +676,7 @@ def _add_click_options(options: List[click.Option]):
 
 
 def _parse_override_params(
-        cloud: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
+        infra: Optional[str] = None,
         gpus: Optional[str] = None,
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
@@ -683,21 +689,11 @@ def _parse_override_params(
         config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
-    if cloud is not None:
-        if cloud.lower() == 'none':
-            override_params['cloud'] = None
+    if infra is not None:
+        if infra.lower() == 'none':
+            override_params['infra'] = None
         else:
-            override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
-    if region is not None:
-        if region.lower() == 'none':
-            override_params['region'] = None
-        else:
-            override_params['region'] = region
-    if zone is not None:
-        if zone.lower() == 'none':
-            override_params['zone'] = None
-        else:
-            override_params['zone'] = zone
+            override_params['infra'] = infra
     if gpus is not None:
         if gpus.lower() == 'none':
             override_params['accelerators'] = None
@@ -828,9 +824,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     *,
     name: Optional[str] = None,
     workdir: Optional[str] = None,
-    cloud: Optional[str] = None,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
+    infra: Optional[str] = None,
     gpus: Optional[str] = None,
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
@@ -868,9 +862,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             click.secho('Command to run: ', fg='cyan', nl=False)
             click.secho(entrypoint)
 
-    override_params = _parse_override_params(cloud=cloud,
-                                             region=region,
-                                             zone=zone,
+    override_params = _parse_override_params(infra=infra,
                                              gpus=gpus,
                                              cpus=cpus,
                                              memory=memory,
@@ -1172,6 +1164,7 @@ def launch(
         backend_name: Optional[str],
         name: Optional[str],
         workdir: Optional[str],
+        infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
         zone: Optional[str],
@@ -1219,13 +1212,17 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
+    if cloud is not None and region is not None and zone is not None:
+        logger.warning(
+            'The --cloud, --region, and --zone options are deprecated. '
+            'Please use --infra instead. ')
+        infra = infra_utils.format_infra(cloud, region, zone)
+
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         workdir=workdir,
-        cloud=cloud,
-        region=region,
-        zone=zone,
+        infra=infra,
         gpus=gpus,
         cpus=cpus,
         memory=memory,
