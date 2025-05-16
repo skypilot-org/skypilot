@@ -3424,6 +3424,11 @@ def show_gpus(
     * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
       in the Kubernetes cluster.
     """
+    cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
+                                                               cloud,
+                                                               region,
+                                                               zone=None)
+
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3438,10 +3443,6 @@ def show_gpus(
         raise click.UsageError(
             '--all-regions and --region flags cannot be used simultaneously.')
 
-    cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
-                                                               cloud,
-                                                               region,
-                                                               zone=None)
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
