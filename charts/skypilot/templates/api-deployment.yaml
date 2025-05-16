@@ -232,7 +232,7 @@ spec:
           if [ -n "$LAMBDA_API_KEY" ]; then
             echo "Lambda credentials found in environment variable."
             mkdir -p /root/.lambda_cloud
-            echo "api_key = \"$LAMBDA_API_KEY\"" > /root/.lambda_cloud/lambda_keys
+            echo "api_key = $LAMBDA_API_KEY" > /root/.lambda_cloud/lambda_keys
           else
             echo "Lambda credentials not found in environment variables. Skipping credentials setup."
             sleep 600

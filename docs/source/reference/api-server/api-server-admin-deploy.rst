@@ -333,6 +333,21 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set runpodCredentials.enabled=true \
                     --set runpodCredentials.runpodSecretName=your_secret_name
 
+    .. tab-item:: Lambda
+        :sync: lambda-creds-tab
+
+        SkyPilot API server use **API key** to authenticate with Lambda. To configure Lambda access, go to the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page on your Lambda Cloud console and generate an **API key**.
+
+        Once the key is generated, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic lambda-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Lambda credentials by setting ``lambdaCredentials.enabled=true``
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
