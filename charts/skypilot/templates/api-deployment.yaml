@@ -155,6 +155,9 @@ spec:
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        - name: state-volume
+          mountPath: /root/sky_logs
+          subPath: sky_logs
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
