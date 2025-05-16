@@ -24,6 +24,7 @@ A collection of examples demonstrating the use cases of SkyPilot.
    Models <models/index>
    Other Frameworks <frameworks/index>
    AI Applications <applications/index>
+   AI Performance <performance/index>
 
 .. _examples-contribute:
 
