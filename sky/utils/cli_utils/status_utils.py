@@ -231,7 +231,7 @@ _get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
 
 
 def _get_command(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
-    command = cluster_record['last_use']
+    command = cluster_record.get('last_use', '-')
     if truncate:
         return common_utils.truncate_long_string(command, COMMAND_TRUNC_LENGTH)
     return command
@@ -324,6 +324,9 @@ def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     """
     handle = cluster_record['handle']
     if isinstance(handle, backends.CloudVmRayResourceHandle):
+        if handle.launched_resources is None:
+            # If launched_resources is None, try to get infra from the record
+            return cluster_record.get('infra', '-')
         return handle.launched_resources.infra.formatted_str(truncate)
     return '-'
 

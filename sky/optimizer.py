@@ -837,8 +837,8 @@ class Optimizer:
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(infra, resources.instance_type + spot, vcpus, mem,
-                      str(accelerators), cost_str, chosen_str)
+            row = Row(infra, vcpus, mem,
+                      str(accelerators), resources.instance_type + spot, cost_str, chosen_str)
 
             return row
 
@@ -857,7 +857,7 @@ class Optimizer:
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
-            'INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS'
+            'INFRA', 'vCPUs', 'Mem(GB)', 'GPUS', 'INSTANCE'
         ]
         if len(ordered_best_plan) > 1:
             best_plan_rows = []
