@@ -231,24 +231,22 @@ class Resources:
         """
         self._version = self._VERSION
 
-        if infra is not None and (cloud is not None or region is not None or zone is not None):
-            with ux_utils.print_exception_no_traceback():   
+        if infra is not None and (cloud is not None or region is not None or
+                                  zone is not None):
+            with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify both `infra` and `cloud`, '
                                  '`region`, or `zone` parameters. '
                                  'Please provide only one of these parameters.')
 
-        # Infra is user facing, and cloud, region, zone in parameters are for 
+        # Infra is user facing, and cloud, region, zone in parameters are for
         # backward compatibility. Internally, we keep using cloud, region, zone
         # for simplicity.
         if infra is not None:
             infra_info = infra_utils.parse_infra(infra)
             # Infra takes precedence over individually specified parameters
-            if cloud is None:
-                cloud = infra_info.cloud
-            if region is None:
-                region = infra_info.region
-            if zone is None:
-                zone = infra_info.zone
+            cloud = infra_info.cloud
+            region = infra_info.region
+            zone = infra_info.zone
 
         self._cloud = cloud
         self._region: Optional[str] = region
@@ -1655,17 +1653,17 @@ class Resources:
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
         resources_fields = {}
-        
+
         # Extract infra field if present
         infra = config.pop('infra', None)
         resources_fields['infra'] = infra
-        
+
         # Keep backward compatibility with cloud, region, zone
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
         resources_fields['region'] = config.pop('region', None)
         resources_fields['zone'] = config.pop('zone', None)
-        
+
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
@@ -1720,14 +1718,15 @@ class Resources:
                 config[key] = value
 
         # Construct infra field if cloud is set
-        infra = infra_utils.format_infra(str(self.cloud), self.region, self.zone)
+        infra = infra_utils.format_infra(str(self.cloud), self.region,
+                                         self.zone)
         add_if_not_none('infra', infra)
-        
+
         # Keep backward compatibility
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
-        
+
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)

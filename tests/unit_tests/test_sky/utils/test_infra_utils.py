@@ -39,18 +39,23 @@ class TestInfraUtils(unittest.TestCase):
         """Test the format_infra function with various inputs."""
         test_cases = [
             # Format: (cloud, region, zone, expected)
-            (clouds.AWS(), "us-east-1", None, "aws/us-east-1"),
-            (clouds.AWS(), "us-east-1", "us-east-1a", "aws/us-east-1/us-east-1a"),
-            (clouds.GCP(), "us-central1", None, "gcp/us-central1"),
-            (clouds.Kubernetes(), "my-cluster-ctx", None, "kubernetes/my-cluster-ctx"),
+            ("aws", "us-east-1", None, "aws/us-east-1"),
+            ("aws", "us-east-1", "us-east-1a", "aws/us-east-1/us-east-1a"),
+            ("gcp", "us-central1", None, "gcp/us-central1"),
+            ("kubernetes", "my-cluster-ctx", None, "kubernetes/my-cluster-ctx"),
             # Test with slashes in Kubernetes context
-            (clouds.Kubernetes(), "my/cluster/ctx", None, "kubernetes/my/cluster/ctx"),
-            # Test with zone in Kubernetes (should be ignored)
-            (clouds.Kubernetes(), "my-cluster-ctx", "some-zone", "kubernetes/my-cluster-ctx"),
+            ("kubernetes", "my/cluster/ctx", None, "kubernetes/my/cluster/ctx"),
+            # Test with zone in Kubernetes
+            ("kubernetes", "my-cluster-ctx", "some-zone", "kubernetes/my-cluster-ctx/some-zone"),
             # Test with just cloud
-            (clouds.AWS(), None, None, "aws"),
+            ("aws", None, None, "aws"),
             # Test with None cloud
             (None, "us-east-1", None, None),
+            # Additional test cases for simplified implementation
+            ("aws", "*", "*", "aws"),
+            ("gcp", "us-central1", "*", "gcp/us-central1"),
+            ("aws", "*", "us-east-1a", "aws/*/us-east-1a"),
+            ("*", "*", "*", None),
         ]
         
         for cloud, region, zone, expected in test_cases:
