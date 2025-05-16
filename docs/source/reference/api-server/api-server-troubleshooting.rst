@@ -40,3 +40,17 @@ If the pending reason is ``FailedScheduling`` and the information indicates ther
 .. note::
 
     API server requires at least 4 CPU cores and 8 GiB memory. Setting lower values may cause degraded performance.
+
+.. _sky-api-server-troubleshooting-ingress-nginx-conflicts:
+
+Ingress-nginx controller conflicts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you encounter similar errors as below when deploying the API server:
+
+.. code-block:: console
+
+    Error: Unable to continue with install: IngressClass "nginx" in namespace "" exists and cannot be imported into the current release: invalid ownership metadata; annotation validation error: key "meta.helm.sh/release-name" must equal "test": current value is "skypilot"
+
+It is likely you have an existing ingress-nginx controller deployed in the Kubernetes cluster. Or have an existing SkyPilot API server deployed which by default installs an ingress-nginx controller. If this is the case, you can follow the instructions in :ref:`Reusing ingress controller for API server <sky-api-server-helm-multiple-deploy>` to reuse the existing ingress-nginx controller to solve this issue.
+
