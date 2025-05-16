@@ -41,11 +41,17 @@ class InfraInfo:
         Raises:
             ValueError: If the infra string is malformed.
         """
-        if infra is None:
+        if infra is None or infra.strip() == '':
             return InfraInfo()
 
         parts = infra.strip().split(
             '/')  # Split on / to get cloud, region, zone
+
+        if '' in parts:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid infra format: {infra}. Format should not contain '
+                    'empty parts (e.g., double slashes "//").')
 
         if not parts or not parts[0]:
             with ux_utils.print_exception_no_traceback():
