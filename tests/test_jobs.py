@@ -38,10 +38,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster1',
         cluster_yaml='/tmp/cluster1.yaml',
         launched_nodes=2,
-        launched_resources=sky.Resources(infra='aws',
-                                         instance_type='p4d.24xlarge',
-                                         region='us-east-1',
-                                         zone='us-east-1a'),
+        launched_resources=sky.Resources(infra='aws/us-east-1/us-east-1a',
+                                         instance_type='p4d.24xlarge'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster1',
@@ -53,11 +51,9 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster2',
         cluster_yaml='/tmp/cluster2.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(infra='gcp',
+        launched_resources=sky.Resources(infra='gcp/us-west1/us-west1-a',
                                          instance_type='n1-highmem-64',
-                                         accelerators='V100:4',
-                                         region='us-west1',
-                                         zone='us-west1-a'),
+                                         accelerators='V100:4'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster2',
@@ -69,9 +65,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_name_on_cloud='test-cluster3',
         cluster_yaml='/tmp/cluster3.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(infra='azure',
-                                         instance_type='Standard_D4s_v3',
-                                         region='eastus'),
+        launched_resources=sky.Resources(infra='azure/eastus',
+                                         instance_type='Standard_D4s_v3'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster3',
@@ -84,10 +79,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_yaml='/tmp/disk-tier1.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(
-            infra='aws',
+            infra='aws/us-east-1/us-east-1a',
             instance_type='m6i.2xlarge',
-            region='us-east-1',
-            zone='us-east-1a',
             disk_tier=resources_utils.DiskTier.BEST))
     global_user_state.add_or_update_cluster(
         'test-disk-tier1',
@@ -100,10 +93,8 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
         cluster_yaml='/tmp/disk-tier2.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(
-            infra='gcp',
+            infra='gcp/us-west1/us-west1-a',
             instance_type='n2-standard-8',
-            region='us-west1',
-            zone='us-west1-a',
             disk_tier=resources_utils.DiskTier.MEDIUM))
     global_user_state.add_or_update_cluster(
         'test-disk-tier2',
@@ -150,9 +141,8 @@ class TestExecutionOnExistingClusters:
             sky.exec(task, cluster_name='test-cluster1', dryrun=True))
         task.set_resources(
             sky.Resources(
-                infra='aws',
+                infra='aws/us-east-1',
                 accelerators='A100:1',
-                region='us-east-1',
             ))
         sky.stream_and_get(
             sky.launch(task, cluster_name='test-cluster1', dryrun=True))
@@ -166,8 +156,7 @@ class TestExecutionOnExistingClusters:
         sky.stream_and_get(
             sky.exec(task, cluster_name='test-cluster2', dryrun=True))
         task.set_resources(
-            sky.Resources(infra='gcp', accelerators='V100:3',
-                          region='us-west1'))
+            sky.Resources(infra='gcp/us-west1', accelerators='V100:3'))
         sky.stream_and_get(
             sky.launch(task, cluster_name='test-cluster2', dryrun=True))
         sky.stream_and_get(
