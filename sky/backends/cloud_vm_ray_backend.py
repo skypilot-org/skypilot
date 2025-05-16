@@ -4468,6 +4468,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                     # down = False is the default, but warn the user in case
                     # they have explicitly specified it.
+                    # TODO(cooperc): Fix for new autostop stuff.
                     config_override_down = skypilot_config.get_nested(
                         (controller.value.controller_type, 'controller',
                          'autostop', 'down'), None)

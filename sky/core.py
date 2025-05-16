@@ -369,9 +369,18 @@ def _start(
                 'supported when starting SkyPilot controllers. To '
                 f'fix: omit the {arguments_str} to use the '
                 f'default autostop settings from config.')
-        idle_minutes_to_autostop, down = (
-            controller_utils.get_controller_autostop_config(
-                controller=controller))
+
+        # Get the autostop resources, from which we extract the correct autostop
+        # config.
+        controller_resources = controller_utils.get_controller_resources(
+            controller, [])
+        # All resources should have the same autostop config.
+        controller_autostop_config = list(
+            controller_resources)[0].autostop_config
+        if (controller_autostop_config is not None and
+                controller_autostop_config.enabled):
+            idle_minutes_to_autostop = controller_autostop_config.idle_minutes
+            down = controller_autostop_config.down
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 

@@ -33,6 +33,37 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
+_AUTOSTOP_SCHEMA = {
+    'anyOf': [
+        {
+            # Use boolean to disable autostop completely, e.g.
+            #   autostop: false
+            'type': 'boolean',
+        },
+        {
+            # Shorthand to set idle_minutes by directly specifying, e.g.
+            #   autostop: 5
+            'type': 'integer',
+            'minimum': 0,
+        },
+        {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'idle_minutes': {
+                    'type': 'integer',
+                    'minimum': 0,
+                },
+                'down': {
+                    'type': 'boolean',
+                },
+            },
+        },
+    ],
+}
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
@@ -165,6 +196,7 @@ def _get_single_resources_schema():
                     'type': 'null',
                 }]
             },
+            'autostop': _AUTOSTOP_SCHEMA,
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -725,29 +757,6 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
-    autostop_schema = {
-        'anyOf': [
-            {
-                # Use boolean to disable autostop completely, e.g.
-                #   autostop: false
-                'type': 'boolean',
-            },
-            {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'idle_minutes': {
-                        'type': 'integer',
-                        'minimum': 0,
-                    },
-                    'down': {
-                        'type': 'boolean',
-                    },
-                },
-            },
-        ],
-    }
     controller_resources_schema = {
         'type': 'object',
         'required': [],
@@ -762,7 +771,7 @@ def get_config_schema():
                     'high_availability': {
                         'type': 'boolean',
                     },
-                    'autostop': autostop_schema,
+                    'autostop': _AUTOSTOP_SCHEMA,
                 }
             },
             'bucket': {
