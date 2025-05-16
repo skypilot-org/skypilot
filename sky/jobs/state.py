@@ -118,7 +118,8 @@ def create_table(cursor, conn):
         controller_pid INTEGER DEFAULT NULL,
         dag_yaml_path TEXT,
         env_file_path TEXT,
-        user_hash TEXT)""")
+        user_hash TEXT,
+        workspace TEXT DEFAULT NULL)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -134,6 +135,12 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'user_hash', 'TEXT')
 
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'job_info',
+                                 'workspace',
+                                 'TEXT DEFAULT NULL',
+                                 value_to_replace_existing_entries='default')
     conn.commit()
 
 
@@ -190,6 +197,7 @@ columns = [
     'dag_yaml_path',
     'env_file_path',
     'user_hash',
+    'workspace',
 ]
 
 

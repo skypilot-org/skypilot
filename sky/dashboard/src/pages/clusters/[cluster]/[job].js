@@ -120,7 +120,7 @@ export function JobDetailPage() {
           setLogs((prevLogs) => [...prevLogs, strippedLog]);
         }
       },
-      workspace: clusterData?.workspace
+      workspace: clusterData?.workspace,
     })
       .then(() => {
         if (active) {

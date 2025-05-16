@@ -154,7 +154,8 @@ export function Workspaces() {
           workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
         }
         if (cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING') {
-          workspaceStatsAggregator[wsName].hourlyCost += cluster.cost_per_hour || 0;
+          workspaceStatsAggregator[wsName].hourlyCost +=
+            cluster.cost_per_hour || 0;
           totalGlobalHourlyCost += cluster.cost_per_hour || 0;
         }
       });

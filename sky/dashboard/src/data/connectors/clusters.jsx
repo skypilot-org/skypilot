@@ -29,14 +29,16 @@ export async function getClusterCosts() {
     return costs.reduce((acc, cost) => {
       // Calculate cost per hour based on resources and duration
       const duration = cost.duration || 0;
-      const costPerHour = duration > 0 ? (cost.total_cost / (duration / 3600)) : 0;
-      
+      const costPerHour =
+        duration > 0 ? cost.total_cost / (duration / 3600) : 0;
+
       // Use cluster_hash as the unique key, assuming it exists in the cost report items.
       const key = cost.cluster_hash;
-      if (key) { // Only add if the hash exists
+      if (key) {
+        // Only add if the hash exists
         acc[key] = {
           total_cost: cost.total_cost || 0,
-          cost_per_hour: costPerHour
+          cost_per_hour: costPerHour,
         };
       }
       return acc;
@@ -60,7 +62,7 @@ export async function getClusters({ clusterNames = null } = {}) {
           all_users: true,
         }),
       }),
-      getClusterCosts()
+      getClusterCosts(),
     ]);
     // TODO(syang): remove X-Request-ID when v0.10.0 is released.
     const id =
@@ -72,7 +74,9 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusterData = clusters.map((cluster) => {
       // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
       const costKey = cluster.cluster_hash;
-      const cost = costKey ? (costs[costKey] || { total_cost: 0, cost_per_hour: 0 }) : { total_cost: 0, cost_per_hour: 0 };
+      const cost = costKey
+        ? costs[costKey] || { total_cost: 0, cost_per_hour: 0 }
+        : { total_cost: 0, cost_per_hour: 0 };
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
@@ -104,7 +108,12 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function streamClusterJobLogs({ clusterName, jobId, onNewLog, workspace }) {
+export async function streamClusterJobLogs({
+  clusterName,
+  jobId,
+  onNewLog,
+  workspace,
+}) {
   try {
     const response = await fetch(`${ENDPOINT}/logs`, {
       method: 'POST',
@@ -119,8 +128,8 @@ export async function streamClusterJobLogs({ clusterName, jobId, onNewLog, works
         cluster_name: clusterName,
         job_id: jobId,
         override_skypilot_config: {
-          active_workspace: workspace || 'default'
-        }
+          active_workspace: workspace || 'default',
+        },
       }),
     });
     // Stream the logs
@@ -148,8 +157,8 @@ export async function getClusterJobs({ clusterName, workspace }) {
         cluster_name: clusterName,
         all_users: true,
         override_skypilot_config: {
-          active_workspace: workspace
-        }
+          active_workspace: workspace,
+        },
       }),
     });
     // TODO(syang): remove X-Request-ID when v0.10.0 is released.
@@ -219,22 +228,25 @@ export function useClusterDetails({ cluster, job = null }) {
     return null;
   }, [cluster]);
 
-  const fetchClusterJobData = useCallback(async (workspace) => {
-    if (cluster) {
-      try {
-        setLoadingClusterJobData(true);
-        const data = await getClusterJobs({ 
-          clusterName: cluster,
-          workspace: workspace || 'default'
-        });
-        setClusterJobData(data);
-      } catch (error) {
-        console.error('Error fetching cluster job data:', error);
-      } finally {
-        setLoadingClusterJobData(false);
+  const fetchClusterJobData = useCallback(
+    async (workspace) => {
+      if (cluster) {
+        try {
+          setLoadingClusterJobData(true);
+          const data = await getClusterJobs({
+            clusterName: cluster,
+            workspace: workspace || 'default',
+          });
+          setClusterJobData(data);
+        } catch (error) {
+          console.error('Error fetching cluster job data:', error);
+        } finally {
+          setLoadingClusterJobData(false);
+        }
       }
-    }
-  }, [cluster]);
+    },
+    [cluster]
+  );
 
   const refreshData = useCallback(async () => {
     const clusterInfo = await fetchClusterData();

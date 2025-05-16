@@ -194,7 +194,7 @@ export function TopBar() {
           </div>
 
           <div className="border-l border-gray-200 h-6 mx-1"></div>
-          
+
           {/* GPUs Link */}
           <Link
             href="/gpus"
@@ -214,7 +214,6 @@ export function TopBar() {
             <BookDocIcon className="w-4 h-4" />
             {!isMobile && <span>Workspaces</span>}
           </Link>
-
         </div>
 
         {/* External links - now shows only icons on mobile */}

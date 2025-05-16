@@ -41,7 +41,8 @@ import {
 
 // Helper function to format cost (copied from workspaces.jsx)
 const formatCost = (cost) => {
-  if (cost >= 10) { // Use the user-updated threshold of 10
+  if (cost >= 10) {
+    // Use the user-updated threshold of 10
     return cost.toFixed(1);
   }
   return cost.toFixed(2);

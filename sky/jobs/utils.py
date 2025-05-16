@@ -1283,11 +1283,16 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
+    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
+                    workspace) -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_info({job_id}, {dag_name!r})
+            set_job_info_kwargs = {{'workspace': {workspace!r}}}
+            if managed_job_version < 4:
+                set_job_info_kwargs = {{}}
+            managed_job_state.set_job_info(
+                {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(

@@ -58,12 +58,16 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         STOPPED.
     """
     # TODO(zhwu): Update the information for autostop clusters.
+    workspaces = set(record['workspace'] for record in cluster_records)
+    show_workspaces = len(workspaces) > 1
 
     status_columns = [
         StatusColumn('NAME', _get_name),
         StatusColumn('USER', _get_user_name, show_by_default=show_user),
         StatusColumn('USER_ID', _get_user_hash, show_by_default=False),
-        StatusColumn('WORKSPACE', _get_workspace, show_by_default=True),
+        StatusColumn('WORKSPACE',
+                     _get_workspace,
+                     show_by_default=show_workspaces),
         StatusColumn('LAUNCHED', _get_launched),
         StatusColumn('RESOURCES',
                      _get_resources,
@@ -103,12 +107,13 @@ def show_status_table(cluster_records: List[_ClusterRecord],
             for cluster in query_clusters
             if cluster not in cluster_names
         ]
-        cluster_str = 'Cluster'
-        if len(not_found_clusters) > 1:
-            cluster_str += 's'
-        cluster_str += ' '
-        cluster_str += ', '.join(not_found_clusters)
-        click.echo(f'{cluster_str} not found.')
+        if not_found_clusters:
+            cluster_str = 'Cluster'
+            if len(not_found_clusters) > 1:
+                cluster_str += 's'
+            cluster_str += ' '
+            cluster_str += ', '.join(not_found_clusters)
+            click.echo(f'{cluster_str} not found.')
     elif not cluster_records:
         click.echo('No existing clusters.')
     return num_pending_autostop
