@@ -773,8 +773,8 @@ def get_clusters() -> List[Dict[str, Any]]:
             'workspace': row.workspace,
         }
 
-        records.append(record)
-    return records
+            records.append(record)
+        return records
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
