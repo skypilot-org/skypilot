@@ -39,7 +39,7 @@ def parse_args():
 def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     """Load SSH targets from YAML file."""
     if not os.path.exists(file_path):
-        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}")
+        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}", flush=True)
         sys.exit(1)
     
     try:
@@ -47,18 +47,18 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
             targets = yaml.safe_load(f)
         return targets
     except Exception as e:
-        print(f"{RED}Error loading SSH targets file: {e}{NC}")
+        print(f"{RED}Error loading SSH targets file: {e}{NC}", flush=True)
         sys.exit(1)
 
 def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for a specific cluster or the first one if not specified."""
     if not targets:
-        print(f"{RED}Error: No clusters defined in SSH targets file{NC}")
+        print(f"{RED}Error: No clusters defined in SSH targets file{NC}", flush=True)
         sys.exit(1)
     
     if cluster_name:
         if cluster_name not in targets:
-            print(f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}")
+            print(f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}", flush=True)
             sys.exit(1)
         return cluster_name, targets[cluster_name]
     
@@ -69,7 +69,7 @@ def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = No
 def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
     """Prepare list of hosts with resolved user, identity_file, and password."""
     if 'hosts' not in cluster_config or not cluster_config['hosts']:
-        print(f"{RED}Error: No hosts defined in cluster configuration{NC}")
+        print(f"{RED}Error: No hosts defined in cluster configuration{NC}", flush=True)
         sys.exit(1)
     
     # Get cluster-level defaults
@@ -91,7 +91,7 @@ def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                print(f"{RED}Warning: Host missing 'ip' field, skipping: {host}{NC}")
+                print(f"{RED}Warning: Host missing 'ip' field, skipping: {host}{NC}", flush=True)
                 continue
             
             # Use host-specific values or fall back to cluster defaults
@@ -112,9 +112,9 @@ def run_command(cmd, shell=False):
     """Run a local command and return the output."""
     process = subprocess.run(cmd, shell=shell, capture_output=True, text=True)
     if process.returncode != 0:
-        print(f"{RED}Error executing command: {cmd}{NC}")
-        print(f"STDOUT: {process.stdout}")
-        print(f"STDERR: {process.stderr}")
+        print(f"{RED}Error executing command: {cmd}{NC}", flush=True)
+        print(f"STDOUT: {process.stdout}", flush=True)
+        print(f"STDERR: {process.stderr}", flush=True)
         return None
     return process.stdout.strip()
 
@@ -131,8 +131,8 @@ def run_remote(node_ip, cmd, user, ssh_key, connect_timeout=30):
                cmd]
     process = subprocess.run(ssh_cmd, capture_output=True, text=True)
     if process.returncode != 0:
-        print(f"{RED}Error executing command {cmd} on {node_ip}:{NC}")
-        print(f"STDERR: {process.stderr}")
+        print(f"{RED}Error executing command {cmd} on {node_ip}:{NC}", flush=True)
+        print(f"STDERR: {process.stderr}", flush=True)
         return None
     return process.stdout.strip()
 
@@ -156,15 +156,15 @@ export SUDO_ASKPASS=$ASKPASS_SCRIPT
 
 def progress_message(message):
     """Show a progress message."""
-    print(f"{YELLOW}➜ {message}{NC}")
+    print(f"{YELLOW}➜ {message}{NC}", flush=True)
 
 def success_message(message):
     """Show a success message."""
-    print(f"{GREEN}✔ {message}{NC}")
+    print(f"{GREEN}✔ {message}{NC}", flush=True)
 
 def cleanup_server_node(node_ip, user, ssh_key, askpass_block):
     """Uninstall k3s and clean up the state on a server node."""
-    print(f"{YELLOW}Cleaning up head node {node_ip}...{NC}")
+    print(f"{YELLOW}Cleaning up head node {node_ip}...{NC}", flush=True)
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -172,11 +172,11 @@ def cleanup_server_node(node_ip, user, ssh_key, askpass_block):
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     run_remote(node_ip, cmd, user, ssh_key)
-    print(f"{GREEN}Node {node_ip} cleaned up successfully.{NC}")
+    print(f"{GREEN}Node {node_ip} cleaned up successfully.{NC}", flush=True)
 
 def cleanup_agent_node(node_ip, user, ssh_key, askpass_block):
     """Uninstall k3s and clean up the state on an agent node."""
-    print(f"{YELLOW}Cleaning up node {node_ip}...{NC}")
+    print(f"{YELLOW}Cleaning up node {node_ip}...{NC}", flush=True)
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -184,7 +184,7 @@ def cleanup_agent_node(node_ip, user, ssh_key, askpass_block):
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     run_remote(node_ip, cmd, user, ssh_key)
-    print(f"{GREEN}Node {node_ip} cleaned up successfully.{NC}")
+    print(f"{GREEN}Node {node_ip} cleaned up successfully.{NC}", flush=True)
 
 def check_gpu(node_ip, user, ssh_key):
     """Check if a node has a GPU."""
@@ -207,18 +207,18 @@ def main():
     if args.ips_file and args.user and args.ssh_key:
         # Using command line arguments - legacy mode
         if not os.path.isfile(args.ssh_key):
-            print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}")
+            print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}", flush=True)
             sys.exit(1)
         
         if not os.path.isfile(args.ips_file):
-            print(f"{RED}Error: IPs file not found: {args.ips_file}{NC}")
+            print(f"{RED}Error: IPs file not found: {args.ips_file}{NC}", flush=True)
             sys.exit(1)
         
         with open(args.ips_file, 'r') as f:
             ips = [line.strip() for line in f if line.strip()]
         
         if not ips:
-            print(f"{RED}Error: IPs file is empty or not formatted correctly.{NC}")
+            print(f"{RED}Error: IPs file is empty or not formatted correctly.{NC}", flush=True)
             sys.exit(1)
         
         head_node = ips[0]
@@ -235,7 +235,7 @@ def main():
         hosts_info = prepare_hosts_info(cluster_config)
         
         if not hosts_info:
-            print(f"{RED}Error: No valid hosts found in the cluster configuration{NC}")
+            print(f"{RED}Error: No valid hosts found in the cluster configuration{NC}", flush=True)
             sys.exit(1)
         
         # Use the first host as the head node and the rest as worker nodes
@@ -259,12 +259,12 @@ def main():
     k3s_token = "mytoken"  # Any string can be used as the token
     
     # Pre-flight checks
-    print(f"{YELLOW}Checking SSH connection to head node...{NC}")
+    print(f"{YELLOW}Checking SSH connection to head node...{NC}", flush=True)
     run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key)
     
     # If --cleanup flag is set, uninstall k3s and exit
     if args.cleanup:
-        print(f"{YELLOW}Starting cleanup...{NC}")
+        print(f"{YELLOW}Starting cleanup...{NC}", flush=True)
         
         # Clean up head node
         cleanup_server_node(head_node, ssh_user, ssh_key, askpass_block)
@@ -295,7 +295,7 @@ def main():
             
             success_message(f"Context '{context_name}' removed from local kubeconfig.")
         
-        print(f"{GREEN}Cleanup completed successfully.{NC}")
+        print(f"{GREEN}Cleanup completed successfully.{NC}", flush=True)
         sys.exit(0)
     
     # Step 1: Install k3s on the head node
@@ -325,12 +325,12 @@ def main():
     # Check if head node has a GPU
     install_gpu = False
     if check_gpu(head_node, ssh_user, ssh_key):
-        print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}")
+        print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}", flush=True)
         install_gpu = True
     
     # Fetch the head node's internal IP (this will be passed to worker nodes)
     master_addr = run_remote(head_node, "hostname -I | awk '{print $1}'", ssh_user, ssh_key)
-    print(f"{GREEN}Master node internal IP: {master_addr}{NC}")
+    print(f"{GREEN}Master node internal IP: {master_addr}{NC}", flush=True)
     
     # Step 2: Install k3s on worker nodes and join them to the master node
     for i, node in enumerate(worker_nodes):
@@ -356,7 +356,7 @@ def main():
         
         # Check if worker node has a GPU
         if check_gpu(node, worker_user, worker_key):
-            print(f"{YELLOW}GPU detected on worker node ({node}).{NC}")
+            print(f"{YELLOW}GPU detected on worker node ({node}).{NC}", flush=True)
             install_gpu = True
     
     # Step 3: Configure local kubectl to connect to the cluster
@@ -371,7 +371,7 @@ def main():
             "scp", "-o", "StrictHostKeyChecking=no", "-o", "IdentitiesOnly=yes", 
             "-i", ssh_key, f"{ssh_user}@{head_node}:~/.kube/config", temp_kubeconfig
         ]
-        subprocess.run(scp_cmd, check=True)
+        run_command(scp_cmd, shell=False)
         
         # Create the directory for the kubeconfig file if it doesn't exist
         ensure_directory_exists(kubeconfig_path)
@@ -415,22 +415,26 @@ def main():
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, "merged_config")
         os.environ["KUBECONFIG"] = f"{kubeconfig_path}:{modified_config}"
-        subprocess.run(["kubectl", "config", "view", "--flatten"], stdout=open(merged_config, 'w'), check=True)
+        with open(merged_config, 'w') as merged_file:
+            kubectl_cmd = ["kubectl", "config", "view", "--flatten"]
+            result = run_command(kubectl_cmd, shell=False)
+            if result:
+                merged_file.write(result)
         
         # Replace the kubeconfig with the merged config
         os.replace(merged_config, kubeconfig_path)
         
         # Set the new context as the current context
-        subprocess.run(["kubectl", "config", "use-context", context_name], check=True)
+        run_command(["kubectl", "config", "use-context", context_name], shell=False)
     
     success_message(f"kubectl configured with new context '{context_name}'.")
     
-    print(f"Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}")
-    print("You can now run 'kubectl get nodes' to verify the setup.")
+    print(f"Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}", flush=True)
+    print("You can now run 'kubectl get nodes' to verify the setup.", flush=True)
     
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
-        print(f"{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}")
+        print(f"{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}", flush=True)
         cmd = f"""
             {askpass_block}
             curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
@@ -456,24 +460,24 @@ def main():
         run_remote(head_node, cmd, ssh_user, ssh_key)
         success_message("GPU Operator installed.")
     else:
-        print(f"{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}")
+        print(f"{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}", flush=True)
     
     # Configure SkyPilot
     progress_message("Configuring SkyPilot...")
     
     # The env var KUBECONFIG ensures sky check uses the right kubeconfig
     os.environ["KUBECONFIG"] = kubeconfig_path
-    subprocess.run(["sky", "check", "kubernetes"], check=True)
+    run_command(["sky", "check", "kubernetes"], shell=False)
     
     success_message("SkyPilot configured successfully.")
     
     # Display final success message
-    print(f"{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}")
-    print("You can now interact with your Kubernetes cluster through SkyPilot: ")
-    print("  • List available GPUs: sky show-gpus --cloud kubernetes")
-    print("  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes --gpus A100:1")
-    print("  • Connect to pod with SSH: ssh devbox")
-    print("  • Connect to pod with VSCode: code --remote ssh-remote+devbox '/'")
+    print(f"{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}", flush=True)
+    print("You can now interact with your Kubernetes cluster through SkyPilot: ", flush=True)
+    print("  • List available GPUs: sky show-gpus --cloud kubernetes", flush=True)
+    print("  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes --gpus A100:1", flush=True)
+    print("  • Connect to pod with SSH: ssh devbox", flush=True)
+    print("  • Connect to pod with VSCode: code --remote ssh-remote+devbox '/'", flush=True)
 
 if __name__ == "__main__":
     main()
