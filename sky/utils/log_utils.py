@@ -309,6 +309,8 @@ class SkySSHUpLineProcessor(LineProcessor):
 
     def process_line(self, log_line: str) -> None:
         # Pre-flight checks
+        if 'Checking SSH connection to head node' in log_line:
+            logger.info(f'{colorama.Fore.YELLOW}Checking SSH connection to head node...{colorama.Style.RESET_ALL}')
         if 'SSH connection successful' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SSH connection established.'
                         f'{colorama.Style.RESET_ALL}')

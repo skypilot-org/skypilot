@@ -117,9 +117,17 @@ def run_command(cmd, shell=False):
         return None
     return process.stdout.strip()
 
-def run_remote(node_ip, cmd, user, ssh_key):
+def run_remote(node_ip, cmd, user, ssh_key, connect_timeout=30):
     """Run a command on a remote machine via SSH."""
-    ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "IdentitiesOnly=yes", "-i", ssh_key, f"{user}@{node_ip}", cmd]
+    ssh_cmd = ["ssh", 
+               "-o", "StrictHostKeyChecking=no", 
+               "-o", "IdentitiesOnly=yes",
+               "-o", f"ConnectTimeout={connect_timeout}",
+               "-o", "ServerAliveInterval=10",
+               "-o", "ServerAliveCountMax=3",
+               "-i", ssh_key, 
+               f"{user}@{node_ip}", 
+               cmd]
     process = subprocess.run(ssh_cmd, capture_output=True, text=True)
     if process.returncode != 0:
         print(f"{RED}Error executing command on {node_ip}:{NC}")
@@ -250,6 +258,7 @@ def main():
     k3s_token = "mytoken"  # Any string can be used as the token
     
     # Pre-flight checks
+    print(f"{YELLOW}Checking SSH connection to head node...{NC}")
     run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key)
     
     # If --cleanup flag is set, uninstall k3s and exit
