@@ -1070,6 +1070,32 @@ def cli():
     pass
 
 
+def _handle_infra_cloud_region_zone_options(infra: Optional[str],
+                                            cloud: Optional[str],
+                                            region: Optional[str],
+                                            zone: Optional[str]):
+    """Handle the backward compatibility for --infra and --cloud/region/zone.
+    
+    Returns:
+        cloud, region, zone
+    """
+    if cloud is not None or region is not None or zone is not None:
+        logger.warning(
+            'The --cloud, --region, and --zone options are deprecated. '
+            'Please use --infra instead. ')
+        if infra is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both --infra and '
+                                 '--cloud, --region, or --zone.')
+
+    if infra is not None:
+        infra_info = infra_utils.InfraInfo.from_str(infra)
+        cloud = infra_info.cloud
+        region = infra_info.region
+        zone = infra_info.zone
+    return cloud, region, zone
+
+
 @cli.command(cls=_DocumentedCodeCommand)
 @config_option(expose_value=True)
 @click.argument('entrypoint',
@@ -1227,20 +1253,8 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
-    if cloud is not None or region is not None or zone is not None:
-        logger.warning(
-            'The --cloud, --region, and --zone options are deprecated. '
-            'Please use --infra instead. ')
-        if infra is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify both --infra and '
-                                 '--cloud, --region, or --zone.')
-
-    if infra is not None:
-        infra_info = infra_utils.parse_infra(infra)
-        cloud = infra_info.cloud
-        region = infra_info.region
-        zone = infra_info.zone
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -1359,6 +1373,7 @@ def exec(cluster: Optional[str],
          entrypoint: Tuple[str, ...],
          detach_run: bool,
          name: Optional[str],
+         infra: Optional[str],
          cloud: Optional[str],
          region: Optional[str],
          zone: Optional[str],
@@ -1449,6 +1464,9 @@ def exec(cluster: Optional[str],
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
+
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -3335,10 +3353,15 @@ def check(clouds: Tuple[str], verbose: bool):
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
+@click.option('--infra',
+              default=None,
+              type=str,
+              help='Infrastructure to query. Examples: "aws", "aws/us-east-1"')
 @click.option('--cloud',
               default=None,
               type=str,
-              help='Cloud provider to query.')
+              help='Cloud provider to query.',
+              hidden=True)
 @click.option(
     '--region',
     required=False,
@@ -3346,6 +3369,7 @@ def check(clouds: Tuple[str], verbose: bool):
     help=
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
+    hidden=True,
 )
 @click.option(
     '--all-regions',
@@ -3358,6 +3382,7 @@ def check(clouds: Tuple[str], verbose: bool):
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
         all_regions: Optional[bool]):
@@ -3412,6 +3437,11 @@ def show_gpus(
     if all_regions and region is not None:
         raise click.UsageError(
             '--all-regions and --region flags cannot be used simultaneously.')
+
+    cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
+                                                               cloud,
+                                                               region,
+                                                               zone=None)
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
@@ -4014,6 +4044,7 @@ def jobs_launch(
     name: Optional[str],
     cluster: Optional[str],
     workdir: Optional[str],
+    infra: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
@@ -4055,6 +4086,8 @@ def jobs_launch(
                                    'Use one of the flags as they are alias.')
         name = cluster
     env = _merge_env_vars(env_file, env)
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -4532,6 +4565,7 @@ def serve_up(
     service_yaml: Tuple[str, ...],
     service_name: Optional[str],
     workdir: Optional[str],
+    infra: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
@@ -4578,6 +4612,8 @@ def serve_up(
 
         sky serve up service.yaml
     """
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
@@ -4644,13 +4680,13 @@ def serve_up(
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(service_name: str, service_yaml: Tuple[str, ...],
-                 workdir: Optional[str], cloud: Optional[str],
-                 region: Optional[str], zone: Optional[str],
-                 num_nodes: Optional[int], use_spot: Optional[bool],
-                 image_id: Optional[str], env_file: Optional[Dict[str, str]],
-                 env: List[Tuple[str, str]], gpus: Optional[str],
-                 instance_type: Optional[str], ports: Tuple[str],
-                 cpus: Optional[str], memory: Optional[str],
+                 workdir: Optional[str], infra: Optional[str],
+                 cloud: Optional[str], region: Optional[str],
+                 zone: Optional[str], num_nodes: Optional[int],
+                 use_spot: Optional[bool], image_id: Optional[str],
+                 env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+                 gpus: Optional[str], instance_type: Optional[str],
+                 ports: Tuple[str], cpus: Optional[str], memory: Optional[str],
                  disk_size: Optional[int], disk_tier: Optional[str], mode: str,
                  yes: bool, async_call: bool):
     """Update a SkyServe service.
@@ -4682,6 +4718,8 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
         sky serve update --mode blue_green sky-service-16aa new_service.yaml
 
     """
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
     task = _generate_task_with_service(
         service_name=service_name,
         service_yaml_args=service_yaml,
@@ -5196,6 +5234,7 @@ def benchmark_launch(
     benchmark: str,
     name: Optional[str],
     workdir: Optional[str],
+    infra: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
@@ -5229,7 +5268,6 @@ def benchmark_launch(
         raise click.BadParameter(f'Benchmark {benchmark} already exists. '
                                  'To delete the previous benchmark result, '
                                  f'run `sky bench delete {benchmark}`.')
-
     entrypoint = ' '.join(entrypoint)
     if not entrypoint:
         raise click.BadParameter('Please specify a task yaml to benchmark.')
@@ -5240,6 +5278,8 @@ def benchmark_launch(
             'Sky Benchmark does not support command line tasks. '
             'Please provide a YAML file.')
     assert config is not None, (is_yaml, config)
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
 
     click.secho('Benchmarking a task from YAML: ', fg='cyan', nl=False)
     click.secho(entrypoint, bold=True)

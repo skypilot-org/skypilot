@@ -25,6 +25,7 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -38,6 +39,7 @@ logger = sky_logging.init_logger(__name__)
 
 _DUMMY_SOURCE_NAME = 'skypilot-dummy-source'
 _DUMMY_SINK_NAME = 'skypilot-dummy-sink'
+_REGION_OR_ZONE_TRUNCATION_LENGTH = 15
 
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
@@ -794,22 +796,28 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
+            # Determine region or zone info
             if resources.zone is None:
                 region_or_zone = resources.region
             else:
                 region_or_zone = resources.zone
+                
+            # Format infra as CLOUD (REGION/ZONE)
+            infra = f'{cloud}'
+            if region_or_zone:
+                infra = f'{cloud} ({region_or_zone})'
+                
             return [
-                str(cloud),
+                infra,
                 resources.instance_type + spot,
                 vcpus,
                 mem,
                 str(accelerators),
-                str(region_or_zone),
             ]
 
         Row = collections.namedtuple('Row', [
-            'cloud', 'instance', 'vcpus', 'mem', 'accelerators',
-            'region_or_zone', 'cost_str', 'chosen_str'
+            'infra', 'instance', 'vcpus', 'mem', 'accelerators',
+            'cost_str', 'chosen_str'
         ])
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
@@ -833,18 +841,25 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
+            # Determine region or zone info
             if resources.zone is None:
                 region_or_zone = resources.region
             else:
                 region_or_zone = resources.zone
 
+            infra = f'{cloud}'
+            if region_or_zone:
+                truncated_region_or_zone = common_utils.truncate_long_string(
+                    region_or_zone, _REGION_OR_ZONE_TRUNCATION_LENGTH)
+                infra = f'{cloud} ({truncated_region_or_zone})'
+                
+
             chosen_str = ''
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(cloud, resources.instance_type + spot, vcpus, mem,
-                      str(accelerators), str(region_or_zone), cost_str,
-                      chosen_str)
+            row = Row(infra, resources.instance_type + spot, vcpus, mem,
+                      str(accelerators), cost_str, chosen_str)
 
             return row
 
@@ -863,8 +878,7 @@ class Optimizer:
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
-            'REGION/ZONE'
+            'INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS'
         ]
         if len(ordered_best_plan) > 1:
             best_plan_rows = []

@@ -242,7 +242,7 @@ class Resources:
         # backward compatibility. Internally, we keep using cloud, region, zone
         # for simplicity.
         if infra is not None:
-            infra_info = infra_utils.parse_infra(infra)
+            infra_info = infra_utils.InfraInfo.from_str(infra)
             # Infra takes precedence over individually specified parameters
             cloud = infra_info.cloud
             region = infra_info.region
