@@ -13,7 +13,7 @@ install_requires = [
     'cachetools',
     # NOTE: ray requires click>=7.0.
     # click 8.2.0 has a bug in parsing the command line arguments:
-    # https://github.com/skypilot-org/skypilot/issues/5596
+    # https://github.com/pallets/click/issues/2894
     # TODO(aylei): remove this once the bug is fixed in click.
     'click >= 7.0, < 8.2.0',
     'colorama',
