@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
+import sky
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
@@ -97,7 +98,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 23
+    _VERSION = 22
 
     def __init__(
         self,
@@ -233,10 +234,14 @@ class Resources:
 
         if infra is not None and (cloud is not None or region is not None or
                                   zone is not None):
-            with ux_utils.print_exception_no_traceback():
+            import traceback
+            stacktrace = traceback.format_stack()
+            print(stacktrace)
+            with ux_utils.enable_traceback():
                 raise ValueError('Cannot specify both `infra` and `cloud`, '
                                  '`region`, or `zone` parameters. '
-                                 'Please provide only one of these parameters.')
+                                 f'Got: infra={infra}, cloud={cloud}, '
+                                 f'region={region}, zone={zone}')
 
         # Infra is user facing, and cloud, region, zone in parameters are for
         # backward compatibility. Internally, we keep using cloud, region, zone
@@ -244,7 +249,7 @@ class Resources:
         if infra is not None:
             infra_info = infra_utils.InfraInfo.from_str(infra)
             # Infra takes precedence over individually specified parameters
-            cloud = infra_info.cloud
+            cloud = sky.CLOUD_REGISTRY.from_str(infra_info.cloud)
             region = infra_info.region
             zone = infra_info.zone
 
@@ -1721,11 +1726,6 @@ class Resources:
         infra = infra_utils.format_infra(str(self.cloud), self.region,
                                          self.zone)
         add_if_not_none('infra', infra)
-
-        # Keep backward compatibility
-        add_if_not_none('cloud', str(self.cloud))
-        add_if_not_none('region', self.region)
-        add_if_not_none('zone', self.zone)
 
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
