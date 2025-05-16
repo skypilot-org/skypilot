@@ -11,6 +11,7 @@ from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
+TIMEOUT = 180
 
 logger = sky_logging.init_logger(__name__)
 
@@ -19,9 +20,7 @@ def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
                       head_only: bool = False) -> Dict[str, Any]:
     """Filter instances by cluster name and status."""
-    print(
-        f'DEBUG: _filter_instances called with cluster_name_on_cloud={cluster_name_on_cloud}, status_filters={status_filters}, head_only={head_only}'
-    )
+    logger.debug(f'Filtering instances: cluster={cluster_name_on_cloud}, status={status_filters}, head_only={head_only}')
     instances = utils.list_instances()
     possible_names = [f'{cluster_name_on_cloud}-head']
     if not head_only:
@@ -50,16 +49,18 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    print('DEBUG: ENTERED run_instances')
-    print(
-        f'DEBUG: region={region}, cluster_name_on_cloud={cluster_name_on_cloud}'
-    )
-    print(f'DEBUG: config={config}')
+    logger.debug(f'Starting run_instances: region={region}, cluster={cluster_name_on_cloud}')
+    start_time = time.time()
+    
     # Define pending statuses for Hyperbolic
-    pending_status = ['CREATING', 'STARTING']
+    pending_status = [utils.HyperbolicInstanceStatus.CREATING.value,
+                     utils.HyperbolicInstanceStatus.STARTING.value]
 
     # Wait for any pending instances to be ready
     while True:
+        if time.time() - start_time > TIMEOUT:
+            raise TimeoutError(f'Timed out after {TIMEOUT}s waiting for instances to be ready')
+            
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances:
             break
@@ -67,7 +68,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         time.sleep(POLL_INTERVAL)
 
     # Check existing running instances
-    exist_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    exist_instances = _filter_instances(cluster_name_on_cloud, [utils.HyperbolicInstanceStatus.RUNNING.value])
     head_instance_id = _get_head_instance_id(exist_instances)
 
     # Calculate how many new instances to start
@@ -93,6 +94,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # Launch new instances
     created_instance_ids = []
     for _ in range(to_start_count):
+        if time.time() - start_time > TIMEOUT:
+            raise TimeoutError(f'Timed out after {TIMEOUT}s waiting for instances to be ready')
+            
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
             # Get instance type from node_config
@@ -165,13 +169,18 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+        if time.time() - start_time > TIMEOUT:
+            raise TimeoutError(f'Timed out after {TIMEOUT}s waiting for instances to be ready')
+            
+        instances = _filter_instances(cluster_name_on_cloud, [utils.HyperbolicInstanceStatus.RUNNING.value])
         ready_instance_cnt = 0
         for instance_id, instance in instances.items():
             # Wait for each instance to be fully ready
-            if utils.wait_for_instance(instance_id, 'RUNNING', timeout=300):
-                if instance.get('ssh_port') is not None:
-                    ready_instance_cnt += 1
+            if not utils.wait_for_instance(instance_id, utils.HyperbolicInstanceStatus.RUNNING.value, timeout=TIMEOUT):
+                logger.error(f'Instance {instance_id} failed to reach RUNNING state within {TIMEOUT}s')
+                raise TimeoutError(f'Instance {instance_id} failed to reach RUNNING state within {TIMEOUT}s')
+            if instance.get('ssh_port') is not None:
+                ready_instance_cnt += 1
         logger.info('Waiting for instances to be ready: '
                     f'({ready_instance_cnt}/{config.count}).')
         if ready_instance_cnt == config.count:
@@ -217,7 +226,7 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """Returns information about the cluster."""
     del region  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    running_instances = _filter_instances(cluster_name_on_cloud, [utils.HyperbolicInstanceStatus.RUNNING.value])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
