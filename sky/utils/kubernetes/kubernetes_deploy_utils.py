@@ -23,12 +23,12 @@ logger = sky_logging.init_logger(__name__)
 def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None, kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
     
-    This function reads ~/.sky/ssh_targets.yaml and uses it to deploy a 
+    This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a 
     Kubernetes cluster on the specified machines.
     
     Args:
         cleanup: Whether to clean up the cluster instead of deploying.
-        cluster_name: Name of the cluster in ssh_targets.yaml to use.
+        cluster_name: Name of the cluster in ssh_node_pools.yaml to use.
             If None, the first cluster in the file will be used.
         kubeconfig_path: Path to save the Kubernetes configuration file.
             If None, the default ~/.kube/config will be used.

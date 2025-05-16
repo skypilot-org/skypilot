@@ -15,7 +15,7 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'  # No color
 
-DEFAULT_SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_targets.yaml')
+DEFAULT_SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
 def parse_args():
@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument('--context-name', dest='context_name', default='default', help='Kubernetes context name')
     parser.add_argument('--cleanup', action='store_true', help='Clean up the cluster')
     parser.add_argument('--password', help='Password for sudo')
-    parser.add_argument('--cluster', help='Name of the cluster in ssh_targets.yaml to use')
+    parser.add_argument('--cluster', help='Name of the cluster in ssh_node_pools.yaml to use')
     parser.add_argument('--ssh-targets-file', dest='ssh_targets_file', 
                         default=DEFAULT_SSH_TARGETS_PATH,
                         help=f'Path to SSH targets YAML file (default: {DEFAULT_SSH_TARGETS_PATH})')
@@ -72,28 +72,39 @@ def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
         print(f"{RED}Error: No hosts defined in cluster configuration{NC}")
         sys.exit(1)
     
-    defaults = cluster_config.get('defaults', {})
-    default_user = defaults.get('user', '')
-    default_identity_file = defaults.get('identity_file', '')
-    default_password = defaults.get('password', '')
+    # Get cluster-level defaults
+    cluster_user = cluster_config.get('user', '')
+    cluster_identity_file = cluster_config.get('identity_file', '')
+    cluster_password = cluster_config.get('password', '')
     
     hosts_info = []
     for host in cluster_config['hosts']:
-        if 'ip' not in host and 'host' not in host:
-            print(f"{RED}Warning: Host missing both 'ip' and 'host' fields, skipping: {host}{NC}")
-            continue
-        
-        # Handle both field naming conventions (user/ssh_user, identity_file/ssh_key_path)
-        host_user = host.get('user', host.get('ssh_user', default_user))
-        host_identity_file = host.get('identity_file', host.get('ssh_key_path', default_identity_file))
-        host_password = host.get('password', default_password)
-        
-        hosts_info.append({
-            'ip': host.get('ip', host.get('host', '')),
-            'user': host_user,
-            'identity_file': host_identity_file,
-            'password': host_password
-        })
+        # Host can be a string (IP) or a dict
+        if isinstance(host, str):
+            # It's a simple IP string
+            hosts_info.append({
+                'ip': host,
+                'user': cluster_user,
+                'identity_file': cluster_identity_file,
+                'password': cluster_password
+            })
+        else:
+            # It's a dict with potential overrides
+            if 'ip' not in host:
+                print(f"{RED}Warning: Host missing 'ip' field, skipping: {host}{NC}")
+                continue
+            
+            # Use host-specific values or fall back to cluster defaults
+            host_user = host.get('user', cluster_user)
+            host_identity_file = host.get('identity_file', cluster_identity_file)
+            host_password = host.get('password', cluster_password)
+            
+            hosts_info.append({
+                'ip': host['ip'],
+                'user': host_user,
+                'identity_file': host_identity_file,
+                'password': host_password
+            })
     
     return hosts_info
 

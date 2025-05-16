@@ -1,7 +1,7 @@
 """SSH Cloud for SkyPilot.
 
 This cloud is a wrapper around Kubernetes that only uses SSH-specific contexts.
-It allows users to manage SSH-based Kubernetes clusters defined in ~/.sky/ssh_targets.yaml
+It allows users to manage SSH-based Kubernetes clusters defined in ~/.sky/ssh_node_pools.yaml
 directly, without having to interact with Kubernetes-specific commands.
 """
 

@@ -6002,7 +6002,7 @@ def api_info():
 
 
 # TODO: Move these constants out
-SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_targets.yaml')
+SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 # TODO: Add support for custom kubeconfig path.
 SSH_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
@@ -6014,16 +6014,16 @@ def ssh():
 
 @ssh.command('up', cls=_DocumentedCodeCommand)
 @click.option('--cluster',
-              help='Name of the cluster to set up. If not specified, the first cluster in ssh_targets.yaml is used.')
+              help='Name of the cluster to set up. If not specified, the first cluster in ssh_node_pools.yaml is used.')
 @click.option('--kubeconfig',
               help=f'Path to save the Kubernetes configuration file. Default: {SSH_KUBECONFIG_PATH}')
 @click.option('--async', 'async_call', is_flag=True, hidden=True,
               help='Run the command asynchronously.')
 def ssh_up(cluster, kubeconfig, async_call):
-    """Set up a cluster using SSH targets from ~/.sky/ssh_targets.yaml.
+    """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
 
     This command sets up a Kubernetes cluster on the machines specified in
-    ~/.sky/ssh_targets.yaml and configures SkyPilot to use it.
+    ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
     """
     kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
 
@@ -6041,7 +6041,7 @@ def ssh_up(cluster, kubeconfig, async_call):
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
 @click.option('--cluster',
-              help='Name of the cluster to clean up. If not specified, the first cluster in ssh_targets.yaml is used.')
+              help='Name of the cluster to clean up. If not specified, the first cluster in ssh_node_pools.yaml is used.')
 @click.option('--kubeconfig',
               help=f'Path to the Kubernetes configuration file to update. Default: {SSH_KUBECONFIG_PATH}')
 @click.option('--async', 'async_call', is_flag=True, hidden=True,
@@ -6050,7 +6050,7 @@ def ssh_down(cluster, kubeconfig, async_call):
     """Clean up a cluster set up with 'sky ssh up'.
 
     This command removes the Kubernetes installation from the machines specified
-    in ~/.sky/ssh_targets.yaml.
+    in ~/.sky/ssh_node_pools.yaml.
     """
     kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
 
