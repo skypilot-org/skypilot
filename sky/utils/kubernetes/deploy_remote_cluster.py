@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import yaml
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 # Colors for nicer UX
 RED = '\033[0;31m'
@@ -17,12 +17,13 @@ NC = '\033[0m'  # No color
 
 DEFAULT_SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
+SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Deploy a Kubernetes cluster on remote machines.')
-    parser.add_argument('--ips-file', dest='ips_file', help='File containing IP addresses (one per line)')
-    parser.add_argument('--user', help='Username to use for SSH')
-    parser.add_argument('--ssh-key', dest='ssh_key', help='Path to SSH private key')
+    parser.add_argument('--ips-file', dest='ips_file', help='File containing IP addresses or SSH host entries (one per line)')
+    parser.add_argument('--user', help='Username to use for SSH (overridden by SSH config if host exists there)')
+    parser.add_argument('--ssh-key', dest='ssh_key', help='Path to SSH private key (overridden by SSH config if host exists there)')
     parser.add_argument('--context-name', dest='context_name', default='default', help='Kubernetes context name')
     parser.add_argument('--cleanup', action='store_true', help='Clean up the cluster')
     parser.add_argument('--password', help='Password for sudo')
@@ -33,6 +34,8 @@ def parse_args():
     parser.add_argument('--kubeconfig-path', dest='kubeconfig_path',
                         default=DEFAULT_KUBECONFIG_PATH,
                         help=f'Path to save the kubeconfig file (default: {DEFAULT_KUBECONFIG_PATH})')
+    parser.add_argument('--use-ssh-config', dest='use_ssh_config', action='store_true',
+                        help='Use SSH config for host settings instead of explicit parameters')
     
     return parser.parse_args()
 
@@ -49,6 +52,19 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         print(f"{RED}Error loading SSH targets file: {e}{NC}", flush=True)
         sys.exit(1)
+
+def check_host_in_ssh_config(hostname: str) -> bool:
+    """Check if a hostname is defined in SSH config file."""
+    if not os.path.exists(SSH_CONFIG_PATH):
+        return False
+    
+    try:
+        result = subprocess.run(["ssh", "-G", hostname], 
+                               capture_output=True, text=True)
+        # If successful, the host is in the SSH config
+        return result.returncode == 0 and "hostname" in result.stdout
+    except Exception:
+        return False
 
 def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for a specific cluster or the first one if not specified."""
@@ -79,14 +95,17 @@ def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
     
     hosts_info = []
     for host in cluster_config['hosts']:
-        # Host can be a string (IP) or a dict
+        # Host can be a string (IP or SSH config hostname) or a dict
         if isinstance(host, str):
-            # It's a simple IP string
+            # Check if this is an SSH config hostname
+            is_ssh_config_host = check_host_in_ssh_config(host)
+            
             hosts_info.append({
                 'ip': host,
-                'user': cluster_user,
-                'identity_file': cluster_identity_file,
-                'password': cluster_password
+                'user': '' if is_ssh_config_host else cluster_user,
+                'identity_file': '' if is_ssh_config_host else cluster_identity_file,
+                'password': cluster_password,
+                'use_ssh_config': is_ssh_config_host
             })
         else:
             # It's a dict with potential overrides
@@ -94,16 +113,20 @@ def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
                 print(f"{RED}Warning: Host missing 'ip' field, skipping: {host}{NC}", flush=True)
                 continue
             
+            # Check if this is an SSH config hostname
+            is_ssh_config_host = check_host_in_ssh_config(host['ip'])
+            
             # Use host-specific values or fall back to cluster defaults
-            host_user = host.get('user', cluster_user)
-            host_identity_file = host.get('identity_file', cluster_identity_file)
+            host_user = '' if is_ssh_config_host else host.get('user', cluster_user)
+            host_identity_file = '' if is_ssh_config_host else host.get('identity_file', cluster_identity_file)
             host_password = host.get('password', cluster_password)
             
             hosts_info.append({
                 'ip': host['ip'],
                 'user': host_user,
                 'identity_file': host_identity_file,
-                'password': host_password
+                'password': host_password,
+                'use_ssh_config': is_ssh_config_host
             })
     
     return hosts_info
@@ -118,20 +141,44 @@ def run_command(cmd, shell=False):
         return None
     return process.stdout.strip()
 
-def run_remote(node_ip, cmd, user, ssh_key, connect_timeout=30):
+def get_effective_host_ip(hostname: str) -> str:
+    """Get the effective IP for a hostname from SSH config."""
+    try:
+        result = subprocess.run(
+            ["ssh", "-G", hostname],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if line.startswith("hostname "):
+                    return line.split(" ", 1)[1].strip()
+    except Exception:
+        pass
+    return hostname  # Return the original hostname if lookup fails
+
+def run_remote(node, cmd, user='', ssh_key='', connect_timeout=30, use_ssh_config=False):
     """Run a command on a remote machine via SSH."""
-    ssh_cmd = ["ssh", 
-               "-o", "StrictHostKeyChecking=no", 
-               "-o", "IdentitiesOnly=yes",
-               "-o", f"ConnectTimeout={connect_timeout}",
-               "-o", "ServerAliveInterval=10",
-               "-o", "ServerAliveCountMax=3",
-               "-i", ssh_key, 
-               f"{user}@{node_ip}", 
-               cmd]
+    if use_ssh_config:
+        # Use SSH config for connection parameters
+        ssh_cmd = ["ssh", node, cmd]
+    else:
+        # Use explicit parameters
+        ssh_cmd = ["ssh", 
+                  "-o", "StrictHostKeyChecking=no", 
+                  "-o", "IdentitiesOnly=yes",
+                  "-o", f"ConnectTimeout={connect_timeout}",
+                  "-o", "ServerAliveInterval=10",
+                  "-o", "ServerAliveCountMax=3"]
+        
+        if ssh_key:
+            ssh_cmd.extend(["-i", ssh_key])
+        
+        ssh_cmd.append(f"{user}@{node}")
+        ssh_cmd.append(cmd)
+    
     process = subprocess.run(ssh_cmd, capture_output=True, text=True)
     if process.returncode != 0:
-        print(f"{RED}Error executing command {cmd} on {node_ip}:{NC}", flush=True)
+        print(f"{RED}Error executing command {cmd} on {node}:{NC}", flush=True)
         print(f"STDERR: {process.stderr}", flush=True)
         return None
     return process.stdout.strip()
@@ -162,34 +209,34 @@ def success_message(message):
     """Show a success message."""
     print(f"{GREEN}✔ {message}{NC}", flush=True)
 
-def cleanup_server_node(node_ip, user, ssh_key, askpass_block):
+def cleanup_server_node(node, user, ssh_key, askpass_block, use_ssh_config=False):
     """Uninstall k3s and clean up the state on a server node."""
-    print(f"{YELLOW}Cleaning up head node {node_ip}...{NC}", flush=True)
+    print(f"{YELLOW}Cleaning up head node {node}...{NC}", flush=True)
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
         sudo -A /usr/local/bin/k3s-uninstall.sh || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
-    run_remote(node_ip, cmd, user, ssh_key)
-    print(f"{GREEN}Node {node_ip} cleaned up successfully.{NC}", flush=True)
+    run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    print(f"{GREEN}Node {node} cleaned up successfully.{NC}", flush=True)
 
-def cleanup_agent_node(node_ip, user, ssh_key, askpass_block):
+def cleanup_agent_node(node, user, ssh_key, askpass_block, use_ssh_config=False):
     """Uninstall k3s and clean up the state on an agent node."""
-    print(f"{YELLOW}Cleaning up node {node_ip}...{NC}", flush=True)
+    print(f"{YELLOW}Cleaning up node {node}...{NC}", flush=True)
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
         sudo -A /usr/local/bin/k3s-agent-uninstall.sh || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
-    run_remote(node_ip, cmd, user, ssh_key)
-    print(f"{GREEN}Node {node_ip} cleaned up successfully.{NC}", flush=True)
+    run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    print(f"{GREEN}Node {node} cleaned up successfully.{NC}", flush=True)
 
-def check_gpu(node_ip, user, ssh_key):
+def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
     cmd = "command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null"
-    result = run_remote(node_ip, cmd, user, ssh_key)
+    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     return result is not None
 
 def ensure_directory_exists(path):
@@ -202,11 +249,12 @@ def main():
     args = parse_args()
     
     kubeconfig_path = os.path.expanduser(args.kubeconfig_path)
+    global_use_ssh_config = args.use_ssh_config
     
     # Check if using YAML configuration or command line arguments
-    if args.ips_file and args.user and args.ssh_key:
+    if args.ips_file:
         # Using command line arguments - legacy mode
-        if not os.path.isfile(args.ssh_key):
+        if args.ssh_key and not os.path.isfile(args.ssh_key) and not global_use_ssh_config:
             print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}", flush=True)
             sys.exit(1)
         
@@ -215,18 +263,22 @@ def main():
             sys.exit(1)
         
         with open(args.ips_file, 'r') as f:
-            ips = [line.strip() for line in f if line.strip()]
+            hosts = [line.strip() for line in f if line.strip()]
         
-        if not ips:
-            print(f"{RED}Error: IPs file is empty or not formatted correctly.{NC}", flush=True)
+        if not hosts:
+            print(f"{RED}Error: Hosts file is empty or not formatted correctly.{NC}", flush=True)
             sys.exit(1)
         
-        head_node = ips[0]
-        worker_nodes = ips[1:]
-        ssh_user = args.user
-        ssh_key = args.ssh_key
+        head_node = hosts[0]
+        worker_nodes = hosts[1:]
+        ssh_user = args.user if not global_use_ssh_config else ''
+        ssh_key = args.ssh_key if not global_use_ssh_config else ''
         context_name = args.context_name
         password = args.password
+        
+        # Check if hosts are in SSH config
+        head_use_ssh_config = global_use_ssh_config or check_host_in_ssh_config(head_node)
+        worker_use_ssh_config = [global_use_ssh_config or check_host_in_ssh_config(node) for node in worker_nodes]
         
     else:
         # Using YAML configuration
@@ -246,11 +298,14 @@ def main():
         worker_nodes = [h['ip'] for h in worker_hosts]
         ssh_user = head_host['user']
         ssh_key = head_host['identity_file']
+        head_use_ssh_config = global_use_ssh_config or head_host.get('use_ssh_config', False)
+        worker_use_ssh_config = [global_use_ssh_config or h.get('use_ssh_config', False) for h in worker_hosts]
         password = head_host['password']
         context_name = args.context_name if args.context_name != 'default' else 'ssh-' + cluster_name # TODO: This is a hack to uniquely identify the SSH contexts in the global kubeconfig. Remove once we move to a different kubeconfig file.
     
     # Ensure SSH key is expanded for paths with ~ (home directory)
-    ssh_key = os.path.expanduser(ssh_key)
+    if ssh_key:
+        ssh_key = os.path.expanduser(ssh_key)
     
     # Generate the askpass block if password is provided
     askpass_block = create_askpass_script(password)
@@ -260,14 +315,14 @@ def main():
     
     # Pre-flight checks
     print(f"{YELLOW}Checking SSH connection to head node...{NC}", flush=True)
-    run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key)
+    run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
     
     # If --cleanup flag is set, uninstall k3s and exit
     if args.cleanup:
         print(f"{YELLOW}Starting cleanup...{NC}", flush=True)
         
         # Clean up head node
-        cleanup_server_node(head_node, ssh_user, ssh_key, askpass_block)
+        cleanup_server_node(head_node, ssh_user, ssh_key, askpass_block, use_ssh_config=head_use_ssh_config)
         
         # Clean up worker nodes
         for i, node in enumerate(worker_nodes):
@@ -277,9 +332,10 @@ def main():
                 worker_key = worker_hosts[i]['identity_file']
                 worker_password = worker_hosts[i]['password']
                 worker_askpass = create_askpass_script(worker_password)
-                cleanup_agent_node(node, worker_user, worker_key, worker_askpass)
+                worker_config = worker_use_ssh_config[i]
+                cleanup_agent_node(node, worker_user, worker_key, worker_askpass, use_ssh_config=worker_config)
             else:
-                cleanup_agent_node(node, ssh_user, ssh_key, askpass_block)
+                cleanup_agent_node(node, ssh_user, ssh_key, askpass_block, use_ssh_config=worker_use_ssh_config[i])
         
         # Remove the context from local kubeconfig if it exists
         if os.path.isfile(kubeconfig_path):
@@ -297,6 +353,13 @@ def main():
         
         print(f"{GREEN}Cleanup completed successfully.{NC}", flush=True)
         sys.exit(0)
+    
+    # Get effective IP for master node if using SSH config - needed for workers to connect
+    if head_use_ssh_config:
+        effective_master_ip = get_effective_host_ip(head_node)
+        print(f"{GREEN}Resolved head node {head_node} to {effective_master_ip} from SSH config{NC}", flush=True)
+    else:
+        effective_master_ip = head_node
     
     # Step 1: Install k3s on the head node
     progress_message(f"Deploying Kubernetes on head node ({head_node})...")
@@ -319,17 +382,17 @@ def main():
             exit 1
         fi
     """
-    run_remote(head_node, cmd, ssh_user, ssh_key)
+    run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
     success_message("K3s deployed on head node.")
     
     # Check if head node has a GPU
     install_gpu = False
-    if check_gpu(head_node, ssh_user, ssh_key):
+    if check_gpu(head_node, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config):
         print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}", flush=True)
         install_gpu = True
     
     # Fetch the head node's internal IP (this will be passed to worker nodes)
-    master_addr = run_remote(head_node, "hostname -I | awk '{print $1}'", ssh_user, ssh_key)
+    master_addr = run_remote(head_node, "hostname -I | awk '{print $1}'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
     print(f"{GREEN}Master node internal IP: {master_addr}{NC}", flush=True)
     
     # Step 2: Install k3s on worker nodes and join them to the master node
@@ -342,20 +405,22 @@ def main():
             worker_key = worker_hosts[i]['identity_file']
             worker_password = worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
+            worker_config = worker_use_ssh_config[i]
         else:
             worker_user = ssh_user
             worker_key = ssh_key
             worker_askpass = askpass_block
+            worker_config = worker_use_ssh_config[i]
         
         cmd = f"""
             {worker_askpass}
             curl -sfL https://get.k3s.io | K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
-        run_remote(node, cmd, worker_user, worker_key)
+        run_remote(node, cmd, worker_user, worker_key, use_ssh_config=worker_config)
         success_message(f"Kubernetes deployed on worker node ({node}).")
         
         # Check if worker node has a GPU
-        if check_gpu(node, worker_user, worker_key):
+        if check_gpu(node, worker_user, worker_key, use_ssh_config=worker_config):
             print(f"{YELLOW}GPU detected on worker node ({node}).{NC}", flush=True)
             install_gpu = True
     
@@ -367,10 +432,13 @@ def main():
         temp_kubeconfig = os.path.join(temp_dir, "kubeconfig")
         
         # Get the kubeconfig from remote server
-        scp_cmd = [
-            "scp", "-o", "StrictHostKeyChecking=no", "-o", "IdentitiesOnly=yes", 
-            "-i", ssh_key, f"{ssh_user}@{head_node}:~/.kube/config", temp_kubeconfig
-        ]
+        if head_use_ssh_config:
+            scp_cmd = ["scp", head_node + ":~/.kube/config", temp_kubeconfig]
+        else:
+            scp_cmd = [
+                "scp", "-o", "StrictHostKeyChecking=no", "-o", "IdentitiesOnly=yes", 
+                "-i", ssh_key, f"{ssh_user}@{head_node}:~/.kube/config", temp_kubeconfig
+            ]
         run_command(scp_cmd, shell=False)
         
         # Create the directory for the kubeconfig file if it doesn't exist
@@ -394,7 +462,8 @@ def main():
                     if in_cluster and "certificate-authority-data:" in line:
                         continue
                     elif in_cluster and "server:" in line:
-                        f_out.write(f"    server: https://{head_node}:6443\n")
+                        # Use the effective IP address (resolved from SSH config if needed)
+                        f_out.write(f"    server: https://{effective_master_ip}:6443\n")
                         f_out.write(f"    insecure-skip-tls-verify: true\n")
                         continue
                     
@@ -457,7 +526,7 @@ def main():
             done
             echo 'GPU operator installed successfully.'
         """
-        run_remote(head_node, cmd, ssh_user, ssh_key)
+        run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
         success_message("GPU Operator installed.")
     else:
         print(f"{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}", flush=True)
