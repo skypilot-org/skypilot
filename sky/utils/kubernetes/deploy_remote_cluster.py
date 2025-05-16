@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument('--context-name', dest='context_name', default='default', help='Kubernetes context name')
     parser.add_argument('--cleanup', action='store_true', help='Clean up the cluster')
     parser.add_argument('--password', help='Password for sudo')
-    parser.add_argument('--cluster', help='Name of the cluster in ssh_node_pools.yaml to use')
+    parser.add_argument('--infra', help='Name of the cluster in ssh_node_pools.yaml to use')
     parser.add_argument('--ssh-targets-file', dest='ssh_targets_file', 
                         default=DEFAULT_SSH_TARGETS_PATH,
                         help=f'Path to SSH targets YAML file (default: {DEFAULT_SSH_TARGETS_PATH})')
@@ -67,7 +67,7 @@ def check_host_in_ssh_config(hostname: str) -> bool:
         return False
 
 def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = None) -> Dict[str, Any]:
-    """Get configuration for a specific cluster or the first one if not specified."""
+    """Get configuration for specific clusters or all clusters."""
     if not targets:
         print(f"{RED}Error: No clusters defined in SSH targets file{NC}", flush=True)
         sys.exit(1)
@@ -76,11 +76,10 @@ def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = No
         if cluster_name not in targets:
             print(f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}", flush=True)
             sys.exit(1)
-        return cluster_name, targets[cluster_name]
+        return {cluster_name: targets[cluster_name]}
     
-    # Use the first cluster if not specified
-    first_cluster = next(iter(targets.keys()))
-    return first_cluster, targets[first_cluster]
+    # Return all clusters if no specific cluster is specified
+    return targets
 
 def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
     """Prepare list of hosts with resolved user, identity_file, and password."""
@@ -280,29 +279,51 @@ def main():
         head_use_ssh_config = global_use_ssh_config or check_host_in_ssh_config(head_node)
         worker_use_ssh_config = [global_use_ssh_config or check_host_in_ssh_config(node) for node in worker_nodes]
         
+        # Single cluster deployment for legacy mode
+        deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, password, 
+                       head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, args.cleanup)
     else:
         # Using YAML configuration
         targets = load_ssh_targets(args.ssh_targets_file)
-        cluster_name, cluster_config = get_cluster_config(targets, args.cluster)
-        hosts_info = prepare_hosts_info(cluster_config)
+        clusters_config = get_cluster_config(targets, args.infra)
         
-        if not hosts_info:
-            print(f"{RED}Error: No valid hosts found in the cluster configuration{NC}", flush=True)
-            sys.exit(1)
-        
-        # Use the first host as the head node and the rest as worker nodes
-        head_host = hosts_info[0]
-        worker_hosts = hosts_info[1:] if len(hosts_info) > 1 else []
-        
-        head_node = head_host['ip']
-        worker_nodes = [h['ip'] for h in worker_hosts]
-        ssh_user = head_host['user']
-        ssh_key = head_host['identity_file']
-        head_use_ssh_config = global_use_ssh_config or head_host.get('use_ssh_config', False)
-        worker_use_ssh_config = [global_use_ssh_config or h.get('use_ssh_config', False) for h in worker_hosts]
-        password = head_host['password']
-        context_name = args.context_name if args.context_name != 'default' else 'ssh-' + cluster_name # TODO: This is a hack to uniquely identify the SSH contexts in the global kubeconfig. Remove once we move to a different kubeconfig file.
-    
+        # Process each cluster
+        for cluster_name, cluster_config in clusters_config.items():
+            print(f"{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}", flush=True)
+            hosts_info = prepare_hosts_info(cluster_config)
+            
+            if not hosts_info:
+                print(f"{RED}Error: No valid hosts found for cluster '{cluster_name}'. Skipping.{NC}", flush=True)
+                continue
+            
+            # Use the first host as the head node and the rest as worker nodes
+            head_host = hosts_info[0]
+            worker_hosts = hosts_info[1:] if len(hosts_info) > 1 else []
+            
+            head_node = head_host['ip']
+            worker_nodes = [h['ip'] for h in worker_hosts]
+            ssh_user = head_host['user']
+            ssh_key = head_host['identity_file']
+            head_use_ssh_config = global_use_ssh_config or head_host.get('use_ssh_config', False)
+            worker_use_ssh_config = [global_use_ssh_config or h.get('use_ssh_config', False) for h in worker_hosts]
+            password = head_host['password']
+            
+            # Generate a unique context name for each cluster
+            context_name = args.context_name
+            if context_name == 'default':
+                context_name = 'ssh-' + cluster_name
+            
+            # Deploy this cluster
+            deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, password,
+                           head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, args.cleanup,
+                           worker_hosts=worker_hosts)
+            
+            print(f"{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}", flush=True)
+
+def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, password,
+                  head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, cleanup, 
+                  worker_hosts=None):
+    """Deploy or clean up a single Kubernetes cluster."""
     # Ensure SSH key is expanded for paths with ~ (home directory)
     if ssh_key:
         ssh_key = os.path.expanduser(ssh_key)
@@ -318,7 +339,7 @@ def main():
     run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
     
     # If --cleanup flag is set, uninstall k3s and exit
-    if args.cleanup:
+    if cleanup:
         print(f"{YELLOW}Starting cleanup...{NC}", flush=True)
         
         # Clean up head node
@@ -326,8 +347,8 @@ def main():
         
         # Clean up worker nodes
         for i, node in enumerate(worker_nodes):
-            # If using YAML config, get the specific user/key for each worker
-            if 'hosts_info' in locals() and i < len(worker_hosts):
+            # If using YAML config with specific worker info
+            if worker_hosts and i < len(worker_hosts):
                 worker_user = worker_hosts[i]['user']
                 worker_key = worker_hosts[i]['identity_file']
                 worker_password = worker_hosts[i]['password']
@@ -352,7 +373,7 @@ def main():
             success_message(f"Context '{context_name}' removed from local kubeconfig.")
         
         print(f"{GREEN}Cleanup completed successfully.{NC}", flush=True)
-        sys.exit(0)
+        return
     
     # Get effective IP for master node if using SSH config - needed for workers to connect
     if head_use_ssh_config:
@@ -399,8 +420,8 @@ def main():
     for i, node in enumerate(worker_nodes):
         progress_message(f"Deploying Kubernetes on worker node ({node})...")
         
-        # If using YAML config, get the specific user/key for each worker
-        if 'hosts_info' in locals() and i < len(worker_hosts):
+        # If using YAML config with specific worker info
+        if worker_hosts and i < len(worker_hosts):
             worker_user = worker_hosts[i]['user']
             worker_key = worker_hosts[i]['identity_file']
             worker_password = worker_hosts[i]['password']
