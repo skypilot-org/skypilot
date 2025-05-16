@@ -406,6 +406,12 @@ def main():
                     
                     f_out.write(line)
         
+        # First check if context name exists and delete it if it does
+        # TODO(romilb): Should we throw an error here instead? 
+        run_command(["kubectl", "config", "delete-context", context_name], shell=False)
+        run_command(["kubectl", "config", "delete-cluster", context_name], shell=False)
+        run_command(["kubectl", "config", "delete-user", context_name], shell=False)
+        
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, "merged_config")
         os.environ["KUBECONFIG"] = f"{kubeconfig_path}:{modified_config}"
