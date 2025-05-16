@@ -296,7 +296,8 @@ def _get_autostop(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     return autostop_str
 
 
-def _get_head_ip(cluster_record: _ClusterRecord) -> str:
+def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+    del truncate  # Unused
     handle = cluster_record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return '-'
