@@ -3081,14 +3081,16 @@ def _get_kubeconfig_path() -> str:
     return kubeconfig_path
 
 
-def format_kubeconfig_exec_auth(config: Any, output_path: str) -> bool:
+def format_kubeconfig_exec_auth(config: Any,
+                                output_path: str,
+                                inject_wrapper: bool = True) -> bool:
     """Reformat the kubeconfig so that exec-based authentication can be used
     with SkyPilot. Will create a new kubeconfig file under <output_path>
     regardless of whether a change has been made.
 
     kubectl internally strips all environment variables except for system
-    defaults, so a wrapper executable injects the relevant PATH information
-    before exec-auth is executed by kubernetes.
+    defaults. If `inject_wrapper` is true, a wrapper executable is applied
+    to inject the relevant PATH information before exec-auth is executed.
 
     Contents of sky-kube-exec-wrapper:
 
@@ -3102,6 +3104,7 @@ def format_kubeconfig_exec_auth(config: Any, output_path: str) -> bool:
         config (dict): kubeconfig parsed by yaml.safe_load
         output_path (str): Path where the potentially modified kubeconfig file
           will be saved
+        inject_wrapper (bool): Whether to inject the wrapper script
     Returns: whether config was updated, for logging purposes
     """
     updated = False
@@ -3115,12 +3118,17 @@ def format_kubeconfig_exec_auth(config: Any, output_path: str) -> bool:
             if executable == kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER:
                 # we don't want this happening recursively.
                 continue
-            exec_info[
-                'command'] = kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER
-            if exec_info.get('args') is None:
-                exec_info['args'] = []
-            exec_info['args'].insert(0, executable)
-            updated = True
+
+            if inject_wrapper:
+                exec_info[
+                    'command'] = kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER
+                if exec_info.get('args') is None:
+                    exec_info['args'] = []
+                exec_info['args'].insert(0, executable)
+                updated = True
+            elif executable != current_command:
+                exec_info['command'] = executable
+                updated = True
 
     os.makedirs(os.path.dirname(os.path.expanduser(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as file:

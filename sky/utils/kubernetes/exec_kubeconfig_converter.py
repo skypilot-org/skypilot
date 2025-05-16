@@ -9,6 +9,12 @@ It assumes the target environment has the auth executable available in PATH.
 If not, you'll need to update your environment container to include the auth
 executable in PATH.
 
+When using LOCAL_CREDENTIALS (aka exec auth) with Kubernetes, though, SkyPilot
+will automatically inject a wrapper script for common exec auth providers like
+GKE and EKS. This wrapper script helps to resolve path issues that may arise
+from executables installed on non system-default paths. Thus, the kubeconfig
+file may look different on the sky jobs controller.
+
 Usage:
     python -m sky.utils.kubernetes.exec_kubeconfig_converter
 """
@@ -41,7 +47,8 @@ def main():
     with open(args.input, 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
 
-    updated = kubernetes_utils.format_kubeconfig_exec_auth(config, args.output)
+    updated = kubernetes_utils.format_kubeconfig_exec_auth(
+        config, args.output, False)
 
     if updated:
         print('Kubeconfig updated with path-less exec auth. '
