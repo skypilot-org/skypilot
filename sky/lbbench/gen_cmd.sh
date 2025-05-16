@@ -1,8 +1,8 @@
-python3 -m sky.lbbench.launch_lb --service-names a620 a623 a625 a627
+python3 -m sky.lbbench.launch_lb --service-names b70 b71 b72 b73 b74 b75
 
 python3 -m sky.lbbench.gen_cmd --service-names a592 --exp-name arena_syn_multi_turn_motivation_8_replicas_trial_two_80_80_80_u240_d600 --extra-args '--workload arena_syn --duration 600' --region-to-args '{"us-east-2":"--num-users 80","ap-northeast-1":"--num-users 80","eu-central-1":"--num-users 80"}' --reload-client
 
-# python3 -m sky.lbbench.gen_cmd --service-names a101 a102 --exp-name ablation_single_region_selective_pushing --extra-args '--workload arena_syn --duration 600 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 120"}'
+python3 -m sky.lbbench.gen_cmd --service-names b70 b71 b72 b73 b74 b75 --exp-name ablation_single_region_selpus_trial_4_tot_b2_u30 --extra-args '--workload tot_single --duration 600 --num-branches 2' --region-to-args '{"us-east-2":"--num-users 30"}'
 
 # python3 -m sky.lbbench.gen_cmd --service-names a250 a251 a252 a253 a254 a257 --exp-name arena_syn_motivation_12_replicas_200_100_100_c2000_u400_d240 --extra-args '--workload arena_syn --duration 240 --num-conv 2000' --region-to-args '{"us-east-2":"--num-users 300","ap-northeast-1":"--num-users 100"}'
 
@@ -18,7 +18,7 @@ python3 -m sky.lbbench.gen_cmd --service-names a582 a5817 --exp-name wildchat_mu
 
 python3 -m sky.lbbench.gen_cmd --service-names a620 a623 a625 a627 a6213 a6216 --exp-name tot_huge_tree_2_2_2_u4_b4_d600 --extra-args '--workload tot_single --duration 600 --num-branches 4' --region-to-args '{"us-east-2":"--num-users 2","ap-northeast-1":"--num-users 2","eu-central-1":"--num-users 2"}' --reload-client
 
-python3 -m sky.lbbench.gen_cmd --service-names a620 a623 a625 a627 a6213 a6216 --exp-name tot_single_mixed_12_replicas_3_b4_20_20_b2_d600 --extra-args '--workload tot_single --duration 600' --region-to-args '{"us-east-2":"--num-users 2 --num-branches 4","ap-northeast-1":"--num-users 20 --num-branches 2","eu-central-1":"--num-users 20 --num-branches 2"}' --reload-client
+python3 -m sky.lbbench.gen_cmd --service-names b21 --exp-name tot_single_mixed_12_replicas_3_b4_20_20_b2_d600 --extra-args '--workload tot_single --duration 600' --region-to-args '{"us-east-2":"--num-users 2 --num-branches 4","ap-northeast-1":"--num-users 20 --num-branches 2","eu-central-1":"--num-users 20 --num-branches 2"}' --reload-client
 
 
 # ==================== cross-region traffic handling ablation ====================
@@ -30,8 +30,20 @@ python3 -m sky.lbbench.gen_cmd --service-names a6811 a6814 --exp-name wildchat_c
 
 
 
-python3 -m sky.lbbench.gen_cmd --service-names r6-11 r6-14 --exp-name wildchat_cross_region_us_6_replicas_60_20_20_u100_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 60","ap-northeast-1":"--num-users 20","eu-central-1":"--num-users 20"}' --reload-client
+python3 -m sky.lbbench.gen_cmd --service-names r3-311 r3-314 --exp-name wildchat_cross_region_us_3_replicas_120_40_40_u200_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 120","ap-northeast-1":"--num-users 40","eu-central-1":"--num-users 40"}' --reload-client
 
-python3 -m sky.lbbench.gen_cmd --service-names r9-11 r9-14 --exp-name wildchat_cross_region_us_9_replicas_60_20_20_u100_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 60","ap-northeast-1":"--num-users 20","eu-central-1":"--num-users 20"}' --reload-client
+python3 -m sky.lbbench.gen_cmd --service-names r6-211 r6-214 --exp-name wildchat_cross_region_us_6_replicas_120_40_40_u200_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 120","ap-northeast-1":"--num-users 40","eu-central-1":"--num-users 40"}' --reload-client
 
-python3 -m sky.lbbench.gen_cmd --service-names r12-11 r12-14 --exp-name wildchat_cross_region_us_12_replicas_60_20_20_u100_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 60","ap-northeast-1":"--num-users 20","eu-central-1":"--num-users 20"}' --reload-client
+python3 -m sky.lbbench.gen_cmd --service-names r9-211 r9-214 --exp-name wildchat_cross_region_us_9_replicas_120_40_40_u200_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 120","ap-northeast-1":"--num-users 40","eu-central-1":"--num-users 40"}' --reload-client
+
+python3 -m sky.lbbench.gen_cmd --service-names r12-211 r12-214 --exp-name wildchat_cross_region_us_12_replicas_120_40_40_u200_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 120","ap-northeast-1":"--num-users 40","eu-central-1":"--num-users 40"}' --reload-client
+
+python3 -m sky.lbbench.gen_cmd --service-names r15-311 r15-314 --exp-name wildchat_cross_region_us_15_replicas_120_40_40_u200_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 120","ap-northeast-1":"--num-users 40","eu-central-1":"--num-users 40"}' --reload-client
+
+python3 -m sky.lbbench.gen_cmd --service-names r18-311 r18-314 --exp-name wildchat_cross_region_us_18_replicas_120_40_40_u200_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 120","ap-northeast-1":"--num-users 40","eu-central-1":"--num-users 40"}' --reload-client
+
+
+
+python3 -m sky.lbbench.gen_cmd --service-names r15-511 r15-514 --exp-name wildchat_cross_region_us_15_replicas_60_20_20_u100_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 60","ap-northeast-1":"--num-users 20","eu-central-1":"--num-users 20"}' --reload-client
+
+python3 -m sky.lbbench.gen_cmd --service-names r18-511 r18-514 --exp-name wildchat_cross_region_us_18_replicas_60_20_20_u100_d600 --extra-args '--workload wildchat --duration 600 --start-index 0 --open-loop-threshold 50' --region-to-args '{"us-east-2":"--num-users 60","ap-northeast-1":"--num-users 20","eu-central-1":"--num-users 20"}' --reload-client

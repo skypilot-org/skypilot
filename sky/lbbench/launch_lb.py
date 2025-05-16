@@ -56,27 +56,6 @@ def _run_cmd(cmd: str):
     subprocess.run(cmd, shell=True, check=True)
 
 
-policy_and_extra_args = [
-    (None, None),
-    ('prefix_tree', None),
-    ('prefix_tree', {
-        'DISABLE_LEAST_LOAD_IN_PREFIX': 'true'
-    }),
-    ('least_load', {
-        'DISABLE_SELECTIVE_PUSHING': 'true'
-    }),
-    ('least_load', None),
-    ('consistent_hashing', {
-        'DISABLE_SELECTIVE_PUSHING': 'true'
-    }),
-    ('consistent_hashing', None),
-    ('round_robin', {
-        'DISABLE_SELECTIVE_PUSHING': 'true'
-    }),
-    ('round_robin', None),
-]
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--service-names', type=str, nargs='+', required=True)
@@ -96,7 +75,7 @@ def main() -> None:
         if idx == 0:
             return _prepare_sgl_cmd(sn2st[sns[idx_in_sns]], cluster_name)
         if idx < len(utils.single_lb_clusters):
-            policy, extra_envs = policy_and_extra_args[idx]
+            policy, extra_envs = utils.single_lb_policy_and_extra_args[idx]
             assert policy is not None
             return _prepare_sky_global_lb(sn2st[sns[idx_in_sns]], ct,
                                           cluster_name, policy, extra_envs)

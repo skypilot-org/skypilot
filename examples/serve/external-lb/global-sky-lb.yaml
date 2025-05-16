@@ -7,6 +7,7 @@ envs:
   PORT:
   POLICY:
   DISABLE_SELECTIVE_PUSHING: false
+  MAX_CONCURRENT_REQUESTS: 40
 
 resources:
   # TODO(tian): Hack. We should figure out the optimal resources.
@@ -32,4 +33,5 @@ run: |
     --load-balancer-port 9002 \
     --load-balancing-policy $POLICY \
     --meta-load-balancing-policy $POLICY \
-    --region global
+    --region global \
+    --max-concurrent-requests $MAX_CONCURRENT_REQUESTS

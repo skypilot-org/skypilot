@@ -17,13 +17,61 @@ OAIChatHistory = List[Dict[str, str]]
 single_lb_clusters = [
     'sgl-router',
     'sgl-router-pull',
-    'sgl-router-no-fallback',
+    # 'sgl-router-no-fallback',
+    'sgl-router-fix-max-concurrency',
     'vanilla-least-load',
     'global-least-load',
     'consistent-hashing',
     'consistent-hashing-enhanced',
     'round-robin',
     'round-robin-enhanced',
+]
+single_lb_clusters = [
+    'sgl-router',
+    'sgl-router-sp-p',
+    'sgl-router-sp-c-40',
+    'sgl-router-sp-c-50',
+    'sgl-router-sp-c-60',
+    'sgl-router-sp-c-70',
+]
+
+
+def _get_sp_c_envs(max_concurrent_requests: int) -> Dict[str, str]:
+    return {
+        'FORCE_DISABLE_STEALING': 'true',
+        'USE_IE_QUEUE_INDICATOR': 'false',
+        'DO_PUSHING_TO_REPLICA': 'true',
+        'MAX_CONCURRENT_REQUESTS': str(max_concurrent_requests),
+    }
+
+
+single_lb_policy_and_extra_args = [
+    (None, None),
+    ('prefix_tree', None),
+    # ('prefix_tree', {
+    #     'DISABLE_LEAST_LOAD_IN_PREFIX': 'true'
+    # }),
+    ('prefix_tree', _get_sp_c_envs(60)),
+    ('least_load', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('least_load', None),
+    ('consistent_hashing', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('consistent_hashing', None),
+    ('round_robin', {
+        'DISABLE_SELECTIVE_PUSHING': 'true'
+    }),
+    ('round_robin', None),
+]
+single_lb_policy_and_extra_args = [
+    (None, None),
+    ('prefix_tree', None),
+    ('prefix_tree', _get_sp_c_envs(40)),
+    ('prefix_tree', _get_sp_c_envs(50)),
+    ('prefix_tree', _get_sp_c_envs(60)),
+    ('prefix_tree', _get_sp_c_envs(70)),
 ]
 
 

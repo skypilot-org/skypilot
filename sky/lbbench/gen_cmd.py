@@ -13,7 +13,8 @@ from sky.lbbench import utils
 raw_describes = [
     'sgl',
     'sky_sgl_enhanced',
-    'sky_sgl_disable_least_load_fallback',
+    # 'sky_sgl_disable_least_load_fallback',
+    'sky_sgl_enhanced_fix_max_concurrency_60',
     'sky_vanilla_least_load',
     'sky_least_load_enhanced',
     'sky_consistent_hashing',
@@ -43,7 +44,8 @@ raw_describes = [
 raw_presents = [
     'SGL',
     'SGL+SelPush',
-    'SGLNoLLFallback',
+    # 'SGLNoLLFallback',
+    'SGLFixedConcurrency',
     'LL',
     'LL+SelPush',
     # 'ConsistentHashing',
@@ -70,10 +72,28 @@ raw_presents = [
     'SkyWalk/PrefixEnahnced',
 ]
 
+raw_describes = [
+    'sgl',
+    'sky_sgl_enhanced',
+    'sky_sgl_enhanced_fix_max_concurrency_40',
+    'sky_sgl_enhanced_fix_max_concurrency_50',
+    'sky_sgl_enhanced_fix_max_concurrency_60',
+    'sky_sgl_enhanced_fix_max_concurrency_70',
+]
+raw_presents = [
+    'BP',
+    'SP-P',
+    'SP-C(40)',
+    'SP-C(50)',
+    'SP-C(60)',
+    'SP-C(70)',
+]
+
 enabled_systems = [
     0,  # sgl router
     1,  # sgl router enhanced
-    2,  # sgl router no least load fallback
+    # 2,  # sgl router no least load fallback
+    2,  # sgl router with fixed max concurrency
     3,  # vanilla least load
     4,  # global least load
     5,  # consistent hashing
@@ -91,7 +111,7 @@ enabled_systems = [
     17,  # selective pushing for both lb and replica. with consistent hashing.
     18,  # same with 13 but disable least load fallback for < 50% match.
 ]
-enabled_systems = [11, 14]
+enabled_systems = list(range(6))
 # enabled_systems = [15]
 
 describes = [raw_describes[i] for i in enabled_systems]
@@ -302,6 +322,7 @@ def main():
         f.write('  start_time=$(date +%s)\n')
         f.write('  wait_count=0\n')
         f.write(f'  expected_jobs={len(regions) * len(describes)}\n')
+        f.write(f'  exp_name="{args.exp_name}"\n')
         f.write('  while true; do\n')
         f.write('    current_time=$(date +%s)\n')
         f.write('    elapsed=$((current_time - start_time))\n')

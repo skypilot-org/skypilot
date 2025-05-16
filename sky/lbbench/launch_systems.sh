@@ -8,7 +8,8 @@ names=()
 # for i in {0..7}; do
 # for i in 0 1 2 3 4 5 10; do
 # for i in 0 3 5 7 13 16; do
-for i in 11 14; do
+# for i in 11 14; do
+for i in {0..6}; do
   name="${PREFIX}${i}"
   names+=("$name")
 

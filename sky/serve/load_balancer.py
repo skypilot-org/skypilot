@@ -45,7 +45,7 @@ _DO_PUSHING_TO_REPLICA = env_options.Options.DO_PUSHING_TO_REPLICA.get()
 _USE_V2_STEALING = env_options.Options.USE_V2_STEALING.get()
 _DISABLE_LEAST_LOAD_IN_PREFIX = env_options.Options.DISABLE_LEAST_LOAD_IN_PREFIX.get(
 )
-
+_USE_IE_QUEUE_INDICATOR = env_options.Options.USE_IE_QUEUE_INDICATOR.get()
 _DISABLE_SELECTIVE_PUSHING = env_options.Options.DISABLE_SELECTIVE_PUSHING.get()
 _FORCE_DISABLE_STEALING = env_options.Options.FORCE_DISABLE_STEALING.get()
 
@@ -1431,7 +1431,11 @@ class SkyServeLoadBalancer:
             f'_DISABLE_LEAST_LOAD_IN_PREFIX: {_DISABLE_LEAST_LOAD_IN_PREFIX}, '
             f'[{os.getenv(env_options.Options.DISABLE_LEAST_LOAD_IN_PREFIX.env_key)}], '
             f'_FORCE_DISABLE_STEALING: {_FORCE_DISABLE_STEALING}, '
-            f'[{os.getenv(env_options.Options.FORCE_DISABLE_STEALING.env_key)}]'
+            f'[{os.getenv(env_options.Options.FORCE_DISABLE_STEALING.env_key)}], '
+            f'_USE_IE_QUEUE_INDICATOR: {_USE_IE_QUEUE_INDICATOR}, '
+            f'[{os.getenv(env_options.Options.USE_IE_QUEUE_INDICATOR.env_key)}], '
+            f'max_concurrent_requests: {self._max_concurrent_requests}, '
+            f'use_ie_queue_indicator: {self._use_ie_queue_indicator}'
         )
         uvicorn.run(self._app,
                     host='0.0.0.0',
@@ -1447,7 +1451,7 @@ def run_load_balancer(
     region: Optional[str] = None,
     tls_credential: Optional[serve_utils.TLSCredential] = None,
     max_concurrent_requests: int = 10,
-    use_ie_queue_indicator: bool = True,
+    use_ie_queue_indicator: Optional[bool] = None,
 ) -> None:
     """ Run the load balancer.
 
@@ -1463,6 +1467,8 @@ def run_load_balancer(
         max_concurrent_requests: Maximum concurrent requests per replica.
             Defaults to 10.
     """
+    if use_ie_queue_indicator is None:
+        use_ie_queue_indicator = _USE_IE_QUEUE_INDICATOR
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
