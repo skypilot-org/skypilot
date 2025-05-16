@@ -1377,12 +1377,12 @@ def local_down() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_up(cluster_name: Optional[str] = None, 
+def ssh_up(infra: Optional[str] = None,
            kubeconfig_path: Optional[str] = None) -> server_common.RequestId:
     """Deploys a Kubernetes cluster on SSH targets defined in ~/.sky/ssh_targets.yaml.
     
     Args:
-        cluster_name: Name of the cluster configuration in ssh_targets.yaml.
+        infra: Name of the cluster configuration in ssh_targets.yaml.
             If None, the first cluster in the file is used.
         kubeconfig_path: Path where the kubeconfig should be saved.
             If None, ~/.kube/config will be used.
@@ -1391,7 +1391,7 @@ def ssh_up(cluster_name: Optional[str] = None,
         request_id: The request ID of the SSH cluster deployment request.
     """
     body = payloads.SSHUpBody(
-        cluster_name=cluster_name,
+        infra=infra,
         kubeconfig_path=kubeconfig_path,
         cleanup=False,
     )
@@ -1405,12 +1405,12 @@ def ssh_up(cluster_name: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_down(cluster_name: Optional[str] = None,
+def ssh_down(infra: Optional[str] = None,
              kubeconfig_path: Optional[str] = None) -> server_common.RequestId:
     """Tears down a Kubernetes cluster on SSH targets.
     
     Args:
-        cluster_name: Name of the cluster configuration in ssh_targets.yaml.
+        infra: Name of the cluster configuration in ssh_targets.yaml.
             If None, the first cluster in the file is used.
         kubeconfig_path: Path to the kubeconfig file that should be updated.
             If None, ~/.kube/config will be used.
@@ -1419,7 +1419,7 @@ def ssh_down(cluster_name: Optional[str] = None,
         request_id: The request ID of the SSH cluster teardown request.
     """
     body = payloads.SSHUpBody(
-        cluster_name=cluster_name,
+        infra=infra,
         kubeconfig_path=kubeconfig_path,
         cleanup=True,
     )

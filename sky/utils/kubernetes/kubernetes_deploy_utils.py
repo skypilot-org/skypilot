@@ -20,7 +20,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None, kubeconfig_path: Optional[str] = None):
+def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
     
     This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a 
@@ -28,7 +28,7 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
     
     Args:
         cleanup: Whether to clean up the cluster instead of deploying.
-        cluster_name: Name of the cluster in ssh_node_pools.yaml to use.
+        infra: Name of the cluster in ssh_node_pools.yaml to use.
             If None, the first cluster in the file will be used.
         kubeconfig_path: Path to save the Kubernetes configuration file.
             If None, the default ~/.kube/config will be used.
@@ -43,8 +43,8 @@ def deploy_ssh_cluster(cleanup: bool = False, cluster_name: Optional[str] = None
     if cleanup:
         deploy_command.append('--cleanup')
     
-    if cluster_name:
-        deploy_command.extend(['--cluster', cluster_name])
+    if infra:
+        deploy_command.extend(['--infra', infra])
     
     if kubeconfig_path:
         deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
