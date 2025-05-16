@@ -209,7 +209,7 @@ jobs:
         id: create_release_branch
         run: |
           RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          BRANCH_NAME="release/${RELEASE_VERSION}"
+          BRANCH_NAME="releases/${RELEASE_VERSION}"
 
           # Configure git
           git config --local user.email "action@github.com"
@@ -233,7 +233,7 @@ jobs:
         id: create_test_branch
         run: |
           RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          BRANCH_NAME="release/${RELEASE_VERSION}"
+          BRANCH_NAME="releases/${RELEASE_VERSION}"
 
           # Checkout the base release branch
           echo "Checking out the release branch ${BRANCH_NAME}..."
