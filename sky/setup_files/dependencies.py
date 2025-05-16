@@ -15,7 +15,7 @@ install_requires = [
     # click 8.2.0 has a bug in parsing the command line arguments:
     # https://github.com/skypilot-org/skypilot/issues/5596
     # TODO(aylei): remove this once the bug is fixed in click.
-    'click == 8.1.7',
+    'click >= 7.0, < 8.2.0',
     'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
