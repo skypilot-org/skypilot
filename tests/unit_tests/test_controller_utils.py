@@ -188,7 +188,6 @@ def test_get_controller_resources_with_task_resources(
         ])
     expected_infra_set = {
         'aws/us-west-2',
-        'aws/us-west-2/us-west-2b',
         'gcp/us-central1/us-central1-a',
     }
     _check_controller_resources(controller_resources, expected_infra_set,
