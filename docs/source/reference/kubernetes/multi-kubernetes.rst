@@ -131,12 +131,14 @@ through the Kubernetes clusters in the same order as they are specified in the f
     $ sky launch --gpus H100 --cloud k8s echo 'Hello World'
 
     Considered resources (1 node):
-    ------------------------------------------------------------------------------------------------------------
-    CLOUD        INSTANCE           vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE           COST ($)   CHOSEN
-    ------------------------------------------------------------------------------------------------------------
-    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-gke   0.00          ✔
-    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-eks   0.00
-    ------------------------------------------------------------------------------------------------------------
+    ---------------------------------------------------------------------------------------------------------
+     INFRA                           INSTANCE          vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
+    ---------------------------------------------------------------------------------------------------------
+     Kubernetes (my-eks-cluster)     2CPU--2GB         2       2         -        0.00       ✔
+     Kubernetes (gke-skypilot)       4CPU--8GB         4       8         -        0.00      
+     AWS (us-east-1)                 m6i.large         2       8         -        0.10     
+     GCP (us-central1-a)             n2-standard-2     2       8         -        0.10     
+    ---------------------------------------------------------------------------------------------------------
 
 
 Launching in a specific Kubernetes cluster

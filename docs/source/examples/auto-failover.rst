@@ -91,20 +91,15 @@ GCP, where it succeeded after one region:
 
   Considered resources (1 node):
   ----------------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
+   INFRA                    INSTANCE              vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   ----------------------------------------------------------------------------------------------------
-   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔
-   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39
-   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77
+   Azure (eastus)           Standard_ND96asr_v4   96      900       A100:8   27.20         ✔
+   GCP (us-central1-a)      a2-highgpu-8g         96      680       A100:8   29.39
+   AWS (us-east-1)          p4d.24xlarge          96      1152      A100:8   32.77
   ----------------------------------------------------------------------------------------------------
   Launching a new cluster 'a100-8'. Proceed? [Y/n]:
 
   ...
-  ⚙️ Launching on Azure eastus.
-  E 10-11 18:24:59 instance.py:457] Failed to create instances: [azure.core.exceptions.HttpResponseError] (InvalidTemplateDeployment)
-  sky.exceptions.ResourcesUnavailableError: Failed to acquire resources in all zones in eastus
-  ...
-
   ⚙️ Launching on GCP us-central1 (us-central1-a).
   W 10-11 18:25:57 instance_utils.py:112] Got return codes 'VM_MIN_COUNT_NOT_REACHED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS' in us-central1-a: 'Requested minimum count of 1 VMs could not be created'; "The zone 'projects/xxxxxx/zones/us-central1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'"
   ...
@@ -135,11 +130,11 @@ A10, L4, and A10g GPUs, using :code:`sky launch task.yaml`.
   $ sky launch task.yaml
   ...
   -----------------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE                 vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+   INFRA                  INSTANCE                 vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   -----------------------------------------------------------------------------------------------------
-   Azure   Standard_NV6ads_A10_v5   6       55        A10:1          eastus        0.45          ✔
-   GCP     g2-standard-4            4       16        L4:1           us-east4-a    0.70
-   AWS     g5.xlarge                4       16        A10G:1         us-east-1     1.01
+   Azure (eastus)         Standard_NV6ads_A10_v5   6       55        A10:1    0.45          ✔
+   GCP (us-east4-a)       g2-standard-4            4       16        L4:1     0.70
+   AWS (us-east-1)        g5.xlarge                4       16        A10G:1   1.01
   -----------------------------------------------------------------------------------------------------
 
 
@@ -222,12 +217,12 @@ This will generate the following output:
 
   Considered resources (1 node):
   ---------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE         vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+   INFRA                  INSTANCE         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   ---------------------------------------------------------------------------------------------
-   GCP     g2-standard-96   96      384       L4:8           us-east4-a    7.98          ✔
-   AWS     g5.48xlarge      192     768       A10G:8         us-east-1     16.29
-   GCP     a2-highgpu-8g    96      680       A100:8         us-east1-b    29.39
-   AWS     p4d.24xlarge     96      1152      A100:8         us-east-1     32.77
+   GCP (us-east4-a)       g2-standard-96   96      384       L4:8     7.98          ✔
+   AWS (us-east-1)        g5.48xlarge      192     768       A10G:8   16.29
+   GCP (us-east1-b)       a2-highgpu-8g    96      680       A100:8   29.39
+   AWS (us-east-1)        p4d.24xlarge     96      1152      A100:8   32.77
   ---------------------------------------------------------------------------------------------
 
   Launching a new cluster 'mycluster'. Proceed? [Y/n]:
