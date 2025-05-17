@@ -31,16 +31,34 @@ export async function getClusters({ clusterNames = null } = {}) {
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
+      let region_or_zone = '';
+      if (cluster.zone) {
+        region_or_zone = cluster.zone;
+      } else {
+        region_or_zone = cluster.region;
+      }
+      // Store the full value before truncation
+      const full_region_or_zone = region_or_zone;
+      // Truncate region_or_zone to 15 characters
+      if (region_or_zone && region_or_zone.length > 15) {
+        region_or_zone = region_or_zone.substring(0, 15) + '...';
+      }
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
-        infra: cluster.cloud,
+        infra: region_or_zone
+          ? cluster.cloud + ' (' + region_or_zone + ')'
+          : cluster.cloud,
+        full_infra: full_region_or_zone
+          ? `${cluster.cloud} (${full_region_or_zone})`
+          : cluster.cloud,
         region: cluster.region,
         cpus: cluster.cpus,
         mem: cluster.memory,
         gpus: cluster.accelerators,
         resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         jobs: [],
@@ -169,7 +187,7 @@ export function useClusterDetails({ cluster, job = null }) {
     if (cluster) {
       try {
         setLoadingClusterJobData(true);
-        const data = await getClusterJobs({ clusterName: cluster, job: job });
+        const data = await getClusterJobs({ clusterName: cluster });
         setClusterJobData(data);
       } catch (error) {
         console.error('Error fetching cluster job data:', error);
@@ -177,7 +195,7 @@ export function useClusterDetails({ cluster, job = null }) {
         setLoadingClusterJobData(false);
       }
     }
-  }, [cluster, job]);
+  }, [cluster]);
 
   const refreshData = useCallback(async () => {
     await Promise.all([fetchClusterData(), fetchClusterJobData()]);
