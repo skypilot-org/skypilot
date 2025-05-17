@@ -423,13 +423,11 @@ def test_valid_image(enable_all_clouds):
     _test_resources(
         infra='gcp/us-central1',
         image_id=
-        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
     _test_resources(
         infra='gcp',
         image_id=
-        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
 
 
 def test_parse_cpus_from_yaml():

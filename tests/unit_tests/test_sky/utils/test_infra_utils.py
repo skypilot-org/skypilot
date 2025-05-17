@@ -154,7 +154,7 @@ class TestInfraUtils(unittest.TestCase):
         for cloud, region, zone, truncate, expected in test_cases:
             result = infra_utils.InfraInfo(
                 cloud, region, zone).formatted_str(truncate=truncate)
-            self.assertEqual(result, expected,
-                             f'Failed: Expected {expected}, got {result}, '
-                             f'cloud={cloud}, region={region}, zone={zone}, '
-                             f'truncate={truncate}')
+            self.assertEqual(
+                result, expected, f'Failed: Expected {expected}, got {result}, '
+                f'cloud={cloud}, region={region}, zone={zone}, '
+                f'truncate={truncate}')
