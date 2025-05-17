@@ -7,7 +7,7 @@ import sky
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.utils import controller_utils
-from sky.utils import infra_utils
+from sky.utils import registry
 
 _DEFAULT_AUTOSTOP = {
     'down': False,
@@ -105,7 +105,7 @@ def test_get_controller_resources_with_task_resources(
     # could host controllers. Return a set, each item has
     # one cloud specified plus the default resources.
     all_clouds = {'aws', 'gcp', 'azure'}
-    expected_infra_set = {infra_utils.InfraInfo(cloud=c) for c in all_clouds}
+    expected_infra_set = all_clouds
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(infra=c) for c in all_clouds])
@@ -119,7 +119,8 @@ def test_get_controller_resources_with_task_resources(
         'aws', 'gcp', 'azure', 'fluidstack', 'k8s', 'lambda', 'runpod'
     }
 
-    def _could_host_controllers(cloud: sky.clouds.Cloud) -> bool:
+    def _could_host_controllers(cloud_str: str) -> bool:
+        cloud = registry.CLOUD_REGISTRY.from_str(cloud_str)
         try:
             cloud.check_features_are_supported(
                 sky.Resources(),
@@ -128,9 +129,7 @@ def test_get_controller_resources_with_task_resources(
             return False
         return True
 
-    expected_infra_set = {
-        str(c).lower() for c in all_clouds if _could_host_controllers(c)
-    }
+    expected_infra_set = {c for c in all_clouds if _could_host_controllers(c)}
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(infra=c) for c in all_clouds])
@@ -183,13 +182,9 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(cloud=sky.AWS(), region='us-west-2'),
-            sky.Resources(cloud=sky.AWS(),
-                          region='us-west-2',
-                          zone='us-west-2b'),
-            sky.Resources(cloud=sky.GCP(),
-                          region='us-central1',
-                          zone='us-central1-a')
+            sky.Resources(infra='aws/us-west-2'),
+            sky.Resources(infra='aws/us-west-2/us-west-2b'),
+            sky.Resources(infra='gcp/us-central1/us-central1-a')
         ])
     expected_infra_set = {
         'aws/us-west-2',
