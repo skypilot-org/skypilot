@@ -121,13 +121,12 @@ def bulk_provision(
     """
     original_config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     head_node_type = original_config['head_node_type']
-    print(
-        "DEBUG: node_config from YAML:",
-        original_config['available_node_types'][head_node_type]['node_config'])
     bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         docker_config=original_config.get('docker', {}),
+        # NOTE: (might be a legacy issue) we call it
+        # 'ray_head_default' in 'gcp-ray.yaml'
         node_config=original_config['available_node_types'][head_node_type]
         ['node_config'],
         count=num_nodes,
