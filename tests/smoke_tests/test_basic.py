@@ -1142,26 +1142,29 @@ def test_lambda_cloud_open_ports():
                 # Don't fail the test if cleanup fails
 
 
-def test_hyperbolic_basic():
-    """Test basic Hyperbolic cloud functionality."""
-    # Test that we can create a task with Hyperbolic resources
-    task = sky.Task('echo "Hello, Hyperbolic!"')
-    task.set_resources(
-        sky.Resources(cloud=sky.clouds.Hyperbolic(),
-                      instance_type='1x-T4-4-17',
-                      accelerators={'T4': 1}))
+def test_hyperbolic_minimal():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'hyperbolic_minimal',
+        [
+            f'sky launch -y -c {name} --cloud hyperbolic {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout("hyperbolic"),
+    )
+    smoke_tests_utils.run_one_test(test)
 
-    # Test that we can create a DAG with Hyperbolic resources
-    with sky.Dag() as dag:
-        task = sky.Task('echo "Hello, Hyperbolic!"')
-        task.set_resources(
-            sky.Resources(cloud=sky.clouds.Hyperbolic(),
-                          instance_type='1x-T4-4-17',
-                          accelerators={'T4': 1}))
 
-    # Test that we can get the cost for Hyperbolic resources
-    resources = sky.Resources(cloud=sky.clouds.Hyperbolic(),
-                              instance_type='1x-T4-4-17',
-                              accelerators={'T4': 1})
-    cost = resources.get_cost(1)  # 1 hour
-    assert cost > 0
+def test_hyperbolic_unsupported_multi_node():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'hyperbolic_unsupported_multi_node',
+        [
+            f'! sky launch -y -c {name} --cloud hyperbolic -n 2 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml 2>&1 | grep -i "not supported"',
+        ],
+        '',
+        smoke_tests_utils.get_timeout("hyperbolic"),
+    )
+    smoke_tests_utils.run_one_test(test)
