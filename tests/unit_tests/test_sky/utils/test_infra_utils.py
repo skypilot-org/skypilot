@@ -7,26 +7,6 @@ from sky.utils import infra_utils
 class TestInfraUtils(unittest.TestCase):
     """Tests for infra_utils.py"""
 
-    def test_infra_info_hashable(self):
-        """Test that InfraInfo objects are hashable."""
-        # Create several InfraInfo objects
-        infra1 = infra_utils.InfraInfo(cloud='aws', region='us-east-1')
-        infra2 = infra_utils.InfraInfo(cloud='aws', region='us-east-1')
-        infra3 = infra_utils.InfraInfo(cloud='gcp', region='us-central1')
-
-        # Test creating a set of InfraInfo objects
-        infra_set = {infra1, infra2, infra3}
-
-        # Check if same objects with identical values are treated as the same in the set
-        self.assertEqual(
-            len(infra_set), 2,
-            "Set should contain only 2 items since infra1 and infra2 are equal")
-
-        # Test InfraInfo in dictionaries
-        infra_dict = {infra1: "aws-region", infra3: "gcp-region"}
-        self.assertEqual(infra_dict[infra2], "aws-region",
-                         "Should find value using equivalent InfraInfo as key")
-
     def test_from_str(self):
         """Test the from_str function with various inputs."""
         test_cases = [

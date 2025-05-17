@@ -116,7 +116,7 @@ def test_get_controller_resources_with_task_resources(
     # could NOT host controllers. Return a set, only
     # containing those could host controllers.
     all_clouds = {
-        'aws', 'gcp', 'azure', 'fluidstack', 'k8s', 'lambda', 'runpod'
+        'aws', 'gcp', 'azure', 'fluidstack', 'kubernetes', 'lambda', 'runpod'
     }
 
     def _could_host_controllers(cloud_str: str) -> bool:
