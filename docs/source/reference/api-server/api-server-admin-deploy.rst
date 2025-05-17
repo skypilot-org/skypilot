@@ -336,7 +336,7 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: Lambda
         :sync: lambda-creds-tab
 
-        SkyPilot API server use **API key** to authenticate with Lambda. To configure Lambda access, go to the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page on your Lambda Cloud console and generate an **API key**.
+        SkyPilot API server uses an **API key** to authenticate with Lambda. To configure Lambda access, go to the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page on your Lambda Cloud console and generate an **API key**.
 
         Once the key is generated, create a Kubernetes secret to store it:
 
