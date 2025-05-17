@@ -1,4 +1,6 @@
-"""Hyperbolic Cloud provider implementation for SkyPilot."""
+"""Hyperbolic Cloud provider implementation
+for SkyPilot.
+"""
 import os
 import typing
 from typing import Dict, List, Optional, Tuple, Union
@@ -26,7 +28,7 @@ class Hyperbolic(clouds.Cloud):
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on Hyperbolic.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Customizing disk tier is not supported yet on Hyperbolic.'),
+            ('Hyperbolic does not support custom disk tiers.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Hyperbolic. '
              'To read data from object stores on Hyperbolic, use `mode: COPY` '
@@ -34,17 +36,20 @@ class Hyperbolic(clouds.Cloud):
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Hyperbolic.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot instances are not supported on Hyperbolic; only on-demand '
-             'instances are available.'),
+            ('Hyperbolic does not support spot instances.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-            ('Hyperbolic does not support cloning disk from cluster.'),
+            ('Hyperbolic does not support cloning disks from existing '
+             'clusters.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Hyperbolic does not support Docker images.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Hyperbolic does not support opening ports.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            ('Hyperbolic does not support custom image IDs.'),
     }
     # Note: Region and zone selection are not supported on Hyperbolic.
-    # All resources are provisioned in a single region without zones.
+    # All resources are provisioned in a single region
+    # without zones.
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -241,8 +246,9 @@ class Hyperbolic(clouds.Cloud):
                                         zones,
                                         num_nodes,
                                         dryrun=False):
-        print(f"DEBUG: r.instance_type = {resources.instance_type}")
-        """Converts planned sky.Resources to cloud-specific resource variables."""
+        """Converts planned sky.Resources to cloud-specific
+        resource variables."""
+        print(f'DEBUG: r.instance_type = {resources.instance_type}')
         del cluster_name, dryrun  # unused
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
