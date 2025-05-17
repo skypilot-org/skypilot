@@ -490,22 +490,23 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources')}
+                onClick={() => requestSort('resources_str')}
               >
-                Resources{getSortDirection('resources')}
+                Requested{getSortDirection('resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('infra')}
+              >
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('cluster')}
               >
-                Cluster{getSortDirection('cluster')}
+                Resources{getSortDirection('cluster')}
               </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
-              >
-                Region{getSortDirection('region')}
-              </TableHead>
+
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('recoveries')}
@@ -520,7 +521,7 @@ export function ManagedJobsTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={12}
+                  colSpan={11}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -556,9 +557,22 @@ export function ManagedJobsTable({
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell>{item.resources}</TableCell>
-                      <TableCell>{item.cluster}</TableCell>
-                      <TableCell>{item.region}</TableCell>
+                      <TableCell>
+                        {item.resources_str || item.resources}
+                      </TableCell>
+                      <TableCell>
+                        {item.cloud && item.cloud !== '-'
+                          ? [
+                              item.cloud,
+                              item.region && item.region !== '-' && !item.zone                                ? item.region
+                                : null,
+                              item.zone && item.zone !== '-' ? item.zone : null,
+                            ]
+                              .filter(Boolean)
+                              .join('/')
+                          : '-'}
+                      </TableCell>
+                      <TableCell>{item.cluster_resources}</TableCell>
                       <TableCell>{item.recoveries}</TableCell>
                       <TableCell>
                         {item.details ? (
@@ -583,7 +597,7 @@ export function ManagedJobsTable({
                     {expandedRowId === item.id && (
                       <ExpandedDetailsRow
                         text={item.details}
-                        colSpan={12}
+                        colSpan={11}
                         innerRef={expandedRowRef}
                       />
                     )}
@@ -592,7 +606,7 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-6">
+                <TableCell colSpan={11} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
@@ -944,9 +958,15 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources')}
+                onClick={() => requestSort('resources_str')}
               >
-                Resources{getSortDirection('resources')}
+                Resources{getSortDirection('resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('infra')}
+              >
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead className="whitespace-nowrap">Logs</TableHead>
             </TableRow>
@@ -985,7 +1005,22 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
-                    <TableCell>{item.resources}</TableCell>
+                    <TableCell>
+                      {item.resources_str || item.resources}
+                    </TableCell>
+                    <TableCell>
+                      {item.cloud && item.cloud !== '-'
+                        ? [
+                            item.cloud,
+                            item.region && item.region !== '-'
+                              ? item.region
+                              : null,
+                            item.zone && item.zone !== '-' ? item.zone : null,
+                          ]
+                            .filter(Boolean)
+                            .join('/')
+                        : item.infra || item.full_infra || 'N/A'}
+                    </TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions
                         jobParent={`/clusters/${clusterName}`}
@@ -997,7 +1032,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      colSpan={8}
+                      colSpan={9}
                       innerRef={expandedRowRef}
                     />
                   )}
@@ -1006,7 +1041,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   No jobs found

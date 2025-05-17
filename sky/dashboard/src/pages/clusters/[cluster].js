@@ -166,9 +166,7 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                 <div className="text-base mt-1">{clusterData.user}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
-                  Infra
-                </div>
+                <div className="text-gray-600 font-medium text-base">Infra</div>
                 <div className="text-base mt-1">
                   {clusterData.full_infra || clusterData.infra || 'N/A'}
                 </div>
@@ -178,7 +176,9 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                   Resources
                 </div>
                 <div className="text-base mt-1">
-                  {clusterData.resources_str_full || clusterData.resources_str || 'N/A'}
+                  {clusterData.resources_str_full ||
+                    clusterData.resources_str ||
+                    'N/A'}
                 </div>
               </div>
               <div>
@@ -186,7 +186,9 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                   Started
                 </div>
                 <div className="text-base mt-1">
-                  {clusterData.time ? new Date(clusterData.time).toLocaleString() : 'N/A'}
+                  {clusterData.time
+                    ? new Date(clusterData.time).toLocaleString()
+                    : 'N/A'}
                 </div>
               </div>
             </div>

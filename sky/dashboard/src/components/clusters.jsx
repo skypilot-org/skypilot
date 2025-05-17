@@ -7,7 +7,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip, NonCapitalizedTooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+} from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
