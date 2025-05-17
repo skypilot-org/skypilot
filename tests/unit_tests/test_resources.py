@@ -11,7 +11,6 @@ from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
 from sky.utils import resources_utils
-from sky.utils import infra_utils
 
 GLOBAL_VALID_LABELS = {
     'plaintext': 'plainvalue',
@@ -210,16 +209,32 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
+
 @pytest.mark.parametrize(['resources_kwargs', 'expected_yaml_config'], [
-    ({'infra': '*/*/us-east-1b', 'accelerators': 'A10'}, {
+    ({
         'infra': '*/*/us-east-1b',
-        'accelerators': {'A10': 1},
+        'accelerators': 'A10'
+    }, {
+        'infra': '*/*/us-east-1b',
+        'accelerators': {
+            'A10': 1
+        },
         'disk_size': 256,
     }),
-    ({'infra': 'gcp/*/us-east1-b', 'accelerators': 'A10:8', 'labels': {'key': 'value'}}, {
+    ({
         'infra': 'gcp/*/us-east1-b',
-        'accelerators': {'A10': 8},
-        'labels': {'key': 'value'},
+        'accelerators': 'A10:8',
+        'labels': {
+            'key': 'value'
+        }
+    }, {
+        'infra': 'gcp/*/us-east1-b',
+        'accelerators': {
+            'A10': 8
+        },
+        'labels': {
+            'key': 'value'
+        },
         'disk_size': 256,
     }),
 ])
@@ -236,5 +251,3 @@ def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
     assert loaded_r.accelerators == original_accelerators
     assert original_accelerators == r.accelerators
     assert loaded_r.labels == r.labels
-
-
