@@ -560,8 +560,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       resources:
         # All configs below are optional.
         # Specify the location of the jobs controller.
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # Bump cpus to allow more managed jobs to be launched concurrently. (Default: 4+)
         cpus: 8+
         # Bump memory to allow more managed jobs to be running at once.
@@ -642,7 +641,7 @@ For maximum parallelism, the following configuration is recommended:
     controller:
       resources:
         # In our testing, aws > gcp > azure
-        cloud: aws
+        infra: aws
         cpus: 128
         # Azure does not have 128+ CPU instances, so use 96 instead
         # cpus: 96

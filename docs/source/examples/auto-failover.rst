@@ -165,11 +165,10 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
 
   resources:
     ordered: # Candidate resources in a preference order
-      - cloud: gcp
+      - infra: gcp
         accelerators: A100-80GB
       - instance_type: g5.xlarge
-      - cloud: azure
-        region: eastus
+      - infra: azure/eastus
         accelerators: A100
 
 
@@ -178,11 +177,10 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
 
     resources:
       any_of: # Candidate resources that can be chosen in any order
-        - cloud: gcp
+        - infra: gcp
           accelerators: A100-80GB
         - instance_type: g5.xlarge
-        - cloud: azure
-          region: eastus
+        - infra: azure/eastus
           accelerators: A100
 
 .. tip::
@@ -198,18 +196,18 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
     accelerators: {A10g:8, A10:8, L4:8, A100:8}
     any_of:
       # AWS:
-      - region: us-east-1
-      - region: us-east-2
-      - region: us-west-1
-      - region: us-west-2
+      - infra: aws/us-east-1
+      - infra: aws/us-east-2
+      - infra: aws/us-west-1
+      - infra: aws/us-west-2
       # GCP
-      - region: us-central1
-      - region: us-east1
-      - region: us-east4
-      - region: us-west1
-      - region: us-west2
-      - region: us-west3
-      - region: us-west4
+      - infra: gcp/us-central1
+      - infra: gcp/us-east1
+      - infra: gcp/us-east4
+      - infra: gcp/us-west1
+      - infra: gcp/us-west2
+      - infra: gcp/us-west3
+      - infra: gcp/us-west4
 
 .. hint::
 

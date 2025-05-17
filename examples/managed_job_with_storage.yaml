@@ -7,7 +7,7 @@
 #   sky down spot-storage
 
 resources:
-  cloud: aws
+  infra: aws
   use_spot: true
   job_recovery: failover
 
