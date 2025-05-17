@@ -1131,3 +1131,31 @@ def test_lambda_cloud_open_ports():
             except Exception as e:
                 print(f'Warning: Failed to clean up test firewall rule: {e}')
                 # Don't fail the test if cleanup fails
+
+
+def test_hyperbolic_minimal():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'hyperbolic_minimal',
+        [
+            f'sky launch -y -c {name} --cloud hyperbolic {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout("hyperbolic"),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_hyperbolic_unsupported_multi_node():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'hyperbolic_unsupported_multi_node',
+        [
+            f'! sky launch -y -c {name} --cloud hyperbolic -n 2 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml 2>&1 | grep -i "not supported"',
+        ],
+        '',
+        smoke_tests_utils.get_timeout("hyperbolic"),
+    )
+    smoke_tests_utils.run_one_test(test)
