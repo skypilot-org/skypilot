@@ -40,7 +40,7 @@ Note the ``$ZONE`` variable must match the zone of the GKE cluster.
 Create a persistent volume on GKE
 ---------------------------------
 
-Next, create a persistent volume on GKE that uses the persistent disk we just created.
+Next, create a persistent volume on GKE that uses the persistent disk that was just created.
 
 ``sky-pv.yaml``:
 
@@ -75,14 +75,14 @@ Apply the Persistent Volume to the GKE cluster.
 
 .. _api-server-persistence-example-add-cloud-credentials:
 
-Add cloud credentials to the API server
----------------------------------------
+[Optional] Add lambda cloud credentials to the API server
+---------------------------------------------------------
 
 Next, add cloud credentials to the API server.
 
 In this example, the API server is configured to use Lambda Cloud credentials.
 
-To learn how to configure the credentials for your cloud provider, please refer to :ref:`sky-api-server-configure-credentials`.
+To learn how to configure the credentials for another cloud provider, please refer to :ref:`sky-api-server-configure-credentials`.
 
 .. code-block:: bash
 
@@ -93,7 +93,7 @@ To learn how to configure the credentials for your cloud provider, please refer 
 
 .. _api-server-persistence-example-deploy-api-server:
 
-Deploy the API server using helm
+Deploy the API server using Helm
 --------------------------------
 
 Next, deploy the API server using Helm with the following command.
