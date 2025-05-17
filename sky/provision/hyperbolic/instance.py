@@ -1,14 +1,11 @@
 """Hyperbolic instance provisioning."""
 import time
 from typing import Any, Dict, List, Optional
-import uuid
 
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.hyperbolic import utils
-from sky.utils import common_utils
 from sky.utils import status_lib
-from sky.utils import ux_utils
 
 PROVIDER_NAME = 'hyperbolic'
 POLL_INTERVAL = 5
@@ -21,9 +18,9 @@ logger = sky_logging.init_logger(__name__)
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
                       head_only: bool = False) -> Dict[str, Any]:
-    logger.debug(
-        f'Filtering instances: cluster={cluster_name_on_cloud}, status={status_filters}'
-    )
+    logger.debug(f'Filtering instances: cluster={cluster_name_on_cloud}, '
+                 f'status={status_filters}')
+    _ = head_only  # Mark as intentionally unused
 
     # Filter by cluster name using metadata
     instances = utils.list_instances(
@@ -38,18 +35,18 @@ def _filter_instances(cluster_name_on_cloud: str,
         try:
             # Check status filter
             instance_status = instance.get('status', '').lower()
-            if status_filters is not None and instance_status not in status_filters:
+            if (status_filters is not None and
+                    instance_status not in status_filters):
                 logger.debug(
-                    f'Skipping instance {instance_id} - status {instance_status} not in {status_filters}'
-                )
+                    f'Skipping instance {instance_id} '
+                    f'- status {instance_status}not in {status_filters}')
                 continue
 
             filtered_instances[instance_id] = instance
-            logger.debug(
-                f'Including instance {instance_id} with status {instance_status}'
-            )
+            logger.debug(f'Including instance {instance_id} '
+                         f'with status {instance_status}')
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Error processing instance {instance_id}: {str(e)}')
             continue
 
@@ -58,10 +55,7 @@ def _filter_instances(cluster_name_on_cloud: str,
 
 
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
-    """Get the instance ID from the instances dict.
-    
-    Since Hyperbolic only supports single node clusters, this is just the first instance.
-    """
+    """Get the instance ID from the instances dict."""
     if not instances:
         return None
     return next(iter(instances.keys()))
@@ -69,9 +63,8 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
-    logger.info(
-        f'Starting run_instances with region={region}, cluster={cluster_name_on_cloud}'
-    )
+    logger.info(f'Starting run_instances with region={region}, '
+                f'cluster={cluster_name_on_cloud}')
     logger.debug(f'Config: {config}')
     start_time = time.time()
 
@@ -190,15 +183,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 f'Parsed CPU count: {cpu_count}, memory: {memory_gb}GB')
 
             if cpu_count < 1 or memory_gb < 1:
-                raise ValueError(
-                    f'Invalid CPU count ({cpu_count}) or memory ({memory_gb}GB). '
-                    'Both must be positive integers.')
+                raise ValueError(f'Invalid CPU count ({cpu_count}) '
+                                 f'or memory ({memory_gb}GB). '
+                                 'Both must be positive integers.')
 
         except ValueError as e:
             logger.error(
                 f'Failed to parse instance type {instance_type}: {str(e)}')
             raise RuntimeError(
-                f'Failed to parse instance type {instance_type}: {str(e)}')
+                f'Failed to parse instance type {instance_type}: {str(e)}'
+            ) from e
 
         # Launch instance with GPU configuration and metadata
         logger.info(
@@ -208,8 +202,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                             name=cluster_name_on_cloud)
         logger.info(f'Successfully launched instance {instance_id}')
         created_instance_ids = [instance_id]
-    except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Error in run_instances: {str(e)}')
+    except Exception as e:
+        logger.error(f'Unexpected error: {e}')
         raise
 
     # Wait for instance to be ready
@@ -256,7 +250,7 @@ def terminate_instances(
         try:
             utils.terminate_instance(instance_id)
             logger.info(f'Terminated instance {instance_id}')
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
 
 
@@ -325,7 +319,13 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
                    provider_config: dict, desired_status: str,
                    timeout: int) -> None:
     """Waits for instances to reach the desired status. Minimal stub."""
-    del region, cluster_name_on_cloud, provider_config, desired_status, timeout  # unused
+    del (
+        region,
+        cluster_name_on_cloud,
+        provider_config,
+        desired_status,
+        timeout  # unused
+    )
     time.sleep(1)
     return
 

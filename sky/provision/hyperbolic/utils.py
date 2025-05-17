@@ -2,9 +2,8 @@
 import enum
 import json
 import os
-import pprint
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -54,8 +53,8 @@ class HyperbolicInstanceStatus(enum.Enum):
         """Convert raw status string to HyperbolicInstanceStatus enum."""
         try:
             return cls(status.lower())
-        except ValueError:
-            raise HyperbolicError(f'Unknown instance status: {status}')
+        except ValueError as exc:
+            raise HyperbolicError(f'Unknown instance status: {status}') from exc
 
     def to_cluster_status(self) -> Optional[status_lib.ClusterStatus]:
         """Convert to SkyPilot cluster status."""
@@ -63,13 +62,14 @@ class HyperbolicInstanceStatus(enum.Enum):
 
 
 class HyperbolicClient:
+    """Client for interacting with the Hyperbolic API."""
 
     def __init__(self):
         """Initialize the Hyperbolic client with API credentials."""
         cred_path = os.path.expanduser(CREDENTIALS_PATH)
         if not os.path.exists(cred_path):
             raise RuntimeError(f'API key not found at {cred_path}')
-        with open(cred_path, 'r') as f:
+        with open(cred_path, 'r', encoding='utf-8') as f:
             self.api_key = f.read().strip()
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
         self.api_url = GATEWAY_BASE_URL
@@ -125,7 +125,7 @@ class HyperbolicClient:
 
             return response_data
         except requests.exceptions.RequestException as e:
-            raise HyperbolicError(f'Request failed: {str(e)}')
+            raise HyperbolicError(f'Request failed: {str(e)}') from e
 
     def launch_instance(self, gpu_model: str, gpu_count: int, name: str) -> str:
         """Launch a new instance with the specified configuration."""
@@ -147,19 +147,14 @@ class HyperbolicClient:
                 raise HyperbolicError('No instance ID returned from API')
             return instance_id
         except Exception as e:
-            raise HyperbolicError(f'Failed to launch instance: {str(e)}')
+            raise HyperbolicError(f'Failed to launch instance: {str(e)}') from e
 
     def list_instances(
         self,
         status: Optional[str] = None,
         user_metadata: Optional[Dict[str, str]] = None
     ) -> Dict[str, Dict[str, Any]]:
-        """List all instances, optionally filtered by status and metadata.
-        
-        Args:
-            status: Optional status to filter instances by
-            metadata: Optional dictionary of metadata to filter instances by
-        """
+        """List all instances, optionally filtered by status and metadata."""
         endpoint = '/v1/marketplace/instances'
         try:
             response = self._make_request('GET', endpoint)
@@ -176,15 +171,13 @@ class HyperbolicClient:
                     instance_status = HyperbolicInstanceStatus.from_raw_status(
                         current_status)
                 except HyperbolicError as e:
-                    logger.warning(
-                        f'Failed to parse status for instance {instance.get("id")}: {e}'
-                    )
+                    logger.warning(f'Failed to parse status for instance '
+                                   f'{instance.get("id")}: {e}')
                     continue
 
                 if status and instance_status.value != status.lower():
                     continue
 
-                # Filter by user_metadata if specified
                 skypilot = instance.get('userMetadata', {}).get('skypilot', {})
                 if user_metadata:
                     cluster_name = user_metadata.get('skypilot_cluster_name',
@@ -192,12 +185,12 @@ class HyperbolicClient:
                     if not skypilot.get('cluster_name',
                                         '').startswith(cluster_name):
                         logger.debug(
-                            f'Skipping instance {instance.get("id")} - skypilot metadata {skypilot} does not match {user_metadata}'
-                        )
+                            f'Skipping instance {instance.get("id")} - '
+                            f'skypilot metadata {skypilot} '
+                            f'does not match {user_metadata}')
                         continue
-                    logger.debug(
-                        f'Including instance {instance.get("id")} - skypilot metadata matches'
-                    )
+                    logger.debug(f'Including instance {instance.get("id")} '
+                                 f'- skypilot metadata matches')
 
                 hardware = instance_info.get('hardware', {})
                 instances[instance.get('id')] = {
@@ -217,7 +210,7 @@ class HyperbolicClient:
                 }
             return instances
         except Exception as e:
-            raise HyperbolicError(f'Failed to list instances: {str(e)}')
+            raise HyperbolicError(f'Failed to list instances: {str(e)}') from e
 
     def terminate_instance(self, instance_id: str) -> None:
         """Terminate an instance by ID."""
@@ -227,26 +220,25 @@ class HyperbolicClient:
             self._make_request('POST', endpoint, payload=data)
         except Exception as e:
             raise HyperbolicError(
-                f'Failed to terminate instance {instance_id}: {str(e)}')
+                f'Failed to terminate instance {instance_id}: {str(e)}') from e
 
     def wait_for_instance(self,
                           instance_id: str,
                           target_status: str,
                           timeout: int = TIMEOUT) -> bool:
-        """Wait for an instance to reach a specific status and have SSH command available."""
+        """Wait for an instance to reach a specific status."""
         start_time = time.time()
         target_status_enum = HyperbolicInstanceStatus.from_raw_status(
             target_status)
         logger.info(
-            f'Waiting for instance {instance_id} to reach status {target_status_enum.value} and have SSH command'
-        )
+            f'Waiting for instance {instance_id} '
+            f'to reach status {target_status_enum.value} and have SSH command')
 
         while True:
             elapsed = time.time() - start_time
             if elapsed >= timeout:
-                logger.error(
-                    f'Timeout after {int(elapsed)}s waiting for instance {instance_id}'
-                )
+                logger.error(f'Timeout after {int(elapsed)}s '
+                             f'waiting for instance {instance_id}')
                 return False
 
             try:
@@ -260,24 +252,24 @@ class HyperbolicClient:
 
                 current_status = instance.get('status', '').lower()
                 ssh_command = instance.get('sshCommand')
-                logger.debug(
-                    f'Current status: {current_status}, Target status: {target_status_enum.value}, SSH command: {ssh_command}'
-                )
+                logger.debug(f'Current status: {current_status}, '
+                             f'Target status: {target_status_enum.value}, '
+                             f'SSH command: {ssh_command}')
 
                 if current_status == target_status_enum.value and ssh_command:
-                    logger.info(
-                        f'Instance {instance_id} reached target status {target_status_enum.value} and has SSH command after {int(elapsed)}s'
-                    )
+                    logger.info(f'Instance {instance_id} reached '
+                                f'target status {target_status_enum.value} '
+                                f'and has SSH command after {int(elapsed)}s')
                     return True
 
                 if current_status in ['failed', 'error', 'terminated']:
-                    logger.error(
-                        f'Instance {instance_id} reached terminal status: {current_status} after {int(elapsed)}s'
-                    )
+                    logger.error(f'Instance {instance_id} reached '
+                                 f'terminal status: {current_status} '
+                                 f'after {int(elapsed)}s')
                     return False
 
                 time.sleep(5)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Error while waiting for instance {instance_id}: {str(e)}')
                 time.sleep(5)
@@ -296,23 +288,25 @@ def get_client() -> HyperbolicClient:
 
 
 # Backward-compatible wrapper functions
-
-
 def launch_instance(gpu_model: str, gpu_count: int, name: str) -> str:
+    """Launch a new instance with the specified configuration."""
     return get_client().launch_instance(gpu_model, gpu_count, name)
 
 
 def list_instances(
         status: Optional[str] = None,
         metadata: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
+    """List all instances, optionally filtered by status and metadata."""
     return get_client().list_instances(status, metadata)
 
 
 def terminate_instance(instance_id: str) -> None:
+    """Terminate an instance by ID."""
     return get_client().terminate_instance(instance_id)
 
 
 def wait_for_instance(instance_id: str,
                       target_status: str,
                       timeout: int = TIMEOUT) -> bool:
+    """Wait for an instance to reach a specific status."""
     return get_client().wait_for_instance(instance_id, target_status, timeout)
