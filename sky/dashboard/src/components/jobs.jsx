@@ -21,7 +21,11 @@ import { formatDuration } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
-import { CustomTooltip as Tooltip, NonCapitalizedTooltip, relativeTime } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+  relativeTime,
+} from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
@@ -557,9 +561,7 @@ export function ManagedJobsTable({
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell>
-                        {item.requested_resources}
-                      </TableCell>
+                      <TableCell>{item.requested_resources}</TableCell>
                       <TableCell>
                         <NonCapitalizedTooltip
                           content={item.full_infra || item.infra}
@@ -570,7 +572,9 @@ export function ManagedJobsTable({
                       </TableCell>
                       <TableCell>
                         <NonCapitalizedTooltip
-                          content={item.resources_str_full || item.resources_str}
+                          content={
+                            item.resources_str_full || item.resources_str
+                          }
                           className="text-sm text-muted-foreground"
                         >
                           <span>{item.resources_str}</span>
@@ -1123,7 +1127,6 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
     </div>
   );
 }
-
 
 function ExpandedDetailsRow({ text, colSpan, innerRef }) {
   return (
