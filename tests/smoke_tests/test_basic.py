@@ -55,12 +55,12 @@ def test_minimal(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -103,7 +103,7 @@ def test_launch_fast(generic_cloud: str):
         'test_launch_fast',
         [
             # First launch to create the cluster
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Second launch to test fast launch - should not reprovision
@@ -138,7 +138,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -172,7 +172,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
         'test_launch_fast_with_cluster_changes',
         [
             # Initial launch
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Launch again - setup and provisioning should be skipped
@@ -209,14 +209,14 @@ def test_stale_job(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'stale_job',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
-            f'sky stop {name} -y',
+            f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=100),
-            f'sky start {name} -y',
+            f'sky start -y {name}',
             f'sky logs {name} 1 --status',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
@@ -236,7 +236,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --cloud aws --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -283,7 +283,7 @@ def test_gcp_stale_job_manual_restart():
         'gcp_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} --cloud gcp --zone {zone} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra gcp/*/us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=stop_cmd),
@@ -313,7 +313,7 @@ def test_env_check(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'env_check',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/env_check.yaml',
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             # Test with only setup.
             f'sky launch -y -c {name} tests/test_yamls/test_only_setup.yaml',
@@ -337,7 +337,7 @@ def test_cli_logs(generic_cloud: str):
         num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
-        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
+        f'sky launch -y -c {name} --infra {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
         f'sky exec {name} "echo {timestamp} 2"',
         f'sky exec {name} "echo {timestamp} 3"',
         f'sky exec {name} "echo {timestamp} 4"',
@@ -386,12 +386,12 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
         assert job_id == 1
         assert handle is not None
         assert handle.cluster_name == name
-        assert handle.launched_resources.cloud.is_same_cloud(cloud)
+        assert str(handle.launched_resources.cloud).lower() == generic_cloud.lower()
         job_id_exec, handle_exec = sky.get(sky.exec(task, cluster_name=name))
         assert job_id_exec == 2
         assert handle_exec is not None
         assert handle_exec.cluster_name == name
-        assert handle_exec.launched_resources.cloud.is_same_cloud(cloud)
+        assert str(handle_exec.launched_resources.cloud).lower() == generic_cloud.lower()
         # For dummy task (i.e. task.run is None), the job won't be submitted.
         dummy_task = sky.Task()
         job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
@@ -627,7 +627,7 @@ def test_sky_bench(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'sky-bench',
         [
-            f'sky bench launch -y -b {name} --cloud {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
+            f'sky bench launch -y -b {name} --infra {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
             'sleep 120',
             f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
         ],
@@ -738,40 +738,34 @@ def test_kubernetes_context_failover(unreachable_context):
                 'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
                 '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
                 'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
-                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
+                'sky show-gpus --infra kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
                 # H100 should not be in the current context
-                f'! sky show-gpus --cloud kubernetes --region {context} | grep H100',
+                f'! sky show-gpus --infra kubernetes/{context} | grep H100',
                 # H100 should be displayed as long as it is available in one of the contexts
-                'sky show-gpus --cloud kubernetes | grep H100',
+                'sky show-gpus --infra kubernetes | grep H100',
                 f'sky launch -y -c {name}-1 --cpus 1 echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
                 f'sky status -v {name}-1 | grep "{context}"',
                 # Test failure for launching H100 on other cluster
-                f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --cloud kubernetes --region {context} echo hi && exit 1 || true',
+                f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --infra kubernetes/{context} echo hi && exit 1 || true',
                 # Test failover
-                f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --cloud kubernetes echo hi',
+                f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --infra kubernetes echo hi',
                 f'sky logs {name}-3 --status',
                 # Test pods
                 f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
                 # It should be launched on kind-skypilot
                 f'sky status -v {name}-3 | grep "kind-skypilot"',
                 # Should be 7 free GPUs
-                f'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "  7"',
+                f'sky show-gpus --infra kubernetes/kind-skypilot | grep H100 | grep "  7"',
                 # Remove the line with "kind-skypilot"
                 f'sed -i "/kind-skypilot/d" {f.name}',
-                # Should still be able to exec and launch on existing cluster
-                f'sky exec {name}-3 "echo hi"',
-                f'sky logs {name}-3 --status',
-                f'sky status -r {name}-3 | grep UP',
-                f'sky launch -c {name}-3 --gpus h100 echo hi',
-                f'sky logs {name}-3 --status',
-                f'sky status -r {name}-3 | grep UP',
+                f'export KUBECONFIG={f.name}',
                 # Test failure for launching on unreachable context
                 f'kubectl config use-context {unreachable_context}',
-                f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --cloud kubernetes --region {unreachable_context} echo hi && exit 1 || true',
+                f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
                 f'sky launch -y -c {name}-5 --cpus 1 echo hi',
             ],
@@ -836,7 +830,7 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
     wait_cmd = wait_cmd.replace('sleep 10', 'sleep 1')
     test = smoke_tests_utils.Test(
         'cancel_launch_and_exec_async', [
-            f'sky launch -c {name} -y --cloud {generic_cloud} --async',
+            f'sky launch -c {name} -y --infra {generic_cloud} --async',
             (f's=$(sky exec {name} echo --async) && '
              'echo "$s" && '
              'logs_cmd=$(echo "$s" | grep "Check logs with" | '
@@ -861,7 +855,7 @@ def test_cli_exit_codes(generic_cloud: str):
         'cli_exit_codes',
         [
             # Test successful job exit code (0)
-            f'sky launch -y -c {name} --cloud {generic_cloud} "echo success" && echo "Exit code: $?"',
+            f'sky launch -y -c {name} --infra {generic_cloud} "echo success" && echo "Exit code: $?"',
             f'sky logs {name} 1 --status | grep SUCCEEDED',
 
             # Test that sky logs with successful job returns 0

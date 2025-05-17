@@ -357,19 +357,22 @@ _TASK_OPTIONS = [
         required=False,
         type=str,
         help=('The cloud to use. If specified, overrides the "resources.cloud" '
-              'config. Passing "none" resets the config.')),
+              'config. Passing "none" resets the config.'),
+        hidden=True),
     click.option(
         '--region',
         required=False,
         type=str,
         help=('The region to use. If specified, overrides the '
-              '"resources.region" config. Passing "none" resets the config.')),
+              '"resources.region" config. Passing "none" resets the config.'),
+        hidden=True),
     click.option(
         '--zone',
         required=False,
         type=str,
         help=('The zone to use. If specified, overrides the '
-              '"resources.zone" config. Passing "none" resets the config.')),
+              '"resources.zone" config. Passing "none" resets the config.'),
+        hidden=True),
     click.option(
         '--num-nodes',
         required=False,
