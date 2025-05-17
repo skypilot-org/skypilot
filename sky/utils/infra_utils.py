@@ -34,6 +34,9 @@ class InfraInfo:
         self.region = region
         self.zone = zone
 
+    def __hash__(self):
+        return hash(self.to_str())
+
     @staticmethod
     def from_str(infra: Optional[str]) -> 'InfraInfo':
         """Parse the infra string into cloud, region, and zone components.
