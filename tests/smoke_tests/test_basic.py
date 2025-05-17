@@ -386,12 +386,14 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
         assert job_id == 1
         assert handle is not None
         assert handle.cluster_name == name
-        assert str(handle.launched_resources.cloud).lower() == generic_cloud.lower()
+        assert str(
+            handle.launched_resources.cloud).lower() == generic_cloud.lower()
         job_id_exec, handle_exec = sky.get(sky.exec(task, cluster_name=name))
         assert job_id_exec == 2
         assert handle_exec is not None
         assert handle_exec.cluster_name == name
-        assert str(handle_exec.launched_resources.cloud).lower() == generic_cloud.lower()
+        assert str(handle_exec.launched_resources.cloud).lower(
+        ) == generic_cloud.lower()
         # For dummy task (i.e. task.run is None), the job won't be submitted.
         dummy_task = sky.Task()
         job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
