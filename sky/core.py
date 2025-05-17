@@ -1015,7 +1015,10 @@ def realtime_kubernetes_gpu_availability(
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
 
     if context is None:
-        context_list = clouds.Kubernetes.existing_allowed_contexts()
+        # Include contexts from both Kubernetes and SSH clouds
+        kubernetes_contexts = clouds.Kubernetes.existing_allowed_contexts()
+        ssh_contexts = clouds.SSH.existing_allowed_contexts()
+        context_list = kubernetes_contexts + ssh_contexts
     else:
         context_list = [context]
 
