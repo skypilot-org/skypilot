@@ -178,8 +178,8 @@ def format_resource(resource: 'resources_lib.Resources',
         if ports is not None:
             components.append(f'ports={ports}')
 
-    spot = '[Spot]' if resource.use_spot else ''
-    return f'({spot}{"" if not components else ", ".join(components)})'
+    spot = '[spot]' if resource.use_spot else ''
+    return f'{spot}({"" if not components else ", ".join(components)})'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',

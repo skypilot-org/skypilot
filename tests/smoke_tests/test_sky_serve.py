@@ -113,13 +113,13 @@ _SERVE_STATUS_WAIT = (
     'echo "$s"')
 
 _WAIT_PROVISION_REPR = (
-    # Once controller is ready, check provisioning vs. vCPU=2. This is for
-    # the `_check_replica_in_status`, which will check number of `vCPU=2` in the
+    # Once controller is ready, check provisioning vs. cpus=2. This is for
+    # the `_check_replica_in_status`, which will check number of `cpus=2` in the
     # `sky serve status` output and use that to suggest the number of replicas.
     # However, replicas in provisioning state is possible to have a repr of `-`,
     # since the desired `launched_resources` is not decided yet. This would
     # cause an error when counting desired number of replicas. We wait for the
-    # representation of `vCPU=2` the same with number of provisioning replicas
+    # representation of `cpus=2` the same with number of provisioning replicas
     # to avoid this error.
     # NOTE(tian): This assumes the replica will not do failover, as the
     # requested resources is only 2 vCPU and likely to be immediately available
@@ -127,7 +127,7 @@ _WAIT_PROVISION_REPR = (
     # failover
     # Check #4565 for more information.
     'num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
-    'num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    'num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "x(cpus=2, " | wc -l); '
     'until [ "$num_provisioning" -eq "$num_vcpu_in_provision" ]; '
     'do '
     '    echo "Waiting for provisioning resource repr ready..."; '
@@ -135,10 +135,10 @@ _WAIT_PROVISION_REPR = (
     '    sleep 2; '
     '    s=$(sky serve status {name}); '
     '    num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
-    '    num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    '    num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "x(cpus=2, " | wc -l); '
     'done; '
     # Provisioning is complete
-    'echo "Provisioning complete. PROVISIONING: $num_provisioning, vCPU=2: $num_vcpu_in_provision"'
+    'echo "Provisioning complete. PROVISIONING: $num_provisioning, cpus=2: $num_cpus_in_provision"'
 )
 
 # Shell script snippet to monitor and wait for resolution of NOT_READY status:
@@ -197,7 +197,7 @@ def _check_replica_in_status(name: str,
                              timeout_seconds: int = 0) -> str:
     """Check replicas' status and count in sky serve status
 
-    We will check vCPU=2, as all our tests use vCPU=2.
+    We will check cpus=2, as all our tests use cpus=2.
 
     Args:
         name: the name of the service
@@ -216,8 +216,8 @@ def _check_replica_in_status(name: str,
                          ] and not status.startswith('FAILED'):
             spot_str = ''
             if is_spot:
-                spot_str = r'\[Spot\]'
-            resource_str = f'({spot_str}vCPU=2)'
+                spot_str = r'\[spot\]'
+            resource_str = f'x{spot_str}(cpus=2, '
         check_conditions.append(
             f'echo "$s" | grep "{resource_str}" | grep "{status}" | wc -l | '
             f'grep {count}')

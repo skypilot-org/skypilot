@@ -248,7 +248,7 @@ def test_gcp_image_id_dict_zone():
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
             f'sky launch -y -c {name} --infra */*/us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the zone.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
             f'sky exec {name} --infra gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
             # Fail due to image id mismatch.
             f'sky exec {name} --infra gcp --image-id skypilot:gpu-debian-10 tests/test_yamls/minimal.yaml && exit 1 || true',

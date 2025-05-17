@@ -1736,7 +1736,7 @@ def test_gcp_disk_tier(instance_types: List[str]):
                 'gcp-disk-tier-' + disk_tier.value,
                 [
                     smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-                    f'sky launch -y -c {name} --infra gcp --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                    f'sky launch -y -c {name} --infra gcp/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
                     f'--disk-tier {disk_tier.value} {instance_type_option} ',
                     smoke_tests_utils.run_cloud_cmd_on_cluster(
                         name,
