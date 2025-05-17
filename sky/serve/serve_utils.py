@@ -1027,11 +1027,9 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         return 'No existing replicas.'
 
     replica_columns = [
-        'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'RESOURCES',
-        'STATUS', 'REGION'
+        'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'INFRA',
+        'RESOURCES', 'STATUS'
     ]
-    if show_all:
-        replica_columns.append('ZONE')
     replica_table = log_utils.create_table(replica_columns)
 
     truncate_hint = ''
@@ -1047,21 +1045,17 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         version = (record['version'] if 'version' in record else '-')
         replica_endpoint = endpoint if endpoint else '-'
         launched_at = log_utils.readable_time_duration(record['launched_at'])
+        infra = '-'
         resources_str = '-'
         replica_status = record['status']
         status_str = replica_status.colored_str()
-        region = '-'
-        zone = '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
         if replica_handle is not None:
+            infra = replica_handle.launched_resources.infra.formatted_str()
             resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)
-            if replica_handle.launched_resources.region is not None:
-                region = replica_handle.launched_resources.region
-            if replica_handle.launched_resources.zone is not None:
-                zone = replica_handle.launched_resources.zone
 
         replica_values = [
             service_name,
@@ -1069,12 +1063,10 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             version,
             replica_endpoint,
             launched_at,
+            infra,
             resources_str,
             status_str,
-            region,
         ]
-        if show_all:
-            replica_values.append(zone)
         replica_table.add_row(replica_values)
 
     return f'{replica_table}{truncate_hint}'

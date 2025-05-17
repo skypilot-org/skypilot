@@ -2,7 +2,7 @@
 name: gcp-start-stop
 
 resources:
-  cloud: gcp
+  infra: gcp
 
 num_nodes: 2
 

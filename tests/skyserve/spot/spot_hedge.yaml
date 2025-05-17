@@ -21,14 +21,12 @@ envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 resources:
-  cloud: aws
+  infra: aws
   any_of:
     # Enable all region in AWS.
-    - cloud: aws
+    - infra: aws
     # Enable one in GCP.
-    - cloud: gcp
-      region: asia-northeast3
-      zone: asia-northeast3-a
+    - infra: gcp/*/asia-northeast3-a
   use_spot: true
   accelerators: L4
   ports: 9000  # Expose to internet traffic.

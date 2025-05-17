@@ -1,5 +1,5 @@
 resources:
-  cloud: aws
+  infra: aws
   image_id: skypilot:gpu-ubuntu-1804
 
 

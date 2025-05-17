@@ -8,8 +8,8 @@ resources:
   memory: 4+
   use_spot: true
   any_of:
-    - cloud: aws
-    - cloud: gcp
+    - infra: aws
+    - infra: gcp
 
 setup: |
   echo setup for train
@@ -27,8 +27,8 @@ resources:
   cpus: 2+
   memory: 4+
   any_of:
-    - cloud: aws
-    - cloud: gcp
+    - infra: aws
+    - infra: gcp
 
 setup: |
   echo setup for train

@@ -21,7 +21,7 @@ pip install "skypilot-nightly[lambda,kubernetes]"
 1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node. If using GCP, AWS or Azure, uncomment the ports line to allow inbound connections to the Kubernetes API server. 
 ```yaml
 resources:
-  cloud: lambda
+  infra: lambda
   accelerators: A10:1
   # ports: 6443
 

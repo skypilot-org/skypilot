@@ -10,7 +10,7 @@
 name: stress
 
 resources:
-  cloud: aws
+  infra: aws
 
 workdir: .
 

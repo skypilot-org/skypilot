@@ -9,8 +9,8 @@ resources:
   cpus: 2
   memory: 4+
   any_of:
-    - cloud: aws
-    - cloud: gcp
+    - infra: aws
+    - infra: gcp
 
 
 setup: |
@@ -27,8 +27,8 @@ resources:
   cpus: 2
   memory: 4+
   any_of:
-    - cloud: aws
-    - cloud: gcp
+    - infra: aws
+    - infra: gcp
 
 
 setup: |
@@ -47,8 +47,8 @@ resources:
   cpus: 2
   memory: 4+
   any_of:
-    - cloud: aws
-    - cloud: gcp
+    - infra: aws
+    - infra: gcp
 
 setup: |
   echo setup for eval
@@ -67,8 +67,8 @@ resources:
   cpus: 2
   memory: 4+
   any_of:
-    - cloud: aws
-    - cloud: gcp
+    - infra: aws
+    - infra: gcp
 
 setup: |
   echo setup for eval

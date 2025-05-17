@@ -2570,7 +2570,10 @@ def get_clusters(
         if handle is None:
             return
         record['resources_str'] = resources_utils.get_readable_resources_repr(
-            handle)
+            handle, simplify=True)
+        record[
+            'resources_str_full'] = resources_utils.get_readable_resources_repr(
+                handle, simplify=False)
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)

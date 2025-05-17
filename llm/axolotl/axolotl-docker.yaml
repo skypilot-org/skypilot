@@ -5,7 +5,7 @@ name: axolotl
 
 resources:
   accelerators: L4:1
-  cloud: gcp # optional
+  infra: gcp # optional
 
 workdir: mistral
 

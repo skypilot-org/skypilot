@@ -37,10 +37,10 @@ from sky.utils import subprocess_utils
 # different job id.
 test_id = str(uuid.uuid4())[-2:]
 
-LAMBDA_TYPE = '--cloud lambda --gpus A10'
-FLUIDSTACK_TYPE = '--cloud fluidstack --gpus RTXA4000'
+LAMBDA_TYPE = '--infra lambda --gpus A10'
+FLUIDSTACK_TYPE = '--infra fluidstack --gpus RTXA4000'
 
-SCP_TYPE = '--cloud scp'
+SCP_TYPE = '--infra scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 STORAGE_SETUP_COMMANDS = [
@@ -490,7 +490,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
-    original_resources = sky.Resources(cloud=sky.AWS(),
+    original_resources = sky.Resources(infra='aws',
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
@@ -517,7 +517,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
-    original_resources = sky.Resources(cloud=sky.GCP(),
+    original_resources = sky.Resources(infra='gcp',
                                        instance_type='a2-ultragpu-1g',
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
@@ -611,7 +611,7 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
         return 'true'
     else:
         return (
-            f'sky launch -y -c {cluster_name} --cloud {cloud} {LOW_RESOURCE_ARG} --async'
+            f'sky launch -y -c {cluster_name} --infra {cloud} {LOW_RESOURCE_ARG} --async'
         )
 
 

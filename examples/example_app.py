@@ -40,10 +40,12 @@ def make_application():
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
         train_op.set_resources({
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            sky.Resources(infra='aws',
+                          instance_type='p3.2xlarge'),  # 1 V100, EC2.
+            sky.Resources(infra='aws',
+                          instance_type='p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), accelerators='tpu-v3-8'),
+            sky.Resources(infra='gcp', accelerators='tpu-v3-8'),
         })
 
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
@@ -58,10 +60,14 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
-            sky.Resources(sky.AWS(), 'inf1.2xlarge'),
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),
-            sky.Resources(sky.GCP(), 'n1-standard-4', accelerators='T4'),
-            sky.Resources(sky.GCP(), 'n1-standard-8', accelerators='T4'),
+            sky.Resources(infra='aws', instance_type='inf1.2xlarge'),
+            sky.Resources(infra='aws', instance_type='p3.2xlarge'),
+            sky.Resources(infra='gcp',
+                          instance_type='n1-standard-4',
+                          accelerators='T4'),
+            sky.Resources(infra='gcp',
+                          instance_type='n1-standard-8',
+                          accelerators='T4'),
         })
 
         infer_op.set_time_estimator(

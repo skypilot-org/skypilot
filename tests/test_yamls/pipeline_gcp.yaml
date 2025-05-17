@@ -4,8 +4,7 @@ name: pipeline
 name: a
 
 resources:
-  cloud: gcp
-  zone: us-east4-b
+  infra: gcp/*/us-east4-b
   cpus: 2+
   memory: 4+
 
@@ -21,7 +20,7 @@ run: |
 name: b
 
 resources:
-  cloud: gcp
+  infra: gcp
   cpus: 2+
   memory: 4+
 
@@ -39,7 +38,7 @@ run: |
 name: eval1
 
 resources:
-  cloud: gcp
+  infra: gcp
   cpus: 2+
   memory: 4+
 
@@ -57,7 +56,7 @@ run: |
 name: eval2
 
 resources:
-  cloud: gcp
+  infra: gcp
   cpus: 2+
   memory: 4+
 

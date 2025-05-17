@@ -14,7 +14,7 @@ name: pingpong
 num_nodes: 2
 
 resources:
-  cloud: gcp
+  infra: gcp
 
 file_mounts:
     /sharedfs:

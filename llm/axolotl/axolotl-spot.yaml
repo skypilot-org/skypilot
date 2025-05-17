@@ -10,7 +10,7 @@ name: axolotl
 
 resources:
   accelerators: A100:1
-  cloud: gcp # optional
+  infra: gcp # optional
   use_spot: True
   image_id: docker:winglian/axolotl:main-py3.10-cu118-2.0.1
 

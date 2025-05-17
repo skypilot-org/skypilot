@@ -450,12 +450,10 @@ function JobDetailsContent({
   return (
     <div className="grid grid-cols-2 gap-6">
       <div>
-        <div className="text-gray-600 font-medium text-base">Job ID</div>
-        <div className="text-base mt-1">{jobData.id}</div>
-      </div>
-      <div>
-        <div className="text-gray-600 font-medium text-base">Job Name</div>
-        <div className="text-base mt-1">{jobData.name}</div>
+        <div className="text-gray-600 font-medium text-base">Job ID (Name)</div>
+        <div className="text-base mt-1">
+          {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
+        </div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
@@ -468,12 +466,22 @@ function JobDetailsContent({
         <div className="text-base mt-1">{jobData.user}</div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Resources</div>
-        <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
+        <div className="text-gray-600 font-medium text-base">
+          Requested Resources
+        </div>
+        <div className="text-base mt-1">
+          {jobData.requested_resources || 'N/A'}
+        </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Cluster</div>
-        <div className="text-base mt-1">{jobData.cluster || '-'}</div>
+        <div className="text-gray-600 font-medium text-base">Infra</div>
+        <div className="text-base mt-1">{jobData.infra || '-'}</div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Resources</div>
+        <div className="text-base mt-1">
+          {jobData.resources_str_full || jobData.resources_str || '-'}
+        </div>
       </div>
     </div>
   );

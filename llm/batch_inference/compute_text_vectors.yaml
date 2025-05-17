@@ -6,7 +6,7 @@ resources:
   cpus: 4
   accelerators: 
     L4: 1
-  cloud: aws
+  infra: aws
   any_of:
     - use_spot: true
     - use_spot: false

@@ -20,7 +20,7 @@ name: resnet-distributed-app
 
 resources:
     accelerators: V100
-    cloud: aws
+    infra: aws
 
 num_nodes: 1
 

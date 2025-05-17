@@ -7,8 +7,7 @@ service:
 
 resources:
   ports: 8080
-  cloud: gcp
-  zone: us-central1-a
+  infra: gcp/*/us-central1-a
   use_spot: true
 
 workdir: examples/serve/http_server

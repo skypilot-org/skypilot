@@ -17,7 +17,7 @@
 name: storage-demo
 
 resources:
-  cloud: aws
+  infra: aws
   instance_type: m5.8xlarge
 
 file_mounts:

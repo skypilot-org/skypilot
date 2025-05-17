@@ -30,7 +30,7 @@ with sky.Dag() as dag:
     )
 
     train.set_resources({
-        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        sky.Resources(infra='aws', instance_type='p3.2xlarge'),
     })
 
 sky.launch(dag)

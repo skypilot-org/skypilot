@@ -1,5 +1,5 @@
 resources:
-  cloud: gcp
+  infra: gcp
 
 setup: |
   git clone https://github.com/autogluon/autogluon.git

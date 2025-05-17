@@ -1,7 +1,7 @@
 name: resnet-app
 
 resources:
-  cloud: aws
+  infra: aws
   accelerators:
     V100: 1
 

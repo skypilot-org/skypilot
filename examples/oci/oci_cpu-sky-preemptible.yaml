@@ -2,12 +2,8 @@ name: cpu-task2
 
 resources:
   # Optional; if left out, automatically pick the cheapest cloud.
-  cloud: oci
+  infra: oci/ap-seoul-1
 
-  region: ap-seoul-1
-  
-  # zone: AP-SEOUL-1-AD-1
-  
   instance_type: VM.Standard.E4.Flex$_2_16
 
   cpus: 2

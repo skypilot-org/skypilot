@@ -23,13 +23,11 @@ envs:
 resources:
   any_of:
     # Enable all region in AWS.
-    - cloud: aws
+    - infra: aws
       # region: us-east-1
       # zone: us-east-1f
     # Enable one zone in GCP.
-    - cloud: gcp
-      region: europe-west2
-      zone: europe-west2-a
+    - infra: gcp/*/europe-west2-a
   use_spot: true
   accelerators: T4
   ports: 9000  # Expose to internet traffic.

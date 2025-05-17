@@ -2,14 +2,10 @@ name: gpu-task1
 
 resources:
   # Optional; if left out, automatically pick the cheapest cloud.
-  cloud: oci
+  infra: oci/ap-seoul-1
 
   accelerators: A10:1  # 1x NVIDIA A10 GPU
 
-  region: ap-seoul-1
-  
-  # zone: AP-SEOUL-1-AD-1
-  
   # instance_type: VM.GPU.A10.1
 
   # image_id: skypilot:gpu-ubuntu-2004

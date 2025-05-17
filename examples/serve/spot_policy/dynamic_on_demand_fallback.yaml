@@ -11,8 +11,8 @@ service:
 
 resources:
   any_of:
-  - zone: us-central1-a
-  - region: us-east1
+  - infra: gcp/*/us-central1-a
+  - infra: gcp/us-east1
   ports: 8081
   cpus: 2+
   # use_spot is needed for ondemand fallback

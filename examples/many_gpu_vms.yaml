@@ -1,7 +1,7 @@
 name: many_gpu_vms
 
 resources:
-  cloud: aws
+  infra: aws
   accelerators: V100:8
   # use_spot: true
 

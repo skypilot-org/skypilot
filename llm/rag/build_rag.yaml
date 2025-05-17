@@ -4,7 +4,7 @@ workdir: .
 
 resources:
   memory: 32+  # Need more memory for merging embeddings
-  cloud: aws
+  infra: aws
 
 envs:
   EMBEDDINGS_BUCKET_NAME: sky-rag-embeddings

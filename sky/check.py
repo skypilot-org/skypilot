@@ -34,7 +34,7 @@ def check_capabilities(
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
-    echo('Checking credentials to enable clouds for SkyPilot.')
+    echo('Checking credentials to enable infra for SkyPilot.')
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
@@ -189,7 +189,7 @@ def check_capabilities(
                                                   key=lambda item: item[0])
             ])
             echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
-                 f'Enabled clouds {PARTY_POPPER_EMOJI}'
+                 f'Enabled infra {PARTY_POPPER_EMOJI}'
                  f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
     return enabled_clouds
 

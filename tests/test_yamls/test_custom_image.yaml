@@ -1,6 +1,5 @@
 resources:
-  cloud: aws
-  region: us-east-2
+  infra: aws/us-east-2
   # Nvidia image from
   # https://aws.amazon.com/marketplace/pp/prodview-rf7na2b2ttvdg
   image_id: ami-062ddd90fb6f8267a

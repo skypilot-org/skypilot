@@ -2,7 +2,7 @@
 name: azure-start-stop
 
 resources:
-  cloud: azure
+  infra: azure
 
 # Optimizing for smoke tests
 #   2 nodes: smoke tests ~37 mins
