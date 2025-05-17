@@ -348,6 +348,27 @@ Following tabs describe how to configure credentials for different clouds on the
 
         When installing or upgrading the Helm chart, enable Lambda credentials by setting ``lambdaCredentials.enabled=true``
 
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              # keep the Helm chart values set in the previous step
+              --reuse-values \
+              --set lambdaCredentials.enabled=true
+
+        .. dropdown:: Use existing Lambda credentials
+
+            You can also set the following values to use a secret that already contains your Lambda credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set lambdaCredentials.enabled=true \
+                    --set lambdaCredentials.lambdaSecretName=your_secret_name
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
