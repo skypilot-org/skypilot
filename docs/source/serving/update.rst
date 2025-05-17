@@ -160,9 +160,9 @@ Eventually, we will only have new replicas ready to serve user requests.
 
     Service Replicas
     SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED    INFRA                RESOURCES                                     STATUS  
-    http-server   3   2        http://3.93.241.163:8081    3 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         READY   
+    http-server   3   2        http://3.93.241.163:8081    3 mins ago  AWS (us-east-1b)     1x(cpus=2, mem=8, type=m5.large, ...)         READY   
     http-server   4   2        http://18.206.226.82:8081   3 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         READY   
-    http-server   5   2        http://3.26.232.31:8081     1 min ago   AWS (us-east-1b)     1x(cpus=2, mem=8, type=m5.large, ...)         READY
+    http-server   5   2        http://3.26.232.31:8081     1 min ago   AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         READY
 
 
 
@@ -213,10 +213,10 @@ SkyServe will trigger launching three new replicas.
     Service Replicas
     SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                     STATUS       
     http-server   1   1        http://54.173.203.169:8081  6 mins ago   AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         READY         
-    http-server   2   1        http://52.87.241.103:8081   6 mins ago   AWS (us-east-1b)     1x(cpus=2, mem=8, type=m5.large, ...)         READY         
-    http-server   3   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING  
+    http-server   2   1        http://52.87.241.103:8081   6 mins ago   AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         READY         
+    http-server   3   2        -                           21 secs ago  AWS (us-east-1b)     1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING  
     http-server   4   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING  
-    http-server   5   2        -                           21 secs ago  AWS (us-east-1c)     1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING  
+    http-server   5   2        -                           21 secs ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING  
 
 
 When a new replica is ready, the traffic will still be redirected to old replicas.
@@ -231,11 +231,11 @@ When a new replica is ready, the traffic will still be redirected to old replica
 
     Service Replicas
     SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                      STATUS        
-    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1)      1x(cpus=2, mem=8, type=m5.large, ...)         SHUTTING_DOWN  
-    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1)      1x(cpus=2, mem=8, type=m5.large, ...)         READY          
-    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
-    http-server   4   2        http://18.206.226.82:8081   1 min ago    AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
-    http-server   5   2        -                           1 min ago    AWS (us-east-1)      1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING   
+    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         SHUTTING_DOWN  
+    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         READY          
+    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1b)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
+    http-server   4   2        http://18.206.226.82:8081   1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
+    http-server   5   2        -                           1 min ago    AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         PROVISIONING   
 
 
 Once the total number of new replicas satisfies the requirements, traffics will be redirected to new replicas and old replicas will be scaled down.
@@ -250,11 +250,11 @@ Once the total number of new replicas satisfies the requirements, traffics will 
 
     Service Replicas
     SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                      STATUS         
-    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1)      1x(cpus=2, mem=8, type=m5.large, ...)         SHUTTING_DOWN  
-    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1)      1x(cpus=2, mem=8, type=m5.large, ...)         SHUTTING_DOWN  
-    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
-    http-server   4   2        http://18.206.226.82:8081   1 min ago    AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
-    http-server   5   2        http://3.26.232.31:8081     1 min ago    AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY
+    http-server   1   1        http://54.173.203.169:8081  10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         SHUTTING_DOWN  
+    http-server   2   1        http://52.87.241.103:8081   10 mins ago  AWS (us-east-1a)     1x(cpus=2, mem=8, type=m5.large, ...)         SHUTTING_DOWN  
+    http-server   3   2        http://3.93.241.163:8081    1 min ago    AWS (us-east-1b)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
+    http-server   4   2        http://18.206.226.82:8081   1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
+    http-server   5   2        http://3.26.232.31:8081     1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY
 
 Eventually, same as the rolling update, we will only have new replicas ready to serve user requests.
 
@@ -268,6 +268,6 @@ Eventually, same as the rolling update, we will only have new replicas ready to 
 
     Service Replicas
     SERVICE_NAME  ID  VERSION  ENDPOINT                    LAUNCHED     INFRA                RESOURCES                                      STATUS        
-    http-server   3   2        http://3.93.241.163:8081    3 mins ago   AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
-    http-server   4   2        http://18.206.226.82:8081   3 mins ago   AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
-    http-server   5   2        http://3.26.232.31:8081     1 min ago    AWS (us-east-1)      1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY
+    http-server   3   2        http://3.93.241.163:8081    3 mins ago   AWS (us-east-1b)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
+    http-server   4   2        http://18.206.226.82:8081   3 mins ago   AWS (us-east-1a)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY          
+    http-server   5   2        http://3.26.232.31:8081     1 min ago    AWS (us-east-1a)     1x(cpus=4, mem=16, type=m5.xlarge, ...)       READY
