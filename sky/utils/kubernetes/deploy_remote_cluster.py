@@ -351,7 +351,7 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
         ] + exec_args + [
             "--exec-arg=--context", f"--exec-arg={context_name}",
             "--exec-arg=--port", f"--exec-arg={port}",
-            "--exec-arg=--use-ssh-config", f"--exec-arg={head_node}"
+            "--exec-arg=--use-ssh-config", "--exec-arg=--host", f"--exec-arg={head_node}"
         ])
     else:
         run_command([
@@ -359,9 +359,9 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
         ] + exec_args + [
             "--exec-arg=--context", f"--exec-arg={context_name}",
             "--exec-arg=--port", f"--exec-arg={port}",
-            "--exec-arg=--ssh-key", f"--exec-arg={ssh_key}",
             "--exec-arg=--host", f"--exec-arg={head_node}",
-            "--exec-arg=--user", f"--exec-arg={ssh_user}"
+            "--exec-arg=--user", f"--exec-arg={ssh_user}",
+            "--exec-arg=--ssh-key", f"--exec-arg={ssh_key}"
         ])
     
     success_message(f"SSH tunnel configured through kubectl credential plugin on port {port}")

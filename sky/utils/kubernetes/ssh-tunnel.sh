@@ -4,6 +4,9 @@
 
 # Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT]
 
+# Enable debug logging (writes to stderr and logfile)
+DEBUG=1
+
 # Parse arguments
 USE_SSH_CONFIG=0
 SSH_KEY=""
@@ -11,6 +14,15 @@ CONTEXT=""
 HOST=""
 USER=""
 PORT=6443  # Default port if not specified
+
+# Log to both stderr and log file
+debug_log() {
+  local message="$(date): $1"
+  if [[ $DEBUG -eq 1 ]]; then
+    echo "$message" >&2
+  fi
+  echo "$message" >> "$LOG_FILE"
+}
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -64,29 +76,72 @@ PID_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.pid"
 LOG_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.log"
 LOCK_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.lock"
 
+debug_log "Starting ssh-tunnel.sh for context $CONTEXT, host $HOST, port $PORT"
+debug_log "SSH Config: $USE_SSH_CONFIG, User: $USER"
+
 # Check if specified port is already in use (tunnel may be running)
 if nc -z localhost "$PORT" 2>/dev/null; then
-  # Port is in use, might be our tunnel
-  echo "Port $PORT already in use" >> "$LOG_FILE"
+  debug_log "Port $PORT already in use, checking if it's our tunnel"
+  
+  # Check if there's a PID file and if that process is running
+  if [[ -f "$PID_FILE" ]]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+      debug_log "Tunnel appears to be running with PID $OLD_PID"
+    else
+      debug_log "PID file exists but process $OLD_PID is not running"
+    fi
+  else
+    debug_log "Port $PORT is in use but no PID file exists"
+  fi
   
   # Return valid credential format for kubectl
   echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
   exit 0
 fi
 
-# Try to acquire lock to avoid race conditions when multiple processes try to start the tunnel
-exec 9>"$LOCK_FILE"
-if ! flock -n 9; then
-  # Another process is already starting the tunnel
-  echo "Another process is starting the tunnel" >> "$LOG_FILE"
-  # Wait briefly for the tunnel to be established
-  for i in {1..10}; do
-    if nc -z localhost "$PORT" 2>/dev/null; then
-      echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
-      exit 0
+# Check for flock command
+if ! command -v flock >/dev/null 2>&1; then
+  debug_log "flock command not available, using alternative lock mechanism"
+  # Simple file-based locking
+  if [ -f "$LOCK_FILE" ]; then
+    lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+      debug_log "Another process ($lock_pid) is starting the tunnel, waiting briefly"
+      # Wait briefly for the tunnel to be established
+      for i in {1..10}; do
+        if nc -z localhost "$PORT" 2>/dev/null; then
+          debug_log "Tunnel is now active"
+          echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
+          exit 0
+        fi
+        sleep 0.2
+      done
+      debug_log "Waited for tunnel but port $PORT still not available"
+    else
+      # Stale lock file
+      debug_log "Removing stale lock file"
+      rm -f "$LOCK_FILE"
     fi
-    sleep 0.2
-  done
+  fi
+  # Create our lock
+  echo $$ > "$LOCK_FILE"
+else
+  # Use flock for better locking
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    debug_log "Another process is starting the tunnel, waiting briefly"
+    # Wait briefly for the tunnel to be established
+    for i in {1..10}; do
+      if nc -z localhost "$PORT" 2>/dev/null; then
+        debug_log "Tunnel is now active"
+        echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
+        exit 0
+      fi
+      sleep 0.2
+    done
+    debug_log "Waited for tunnel but port $PORT still not available"
+  fi
 fi
 
 # Check if we have a PID file with running process
@@ -95,18 +150,18 @@ if [[ -f "$PID_FILE" ]]; then
   if kill -0 "$OLD_PID" 2>/dev/null; then
     # Process exists but port isn't open - something's wrong, kill it
     kill "$OLD_PID" 2>/dev/null
-    echo "$(date): Killed stale tunnel process $OLD_PID" >> "$LOG_FILE"
+    debug_log "Killed stale tunnel process $OLD_PID"
+  else
+    debug_log "PID file exists but process $OLD_PID is not running anymore"
   fi
+  # Remove the stale PID file
+  rm -f "$PID_FILE"
 fi
 
 # Check for autossh
 if ! command -v autossh >/dev/null 2>&1; then
-  echo "$(date): ERROR: autossh is not installed but required for reliable SSH tunnels" >> "$LOG_FILE"
-  echo "$(date): Please install autossh:" >> "$LOG_FILE"
-  echo "$(date): - On macOS: brew install autossh" >> "$LOG_FILE"
-  echo "$(date): - On Ubuntu/Debian: apt-get install autossh" >> "$LOG_FILE"
-  echo "$(date): - On RHEL/CentOS: yum install autossh" >> "$LOG_FILE"
-  echo "$(date): Falling back to regular ssh (less reliable)" >> "$LOG_FILE"
+  debug_log "WARNING: autossh is not installed but recommended for reliable SSH tunnels"
+  debug_log "Install autossh: brew install autossh (macOS), apt-get install autossh (Ubuntu/Debian)"
   
   # Fall back to regular ssh
   if [[ $USE_SSH_CONFIG -eq 1 ]]; then
@@ -139,34 +194,48 @@ else
   fi
 fi
 
-# Start the tunnel in background
-{
-  echo "$(date): Starting SSH tunnel for port $PORT: ${SSH_CMD[*]}" >> "$LOG_FILE"
-  "${SSH_CMD[@]}" >> "$LOG_FILE" 2>&1 &
-  TUNNEL_PID=$!
-  echo $TUNNEL_PID > "$PID_FILE"
-  echo "$(date): Tunnel started with PID $TUNNEL_PID" >> "$LOG_FILE"
-  
-  # Wait for tunnel to establish
-  for i in {1..10}; do
-    if nc -z localhost "$PORT" 2>/dev/null; then
-      echo "$(date): Tunnel established successfully on port $PORT" >> "$LOG_FILE"
-      break
-    fi
-    sleep 0.2
-  done
-} &
+debug_log "Starting SSH tunnel: ${SSH_CMD[*]}"
 
-# Don't wait for the background process
-disown
+# Start the tunnel in foreground and wait for it to establish
+"${SSH_CMD[@]}" >> "$LOG_FILE" 2>&1 &
+TUNNEL_PID=$!
 
-# Attempt to wait briefly for tunnel to be ready
-for i in {1..5}; do
+# Save PID immediately
+echo $TUNNEL_PID > "$PID_FILE"
+debug_log "Tunnel started with PID $TUNNEL_PID"
+
+# Wait for tunnel to establish
+tunnel_up=0
+for i in {1..20}; do
   if nc -z localhost "$PORT" 2>/dev/null; then
+    debug_log "Tunnel established successfully on port $PORT"
+    tunnel_up=1
     break
   fi
   sleep 0.2
 done
+
+# Clean up lock file
+if command -v flock >/dev/null 2>&1; then
+  # Using flock
+  exec 9>&- # Close file descriptor to release lock
+else
+  # Using simple lock
+  rm -f "$LOCK_FILE"
+fi
+
+# Check if the tunnel process is still running
+if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+  debug_log "ERROR: Tunnel process exited unexpectedly! Check logs for details"
+  if [[ -f "$PID_FILE" ]]; then
+    rm -f "$PID_FILE"
+  fi
+  # Return error in case of tunnel failure
+  echo "Failed to establish SSH tunnel" >&2
+  exit 1
+elif [[ $tunnel_up -eq 0 ]]; then
+  debug_log "WARNING: Tunnel process is running but port $PORT is not responding"
+fi
 
 # Return valid credential format for kubectl
 echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
