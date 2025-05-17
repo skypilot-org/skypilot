@@ -23,11 +23,11 @@ class InfraInfo:
                  region: Optional[str] = None,
                  zone: Optional[str] = None):
         assert cloud not in ['none', 'None', 'NONE'], 'cloud must be specified'
-        if cloud == '*':
+        if not cloud or cloud == '*':
             cloud = None
-        if region == '*':
+        if not region or region == '*':
             region = None
-        if zone == '*':
+        if not zone or zone == '*':
             zone = None
 
         self.cloud = cloud
@@ -57,11 +57,13 @@ class InfraInfo:
         Raises:
             ValueError: If the infra string is malformed.
         """
-        if infra is None or infra.strip() == '':
+        if infra is None or not infra.strip():
             return InfraInfo()
 
-        parts = infra.strip().split(
-            '/')  # Split on / to get cloud, region, zone
+        infra = infra.strip().strip('/')
+
+        # Split on / to get cloud, region, zone
+        parts = [p.strip() for p in infra.strip().split('/')]
 
         if '' in parts:
             with ux_utils.print_exception_no_traceback():
