@@ -246,7 +246,8 @@ class Hyperbolic(clouds.Cloud):
         del cluster_name, dryrun  # unused
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        custom_resources = resources_utils.make_ray_custom_resources_str(acc_dict)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': r.instance_type,
