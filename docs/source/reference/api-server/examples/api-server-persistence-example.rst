@@ -86,6 +86,8 @@ To learn how to configure the credentials for another cloud provider, please ref
 
 .. code-block:: bash
 
+    export NAMESPACE=skypilot
+    kubectl create namespace $NAMESPACE
     kubectl create secret generic lambda-credentials \
     --namespace $NAMESPACE \
     --from-literal api_key=YOUR_API_KEY
@@ -118,9 +120,7 @@ Next, deploy the API server using Helm with the following command.
     --set lambdaCredentials.enabled=true \
     --set lambdaCredentials.lambdaSecretName=lambda-credentials
 
-Once the API server is deployed, find the API server URL following the instructions in :ref:`sky-api-server-connect`.
-
-Then, log in to the API server using the following command.
+Once the API server is deployed, find the API server URL following the instructions in :ref:`sky-get-api-server-url` to get the API server URL, then log in to the API server using the following command:
 
 .. code-block:: bash
 
