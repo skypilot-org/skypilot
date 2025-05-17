@@ -661,3 +661,9 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. tip::
 
     If you are installing SkyPilot API client in the same environment, we recommend using a different python environment (venv, conda, etc.) to avoid conflicts with the SkyPilot installation used to deploy the API server.
+
+
+.. toctree::
+   :hidden:
+
+   Persisting API Server State Example <examples/api-server-persistence-example>
