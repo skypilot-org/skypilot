@@ -33,6 +33,9 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         clouds = [clouds]  # type: ignore
 
     def _execute_catalog_method(cloud: str):
+        if cloud == 'ssh':
+            # SSH is a special case, we need to use the kubernetes catalog.
+            cloud = 'kubernetes'
         try:
             cloud_module = importlib.import_module(
                 f'sky.clouds.service_catalog.{cloud.lower()}_catalog')

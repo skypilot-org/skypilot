@@ -320,7 +320,7 @@ class SkySSHUpLineProcessor(LineProcessor):
             self.status_display.update(
                 ux_utils.spinner_message(
                     'Creating remote cluster - '
-                    'deploying Kubernetes on head node',
+                    'deploying SkyPilot runtime on head node',
                     log_path=self.log_path,
                     is_local=self.is_local))
         if 'K3s deployed on head node.' in log_line:
@@ -333,7 +333,7 @@ class SkySSHUpLineProcessor(LineProcessor):
             self.status_display.update(
                 ux_utils.spinner_message(
                     'Creating remote cluster - '
-                    'deploying Kubernetes on worker nodes',
+                    'deploying SkyPilot runtime on worker nodes',
                     log_path=self.log_path,
                     is_local=self.is_local))
         if 'Kubernetes deployed on worker node' in log_line:

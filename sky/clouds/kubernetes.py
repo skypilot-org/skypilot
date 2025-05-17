@@ -162,6 +162,12 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = set(all_contexts)
 
+        # Exclude contexts starting with `ssh-`
+        # TODO(romilb): Remove this once SSH Node Pools use a separate kubeconfig.
+        all_contexts = [
+            ctx for ctx in all_contexts if not ctx.startswith('ssh-')
+        ]
+
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
 
