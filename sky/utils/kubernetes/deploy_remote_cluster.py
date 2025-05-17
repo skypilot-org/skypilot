@@ -2,12 +2,14 @@
 # Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script.
 import argparse
 import os
+import re
+import random
 import subprocess
 import sys
 import tempfile
 import time
 import yaml
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 
 # Colors for nicer UX
 RED = '\033[0;31m'
@@ -247,9 +249,82 @@ def ensure_directory_exists(path):
     if directory and not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)
 
+def get_used_localhost_ports() -> Set[int]:
+    """Get SSH port forwardings already in use on localhost"""
+    used_ports = set()
+    
+    # Get ports from netstat (works on macOS and Linux)
+    try:
+        if sys.platform == 'darwin':
+            # macOS
+            result = subprocess.run(
+                ["netstat", "-an", "-p", "tcp"], 
+                capture_output=True, text=True)
+        else:
+            # Linux and other Unix-like systems
+            result = subprocess.run(
+                ["netstat", "-tln"], 
+                capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # Look for lines with "localhost:<port>" or "127.0.0.1:<port>"
+            for line in result.stdout.splitlines():
+                if "127.0.0.1:" in line or "localhost:" in line:
+                    match = re.search(r':(64\d\d)\s', line)
+                    if match:
+                        port = int(match.group(1))
+                        if 6400 <= port <= 6500:  # Only consider our range
+                            used_ports.add(port)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        # If netstat fails, try another approach
+        pass
+    
+    # Also check ports from existing kubeconfig entries
+    try:
+        result = subprocess.run(
+            ["kubectl", "config", "view", "-o", "jsonpath='{.clusters[*].cluster.server}'"],
+            capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # Look for localhost URLs with ports
+            for url in result.stdout.split():
+                if "localhost:" in url or "127.0.0.1:" in url:
+                    match = re.search(r':(\d+)', url)
+                    if match:
+                        port = int(match.group(1))
+                        if 6400 <= port <= 6500:  # Only consider our range
+                            used_ports.add(port)
+    except subprocess.SubprocessError:
+        pass
+    
+    return used_ports
+
+def get_available_port(start: int = 6443, end: int = 6499) -> int:
+    """Get an available port in the given range that's not used by other tunnels"""
+    used_ports = get_used_localhost_ports()
+    
+    # Try to use port 6443 first if available for the first cluster
+    if start == 6443 and start not in used_ports:
+        return start
+    
+    # Otherwise find any available port in the range
+    available_ports = list(set(range(start, end + 1)) - used_ports)
+    
+    if not available_ports:
+        # If all ports are used, pick a random one from our range
+        # (we'll terminate any existing connection in the setup)
+        return random.randint(start, end)
+    
+    # Sort to get deterministic allocation
+    available_ports.sort()
+    return available_ports[0]
+
 def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh_config=False):
     """Set up kubeconfig exec credential plugin for SSH tunnel"""
     progress_message("Setting up SSH tunnel for Kubernetes API access...")
+    
+    # Get an available port for this cluster
+    port = get_available_port()
     
     # Paths to scripts
     tunnel_script = os.path.join(SCRIPT_DIR, "ssh-tunnel.sh")
@@ -259,44 +334,41 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
     os.chmod(tunnel_script, 0o755)
     os.chmod(cleanup_script, 0o755)
     
-    # Build the credential exec command
-    if use_ssh_config:
-        exec_cmd = f"{tunnel_script} --use-ssh-config --context {context_name} {head_node}"
-    else:
-        exec_cmd = f"{tunnel_script} --ssh-key {ssh_key} --context {context_name} {head_node} {ssh_user}"
-    
-    # Update kubeconfig to use localhost instead of remote IP
+    # Update kubeconfig to use localhost with the selected port
     run_command(["kubectl", "config", "set-cluster", context_name, 
-                "--server=https://localhost:6443",
+                f"--server=https://localhost:{port}",
                 "--insecure-skip-tls-verify=true"])
     
-    # Set up exec credential plugin
-    run_command([
-        "kubectl", "config", "set-credentials", context_name,
-        f"--exec-command={tunnel_script}",
-        f"--exec-arg=--context",
-        f"--exec-arg={context_name}",
-        "--exec-api-version=client.authentication.k8s.io/v1beta1"
-    ])
+    # Build the exec args list based on auth method
+    exec_args = [
+        "--exec-command", tunnel_script,
+        "--exec-api-version", "client.authentication.k8s.io/v1beta1"
+    ]
     
     if use_ssh_config:
         run_command([
-            "kubectl", "config", "set-credentials", context_name,
-            f"--exec-arg=--use-ssh-config",
-            f"--exec-arg={head_node}"
+            "kubectl", "config", "set-credentials", context_name
+        ] + exec_args + [
+            "--exec-arg=--context", f"--exec-arg={context_name}",
+            "--exec-arg=--port", f"--exec-arg={port}",
+            "--exec-arg=--use-ssh-config", f"--exec-arg={head_node}"
         ])
     else:
         run_command([
-            "kubectl", "config", "set-credentials", context_name,
-            f"--exec-arg=--ssh-key",
-            f"--exec-arg={ssh_key}",
-            f"--exec-arg={head_node}",
-            f"--exec-arg={ssh_user}"
+            "kubectl", "config", "set-credentials", context_name
+        ] + exec_args + [
+            "--exec-arg=--context", f"--exec-arg={context_name}",
+            "--exec-arg=--port", f"--exec-arg={port}",
+            "--exec-arg=--ssh-key", f"--exec-arg={ssh_key}",
+            "--exec-arg=--host", f"--exec-arg={head_node}",
+            "--exec-arg=--user", f"--exec-arg={ssh_user}"
         ])
     
-    success_message("SSH tunnel configured through kubectl credential plugin")
-    print(f"{GREEN}Your kubectl connection is now tunneled through SSH (port 6443).{NC}", flush=True)
+    success_message(f"SSH tunnel configured through kubectl credential plugin on port {port}")
+    print(f"{GREEN}Your kubectl connection is now tunneled through SSH (port {port}).{NC}", flush=True)
     print(f"{GREEN}This tunnel will be automatically established when needed.{NC}", flush=True)
+    
+    return port
 
 def cleanup_kubectl_ssh_tunnel(context_name):
     """Clean up the SSH tunnel for a specific context"""
