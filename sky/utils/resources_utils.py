@@ -161,7 +161,9 @@ def format_resource(resource: 'resources_lib.Resources',
         instance_type = common_utils.truncate_long_string(instance_type, 15)
     if not is_k8s:
         components.append(f'type={instance_type}')
-    if not simplify:
+    if simplify:
+        components.append('...')
+    else:
         image_id = resource.image_id
         if image_id is not None:
             if None in image_id:
@@ -177,7 +179,7 @@ def format_resource(resource: 'resources_lib.Resources',
             components.append(f'ports={ports}')
 
     spot = '[Spot]' if resource.use_spot else ''
-    return f'({spot}{"" if not components else ", ".join(components)}, ...)'
+    return f'({spot}{"" if not components else ", ".join(components)})'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
