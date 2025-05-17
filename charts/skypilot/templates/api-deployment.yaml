@@ -125,6 +125,11 @@ spec:
           mountPath: /root/.runpod
           readOnly: true
         {{- end }}
+        {{- if .Values.lambdaCredentials.enabled }}
+        - name: lambda-config
+          mountPath: /root/.lambda_cloud
+          readOnly: true
+        {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
@@ -213,6 +218,35 @@ spec:
         - name: runpod-config
           mountPath: /root/.runpod
       {{- end }}
+      {{- if .Values.lambdaCredentials.enabled }}
+      - name: create-lambda-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up Lambda credentials..."
+          if [ -n "$LAMBDA_API_KEY" ]; then
+            echo "Lambda credentials found in environment variable."
+            mkdir -p /root/.lambda_cloud
+            echo "api_key = $LAMBDA_API_KEY" > /root/.lambda_cloud/lambda_keys
+          else
+            echo "Lambda credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: LAMBDA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.lambdaCredentials.lambdaSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: lambda-config
+          mountPath: /root/.lambda_cloud
+      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -235,6 +269,10 @@ spec:
       {{- end }}
       {{- if .Values.runpodCredentials.enabled }}
       - name: runpod-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.lambdaCredentials.enabled }}
+      - name: lambda-config
         emptyDir: {}
       {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
