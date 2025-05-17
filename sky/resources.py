@@ -102,13 +102,13 @@ class Resources:
 
     def __init__(
         self,
-        infra: Optional[str] = None,
         cloud: Optional[clouds.Cloud] = None,
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
+        infra: Optional[str] = None,
         use_spot: Optional[bool] = None,
         job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
                                      str]] = None,
@@ -150,12 +150,7 @@ class Resources:
 
 
         Args:
-          infra: a string specifying the infrastructure to use, in the format
-            of "cloud/region" or "cloud/region/zone". For example,
-            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
-            specifying cloud, region, and zone separately. If provided, it
-            takes precedence over cloud, region, and zone parameters.
-          cloud: the cloud to use.
+          cloud: the cloud to use. Deprecated. Use `infra` instead.
           instance_type: the instance type to use.
           cpus: the number of CPUs required for the task.
             If a str, must be a string of the form ``'2'`` or ``'2+'``, where
@@ -169,6 +164,11 @@ class Resources:
             dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
           accelerator_args: accelerator-specific arguments. For example,
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+          infra: a string specifying the infrastructure to use, in the format
+            of "cloud/region" or "cloud/region/zone". For example,
+            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
+            specifying cloud, region, and zone separately. If provided, it
+            takes precedence over cloud, region, and zone parameters.
           use_spot: whether to use spot instances. If None, defaults to
             False.
           job_recovery: the job recovery strategy to use for the managed
@@ -181,8 +181,8 @@ class Resources:
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
 
-          region: the region to use.
-          zone: the zone to use.
+          region: the region to use. Deprecated. Use `infra` instead.
+          zone: the zone to use. Deprecated. Use `infra` instead.
           image_id: the image ID to use. If a str, must be a string
             of the image id from the cloud, such as AWS:
             ``'ami-1234567890abcdef0'``, GCP:
