@@ -23,6 +23,13 @@ class InfraInfo:
                  region: Optional[str] = None,
                  zone: Optional[str] = None):
         assert cloud not in ['none', 'None', 'NONE'], 'cloud must be specified'
+        if cloud == '*':
+            cloud = None
+        if region == '*':
+            region = None
+        if zone == '*':
+            zone = None
+
         self.cloud = cloud
         self.region = region
         self.zone = zone
@@ -117,18 +124,20 @@ class InfraInfo:
         region = self.region
         zone = self.zone
 
-        if cloud is None or cloud == '*':
-            return None
-
+        if cloud is None:
+            cloud = '*'
         if region is None:
             region = '*'
         if zone is None:
             zone = '*'
 
         # Build the parts list and filter out trailing wildcards
-        parts = [str(cloud).lower(), region, zone]
+        parts = [cloud.lower(), region, zone]
         while parts and parts[-1] == '*':
             parts.pop()
+
+        if not parts:
+            return None
 
         # Join the parts with '/'
         return '/'.join(parts)
