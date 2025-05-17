@@ -21,7 +21,7 @@ import { formatDuration } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
-import { CustomTooltip as Tooltip, relativeTime } from '@/components/utils';
+import { CustomTooltip as Tooltip, NonCapitalizedTooltip, relativeTime } from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
@@ -558,21 +558,24 @@ export function ManagedJobsTable({
                         <StatusBadge status={item.status} />
                       </TableCell>
                       <TableCell>
-                        {item.resources_str || item.resources}
+                        {item.requested_resources}
                       </TableCell>
                       <TableCell>
-                        {item.cloud && item.cloud !== '-'
-                          ? [
-                              item.cloud,
-                              item.region && item.region !== '-' && !item.zone                                ? item.region
-                                : null,
-                              item.zone && item.zone !== '-' ? item.zone : null,
-                            ]
-                              .filter(Boolean)
-                              .join('/')
-                          : '-'}
+                        <NonCapitalizedTooltip
+                          content={item.full_infra || item.infra}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.infra}</span>
+                        </NonCapitalizedTooltip>
                       </TableCell>
-                      <TableCell>{item.cluster_resources}</TableCell>
+                      <TableCell>
+                        <NonCapitalizedTooltip
+                          content={item.resources_str_full || item.resources_str}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.resources_str}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
                       <TableCell>{item.recoveries}</TableCell>
                       <TableCell>
                         {item.details ? (
@@ -958,15 +961,9 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
+                onClick={() => requestSort('resources')}
               >
-                Resources{getSortDirection('resources_str')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
+                Resources{getSortDirection('resources')}
               </TableHead>
               <TableHead className="whitespace-nowrap">Logs</TableHead>
             </TableRow>
@@ -1005,22 +1002,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
-                    <TableCell>
-                      {item.resources_str || item.resources}
-                    </TableCell>
-                    <TableCell>
-                      {item.cloud && item.cloud !== '-'
-                        ? [
-                            item.cloud,
-                            item.region && item.region !== '-'
-                              ? item.region
-                              : null,
-                            item.zone && item.zone !== '-' ? item.zone : null,
-                          ]
-                            .filter(Boolean)
-                            .join('/')
-                        : item.infra || item.full_infra || 'N/A'}
-                    </TableCell>
+                    <TableCell>{item.resources}</TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions
                         jobParent={`/clusters/${clusterName}`}
@@ -1032,7 +1014,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      colSpan={9}
+                      colSpan={8}
                       innerRef={expandedRowRef}
                     />
                   )}
@@ -1041,7 +1023,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
                   No jobs found
@@ -1141,6 +1123,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
     </div>
   );
 }
+
 
 function ExpandedDetailsRow({ text, colSpan, innerRef }) {
   return (

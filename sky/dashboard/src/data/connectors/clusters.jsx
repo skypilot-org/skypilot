@@ -53,7 +53,6 @@ export async function getClusters({ clusterNames = null } = {}) {
         full_infra: full_region_or_zone
           ? `${cluster.cloud} (${full_region_or_zone})`
           : cluster.cloud,
-        region: cluster.region,
         cpus: cluster.cpus,
         mem: cluster.memory,
         gpus: cluster.accelerators,

@@ -82,6 +82,27 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
       const total_duration = endTime - job.submitted_at;
 
+      let region_or_zone = '';
+      if (job.zone) {
+        region_or_zone = job.zone;
+      } else {
+        region_or_zone = job.region;
+      }
+
+      const full_region_or_zone = region_or_zone;
+      if (region_or_zone && region_or_zone.length > 15) {
+        region_or_zone = region_or_zone.substring(0, 15) + '...';
+      }
+
+      let infra = job.cloud + ' (' + region_or_zone + ')';
+      if (region_or_zone === '-') {
+        infra = job.cloud;
+      }
+      let full_infra = job.cloud + ' (' + full_region_or_zone + ')';
+      if (full_region_or_zone === '-') {
+        full_infra = job.cloud;
+      }
+
       return {
         id: job.job_id,
         task: job.task_name,
@@ -89,12 +110,11 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         job_duration: job.job_duration,
         total_duration: total_duration,
         status: job.status,
-        resources: job.resources,
-        cluster_resources: job.cluster_resources,
-        cluster_resources_full: job.cluster_resources_full,
-        cloud: job.cloud,
-        region: job.region,
-        zone: job.zone,
+        requested_resources: job.resources,
+        resources_str: job.cluster_resources,
+        resources_str_full: job.cluster_resources_full,
+        infra: infra,
+        full_infra: job.cloud + ' (' + full_region_or_zone + ')',
         recoveries: job.recovery_count,
         details: job.failure_reason,
         user: job.user_name,
