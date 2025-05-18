@@ -1677,7 +1677,7 @@ def test_aws_disk_tier():
             'aws-disk-tier-' + disk_tier.value,
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-                f'sky launch -y -c {name} --infra aws --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
