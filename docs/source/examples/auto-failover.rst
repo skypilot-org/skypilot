@@ -100,6 +100,11 @@ GCP, where it succeeded after one region:
   Launching a new cluster 'a100-8'. Proceed? [Y/n]:
 
   ...
+  ⚙️ Launching on Azure eastus.
+  E 10-11 18:24:59 instance.py:457] Failed to create instances: [azure.core.exceptions.HttpResponseError] (InvalidTemplateDeployment)
+  sky.exceptions.ResourcesUnavailableError: Failed to acquire resources in all zones in eastus
+  ...
+
   ⚙️ Launching on GCP us-central1 (us-central1-a).
   W 10-11 18:25:57 instance_utils.py:112] Got return codes 'VM_MIN_COUNT_NOT_REACHED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS' in us-central1-a: 'Requested minimum count of 1 VMs could not be created'; "The zone 'projects/xxxxxx/zones/us-central1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'"
   ...
