@@ -713,16 +713,14 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         if os.path.getsize(cert_file_path) > 0:
                             print(f"{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}", flush=True)
                             
-                            # Check for PEM format
+                            # Quick validation of PEM format
                             with open(cert_file_path, 'r') as f:
-                                first_line = f.readline().strip()
-                                f.seek(0, os.SEEK_END)
-                                f.seek(max(0, f.tell() - 100), os.SEEK_SET)  # Last ~100 chars
-                                last_part = f.read()
-                                last_line = last_part.strip().split('\n')[-1] if '\n' in last_part else last_part.strip()
-                            
-                            print(f"{GREEN}Certificate file starts with: {first_line}{NC}", flush=True)
-                            print(f"{GREEN}Certificate file ends with: {last_line}{NC}", flush=True)
+                                content = f.readlines()
+                                first_line = content[0].strip() if content else ""
+                                last_line = content[-1].strip() if content else ""
+                                
+                            if not first_line.startswith("-----BEGIN") or not last_line.startswith("-----END"):
+                                print(f"{YELLOW}Warning: Certificate may not be in proper PEM format{NC}", flush=True)
                         else:
                             print(f"{RED}Error: Certificate file is empty{NC}", flush=True)
                     except Exception as e:
@@ -756,16 +754,14 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         if os.path.getsize(key_file_path) > 0:
                             print(f"{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}", flush=True)
                             
-                            # Check for PEM format
+                            # Quick validation of PEM format
                             with open(key_file_path, 'r') as f:
-                                first_line = f.readline().strip()
-                                f.seek(0, os.SEEK_END)
-                                f.seek(max(0, f.tell() - 100), os.SEEK_SET)  # Last ~100 chars
-                                last_part = f.read()
-                                last_line = last_part.strip().split('\n')[-1] if '\n' in last_part else last_part.strip()
-                            
-                            print(f"{GREEN}Key file starts with: {first_line}{NC}", flush=True)
-                            print(f"{GREEN}Key file ends with: {last_line}{NC}", flush=True)
+                                content = f.readlines()
+                                first_line = content[0].strip() if content else ""
+                                last_line = content[-1].strip() if content else ""
+                                
+                            if not first_line.startswith("-----BEGIN") or not last_line.startswith("-----END"):
+                                print(f"{YELLOW}Warning: Key may not be in proper PEM format{NC}", flush=True)
                         else:
                             print(f"{RED}Error: Key file is empty{NC}", flush=True)
                     except Exception as e:

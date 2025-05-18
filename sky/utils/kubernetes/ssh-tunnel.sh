@@ -4,8 +4,8 @@
 
 # Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT] [--ttl SECONDS]
 
-# Enable debug logging (writes to stderr and logfile)
-DEBUG=1
+# Disable debug logging by default (set to 1 to enable debugging)
+DEBUG=0
 
 # Default time-to-live for credential in seconds
 # This forces kubectl to check the tunnel status frequently
@@ -19,13 +19,12 @@ HOST=""
 USER=""
 PORT=6443  # Default port if not specified
 
-# Log to both stderr and log file
+# Log only to the log file, not to stderr
 debug_log() {
-  local message="$(date): $1"
   if [[ $DEBUG -eq 1 ]]; then
-    echo "$message" >&2
+    local message="$(date): $1"
+    echo "$message" >> "$LOG_FILE"
   fi
-  echo "$message" >> "$LOG_FILE"
 }
 
 # Generate expiration timestamp for credential
