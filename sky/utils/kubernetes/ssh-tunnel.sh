@@ -2,10 +2,14 @@
 # ssh-tunnel.sh - Fast SSH tunnel script for Kubernetes API access
 # Used as kubectl exec credential plugin to establish SSH tunnel on demand
 
-# Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT]
+# Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT] [--ttl SECONDS]
 
 # Enable debug logging (writes to stderr and logfile)
 DEBUG=1
+
+# Default time-to-live for credential in seconds
+# This forces kubectl to check the tunnel status frequently
+TTL_SECONDS=30
 
 # Parse arguments
 USE_SSH_CONFIG=0
@@ -22,6 +26,12 @@ debug_log() {
     echo "$message" >&2
   fi
   echo "$message" >> "$LOG_FILE"
+}
+
+# Generate expiration timestamp for credential
+generate_expiration_timestamp() {
+  # Try macOS date format first, fallback to Linux format
+  date -u -v+${TTL_SECONDS}S +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+${TTL_SECONDS} seconds" +"%Y-%m-%dT%H:%M:%SZ"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -48,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --user)
       USER="$2"
+      shift 2
+      ;;
+    --ttl)
+      TTL_SECONDS="$2"
       shift 2
       ;;
     *)
@@ -77,7 +91,7 @@ LOG_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.log"
 LOCK_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.lock"
 
 debug_log "Starting ssh-tunnel.sh for context $CONTEXT, host $HOST, port $PORT"
-debug_log "SSH Config: $USE_SSH_CONFIG, User: $USER"
+debug_log "SSH Config: $USE_SSH_CONFIG, User: $USER, TTL: ${TTL_SECONDS}s"
 
 # Check if specified port is already in use (tunnel may be running)
 if nc -z localhost "$PORT" 2>/dev/null; then
@@ -95,8 +109,11 @@ if nc -z localhost "$PORT" 2>/dev/null; then
     debug_log "Port $PORT is in use but no PID file exists"
   fi
   
-  # Return valid credential format for kubectl
-  echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
+  # Generate expiration timestamp
+  EXPIRATION_TIME=$(generate_expiration_timestamp)
+  
+  # Return valid credential format for kubectl with expiration
+  echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
   exit 0
 fi
 
@@ -112,7 +129,11 @@ if ! command -v flock >/dev/null 2>&1; then
       for i in {1..10}; do
         if nc -z localhost "$PORT" 2>/dev/null; then
           debug_log "Tunnel is now active"
-          echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
+          
+          # Generate expiration timestamp
+          EXPIRATION_TIME=$(generate_expiration_timestamp)
+          
+          echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
           exit 0
         fi
         sleep 0.2
@@ -135,7 +156,11 @@ else
     for i in {1..10}; do
       if nc -z localhost "$PORT" 2>/dev/null; then
         debug_log "Tunnel is now active"
-        echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
+        
+        # Generate expiration timestamp
+        EXPIRATION_TIME=$(generate_expiration_timestamp)
+        
+        echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
         exit 0
       fi
       sleep 0.2
@@ -237,6 +262,9 @@ elif [[ $tunnel_up -eq 0 ]]; then
   debug_log "WARNING: Tunnel process is running but port $PORT is not responding"
 fi
 
-# Return valid credential format for kubectl
-echo '{"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","status":{"token":"k8s-ssh-tunnel-token"}}'
+# Generate expiration timestamp
+EXPIRATION_TIME=$(generate_expiration_timestamp)
+
+# Return valid credential format for kubectl with expiration
+echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
 exit 0 

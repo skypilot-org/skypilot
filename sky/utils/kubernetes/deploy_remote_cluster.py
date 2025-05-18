@@ -345,12 +345,16 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
         "--exec-api-version", "client.authentication.k8s.io/v1beta1"
     ]
     
+    # Set credential TTL to force frequent tunnel checks
+    ttl_seconds = 30
+    
     if use_ssh_config:
         run_command([
             "kubectl", "config", "set-credentials", context_name
         ] + exec_args + [
             "--exec-arg=--context", f"--exec-arg={context_name}",
             "--exec-arg=--port", f"--exec-arg={port}",
+            "--exec-arg=--ttl", f"--exec-arg={ttl_seconds}",
             "--exec-arg=--use-ssh-config", "--exec-arg=--host", f"--exec-arg={head_node}"
         ])
     else:
@@ -359,6 +363,7 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
         ] + exec_args + [
             "--exec-arg=--context", f"--exec-arg={context_name}",
             "--exec-arg=--port", f"--exec-arg={port}",
+            "--exec-arg=--ttl", f"--exec-arg={ttl_seconds}",
             "--exec-arg=--host", f"--exec-arg={head_node}",
             "--exec-arg=--user", f"--exec-arg={ssh_user}",
             "--exec-arg=--ssh-key", f"--exec-arg={ssh_key}"
@@ -367,6 +372,7 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
     success_message(f"SSH tunnel configured through kubectl credential plugin on port {port}")
     print(f"{GREEN}Your kubectl connection is now tunneled through SSH (port {port}).{NC}", flush=True)
     print(f"{GREEN}This tunnel will be automatically established when needed.{NC}", flush=True)
+    print(f"{GREEN}Credential TTL set to {ttl_seconds}s to ensure tunnel health is checked frequently.{NC}", flush=True)
     
     return port
 
