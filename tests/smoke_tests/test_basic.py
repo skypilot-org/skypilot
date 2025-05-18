@@ -560,7 +560,7 @@ def test_multiple_accelerators_ordered_with_default():
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered_with_default.yaml | grep "Using user-specified accelerators list"',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status {name} | grep Spot',
+            f'sky status {name} | grep spot',
         ],
         f'sky down -y {name}',
     )
