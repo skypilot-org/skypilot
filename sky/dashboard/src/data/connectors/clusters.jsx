@@ -12,24 +12,28 @@ import { ENDPOINT } from '@/data/connectors/constants';
  */
 function truncateMiddle(str, maxLength = 15) {
   if (!str || str.length <= maxLength) return str;
-  
+
   // Reserve 3 characters for '...'
   if (maxLength <= 3) return '...';
-  
+
   // Calculate how many characters to keep from beginning and end
   const halfLength = Math.floor((maxLength - 3) / 2);
   const remainder = (maxLength - 3) % 2;
-  
+
   // Keep one more character at the beginning if maxLength - 3 is odd
   const startLength = halfLength + remainder;
   const endLength = halfLength;
-  
+
   // When endLength is 0, just show the start part and '...'
   if (endLength === 0) {
     return str.substring(0, startLength) + '...';
   }
-  
-  return str.substring(0, startLength) + '...' + str.substring(str.length - endLength);
+
+  return (
+    str.substring(0, startLength) +
+    '...' +
+    str.substring(str.length - endLength)
+  );
 }
 
 const clusterStatusMap = {
