@@ -68,8 +68,8 @@ export async function getClusters({ clusterNames = null } = {}) {
       // Store the full value before truncation
       const full_region_or_zone = region_or_zone;
       // Truncate region_or_zone in the middle if it's too long
-      if (region_or_zone && region_or_zone.length > 15) {
-        region_or_zone = truncateMiddle(region_or_zone, 15);
+      if (region_or_zone && region_or_zone.length > 25) {
+        region_or_zone = truncateMiddle(region_or_zone, 25);
       }
       return {
         status: clusterStatusMap[cluster.status],
