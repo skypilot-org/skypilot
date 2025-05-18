@@ -723,7 +723,9 @@ def deprecated_function(
     return new_func
 
 
-def truncate_long_string(s: str, max_length: int = 35, truncate_middle: bool = False) -> str:
+def truncate_long_string(s: str,
+                         max_length: int = 35,
+                         truncate_middle: bool = False) -> str:
     """Truncate a string to a maximum length.
     
     Args:
@@ -738,22 +740,22 @@ def truncate_long_string(s: str, max_length: int = 35, truncate_middle: bool = F
     """
     if len(s) <= max_length:
         return s
-    
+
     if truncate_middle:
         # Reserve 3 characters for '...'
         if max_length <= 3:
             return '...'
-        
+
         # Calculate how many characters to keep from beginning and end
         half_length = (max_length - 3) // 2
         remainder = (max_length - 3) % 2
-        
+
         # Keep one more character at the beginning if max_length - 3 is odd
         start_length = half_length + remainder
         end_length = half_length
-        
+
         return s[:start_length] + '...' + s[-end_length:]
-        
+
     # Original end-truncation logic
     splits = s.split(' ')
     if len(splits[0]) > max_length:

@@ -164,7 +164,8 @@ class InfraInfo:
 
         if region_or_zone is not None and truncate:
             region_or_zone = common_utils.truncate_long_string(
-                region_or_zone, _REGION_OR_ZONE_TRUNCATION_LENGTH, 
+                region_or_zone,
+                _REGION_OR_ZONE_TRUNCATION_LENGTH,
                 truncate_middle=True)
 
         formatted_str = f'{self.cloud}'

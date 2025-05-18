@@ -143,7 +143,8 @@ class TestInfraUtils(unittest.TestCase):
             ('*', 'us-east-1', None, True, '-'),
             # Test truncation boundary cases
             ('aws', 'x' * 25, None, True, 'aws (' + 'x' * 25 + ')'),
-            ('aws', 'x' * 26, None, True, 'aws (' + 'x' * 11 + '...' + 'x' * 11 + ')'),
+            ('aws', 'x' * 26, None, True,
+             'aws (' + 'x' * 11 + '...' + 'x' * 11 + ')'),
             ('aws', 'x' * 24, None, True, 'aws (' + 'x' * 24 + ')'),
             # Test with empty strings
             ('aws', '', None, True, 'aws'),
