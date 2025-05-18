@@ -735,16 +735,35 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         
                         # Check if the data already looks like a PEM file
                         key_file_path = os.path.join(cert_dir, f"{context_name}-key.pem")
-                        has_begin = any(marker in key_pem for marker in ["-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----"])
-                        has_end = any(marker in key_pem for marker in ["-----END PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"])
                         
-                        if not has_begin or not has_end:
-                            print(f"{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}", flush=True)
-                            # Add PEM markers if missing
-                            if not has_begin:
-                                key_pem = f"-----BEGIN PRIVATE KEY-----\n{key_pem}"
-                            if not has_end:
-                                key_pem = f"{key_pem}\n-----END PRIVATE KEY-----"
+                        # Check for EC key format
+                        if "EC PRIVATE KEY" in key_pem:
+                            # Handle EC KEY format directly
+                            match_ec = re.search(r'-----BEGIN EC PRIVATE KEY-----(.*?)-----END EC PRIVATE KEY-----', 
+                                               key_pem, re.DOTALL)
+                            if match_ec:
+                                # Extract and properly format EC key
+                                key_content = match_ec.group(1).strip()
+                                key_pem = f"-----BEGIN EC PRIVATE KEY-----\n{key_content}\n-----END EC PRIVATE KEY-----"
+                            else:
+                                # Extract content and assume EC format
+                                key_content = re.sub(r'-----BEGIN.*?-----', '', key_pem)
+                                key_content = re.sub(r'-----END.*?-----.*', '', key_content).strip()
+                                key_pem = f"-----BEGIN EC PRIVATE KEY-----\n{key_content}\n-----END EC PRIVATE KEY-----"
+                        else:
+                            # Handle regular private key format
+                            has_begin = any(marker in key_pem for marker in ["-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----"])
+                            has_end = any(marker in key_pem for marker in ["-----END PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"])
+                            
+                            if not has_begin or not has_end:
+                                print(f"{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}", flush=True)
+                                # Add PEM markers if missing
+                                if not has_begin:
+                                    key_pem = f"-----BEGIN PRIVATE KEY-----\n{key_pem}"
+                                if not has_end:
+                                    key_pem = f"{key_pem}\n-----END PRIVATE KEY-----"
+                                    # Remove any trailing characters after END marker
+                                    key_pem = re.sub(r'(-----END PRIVATE KEY-----).*', r'\1', key_pem)
                         
                         # Write the key
                         with open(key_file_path, 'w') as key_file:
