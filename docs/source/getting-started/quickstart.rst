@@ -32,7 +32,7 @@ Copy the following YAML into a ``hello_sky.yaml`` file:
 
   resources:
     # Optional; if left out, automatically pick the cheapest cloud.
-    cloud: aws
+    infra: aws
     # 8x NVIDIA A100 GPU
     accelerators: A100:8
 
