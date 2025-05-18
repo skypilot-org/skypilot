@@ -26,7 +26,8 @@ def cli():
 @click.option("--command", type=str, help="The command to run on the cluster")
 def launch_cluster(cluster_name: str, cloud: str, command: str) -> None:
     task = sky.Task(run=command)
-    resource = sky.Resources(infra=cloud, **LOW_RESOURCE_PARAM)
+    cloud = registry.CLOUD_REGISTRY.from_str(cloud)
+    resource = sky.Resources(cloud=cloud, **LOW_RESOURCE_PARAM)
     task.set_resources(resource)
     request_id = sdk.launch(cluster_name=cluster_name, task=task)
     sdk.stream_and_get(request_id)
