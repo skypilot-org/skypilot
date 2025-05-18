@@ -43,26 +43,27 @@ class TestTruncateLongString:
         s = "us-west-2-availability-zone-1"
         result = common_utils.truncate_long_string(s, 3, truncate_middle=True)
         assert result == '...'
-        
+
     def test_empty_string(self):
         assert common_utils.truncate_long_string('', 10) == ''
-        
+
     def test_exact_length_no_truncation(self):
-        assert common_utils.truncate_long_string('abcde', 5, 
-                                              truncate_middle=True) == 'abcde'
-        
+        assert common_utils.truncate_long_string(
+            'abcde', 5, truncate_middle=True) == 'abcde'
+
     def test_one_less_than_length(self):
-        assert common_utils.truncate_long_string('abcde', 4,
-                                              truncate_middle=True) == 'a...'
-        
+        assert common_utils.truncate_long_string('abcde',
+                                                 4,
+                                                 truncate_middle=True) == 'a...'
+
     def test_middle_truncation_even_length(self):
         assert common_utils.truncate_long_string(
-            'abcdefghijklmnopqrstuvwxyz', 10, 
+            'abcdefghijklmnopqrstuvwxyz', 10,
             truncate_middle=True) == 'abcd...xyz'
-        
+
     def test_middle_truncation_odd_max_length(self):
         assert common_utils.truncate_long_string(
-            'abcdefghijklmnopqrstuvwxyz', 11, 
+            'abcdefghijklmnopqrstuvwxyz', 11,
             truncate_middle=True) == 'abcd...wxyz'
 
 

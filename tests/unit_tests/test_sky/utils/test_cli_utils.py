@@ -4,7 +4,6 @@ This module contains tests for the CLI utilities in sky.utils.cli_utils.
 """
 import time
 
-import colorama
 import pytest
 
 import sky
@@ -40,7 +39,7 @@ def test_status_table_format():
 
     # Test the resources format
     resources_str = status_utils._get_resources(mock_record)
-    assert resources_str == '1x(vCPUs=8, mem=32, type=m6i.2xlarge, ...)'
+    assert resources_str == '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)'
 
     # Test Kubernetes case
     mock_k8s_resources = Resources(infra='k8s/my-ctx', cpus='2+', memory='4+')
@@ -138,8 +137,8 @@ def test_show_status_table():
             'user_name': 'test_user',
             'user_hash': 'abc123',
             'head_ip': '1.2.3.4',
-            'resources_str': '1x(vCPUs=8, mem=32, type=m6i.2xlarge, ...)',
-            'resources_str_full': ('1x(vCPUs=8, mem=32, type=m6i.2xlarge, '
+            'resources_str': '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)',
+            'resources_str_full': ('1x(cpus=8, mem=32, type=m6i.2xlarge, '
                                    'disk=50)'),
         }
 
@@ -242,17 +241,17 @@ def test_get_resources():
         launched_resources=mock_resources)
     mock_record = {
         'handle': mock_handle,
-        'resources_str': '1x(vCPUs=8, mem=32, type=m6i.2xlarge, ...)',
-        'resources_str_full': '1x(vCPUs=8, mem=32, type=m6i.2xlarge, disk=50)',
+        'resources_str': '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)',
+        'resources_str_full': '1x(cpus=8, mem=32, type=m6i.2xlarge, disk=50)',
     }
 
     # Test normal resources
     resources_str = status_utils._get_resources(mock_record)
-    assert resources_str == '1x(vCPUs=8, mem=32, type=m6i.2xlarge, ...)'
+    assert resources_str == '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)'
 
     # Test full resources
     resources_str = status_utils._get_resources(mock_record, truncate=False)
-    assert resources_str == '1x(vCPUs=8, mem=32, type=m6i.2xlarge, disk=50)'
+    assert resources_str == '1x(cpus=8, mem=32, type=m6i.2xlarge, disk=50)'
 
     # Test no resources
     mock_record['handle'].launched_resources = None
@@ -274,18 +273,18 @@ def test_get_resources_gpu():
         launched_resources=mock_resources_aws_gpu)
     mock_record_aws_gpu = {
         'handle': mock_handle_aws_gpu,
-        'resources_str': '1x(V100:1, vCPUs=8, mem=61, ...)',
-        'resources_str_full': '1x(V100:1, vCPUs=8, mem=61, disk=50)',
+        'resources_str': '1x(V100:1, cpus=8, mem=61, ...)',
+        'resources_str_full': '1x(V100:1, cpus=8, mem=61, disk=50)',
     }
 
     # Test GPU resources
     resources_str = status_utils._get_resources(mock_record_aws_gpu)
-    assert resources_str == '1x(V100:1, vCPUs=8, mem=61, ...)'
+    assert resources_str == '1x(V100:1, cpus=8, mem=61, ...)'
 
     # Test full GPU resources
     resources_str = status_utils._get_resources(mock_record_aws_gpu,
                                                 truncate=False)
-    assert resources_str == '1x(V100:1, vCPUs=8, mem=61, disk=50)'
+    assert resources_str == '1x(V100:1, cpus=8, mem=61, disk=50)'
 
     # Test GCP with multiple GPUs
     mock_resources_gcp_multi_gpu = Resources(infra='gcp/us-central1',
@@ -299,13 +298,13 @@ def test_get_resources_gpu():
         launched_resources=mock_resources_gcp_multi_gpu)
     mock_record_gcp_multi_gpu = {
         'handle': mock_handle_gcp_multi_gpu,
-        'resources_str': '2x(A100:4, vCPUs=12, mem=85, ...)',
-        'resources_str_full': '2x(A100:4, vCPUs=12, mem=85, disk=50)',
+        'resources_str': '2x(A100:4, cpus=12, mem=85, ...)',
+        'resources_str_full': '2x(A100:4, cpus=12, mem=85, disk=50)',
     }
 
     # Test multiple GPU resources
     resources_str = status_utils._get_resources(mock_record_gcp_multi_gpu)
-    assert resources_str == '2x(A100:4, vCPUs=12, mem=85, ...)'
+    assert resources_str == '2x(A100:4, cpus=12, mem=85, ...)'
 
 
 def test_get_resources_kubernetes():
@@ -322,13 +321,13 @@ def test_get_resources_kubernetes():
         launched_resources=mock_resources_k8s_cpu)
     mock_record_k8s_cpu = {
         'handle': mock_handle_k8s_cpu,
-        'resources_str': '1x(vCPUs=4, mem=16, ...)',
-        'resources_str_full': '1x(vCPUs=4, mem=16, disk=50)',
+        'resources_str': '1x(cpus=4, mem=16, ...)',
+        'resources_str_full': '1x(cpus=4, mem=16, disk=50)',
     }
 
     # Test K8s CPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_cpu)
-    assert resources_str == '1x(vCPUs=4, mem=16, ...)'
+    assert resources_str == '1x(cpus=4, mem=16, ...)'
 
     # Test Kubernetes with GPU resources
     mock_resources_k8s_gpu = Resources(infra='k8s/gpu-cluster-ctx',
@@ -343,18 +342,18 @@ def test_get_resources_kubernetes():
         launched_resources=mock_resources_k8s_gpu)
     mock_record_k8s_gpu = {
         'handle': mock_handle_k8s_gpu,
-        'resources_str': '2x(A100:2, vCPUs=8, mem=32, ...)',
-        'resources_str_full': '2x(A100:2, vCPUs=8, mem=32, disk=50)',
+        'resources_str': '2x(A100:2, cpus=8, mem=32, ...)',
+        'resources_str_full': '2x(A100:2, cpus=8, mem=32, disk=50)',
     }
 
     # Test K8s GPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_gpu)
-    assert resources_str == '2x(A100:2, vCPUs=8, mem=32, ...)'
+    assert resources_str == '2x(A100:2, cpus=8, mem=32, ...)'
 
     # Test full K8s GPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_gpu,
                                                 truncate=False)
-    assert resources_str == '2x(A100:2, vCPUs=8, mem=32, disk=50)'
+    assert resources_str == '2x(A100:2, cpus=8, mem=32, disk=50)'
 
     # Test K8s with TPU resources
     mock_resources_k8s_tpu = Resources(infra='k8s/gke-tpu-cluster',
@@ -369,11 +368,11 @@ def test_get_resources_kubernetes():
         launched_resources=mock_resources_k8s_tpu)
     mock_record_k8s_tpu = {
         'handle': mock_handle_k8s_tpu,
-        'resources_str': '1x(tpu-v4-8:1, vCPUs=8, mem=32, ...)',
-        'resources_str_full': ('1x(tpu-v4-8:1, vCPUs=8, mem=32, '
-                               'disk=50)'),
+        'resources_str': '1x(tpu-v4-8:1, cpus=8, mem=32, ...)',
+        'resources_str_full': ('1x(tpu-v4-8:1, cpus=8, mem=32, '
+                              'disk=50)'),
     }
 
     # Test K8s TPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_tpu)
-    assert resources_str == '1x(tpu-v4-8:1, vCPUs=8, mem=32, ...)'
+    assert resources_str == '1x(tpu-v4-8:1, cpus=8, mem=32, ...)' 
