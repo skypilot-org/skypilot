@@ -420,7 +420,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # If azure is used, the azure blob storage checking assumes the bucket is
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
-    region_str = f'/{generic_cloud}' if generic_cloud == 'azure' else ''
+    region_str = f'/centralus' if generic_cloud == 'azure' else ''
     if azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
