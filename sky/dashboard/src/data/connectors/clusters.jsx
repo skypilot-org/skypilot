@@ -4,6 +4,34 @@ import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import { ENDPOINT } from '@/data/connectors/constants';
 
+/**
+ * Truncates a string in the middle, preserving parts from beginning and end.
+ * @param {string} str - The string to truncate
+ * @param {number} maxLength - Maximum length of the truncated string
+ * @return {string} - Truncated string
+ */
+function truncateMiddle(str, maxLength = 15) {
+  if (!str || str.length <= maxLength) return str;
+  
+  // Reserve 3 characters for '...'
+  if (maxLength <= 3) return '...';
+  
+  // Calculate how many characters to keep from beginning and end
+  const halfLength = Math.floor((maxLength - 3) / 2);
+  const remainder = (maxLength - 3) % 2;
+  
+  // Keep one more character at the beginning if maxLength - 3 is odd
+  const startLength = halfLength + remainder;
+  const endLength = halfLength;
+  
+  // When endLength is 0, just show the start part and '...'
+  if (endLength === 0) {
+    return str.substring(0, startLength) + '...';
+  }
+  
+  return str.substring(0, startLength) + '...' + str.substring(str.length - endLength);
+}
+
 const clusterStatusMap = {
   UP: 'RUNNING',
   STOPPED: 'STOPPED',
@@ -39,9 +67,9 @@ export async function getClusters({ clusterNames = null } = {}) {
       }
       // Store the full value before truncation
       const full_region_or_zone = region_or_zone;
-      // Truncate region_or_zone to 15 characters
+      // Truncate region_or_zone in the middle if it's too long
       if (region_or_zone && region_or_zone.length > 15) {
-        region_or_zone = region_or_zone.substring(0, 15) + '...';
+        region_or_zone = truncateMiddle(region_or_zone, 15);
       }
       return {
         status: clusterStatusMap[cluster.status],

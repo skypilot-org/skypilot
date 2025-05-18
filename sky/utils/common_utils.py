@@ -754,6 +754,9 @@ def truncate_long_string(s: str,
         start_length = half_length + remainder
         end_length = half_length
 
+        # When end_length is 0, just show the start part and '...'
+        if end_length == 0:
+            return s[:start_length] + '...'
         return s[:start_length] + '...' + s[-end_length:]
 
     # Original end-truncation logic
