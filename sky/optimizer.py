@@ -994,13 +994,19 @@ class Optimizer:
                     if len(candidate_list) > 1:
                         is_multi_instances = True
                         instance_list = [
-                            res.instance_type for res in candidate_list
+                            res.instance_type
+                            for res in candidate_list
+                            if res.instance_type is not None
                         ]
+                        candidate_str = resources_utils.format_resource(
+                            candidate_list[0], simplify=True)
+
                         logger.info(
-                            f'Multiple {cloud} instances satisfy '
-                            f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]!r} is considered '
-                            f'among:\n{instance_list}.')
+                            f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
+                            f'satisfy {acc_name}:{int(acc_count)}. '
+                            f'The cheapest {candidate_str} is considered '
+                            f'among: {", ".join(instance_list)}.'
+                            f'{colorama.Style.RESET_ALL}')
             if is_multi_instances:
                 logger.info(
                     f'To list more details, run: sky show-gpus {acc_name}\n')
