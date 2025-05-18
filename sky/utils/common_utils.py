@@ -727,14 +727,14 @@ def truncate_long_string(s: str,
                          max_length: int = 35,
                          truncate_middle: bool = False) -> str:
     """Truncate a string to a maximum length.
-    
+
     Args:
         s: String to truncate.
         max_length: Maximum length of the truncated string.
         truncate_middle: Whether to truncate in the middle of the string.
             If True, the middle part of the string is replaced with '...'.
             If False, truncation happens at the end preserving whole words.
-    
+
     Returns:
         Truncated string.
     """
