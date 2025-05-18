@@ -82,6 +82,27 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
       const total_duration = endTime - job.submitted_at;
 
+      // Extract cloud name if not available (backward compatibility)
+      // TODO(zhwu): remove this after 0.12.0
+      let cloud = job.cloud;
+      let cluster_resources = job.cluster_resources;
+      if (!cloud) {
+        // Backward compatibility for old jobs controller without cloud info
+        // Similar to the logic in sky/jobs/utils.py
+        if (job.cluster_resources && job.cluster_resources !== '-') {
+          try {
+            cloud = job.cluster_resources.split('(')[0].split('x').pop().trim();
+            cluster_resources = job.cluster_resources.replace(
+              `${cloud}(`, '(').replace('x ', 'x');
+          } catch (error) {
+            // If parsing fails, set a default value
+            cloud = 'Unknown';
+          }
+        } else {
+          cloud = 'Unknown';
+        }
+      }
+
       let region_or_zone = '';
       if (job.zone) {
         region_or_zone = job.zone;
@@ -94,13 +115,13 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         region_or_zone = region_or_zone.substring(0, 15) + '...';
       }
 
-      let infra = job.cloud + ' (' + region_or_zone + ')';
+      let infra = cloud + ' (' + region_or_zone + ')';
       if (region_or_zone === '-') {
-        infra = job.cloud;
+        infra = cloud;
       }
-      let full_infra = job.cloud + ' (' + full_region_or_zone + ')';
+      let full_infra = cloud + ' (' + full_region_or_zone + ')';
       if (full_region_or_zone === '-') {
-        full_infra = job.cloud;
+        full_infra = cloud;
       }
 
       return {
@@ -111,10 +132,10 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         total_duration: total_duration,
         status: job.status,
         requested_resources: job.resources,
-        resources_str: job.cluster_resources,
-        resources_str_full: job.cluster_resources_full,
+        resources_str: cluster_resources,
+        resources_str_full: job.cluster_resources_full || cluster_resources,
         infra: infra,
-        full_infra: job.cloud + ' (' + full_region_or_zone + ')',
+        full_infra: full_infra,
         recoveries: job.recovery_count,
         details: job.failure_reason,
         user: job.user_name,

@@ -1192,6 +1192,9 @@ def format_job_table(
                     # TODO(zhwu): remove this after 0.12.0
                     cloud = task['cluster_resources'].split('(')[0].split(
                         'x')[-1]
+                    task['cluster_resources'] = task[
+                        'cluster_resources'].replace(f'{cloud}(',
+                                                     '(').replace('x ', 'x')
                 region = task['region']
                 zone = task.get('zone')
                 if cloud == '-':
