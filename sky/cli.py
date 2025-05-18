@@ -346,13 +346,18 @@ _TASK_OPTIONS = [
               'where the task will be invoked. '
               'Overrides the "workdir" config in the YAML if both are supplied.'
              )),
-    click.option('--infra',
-                 required=False,
-                 type=str,
-                 help='Infrastructure to use. '
-                 'Format: cloud, cloud/region, or cloud/region/zone. '
-                 'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
-                 'aws/*/us-east-1a'),
+    click.option(
+        '--infra',
+        required=False,
+        type=str,
+        help='Infrastructure to use. '
+        'Format: cloud, cloud/region, cloud/region/zone, '
+        'or kubernetes/context-name. '
+        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
+        # TODO(zhwu): we have to use `\*` to make sure the docs build
+        # not complaining about the `*`, but this will cause `--help`
+        # to show `\*` instead of `*`.
+        'aws/\\*/us-east-1a, kubernetes/my-cluster-context.'),
     click.option(
         '--cloud',
         required=False,

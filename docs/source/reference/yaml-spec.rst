@@ -159,7 +159,7 @@ Per-node resource requirements (optional).
 
 Infrastructure to use (optional). Format: ``<cloud>``, ``<cloud>/<region>``, ``<cloud>/<region>/<zone>``, ``kubernetes/<context-name>``.
 
-Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, aws/*/us-east-1a, kubernetes/my-cluster-context.
+Examples: ``aws``, ``aws/us-east-1``, ``aws/us-east-1/us-east-1a``, ``aws/*/us-east-1a``, ``kubernetes/my-cluster-context``.
 
 .. code-block:: yaml
 
