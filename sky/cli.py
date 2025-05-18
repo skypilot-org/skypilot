@@ -351,7 +351,8 @@ _TASK_OPTIONS = [
                  type=str,
                  help='Infrastructure to use. '
                  'Format: cloud, cloud/region, or cloud/region/zone. '
-                 'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a'),
+                 'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
+                 'aws/*/us-east-1a'),
     click.option(
         '--cloud',
         required=False,
