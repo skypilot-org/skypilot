@@ -10,6 +10,7 @@ import tempfile
 import time
 import yaml
 from typing import Dict, List, Optional, Any, Tuple, Set
+import base64
 
 # Colors for nicer UX
 RED = '\033[0;31m'
@@ -334,6 +335,11 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
     os.chmod(tunnel_script, 0o755)
     os.chmod(cleanup_script, 0o755)
     
+    # Certificate files
+    cert_dir = os.path.expanduser("~/.sky/tunnel")
+    client_cert_file = os.path.join(cert_dir, f"{context_name}-cert.pem")
+    client_key_file = os.path.join(cert_dir, f"{context_name}-key.pem")
+    
     # Update kubeconfig to use localhost with the selected port
     run_command(["kubectl", "config", "set-cluster", context_name, 
                 f"--server=https://localhost:{port}",
@@ -347,6 +353,11 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
     
     # Set credential TTL to force frequent tunnel checks
     ttl_seconds = 30
+    
+    # Verify if we have extracted certificate data files
+    has_cert_files = os.path.isfile(client_cert_file) and os.path.isfile(client_key_file)
+    if has_cert_files:
+        print(f"{GREEN}Client certificate data extracted and will be used for authentication{NC}", flush=True)
     
     if use_ssh_config:
         run_command([
@@ -629,13 +640,31 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         with open(temp_kubeconfig, 'r') as f_in:
             with open(modified_config, 'w') as f_out:
                 in_cluster = False
+                in_user = False
+                client_cert_data = None
+                client_key_data = None
+                
                 for line in f_in:
                     if "clusters:" in line:
                         in_cluster = True
+                        in_user = False
                     elif "users:" in line:
                         in_cluster = False
+                        in_user = True
+                    elif "contexts:" in line:
+                        in_cluster = False
+                        in_user = False
                     
+                    # Skip certificate authority data in cluster section
                     if in_cluster and "certificate-authority-data:" in line:
+                        continue
+                    # Skip client certificate data in user section but extract it
+                    elif in_user and "client-certificate-data:" in line:
+                        client_cert_data = line.split(":", 1)[1].strip()
+                        continue
+                    # Skip client key data in user section but extract it
+                    elif in_user and "client-key-data:" in line:
+                        client_key_data = line.split(":", 1)[1].strip()
                         continue
                     elif in_cluster and "server:" in line:
                         # Initially just set to the effective master IP
@@ -651,6 +680,96 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                     line = line.replace("current-context: default", f"current-context: {context_name}")
                     
                     f_out.write(line)
+                
+                # Save certificate data if available
+                cert_dir = os.path.expanduser(f"~/.sky/tunnel")
+                os.makedirs(cert_dir, exist_ok=True)
+                
+                if client_cert_data:
+                    # Decode base64 data and save as PEM
+                    try:
+                        # Clean up the certificate data by removing whitespace
+                        clean_cert_data = ''.join(client_cert_data.split())
+                        cert_pem = base64.b64decode(clean_cert_data).decode('utf-8')
+                        
+                        # Check if the data already looks like a PEM file
+                        cert_file_path = os.path.join(cert_dir, f"{context_name}-cert.pem")
+                        has_begin = "-----BEGIN CERTIFICATE-----" in cert_pem
+                        has_end = "-----END CERTIFICATE-----" in cert_pem
+                        
+                        if not has_begin or not has_end:
+                            print(f"{YELLOW}Warning: Certificate data missing PEM markers, attempting to fix...{NC}", flush=True)
+                            # Add PEM markers if missing
+                            if not has_begin:
+                                cert_pem = f"-----BEGIN CERTIFICATE-----\n{cert_pem}"
+                            if not has_end:
+                                cert_pem = f"{cert_pem}\n-----END CERTIFICATE-----"
+                        
+                        # Write the certificate
+                        with open(cert_file_path, 'w') as cert_file:
+                            cert_file.write(cert_pem)
+                        
+                        # Verify the file was written correctly
+                        if os.path.getsize(cert_file_path) > 0:
+                            print(f"{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}", flush=True)
+                            
+                            # Check for PEM format
+                            with open(cert_file_path, 'r') as f:
+                                first_line = f.readline().strip()
+                                f.seek(0, os.SEEK_END)
+                                f.seek(max(0, f.tell() - 100), os.SEEK_SET)  # Last ~100 chars
+                                last_part = f.read()
+                                last_line = last_part.strip().split('\n')[-1] if '\n' in last_part else last_part.strip()
+                            
+                            print(f"{GREEN}Certificate file starts with: {first_line}{NC}", flush=True)
+                            print(f"{GREEN}Certificate file ends with: {last_line}{NC}", flush=True)
+                        else:
+                            print(f"{RED}Error: Certificate file is empty{NC}", flush=True)
+                    except Exception as e:
+                        print(f"{RED}Error processing certificate data: {e}{NC}", flush=True)
+                
+                if client_key_data:
+                    # Decode base64 data and save as PEM
+                    try:
+                        # Clean up the key data by removing whitespace
+                        clean_key_data = ''.join(client_key_data.split())
+                        key_pem = base64.b64decode(clean_key_data).decode('utf-8')
+                        
+                        # Check if the data already looks like a PEM file
+                        key_file_path = os.path.join(cert_dir, f"{context_name}-key.pem")
+                        has_begin = any(marker in key_pem for marker in ["-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----"])
+                        has_end = any(marker in key_pem for marker in ["-----END PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"])
+                        
+                        if not has_begin or not has_end:
+                            print(f"{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}", flush=True)
+                            # Add PEM markers if missing
+                            if not has_begin:
+                                key_pem = f"-----BEGIN PRIVATE KEY-----\n{key_pem}"
+                            if not has_end:
+                                key_pem = f"{key_pem}\n-----END PRIVATE KEY-----"
+                        
+                        # Write the key
+                        with open(key_file_path, 'w') as key_file:
+                            key_file.write(key_pem)
+                        
+                        # Verify the file was written correctly
+                        if os.path.getsize(key_file_path) > 0:
+                            print(f"{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}", flush=True)
+                            
+                            # Check for PEM format
+                            with open(key_file_path, 'r') as f:
+                                first_line = f.readline().strip()
+                                f.seek(0, os.SEEK_END)
+                                f.seek(max(0, f.tell() - 100), os.SEEK_SET)  # Last ~100 chars
+                                last_part = f.read()
+                                last_line = last_part.strip().split('\n')[-1] if '\n' in last_part else last_part.strip()
+                            
+                            print(f"{GREEN}Key file starts with: {first_line}{NC}", flush=True)
+                            print(f"{GREEN}Key file ends with: {last_line}{NC}", flush=True)
+                        else:
+                            print(f"{RED}Error: Key file is empty{NC}", flush=True)
+                    except Exception as e:
+                        print(f"{RED}Error processing key data: {e}{NC}", flush=True)
         
         # First check if context name exists and delete it if it does
         # TODO(romilb): Should we throw an error here instead? 

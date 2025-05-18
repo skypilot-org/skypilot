@@ -34,6 +34,125 @@ generate_expiration_timestamp() {
   date -u -v+${TTL_SECONDS}S +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+${TTL_SECONDS} seconds" +"%Y-%m-%dT%H:%M:%SZ"
 }
 
+# Function to read certificate files if they exist
+read_certificate_data() {
+  local client_cert_file="$TUNNEL_DIR/$CONTEXT-cert.pem"
+  local client_key_file="$TUNNEL_DIR/$CONTEXT-key.pem"
+  local cert_data=""
+  local key_data=""
+  
+  if [[ -f "$client_cert_file" ]]; then
+    # Read the certificate file as is - it's already in PEM format
+    cert_data=$(cat "$client_cert_file")
+    debug_log "Found client certificate data for context $CONTEXT"
+    
+    # Log the first and last few characters to verify PEM format
+    local cert_start=$(head -1 "$client_cert_file")
+    local cert_end=$(tail -1 "$client_cert_file")
+    debug_log "Certificate starts with: $cert_start"
+    debug_log "Certificate ends with: $cert_end"
+    
+    # Check if it has proper PEM format
+    if ! grep -q "BEGIN CERTIFICATE" "$client_cert_file" || ! grep -q "END CERTIFICATE" "$client_cert_file"; then
+      debug_log "WARNING: Certificate file may not be in proper PEM format"
+      # Try to fix it if needed
+      if ! grep -q "BEGIN CERTIFICATE" "$client_cert_file"; then
+        echo "-----BEGIN CERTIFICATE-----" > "$client_cert_file.fixed"
+        cat "$client_cert_file" >> "$client_cert_file.fixed"
+        echo "-----END CERTIFICATE-----" >> "$client_cert_file.fixed"
+        mv "$client_cert_file.fixed" "$client_cert_file"
+        cert_data=$(cat "$client_cert_file")
+        debug_log "Fixed certificate format by adding BEGIN/END markers"
+      fi
+    fi
+  fi
+  
+  if [[ -f "$client_key_file" ]]; then
+    # Read the key file as is - it's already in PEM format
+    key_data=$(cat "$client_key_file")
+    debug_log "Found client key data for context $CONTEXT"
+    
+    # Log the first and last few characters to verify PEM format
+    local key_start=$(head -1 "$client_key_file")
+    local key_end=$(tail -1 "$client_key_file")
+    debug_log "Key starts with: $key_start"
+    debug_log "Key ends with: $key_end"
+    
+    # Check if it has proper PEM format
+    if ! grep -q "BEGIN" "$client_key_file" || ! grep -q "END" "$client_key_file"; then
+      debug_log "WARNING: Key file may not be in proper PEM format"
+      # Try to fix it if needed
+      if ! grep -q "BEGIN" "$client_key_file"; then
+        echo "-----BEGIN PRIVATE KEY-----" > "$client_key_file.fixed"
+        cat "$client_key_file" >> "$client_key_file.fixed"
+        echo "-----END PRIVATE KEY-----" >> "$client_key_file.fixed"
+        mv "$client_key_file.fixed" "$client_key_file"
+        key_data=$(cat "$client_key_file")
+        debug_log "Fixed key format by adding BEGIN/END markers"
+      fi
+    fi
+  fi
+  
+  echo "$cert_data:$key_data"
+}
+
+# Function to generate credentials JSON
+generate_credentials_json() {
+  local expiration_time=$1
+  local cert_bundle=$(read_certificate_data)
+  local client_cert_data=${cert_bundle%:*}
+  local client_key_data=${cert_bundle#*:}
+  
+  if [[ -n "$client_cert_data" && -n "$client_key_data" ]]; then
+    # Debug the certificate data
+    debug_log "Certificate data length: $(echo -n "$client_cert_data" | wc -c) bytes"
+    debug_log "Key data length: $(echo -n "$client_key_data" | wc -c) bytes"
+    
+    # Check if we can create proper JSON with `jq`
+    if command -v jq &>/dev/null; then
+      debug_log "Using jq for JSON formatting"
+      
+      # Create a temporary file for the JSON output to avoid shell escaping issues
+      local TEMP_JSON_FILE=$(mktemp)
+      
+      # Write the JSON to the temporary file using jq for proper JSON formatting
+      cat > "$TEMP_JSON_FILE" << EOL
+{
+  "apiVersion": "client.authentication.k8s.io/v1beta1",
+  "kind": "ExecCredential",
+  "status": {
+    "clientCertificateData": $(printf '%s' "$client_cert_data" | jq -R -s .),
+    "clientKeyData": $(printf '%s' "$client_key_data" | jq -R -s .),
+    "expirationTimestamp": "$expiration_time"
+  }
+}
+EOL
+      
+      # Read the JSON from the file
+      local json_response=$(cat "$TEMP_JSON_FILE")
+      
+      # Clean up
+      rm -f "$TEMP_JSON_FILE"
+      
+      # Output the JSON
+      echo "$json_response"
+    else
+      debug_log "jq is not available, using simpler formatting method"
+      
+      # Alternative approach: encode with base64 and use the token field instead
+      # This works because kubectl will decode token data properly
+      local combined_data=$(echo -n "${client_cert_data}:${client_key_data}" | base64 | tr -d '\n')
+      
+      echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"$combined_data\",\"expirationTimestamp\":\"$expiration_time\"}}"
+      
+      debug_log "Sent certificate data as encoded token instead of direct certificate fields"
+    fi
+  else
+    # Fallback to token-based credential for tunnel-only authentication
+    echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$expiration_time\"}}"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --use-ssh-config)
@@ -113,7 +232,7 @@ if nc -z localhost "$PORT" 2>/dev/null; then
   EXPIRATION_TIME=$(generate_expiration_timestamp)
   
   # Return valid credential format for kubectl with expiration
-  echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
+  generate_credentials_json "$EXPIRATION_TIME"
   exit 0
 fi
 
@@ -133,7 +252,8 @@ if ! command -v flock >/dev/null 2>&1; then
           # Generate expiration timestamp
           EXPIRATION_TIME=$(generate_expiration_timestamp)
           
-          echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
+          # Return valid credential format for kubectl with expiration
+          generate_credentials_json "$EXPIRATION_TIME"
           exit 0
         fi
         sleep 0.2
@@ -160,7 +280,8 @@ else
         # Generate expiration timestamp
         EXPIRATION_TIME=$(generate_expiration_timestamp)
         
-        echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
+        # Return valid credential format for kubectl with expiration
+        generate_credentials_json "$EXPIRATION_TIME"
         exit 0
       fi
       sleep 0.2
@@ -265,6 +386,6 @@ fi
 # Generate expiration timestamp
 EXPIRATION_TIME=$(generate_expiration_timestamp)
 
-# Return valid credential format for kubectl with expiration
-echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$EXPIRATION_TIME\"}}"
+# Return valid credential format with certificates if available
+generate_credentials_json "$EXPIRATION_TIME"
 exit 0 
