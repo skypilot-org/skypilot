@@ -69,7 +69,8 @@ def cluster_logs(cluster_name: str, job_id: int) -> None:
 def launch_managed_job(job_name: str, cloud: str, command: str) -> None:
     task = sky.Task(run=command)
     task.name = job_name
-    resource = sky.Resources(infra=cloud, **LOW_RESOURCE_PARAM)
+    cloud = registry.CLOUD_REGISTRY.from_str(cloud)
+    resource = sky.Resources(cloud=cloud, **LOW_RESOURCE_PARAM)
     task.set_resources(resource)
     request_id = jobs_sdk.launch(
         name=job_name,
