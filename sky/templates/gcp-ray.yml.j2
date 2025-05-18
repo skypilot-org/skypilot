@@ -138,6 +138,23 @@ available_node_types:
           {%- if disk_iops %}
             provisionedIops: {{disk_iops}}
           {%- endif %}
+      {%- for volume in volumes %}
+        - boot: false
+          autoDelete: {{volume.auto_delete}}
+          type: {{volume.storage_type}}
+          deviceName: {{volume.device_name}}
+        {%- if volume.interface_type %}
+          interface: {{volume.interface_type}}
+        {%- endif %}
+          initializeParams:
+            diskType: zones/{{zones}}/diskTypes/{{volume.disk_tier}}
+          {%- if volume.disk_size %}
+            diskSizeGb: {{volume.disk_size}}
+          {%- endif %}
+          {%- if volume.iops %}
+            provisionedIops: {{volume.iops}}
+          {%- endif %}
+      {%- endfor %}
   {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}

@@ -96,7 +96,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 23
+    _VERSION = 24
 
     def __init__(
         self,
@@ -117,6 +117,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, Dict[str, Any], None] = None,
+        volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -201,6 +202,7 @@ class Resources:
             not supported and will be ignored.
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
+          volumes: the volumes to mount on the instance.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
@@ -309,6 +311,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
         self._set_autostop_config(autostop)
+        self._set_volumes(volumes)
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -319,6 +322,7 @@ class Resources:
         self._try_validate_managed_job_attributes()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
+        self._try_validate_volumes()
         self._try_validate_ports()
         self._try_validate_labels()
 
@@ -534,6 +538,10 @@ class Resources:
         return self._labels
 
     @property
+    def volumes(self) -> Optional[List[Dict[str, Any]]]:
+        return self._volumes
+
+    @property
     def autostop_config(self) -> Optional[AutostopConfig]:
         """The requested autostop config.
 
@@ -725,6 +733,70 @@ class Resources:
         autostop: Union[bool, int, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+    def _set_volumes(
+        self,
+        volumes: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        if not volumes:
+            self._volumes = None
+            return
+        valid_volumes = []
+        supported_tiers = [tier.value for tier in resources_utils.DiskTier]
+        supported_storage_types = [
+            storage_type.value for storage_type in resources_utils.StorageType
+        ]
+        network_type = resources_utils.StorageType.NETWORK
+        for volume in volumes:
+            if 'path' not in volume:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid volume {volume!r}. '
+                                     f'Volume must have a "path" field.')
+            if 'storage_type' not in volume:
+                volume['storage_type'] = network_type
+            else:
+                if isinstance(volume['storage_type'], str):
+                    storage_type_str = str(volume['storage_type']).lower()
+                    if storage_type_str not in supported_storage_types:
+                        logger.warning(
+                            f'Invalid storage_type {storage_type_str!r}. '
+                            f'Set it to '
+                            f'{network_type.value}.')
+                        volume['storage_type'] = network_type
+                    else:
+                        volume['storage_type'] = resources_utils.StorageType(
+                            storage_type_str)
+            if volume['storage_type'] == network_type:
+                if 'disk_size' not in volume:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid volume {volume!r}. '
+                            f'Network volumes must have a "disk_size" field.')
+                if round(volume['disk_size']) != volume['disk_size']:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Volume size must be an integer. '
+                                         f'Got: {volume["size"]}.')
+            if 'disk_tier' in volume:
+                if isinstance(volume['disk_tier'], str):
+                    disk_tier_str = str(volume['disk_tier']).lower()
+                    if disk_tier_str not in supported_tiers:
+                        logger.warning(
+                            f'Invalid disk_tier {disk_tier_str!r}. '
+                            f'Set it to {resources_utils.DiskTier.BEST.value}.')
+                        volume['disk_tier'] = resources_utils.DiskTier.BEST
+                    else:
+                        volume['disk_tier'] = resources_utils.DiskTier(
+                            disk_tier_str)
+            else:
+                logger.warning(
+                    f'No disk_tier specified for volume {volume["path"]}. '
+                    f'Set it to {resources_utils.DiskTier.BEST.value}.')
+                volume['disk_tier'] = resources_utils.DiskTier.BEST
+
+            if 'auto_delete' not in volume:
+                volume['auto_delete'] = False
+            valid_volumes.append(volume)
+        self._volumes = valid_volumes
 
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""
@@ -1090,6 +1162,26 @@ class Resources:
                         f'Disk tier {self.disk_tier.value} is not supported '
                         f'for instance type {self.instance_type}.') from None
 
+    def _try_validate_volumes(self) -> None:
+        """Try to validate the volumes attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if self.volumes is None:
+            return
+        if self.cloud is not None:
+            try:
+                for volume in self.volumes:
+                    self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                       volume['disk_tier'])
+            except exceptions.NotSupportedError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Disk tier {volume["disk_tier"].value} is not '
+                        f'supported for instance type {self.instance_type}.'
+                    ) from None
+
     def _try_validate_ports(self) -> None:
         """Try to validate the ports attribute.
 
@@ -1350,6 +1442,29 @@ class Resources:
                 if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
                     return False
 
+        if self.volumes:
+            if not other.volumes:
+                return False
+            else:
+                # Create a mapping of paths to volumes for easier lookup
+                other_volumes_map = {vol['path']: vol for vol in other.volumes}
+                for volume in self.volumes:
+                    if volume['path'] not in other_volumes_map:
+                        logger.info(
+                            f'Volume {volume["path"]} not in other volumes')
+                        return False
+                    other_volume = other_volumes_map[volume['path']]
+                    if volume['storage_type'] != other_volume['storage_type']:
+                        return False
+                    if (volume['storage_type'] ==
+                            resources_utils.StorageType.NETWORK):
+                        if volume['disk_size'] > other_volume['disk_size']:
+                            return False
+                        if volume['disk_tier'] != resources_utils.DiskTier.BEST:
+                            if not (volume['disk_tier'] <=
+                                    other_volume['disk_tier']):
+                                return False
+
         if check_ports:
             if self.ports is not None:
                 if other.ports is None:
@@ -1450,6 +1565,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            volumes=override.pop('volumes', self.volumes),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -1648,6 +1764,7 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_docker_username_for_runpod'] = config.pop(
@@ -1697,6 +1814,18 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
+        if self.volumes is not None:
+            # Convert DiskTier enum to string value for each volume
+            volumes = []
+            for volume in self.volumes:
+                volume_copy = volume.copy()
+                if 'disk_tier' in volume_copy:
+                    volume_copy['disk_tier'] = volume_copy['disk_tier'].value
+                if 'storage_type' in volume_copy:
+                    volume_copy['storage_type'] = volume_copy[
+                        'storage_type'].value
+                volumes.append(volume_copy)
+            config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
         if self._docker_login_config is not None:
@@ -1856,6 +1985,9 @@ class Resources:
 
         if version < 23:
             self._autostop_config = None
+
+        if version < 24:
+            self._volumes = None
 
         self.__dict__.update(state)
 

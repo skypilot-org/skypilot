@@ -50,6 +50,14 @@ class DiskTier(enum.Enum):
         return types.index(self) <= types.index(other)
 
 
+class StorageType(enum.Enum):
+    """Storage type."""
+    # Durable network storage, e.g. GCP persistent disks
+    NETWORK = 'network'
+    # Local instance storage, e.g. GCP local SSDs
+    INSTANCE = 'instance'
+
+
 @dataclasses.dataclass
 class ClusterName:
     display_name: str

@@ -63,6 +63,15 @@ Below is the configuration syntax and some example values.  See details under ea
 
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
+    :ref:`volumes <yaml-spec-resources-volumes>`:
+      # Network volume
+      - path: /mnt/dir1
+        disk_size: 100
+        auto_delete: true
+      # Instance volume
+      - path: /mnt/dir2
+        storage_type: instance
+
   :ref:`envs <yaml-spec-envs>`:
     MY_BUCKET: skypilot-temp-gcs-test
     MY_LOCAL_PATH: tmp-workdir
@@ -719,6 +728,32 @@ OR
       strategy: EAGER_NEXT_REGION
       max_restarts_on_errors: 3
 
+.. _yaml-spec-resources-volumes:
+
+``resources.volumes``
+~~~~~~~~~~~~~~~~~~~~~
+
+Volumes configuration.
+
+Mount network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
+
+This is supported for GCP only for now.
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    volumes:
+      # Network volume
+      - path: /mnt/dir1 # Path to mount the volume on the instance
+        disk_size: 100 # Size of the volume in GB
+        auto_delete: true # Whether to delete the volume when the instance is terminated, optional, default: false
+        storage_type: network # Type of the volume, either 'network' or 'instance', optional, default: network
+        disk_tier: best # Tier of the volume, same as `resources.disk_tier`, optional, default: best
+      # Instance volume, auto_delete is always true for instance volumes
+      - path: /mnt/dir2
+        storage_type: instance
 
 .. _yaml-spec-envs:
 

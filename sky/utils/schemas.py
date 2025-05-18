@@ -140,6 +140,29 @@ def _get_single_resources_schema():
                     }
                 }],
             },
+            'volumes': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'disk_size': {
+                            'type': 'integer',
+                        },
+                        'disk_tier': {
+                            'type': 'string',
+                        },
+                        'path': {
+                            'type': 'string',
+                        },
+                        'auto_delete': {
+                            'type': 'boolean',
+                        },
+                        'storage_type': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
             'disk_size': {
                 'type': 'integer',
             },
