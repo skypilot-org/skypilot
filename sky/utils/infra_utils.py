@@ -5,7 +5,7 @@ from typing import Optional
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
-_REGION_OR_ZONE_TRUNCATION_LENGTH = 15
+_REGION_OR_ZONE_TRUNCATION_LENGTH = 25
 
 
 @dataclasses.dataclass
@@ -164,7 +164,8 @@ class InfraInfo:
 
         if region_or_zone is not None and truncate:
             region_or_zone = common_utils.truncate_long_string(
-                region_or_zone, _REGION_OR_ZONE_TRUNCATION_LENGTH)
+                region_or_zone, _REGION_OR_ZONE_TRUNCATION_LENGTH, 
+                truncate_middle=True)
 
         formatted_str = f'{self.cloud}'
         if region_or_zone is not None:

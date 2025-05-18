@@ -131,7 +131,9 @@ class TestInfraUtils(unittest.TestCase):
             (None, 'us-east-1', None, True, '-'),
             # Test with long region/zone (truncation)
             ('aws', 'us-east-1-very-long-region', None, True,
-             'aws (us-east-1-very-...)'),
+             'aws (us-east-1-v...long-region)'),
+            ('aws', 'us-east-1-very-very-very-long-region', None, True,
+             'aws (us-east-1-v...long-region)'),
             ('aws', 'us-east-1-very-long-region', None, False,
              'aws (us-east-1-very-long-region)'),
             # Test with asterisk
@@ -140,9 +142,9 @@ class TestInfraUtils(unittest.TestCase):
             ('aws', '*', 'us-east-1a', True, 'aws (us-east-1a)'),
             ('*', 'us-east-1', None, True, '-'),
             # Test truncation boundary cases
-            ('aws', 'x' * 15, None, True, 'aws (' + 'x' * 15 + ')'),
-            ('aws', 'x' * 16, None, True, 'aws (' + 'x' * 15 + '...)'),
-            ('aws', 'x' * 14, None, True, 'aws (' + 'x' * 14 + ')'),
+            ('aws', 'x' * 25, None, True, 'aws (' + 'x' * 25 + ')'),
+            ('aws', 'x' * 26, None, True, 'aws (' + 'x' * 11 + '...' + 'x' * 11 + ')'),
+            ('aws', 'x' * 24, None, True, 'aws (' + 'x' * 24 + ')'),
             # Test with empty strings
             ('aws', '', None, True, 'aws'),
             ('aws', '', '', True, 'aws'),
