@@ -128,11 +128,11 @@ To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
 
     $ sky status -u
     Clusters
-    NAME                          USER        LAUNCHED      RESOURCES                         STATUS   AUTOSTOP  COMMAND
-    my-cluster-2                  my-user     2 hrs ago     1x GCP(n2-standard-8)             STOPPED  -         sky launch task-2.yaml
-    other-cluster                 other-user  1 week ago    1x AWS(m6i.16xlarge)              UP       -         sky launch --infra aws...
-    my-cluster-1                  my-user     2 months ago  1x AWS(m6i.4xlarge)               STOPPED  -         sky launch task-1.yaml
-    sky-jobs-controller-7c3d4ff7  root        2 days ago    1x AWS(r6i.xlarge, disk_size=50)  STOPPED  10m       sky jobs launch --env PART...
+    NAME                          USER        LAUNCHED      INFRA                 RESOURCES                                     STATUS   AUTOSTOP
+    my-cluster-2                  my-user     2 hrs ago     GCP (us-central1-a)   1x(cpus=8, mem=32, type=n2-standard-8, ...)   STOPPED  -       
+    other-cluster                 other-user  1 week ago    AWS (us-east-1)       1x(cpus=64, mem=256, type=m6i.16xlarge, ...)  UP       -       
+    my-cluster-1                  my-user     2 months ago  AWS (us-east-1)       1x(cpus=16, mem=64, type=m6i.4xlarge, ...)    STOPPED  -       
+    sky-jobs-controller-7c3d4ff7  root        2 days ago    AWS (us-east-1)       1x(cpus=4, mem=32, type=r6i.xlarge, ...)      STOPPED  10m     
 
     $ sky jobs queue -u
     Fetching managed job statuses...
