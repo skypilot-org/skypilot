@@ -11,7 +11,7 @@ service:
 
 resources:
   ports: 8080
-  infra: gcp/us-central1-a
+  infra: gcp/*/us-central1-a
   cpus: 2+
   use_spot: true
 
