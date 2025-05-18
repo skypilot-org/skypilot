@@ -10,6 +10,7 @@ import { useRouter } from 'next/router';
 
 import Link from 'next/link';
 import {
+  ChipIcon,
   ServerIcon,
   BriefcaseIcon,
   ServiceBellIcon,
@@ -188,6 +189,17 @@ export function TopBar() {
               </>
             )}
           </div>
+
+          <div className="border-l border-gray-200 h-6 mx-1"></div>
+
+          <Link
+            href="/gpus"
+            className={getLinkClasses('/gpus')}
+            prefetch={false}
+          >
+            <ChipIcon className="w-4 h-4" />
+            {!isMobile && <span>GPUs</span>}
+          </Link>
         </div>
 
         {/* External links - now shows only icons on mobile */}
