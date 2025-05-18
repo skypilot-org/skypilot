@@ -1,75 +1,18 @@
-D 05-17 16:23:55 skypilot_config.py:137] using default user config file: ~/.sky/config.yaml
-D 05-17 16:23:55 skypilot_config.py:311] Config loaded from /Users/zhwu/.sky/config.yaml:
-D 05-17 16:23:55 skypilot_config.py:311] jobs:
-D 05-17 16:23:55 skypilot_config.py:311]   controller:
-D 05-17 16:23:55 skypilot_config.py:311]     resources:
-D 05-17 16:23:55 skypilot_config.py:311]       cloud: aws
-D 05-17 16:23:55 skypilot_config.py:311]       autostop: false
-D 05-17 16:23:55 skypilot_config.py:311] 
-D 05-17 16:23:55 skypilot_config.py:311] kubernetes:
-D 05-17 16:23:55 skypilot_config.py:311]   allowed_contexts:
-D 05-17 16:23:55 skypilot_config.py:311]   - my-h100-cluster
-D 05-17 16:23:55 skypilot_config.py:311]   - kind-skypilot
-D 05-17 16:23:55 skypilot_config.py:311] 
-D 05-17 16:23:55 skypilot_config.py:318] Config syntax check passed for path: /Users/zhwu/.sky/config.yaml
-D 05-17 16:23:55 skypilot_config.py:164] using default project config file: .sky.yaml
-D 05-17 16:23:55 skypilot_config.py:407] client config (before task and CLI overrides): 
-D 05-17 16:23:55 skypilot_config.py:407] jobs:
-D 05-17 16:23:55 skypilot_config.py:407]   controller:
-D 05-17 16:23:55 skypilot_config.py:407]     resources:
-D 05-17 16:23:55 skypilot_config.py:407]       cloud: aws
-D 05-17 16:23:55 skypilot_config.py:407]       autostop: false
-D 05-17 16:23:55 skypilot_config.py:407] 
-D 05-17 16:23:55 skypilot_config.py:407] kubernetes:
-D 05-17 16:23:55 skypilot_config.py:407]   allowed_contexts:
-D 05-17 16:23:55 skypilot_config.py:407]   - my-h100-cluster
-D 05-17 16:23:55 skypilot_config.py:407]   - kind-skypilot
-D 05-17 16:23:55 skypilot_config.py:407] 
-D 05-17 16:23:56 skypilot_config.py:195] using default server config file: ~/.sky/config.yaml
-D 05-17 16:23:56 skypilot_config.py:311] Config loaded from /Users/zhwu/.sky/config.yaml:
-D 05-17 16:23:56 skypilot_config.py:311] jobs:
-D 05-17 16:23:56 skypilot_config.py:311]   controller:
-D 05-17 16:23:56 skypilot_config.py:311]     resources:
-D 05-17 16:23:56 skypilot_config.py:311]       cloud: aws
-D 05-17 16:23:56 skypilot_config.py:311]       autostop: false
-D 05-17 16:23:56 skypilot_config.py:311] 
-D 05-17 16:23:56 skypilot_config.py:311] kubernetes:
-D 05-17 16:23:56 skypilot_config.py:311]   allowed_contexts:
-D 05-17 16:23:56 skypilot_config.py:311]   - my-h100-cluster
-D 05-17 16:23:56 skypilot_config.py:311]   - kind-skypilot
-D 05-17 16:23:56 skypilot_config.py:311] 
-D 05-17 16:23:56 skypilot_config.py:318] Config syntax check passed for path: /Users/zhwu/.sky/config.yaml
-D 05-17 16:23:56 skypilot_config.py:382] server config: 
-D 05-17 16:23:56 skypilot_config.py:382] jobs:
-D 05-17 16:23:56 skypilot_config.py:382]   controller:
-D 05-17 16:23:56 skypilot_config.py:382]     resources:
-D 05-17 16:23:56 skypilot_config.py:382]       cloud: aws
-D 05-17 16:23:56 skypilot_config.py:382]       autostop: false
-D 05-17 16:23:56 skypilot_config.py:382] 
-D 05-17 16:23:56 skypilot_config.py:382] kubernetes:
-D 05-17 16:23:56 skypilot_config.py:382]   allowed_contexts:
-D 05-17 16:23:56 skypilot_config.py:382]   - my-h100-cluster
-D 05-17 16:23:56 skypilot_config.py:382]   - kind-skypilot
-D 05-17 16:23:56 skypilot_config.py:382] 
-GPU   QTY  CLOUD       INSTANCE_TYPE                     DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION              
-H100  8    RunPod      8x_H100_SECURE                    -           128    640GB     $ 19.120      -                  CA                  
-H100  8    Vast        8x-H100_SXM-32-65536              637GB       32     64GB      $ 19.200      $ 0.000            California, US, NA  
-H100  8    nebius      gpu-h100-sxm_8gpu-128vcpu-1600gb  200GB       128    1600GB    $ 23.600      -                  eu-north1           
-H100  8    Lambda      gpu_8x_h100_sxm5                  80GB        208    1800GB    $ 23.920      -                  europe-central-1    
-H100  8    GCP         a3-highgpu-8g                     80GB        208    1872GB    $ 46.021      $ 20.199           us-central1         
-H100  8    Paperspace  H100x8                            -           128    640GB     $ 47.600      -                  East Coast (NY2)    
-H100  8    DO          gpu-h100x8-640gb                  80GB        160    1920GB    $ 47.600      -                  tor1                
-H100  8    OCI         BM.GPU.H100.8                     80GB        224    2048GB    $ 80.000      -                  eu-amsterdam-1      
-H100  8    AWS         p5.48xlarge                       80GB        192    2048GB    $ 98.320      $ 14.625           us-east-2           
+GPU   QTY  CLOUD       INSTANCE_TYPE                     DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION             
+H100  8    Vast        8x-H100_NVL-32-65536              749GB       32     64GB      $ 16.000      $ 16.000           Australia, AU, OC  
+H100  8    Vast        8x-H100_SXM-32-65536              637GB       32     64GB      $ 21.000      $ 10.670           Iceland, IS, EU    
+H100  8    nebius      gpu-h100-sxm_8gpu-128vcpu-1600gb  200GB       128    1600GB    $ 23.600      -                  eu-north1          
+H100  8    Lambda      gpu_8x_h100_sxm5                  80GB        208    1800GB    $ 23.920      -                  europe-central-1   
+H100  8    Fluidstack  H100_NVLINK_80GB::8               80GB        252    1440GB    $ 23.920      -                  FINLAND            
+H100  8    RunPod      8x_H100_SECURE                    -           128    640GB     $ 35.920      -                  CA                 
+H100  8    GCP         a3-highgpu-8g                     80GB        208    1872GB    $ 46.021      $ 20.199           us-central1        
+H100  8    Paperspace  H100x8                            -           128    640GB     $ 47.600      -                  East Coast (NY2)   
+H100  8    DO          gpu-h100x8-640gb                  80GB        160    1920GB    $ 47.600      -                  tor1               
+H100  8    OCI         BM.GPU.H100.8                     80GB        224    2048GB    $ 80.000      -                  eu-amsterdam-1     
+H100  8    AWS         p5.48xlarge                       80GB        192    2048GB    $ 98.320      $ 9.832            us-east-2          
 
-GPU        QTY  CLOUD  INSTANCE_TYPE  DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION    
-H100-MEGA  8    GCP    a3-megagpu-8g  80GB        208    1872GB    $ 49.549      $ 16.813           us-east5  
+GPU        QTY  CLOUD  INSTANCE_TYPE  DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION       
+H100-MEGA  8    GCP    a3-megagpu-8g  80GB        208    1872GB    $ 92.214      $ 21.208           us-central1  
 
 GPU       QTY  CLOUD   INSTANCE_TYPE       DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION  
-H100-NVL  8    RunPod  8x_H100-NVL_SECURE  -           128    752GB     $ 22.320      -                  CA      
-
-GPU       QTY  CLOUD   INSTANCE_TYPE       DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION  
-H100-SXM  8    RunPod  8x_H100-SXM_SECURE  -           160    640GB     $ 23.920      $ 21.520           CA      
-
-GPU          QTY  CLOUD       INSTANCE_TYPE        DEVICE_MEM  vCPUs  HOST_MEM  HOURLY_PRICE  HOURLY_SPOT_PRICE  REGION   
-H100-NVLINK  8    Fluidstack  H100_NVLINK_80GB::8  80GB        -      1440GB    $ 23.920      -                  FINLAND  
+H100-SXM  8    RunPod  8x_H100-SXM_SECURE  -           208    640GB     $ 37.520      -                  CA      
