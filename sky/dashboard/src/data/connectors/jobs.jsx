@@ -92,8 +92,9 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         if (job.cluster_resources && job.cluster_resources !== '-') {
           try {
             cloud = job.cluster_resources.split('(')[0].split('x').pop().trim();
-            cluster_resources = job.cluster_resources.replace(
-              `${cloud}(`, '(').replace('x ', 'x');
+            cluster_resources = job.cluster_resources
+              .replace(`${cloud}(`, '(')
+              .replace('x ', 'x');
           } catch (error) {
             // If parsing fails, set a default value
             cloud = 'Unknown';
