@@ -446,7 +446,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   Fetching managed job statuses...
   Managed jobs
   In progress jobs: 1 RECOVERING
-  ID  TASK  NAME      Requested                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  ID  TASK  NAME      REQUESTED                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING
    ↳  0     train     1x [V100:8][Spot|On-demand]  50 mins ago  47m 45s        -             1            RECOVERING
    ↳  1     eval      1x [T4:1]                    -            -              -             0            PENDING

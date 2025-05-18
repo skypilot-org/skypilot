@@ -156,35 +156,35 @@ Per-node resource requirements (optional).
 ``resources.infra``
 ~~~~~~~~~~~~~~~~~~~
 
-The infra to use (optional).
+
+Infrastructure to use (optional). Format: ``<cloud>``, ``<cloud>/<region>``, ``<cloud>/<region>/<zone>``, ``kubernetes/<context-name>``.
+
+Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, aws/*/us-east-1a, kubernetes/my-cluster-context.
 
 .. code-block:: yaml
 
   resources:
     infra: aws
 
-OR
 
 .. code-block:: yaml
 
   resources:
     infra: kubernetes
 
-You can also specify a specific region, zone or kubernetes context with the ``infra`` field.
+You can also specify a specific region, zone or kubernetes context.
 
 .. code-block:: yaml
 
   resources:
     infra: aws/us-east-1
 
-OR
 
 .. code-block:: yaml
 
   resources:
     infra: aws/us-east-1/us-east-1a
 
-OR
 
 .. code-block:: yaml
 

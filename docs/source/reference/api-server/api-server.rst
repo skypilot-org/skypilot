@@ -137,7 +137,7 @@ To see other users' clusters and the job/serve controllers, use the ``-u`` flag.
     $ sky jobs queue -u
     Fetching managed job statuses...
     Managed jobs
-    ID  TASK  NAME       USER        RESOURCES  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+    ID  TASK  NAME       USER        REQUESTED  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
     3   -     job-2      my-user     1x[CPU:2]  2 days ago  2m 10s         1m 14s        0            CANCELLED
     2   -     other-job  other-user  1x[CPU:2]  2 days ago  11m 54s        10m 52s       0            CANCELLED
     1   -     job-1      my-use      1x[CPU:2]  5 days ago  1m 7s          3s            0            SUCCEEDED

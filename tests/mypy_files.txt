@@ -1,4 +1,4 @@
-sky/
+sky
 
 --exclude sky/benchmark
 --exclude sky/callbacks
