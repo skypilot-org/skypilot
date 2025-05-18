@@ -1766,7 +1766,7 @@ def test_azure_disk_tier():
         test = smoke_tests_utils.Test(
             'azure-disk-tier-' + disk_tier.value,
             [
-                f'sky launch -y -c {name} --infra azure --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'sky launch -y -c {name} --infra azure/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
@@ -1788,7 +1788,7 @@ def test_azure_best_tier_failover():
     test = smoke_tests_utils.Test(
         'azure-best-tier-failover',
         [
-            f'sky launch -y -c {name} --infra azure --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'sky launch -y -c {name} --infra azure/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--disk-tier best --instance-type Standard_D8_v5 echo "hello sky"',
             f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
             f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
