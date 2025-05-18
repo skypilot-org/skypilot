@@ -98,7 +98,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 22
+    _VERSION = 23
 
     def __init__(
         self,
