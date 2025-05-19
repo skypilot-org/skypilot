@@ -423,12 +423,14 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    logger.info(f'Initial dag: {dag}')
     request_options = admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
     validate(dag, admin_policy_request_options=request_options)
+    logger.info(f'Dag after validate: {dag}')
 
     confirm_shown = False
     if _need_confirmation:
@@ -445,6 +447,7 @@ def launch(
             request_id = optimize(dag,
                                   admin_policy_request_options=request_options)
             stream_and_get(request_id)
+            logger.info(f'Dag after optimize: {dag}')
         else:
             cluster_record = clusters[0]
             cluster_status = cluster_record['status']
@@ -488,6 +491,7 @@ def launch(
 
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
+    logger.info(f'Final dag: {dag_str}')
     body = payloads.LaunchBody(
         task=dag_str,
         cluster_name=cluster_name,

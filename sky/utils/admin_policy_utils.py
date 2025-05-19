@@ -3,6 +3,7 @@ import copy
 import importlib
 import os
 import tempfile
+import traceback
 from typing import Optional, Tuple, Union
 
 import colorama
@@ -84,8 +85,12 @@ def apply(
     if policy_cls is None:
         return dag, skypilot_config.to_dict()
 
-    logger.info(f'Applying policy: {policy}')
+    logger.info(f'Applying policy: {policy}, use_mutated_config_in_current_request: '
+                f'{use_mutated_config_in_current_request}, request_options: '
+                f'{request_options}, stack_trace: {traceback.format_stack()}')
     original_config = skypilot_config.to_dict()
+    logger.info(f'config: {original_config}')
+    logger.info(f'SkyPilot env: {os.getenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, "<empty>")}')
     config = copy.deepcopy(original_config)
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
@@ -119,6 +124,8 @@ def apply(
         mutated_dag.add(mutated_user_request.task)
     assert mutated_config is not None, dag
 
+    logger.info(f'Mutated config: {mutated_config}')
+    logger.info(f'Original config: {original_config}')
     # Update the new_dag's graph with the old dag's graph
     for u, v in dag.graph.edges:
         u_idx = dag.tasks.index(u)
@@ -137,6 +144,7 @@ def apply(
             common_utils.dump_yaml(temp_file.name, dict(**mutated_config))
             os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
             logger.debug(f'Updated SkyPilot config: {temp_file.name}')
+            logger.info(f'Updated SkyPilot config to: {temp_file.name} in favor of admin policy')
             # TODO(zhwu): This is not a clean way to update the SkyPilot config,
             # because we are resetting the global context for a single DAG,
             # which is conceptually weird.

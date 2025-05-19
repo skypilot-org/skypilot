@@ -36,7 +36,12 @@ class AddLabelsPolicy(sky.AdminPolicy):
                                    {})
         labels['app'] = 'skypilot'
         config.set_nested(('kubernetes', 'custom_metadata', 'labels'), labels)
-        return sky.MutatedUserRequest(user_request.task, config)
+        new_resources = []
+        for r in user_request.task.resources:
+            new_resources.append(r.copy(cpus=4))
+        task = user_request.task
+        task.set_resources(type(task.resources)(new_resources))
+        return sky.MutatedUserRequest(task, config)
 
 
 class DisablePublicIpPolicy(sky.AdminPolicy):
