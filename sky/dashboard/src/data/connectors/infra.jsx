@@ -4,6 +4,81 @@ import {
   COMMON_GPUS,
 } from '@/data/connectors/constants';
 
+export async function getCloudInfrastructure() {
+  try {
+    const response = await fetch(`${ENDPOINT}/clusters`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    
+    const id = response.headers.get('X-Skypilot-Request-ID') || 
+               response.headers.get('X-Request-ID');
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const data = await fetchedData.json();
+    const clusters = data.return_value ? JSON.parse(data.return_value) : [];
+    
+    const jobsResponse = await fetch(`${ENDPOINT}/jobs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    const jobsId = jobsResponse.headers.get('X-Skypilot-Request-ID') || 
+                   jobsResponse.headers.get('X-Request-ID');
+    const jobsFetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${jobsId}`);
+    const jobsData = await jobsFetchedData.json();
+    const jobs = jobsData.return_value ? JSON.parse(jobsData.return_value).jobs : [];
+    
+    const cloudsData = {};
+    
+    CLOUDS_LIST.forEach(cloud => {
+      cloudsData[cloud] = {
+        name: cloud,
+        clusters: 0,
+        jobs: 0,
+        enabled: false
+      };
+    });
+    
+    clusters.forEach(cluster => {
+      const cloud = cluster.cloud.toLowerCase();
+      if (cloudsData[cloud]) {
+        cloudsData[cloud].clusters += 1;
+        cloudsData[cloud].enabled = true;
+      }
+    });
+    
+    jobs.forEach(job => {
+      let cloud = job.cloud;
+      
+      if (!cloud && job.cluster_resources && job.cluster_resources !== '-') {
+        try {
+          cloud = job.cluster_resources.split('(')[0].split('x').pop().trim().toLowerCase();
+        } catch (error) {
+          cloud = null;
+        }
+      }
+      
+      if (cloud && cloudsData[cloud]) {
+        cloudsData[cloud].jobs += 1;
+      }
+    });
+    
+    const result = Object.values(cloudsData)
+      .filter(cloud => cloud.enabled)
+      .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
+    
+    return result;
+  } catch (error) {
+    console.error('Error fetching cloud infrastructure:', error);
+    return [];
+  }
+}
+
 export async function getGPUs() {
   const gpus = await getKubernetesGPUs();
   return gpus;
@@ -98,11 +173,10 @@ async function getKubernetesPerNodeGPUs(context) {
 
 async function getKubernetesGPUs() {
   try {
-    // Get context gpus
     const contextGPUs = await getKubernetesContextGPUs();
 
     const allGPUs = {};
-    const perContextGPUsData = {}; // Renamed to avoid confusion, this will be { context: [gpu1, gpu2] }
+    const perContextGPUsData = {};
     const perNodeGPUs = {};
 
     for (const contextGPU of contextGPUs) {
@@ -130,7 +204,6 @@ async function getKubernetesGPUs() {
           };
         }
 
-        // Push each GPU type into the array for the context
         perContextGPUsData[context].push({
           gpu_name: gpuName,
           gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
@@ -140,7 +213,6 @@ async function getKubernetesGPUs() {
         });
       }
 
-      // Get per node gpus
       const nodeGPUs = await getKubernetesPerNodeGPUs(context);
       for (const node in nodeGPUs) {
         perNodeGPUs[`${context}/${node}`] = {
@@ -153,12 +225,9 @@ async function getKubernetesGPUs() {
       }
     }
     return {
-      // Convert to slice
       allGPUs: Object.values(allGPUs).sort((a, b) =>
         a.gpu_name.localeCompare(b.gpu_name)
       ),
-      // Flatten perContextGPUsData for the expected output structure
-      // The component gpus.jsx will group it again using useMemo
       perContextGPUs: Object.values(perContextGPUsData)
         .flat()
         .sort(
@@ -166,7 +235,6 @@ async function getKubernetesGPUs() {
             a.context.localeCompare(b.context) ||
             a.gpu_name.localeCompare(b.gpu_name)
         ),
-      // Sort by context first, and for the same context, sort by node_name, and for the same node_name, sort by gpu_name
       perNodeGPUs: Object.values(perNodeGPUs).sort(
         (a, b) =>
           a.context.localeCompare(b.context) ||
@@ -222,7 +290,6 @@ export async function getCloudGPUs() {
     }
     const data = await fetchedData.json();
     const allGPUs = data.return_value ? JSON.parse(data.return_value) : {};
-    // commonGPUs, keys from COMMON_GPUS in allGPUs and values are the count array join with comma
     const commonGPUs = Object.keys(allGPUs)
       .filter((gpu) => COMMON_GPUS.includes(gpu))
       .map((gpu) => ({
@@ -230,7 +297,6 @@ export async function getCloudGPUs() {
         gpu_quantities: allGPUs[gpu].join(', '),
       }))
       .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
-    // tpus, keys starts with 'tpu-' in allGPUs and values are the count array join with comma
     const tpus = Object.keys(allGPUs)
       .filter((gpu) => gpu.startsWith('tpu-'))
       .map((gpu) => ({
@@ -238,7 +304,6 @@ export async function getCloudGPUs() {
         gpu_quantities: allGPUs[gpu].join(', '),
       }))
       .sort((a, b) => a.gpu_name.localeCompare(b.gpu_name));
-    // otherGPUs, keys not in COMMON_GPUS and not starts with 'tpu-' in allGPUs and values are the count array join with comma
     const otherGPUs = Object.keys(allGPUs)
       .filter((gpu) => !COMMON_GPUS.includes(gpu) && !gpu.startsWith('tpu-'))
       .map((gpu) => ({
@@ -328,7 +393,7 @@ export async function getDetailedGpuInfo(filter) {
     }
 
     const formattedData = [];
-    const expectedArrayLength = 10; // Expected number of elements in the instance array
+    const expectedArrayLength = 10;
 
     for (const [gpuNameKey, instances] of Object.entries(rawData)) {
       if (!Array.isArray(instances)) {
@@ -353,25 +418,22 @@ export async function getDetailedGpuInfo(filter) {
           !Array.isArray(instanceArray) ||
           instanceArray.length < expectedArrayLength
         ) {
-          // Log if it's not an array or not the expected length, but still try to process if it is an array
           if (!Array.isArray(instanceArray)) {
             console.warn(
               `Expected an array for instance under ${gpuNameKey}, but got:`,
               instanceArray
             );
-            return; // Skip if not an array at all
+            return;
           } else {
             console.warn(
               `Instance array for ${gpuNameKey} has unexpected length ${instanceArray.length} (expected ${expectedArrayLength}):`,
               instanceArray
             );
-            // Continue processing with available data, using undefined for missing fields
           }
         }
 
         const cloud = instanceArray[0];
         const instance_type = instanceArray[1];
-        // instanceArray[2] is accelerator_name, already covered by gpuNameKey or instance.accelerator_name if it were an object
         const acc_count = instanceArray[3];
         const cpu_val = instanceArray[4];
         const dev_mem_val = instanceArray[5];
@@ -422,7 +484,7 @@ export async function getDetailedGpuInfo(filter) {
         const region = region_val || '-';
 
         formattedData.push({
-          accelerator_name: gpuNameKey, // Use the key from rawData as the primary GPU name for the group
+          accelerator_name: gpuNameKey,
           accelerator_count: display_count,
           cloud: cloud || '',
           instance_type: instanceType,
