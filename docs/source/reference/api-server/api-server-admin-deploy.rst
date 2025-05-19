@@ -369,7 +369,7 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set lambdaCredentials.enabled=true \
                     --set lambdaCredentials.lambdaSecretName=your_secret_name
 
-.. tab-item:: Nebius
+    .. tab-item:: Nebius
         :sync: nebius-creds-tab
 
         We use service accounts to authenticate with Nebius. Refer to :ref:`Nebius service account <nebius-service-account>` guide on how to set up a service account.
