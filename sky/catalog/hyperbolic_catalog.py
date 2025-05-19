@@ -2,7 +2,7 @@
 
 This module loads and queries the service catalog for Hyperbolic Cloud.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.clouds import cloud  # Import cloud here for Region
 from sky.clouds.service_catalog import common
@@ -33,9 +33,11 @@ def get_hourly_cost(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> float:
-    del instance_type, use_spot, region, zone  # Unused
-    # TODO: Implement cost calculation
-    return 0.0
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Hyperbolic Cloud does not support zones.')
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
 def get_vcpus_mem_from_instance_type(
@@ -44,25 +46,18 @@ def get_vcpus_mem_from_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
-    """Returns a dict of accelerator counts for the given instance type."""
-    del instance_type  # Unused
-    # TODO: Implement accelerator parsing
-    return None
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
+    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    """Returns the number of vCPUs for the given instance type."""
-    del instance_type  # Unused
-    # TODO: Implement vCPU parsing
-    return None
+    vcpus, _ = get_vcpus_mem_from_instance_type(instance_type)
+    return vcpus
 
 
 def get_memory_from_instance_type(instance_type: str) -> Optional[float]:
-    """Returns the memory in GB for the given instance type."""
-    del instance_type  # Unused
-    # TODO: Implement memory parsing
-    return None
+    _, mem = get_vcpus_mem_from_instance_type(instance_type)
+    return mem
 
 
 def get_zone_shell_cmd() -> Optional[str]:
@@ -73,10 +68,8 @@ def get_zone_shell_cmd() -> Optional[str]:
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
-    """Returns the default instance type."""
-    del cpus, memory, disk_tier  # Unused
-    # TODO: Implement default instance type selection
-    return None
+    del disk_tier  # Unused
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
 
 
 def get_instance_type_for_accelerator(
@@ -88,17 +81,23 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    del acc_name, acc_count, cpus, memory, use_spot, region, zone  # Unused
-    # TODO: Implement instance type selection for accelerators
-    return None, []
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Hyperbolic Cloud does not support zones.')
+    return common.get_instance_type_for_accelerator_impl(df=_df,
+                                                         acc_name=acc_name,
+                                                         acc_count=acc_count,
+                                                         cpus=cpus,
+                                                         memory=memory,
+                                                         use_spot=use_spot,
+                                                         region=region,
+                                                         zone=zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List[cloud.Region]:
-    """Returns a list of regions and zones for the given instance type."""
-    del instance_type, use_spot  # Unused
-    # TODO: Implement region/zone selection
-    return []
+    df = _df[_df['InstanceType'] == instance_type]
+    return common.get_region_zones(df, use_spot)
 
 
 def get_gen_version(instance_type: str) -> Optional[str]:
@@ -116,11 +115,28 @@ def list_accelerators(
     zone: Optional[str] = None,
     use_spot: bool = False,
     instance_type: Optional[str] = None,
-    **kwargs,
+    all_regions: bool = False,
+    require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    del gpus_only, name_filter, case_sensitive, region, zone, use_spot, instance_type, kwargs  # Unused
-    # TODO: Implement accelerator listing
-    return {}
+    """List available accelerators in Hyperbolic Cloud."""
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Hyperbolic Cloud does not support zones.')
+    if use_spot:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Hyperbolic Cloud does not support spot instances.')
+    if instance_type is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Hyperbolic Cloud does not support instance type filtering.')
+
+    region_filter = region
+    quantity_filter = None
+    return common.list_accelerators_impl('Hyperbolic', _df, gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions, require_price)
 
 
 def get_instance_type_from_catalog() -> dict:
