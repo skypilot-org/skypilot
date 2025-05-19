@@ -1,17 +1,28 @@
 .. _api-server-ha:
 
-Advanced API Server High Availability across GKE Clusters
-=========================================================
+API Server High Availability across GKE Clusters
+================================================
+
+  While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
+  this guide is applicable to other managed k8s offerings that provide a CSI provider to a persistent storage device.
 
 When a SkyPilot API server is :ref:`deployed using a Helm chart <sky-api-server-helm-deploy-command>`,
-the API server is deployed with states persisted through a PVC in the Kubernetes cluster.
+the API server is fault tolerant with all states persisted through a PVC in the Kubernetes cluster.
 
-However, if you need to make the server resilient against Kubernetes cluster failures, you can further persist the API server states using cloud services,
-such as a `GCP persistent volume <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ .
+To further make the SkyPilot API server resilient to catastrophic k8s cluster failures,
+this guide walks through how to configure a `GCP persistent volume <https://cloud.google.com/compute/docs/disks/persistent-disks>`_
+to persistently back the SkyPilot state.
 
-By configuring a persistent disk to back the SkyPilot state, the SkyPilot API server becomes resilient to catastrophic k8s cluster failures, including a full cluster deletion.
+.. note::
 
-To recover all SkyPilot state on a new cluster, simply:
+    This guide is optional and only needed if you want to make the SkyPilot API server resilient to catastrophic k8s cluster failures.
+    If you do not need the API server to be resilient to catastrophic k8s cluster failures, you can skip this guide.
+
+TL;DR: Recover API server on another GKE cluster
+------------------------------------------------
+
+If you followed this guide to deploy the API server on a GKE cluster,
+you can recover the API server on another GKE cluster by following these steps:
 
 1. Create the cloud credential secrets
 2. Create the persistent volume definition
@@ -66,6 +77,7 @@ Next, create a persistent volume on GKE that uses the persistent disk that was j
             storage: $DISK_SIZE
         accessModes:
             - ReadWriteOnce
+        persistentVolumeReclaimPolicy: Retain
         csi:
             driver: pd.csi.storage.gke.io
             volumeHandle: projects/$PROJECT/zones/$ZONE/disks/$DISK_NAME
@@ -76,7 +88,16 @@ Replace the variables in the above YAML.
 Note the ``$PROJECT`` and ``$ZONE`` variables must match the project and zone of the GKE cluster.
 In addition, ``$DISK_SIZE`` and ``$DISK_NAME`` must match the size and name of the persistent disk created on GCP.
 
-Apply the Persistent Volume to the GKE cluster.
+.. note::
+
+    While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
+    the same can be done with other cloud providers that provide a CSI provider to a persistent storage device.
+
+    For example, the following article describes how to create a persistent volume on an AWS EKS cluster backed by an EFS file system:
+
+    `AWS Persistent Storage for Kubernetes <https://aws.amazon.com/blogs/storage/persistent-storage-for-kubernetes/#:~:text=Static%20provisioning%20using%20Amazon%20EFS>`_
+
+Apply the Persistent Volume to the k8s cluster.
 
 .. code-block:: bash
 
@@ -117,45 +138,21 @@ Next, deploy the API server using Helm with the following command.
     --set storage.storageClassName=$PV_CLASS_NAME \
     --set storage.size=$DISK_SIZE
 
-Note the last two lines of the command: ``--set storage.size=$DISK_SIZE`` and ``--set storage.storageClassName=$PV_CLASS_NAME``.
+Note the last two lines of the command:
+
+| ``--set storage.storageClassName=$PV_CLASS_NAME`` and
+| ``--set storage.size=$DISK_SIZE``.
+
 These lines associate the API server with the persistent volume created in :ref:`api-server-ha-create-pv`,
 allowing the API server to use the persistent volume to store its state.
-
-.. _api-server-ha-simulate-failure:
-
-Simulate a catastrophic failure of the GKE cluster
---------------------------------------------------
-
-To simulate a catastrophic failure of the GKE cluster, delete the GKE cluster.
-
-Then, create a new GKE cluster and repeat the following sections:
-
-- :ref:`api-server-ha-create-pv`
-- :ref:`api-server-ha-deploy-api-server`
-
-The new API server URL is different from the previous URL, so run ``sky api login`` again with the new server URL.
-
-Once the new API server is up and running, it should retain the same state as the previous API server!
-
-.. _api-server-ha-cleanup:
 
 Cleanup
 -------
 
-Delete GKE cluster used for the exercise.
+Delete the GKE cluster used for the exercise.
 
 Delete the persistent disk on GCP.
 
 .. code-block:: bash
 
     gcloud compute disks delete $DISK_NAME --zone=$ZONE
-
-.. _api-server-ha-conclusion:
-
-Conclusion
-----------
-
-This document demonstrates how a PersistentVolume can be used to persist the API server's state.
-
-While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
-the same can be done with other cloud providers that provide a CSI provider to a persistent block storage device.
