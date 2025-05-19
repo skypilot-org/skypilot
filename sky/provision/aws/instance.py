@@ -778,65 +778,75 @@ def open_ports(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Instance with cluster name '
                              f'{cluster_name_on_cloud} not found.')
-    sg = _get_sg_from_name(ec2, sg_name)
-    if sg is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Cannot find new security group '
-                             f'{sg_name}. Please check the log '
-                             'above and try again.')
-    # For multinode cases, we need to change the SG for all instances.
-    for instance in instance_list:
-        _maybe_move_to_new_sg(instance, sg)
 
-    existing_ports: Set[int] = set()
-    for existing_rule in sg.ip_permissions:
-        # Skip any non-tcp rules or if all traffic (-1) is specified.
-        if existing_rule['IpProtocol'] not in ['tcp', '-1']:
-            continue
-        # Skip any rules that don't have a FromPort or ToPort.
-        if 'FromPort' in existing_rule and 'ToPort' in existing_rule:
-            existing_ports.update(
-                range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
-        elif existing_rule['IpProtocol'] == '-1':
-            # For AWS, IpProtocol = -1 means all traffic
-            all_traffic_allowed: bool = False
-            for group_pairs in existing_rule['UserIdGroupPairs']:
-                if group_pairs['GroupId'] != sg.id:
-                    # We skip the port opening when the rule allows access from
-                    # other security groups, as that is likely added by a user
-                    # manually and satisfy their requirement.
-                    # The security group created by SkyPilot allows all traffic
-                    # from the same security group, which should not be skipped.
-                    existing_ports.add(-1)
-                    all_traffic_allowed = True
-                    break
-            if all_traffic_allowed:
+    for _ in range(utils.BOTO_MAX_RETRIES):
+        try:
+            sg = _get_sg_from_name(ec2, sg_name)
+            if sg is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot find new security group '
+                                    f'{sg_name}. Please check the log '
+                                    'above and try again.')
+            # For multinode cases, we need to change the SG for all instances.
+            for instance in instance_list:
+                _maybe_move_to_new_sg(instance, sg)
+
+            existing_ports: Set[int] = set()
+            for existing_rule in sg.ip_permissions:
+                # Skip any non-tcp rules or if all traffic (-1) is specified.
+                if existing_rule['IpProtocol'] not in ['tcp', '-1']:
+                    continue
+                # Skip any rules that don't have a FromPort or ToPort.
+                if 'FromPort' in existing_rule and 'ToPort' in existing_rule:
+                    existing_ports.update(
+                        range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
+                elif existing_rule['IpProtocol'] == '-1':
+                    # For AWS, IpProtocol = -1 means all traffic
+                    all_traffic_allowed: bool = False
+                    for group_pairs in existing_rule['UserIdGroupPairs']:
+                        if group_pairs['GroupId'] != sg.id:
+                            # We skip the port opening when the rule allows access from
+                            # other security groups, as that is likely added by a user
+                            # manually and satisfy their requirement.
+                            # The security group created by SkyPilot allows all traffic
+                            # from the same security group, which should not be skipped.
+                            existing_ports.add(-1)
+                            all_traffic_allowed = True
+                            break
+                    if all_traffic_allowed:
+                        break
+
+            ports_to_open = []
+            # Do not need to open any ports when all traffic is already allowed.
+            if -1 not in existing_ports:
+                ports_to_open = resources_utils.port_set_to_ranges(
+                    resources_utils.port_ranges_to_set(ports) - existing_ports)
+
+            ip_permissions = []
+            for port in ports_to_open:
+                if port.isdigit():
+                    from_port = to_port = port
+                else:
+                    from_port, to_port = port.split('-')
+                ip_permissions.append({
+                    'FromPort': int(from_port),
+                    'ToPort': int(to_port),
+                    'IpProtocol': 'tcp',
+                    'IpRanges': [{
+                        'CidrIp': '0.0.0.0/0'
+                    }],
+                })
+
+            # For the case when every new ports is already opened.
+            if ip_permissions:
+                sg.authorize_ingress(IpPermissions=ip_permissions)
                 break
-
-    ports_to_open = []
-    # Do not need to open any ports when all traffic is already allowed.
-    if -1 not in existing_ports:
-        ports_to_open = resources_utils.port_set_to_ranges(
-            resources_utils.port_ranges_to_set(ports) - existing_ports)
-
-    ip_permissions = []
-    for port in ports_to_open:
-        if port.isdigit():
-            from_port = to_port = port
-        else:
-            from_port, to_port = port.split('-')
-        ip_permissions.append({
-            'FromPort': int(from_port),
-            'ToPort': int(to_port),
-            'IpProtocol': 'tcp',
-            'IpRanges': [{
-                'CidrIp': '0.0.0.0/0'
-            }],
-        })
-
-    # For the case when every new ports is already opened.
-    if ip_permissions:
-        sg.authorize_ingress(IpPermissions=ip_permissions)
+        except aws.botocore_exceptions().ClientError as e:
+            # There is a race condition where the security group is still being
+            # created if multiple nodes are started at the same time (TOCTOU).
+            # Updating the security group will fail with a ClientError if the ports are already opened.
+            # We can just ignore any that are already opened
+            continue
 
 
 def cleanup_ports(
