@@ -76,8 +76,6 @@ release_lock() {
 
 # Generate SSH command based on available tools and parameters
 generate_ssh_command() {
-  local ssh_cmd=()
-  
   # Check for autossh
   if ! command -v autossh >/dev/null 2>&1; then
     debug_log "WARNING: autossh is not installed but recommended for reliable SSH tunnels"
@@ -85,36 +83,34 @@ generate_ssh_command() {
     
     # Fall back to regular ssh
     if [[ $USE_SSH_CONFIG -eq 1 ]]; then
-      ssh_cmd=(ssh -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N "$HOST")
+      SSH_CMD=("ssh" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N" "$HOST")
     else
-      ssh_cmd=(ssh -o "StrictHostKeyChecking=no" -o "IdentitiesOnly=yes" -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N)
+      SSH_CMD=("ssh" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N")
       
       # Add SSH key if provided
       if [[ -n "$SSH_KEY" ]]; then
-        ssh_cmd+=(-i "$SSH_KEY")
+        SSH_CMD+=("-i" "$SSH_KEY")
       fi
       
       # Add user@host
-      ssh_cmd+=("$USER@$HOST")
+      SSH_CMD+=("$USER@$HOST")
     fi
   else
     # Configure autossh
     if [[ $USE_SSH_CONFIG -eq 1 ]]; then
-      ssh_cmd=(autossh -M 0 -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N "$HOST")
+      SSH_CMD=("autossh" "-M" "0" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N" "$HOST")
     else
-      ssh_cmd=(autossh -M 0 -o "StrictHostKeyChecking=no" -o "IdentitiesOnly=yes" -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N)
+      SSH_CMD=("autossh" "-M" "0" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N")
       
       # Add SSH key if provided
       if [[ -n "$SSH_KEY" ]]; then
-        ssh_cmd+=(-i "$SSH_KEY")
+        SSH_CMD+=("-i" "$SSH_KEY")
       fi
       
       # Add user@host
-      ssh_cmd+=("$USER@$HOST")
+      SSH_CMD+=("$USER@$HOST")
     fi
   fi
-  
-  echo "${ssh_cmd[@]}"
 }
 
 # Function to read certificate files if they exist
@@ -347,7 +343,7 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 
 # Generate the SSH command
-SSH_CMD=($(generate_ssh_command))
+generate_ssh_command
 
 debug_log "Starting SSH tunnel: ${SSH_CMD[*]}"
 
