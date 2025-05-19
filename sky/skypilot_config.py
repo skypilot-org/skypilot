@@ -541,7 +541,7 @@ def override_skypilot_config(
 def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
     """Replaces the global config with the new configs."""
     original_config = _get_loaded_config()
-    _set_loaded_config(config_utils.Config(new_configs))
+    _set_loaded_config(new_configs)
     yield
     _set_loaded_config(original_config)
 
