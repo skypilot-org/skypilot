@@ -1,11 +1,11 @@
 #!/bin/bash
-# ssh-tunnel.sh - Fast SSH tunnel script for Kubernetes API access
-# Used as kubectl exec credential plugin to establish SSH tunnel on demand
+# ssh-tunnel.sh - SSH tunnel script for Kubernetes API access
+# Used as kubectl exec credential plugin to establish SSH tunnel on demand.
+# Returns a valid credential format for kubectl with expiration. The expiration
+# is calculated based on the TTL argument and is required to force kubectl to
+# check the tunnel status frequently.
 
 # Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT] [--ttl SECONDS]
-
-# Disable debug logging by default (set to 1 to enable debugging)
-DEBUG=0
 
 # Default time-to-live for credential in seconds
 # This forces kubectl to check the tunnel status frequently
@@ -19,12 +19,10 @@ HOST=""
 USER=""
 PORT=6443  # Default port if not specified
 
-# Log only to the log file, not to stderr
+# Debug log to ~/.sky/tunnel/$CONTEXT-tunnel.log
 debug_log() {
-  if [[ $DEBUG -eq 1 ]]; then
     local message="$(date): $1"
     echo "$message" >> "$LOG_FILE"
-  fi
 }
 
 # Generate expiration timestamp for credential
@@ -74,6 +72,49 @@ release_lock() {
     rm -f "$LOCK_FILE"
   fi
   debug_log "Lock released"
+}
+
+# Generate SSH command based on available tools and parameters
+generate_ssh_command() {
+  local ssh_cmd=()
+  
+  # Check for autossh
+  if ! command -v autossh >/dev/null 2>&1; then
+    debug_log "WARNING: autossh is not installed but recommended for reliable SSH tunnels"
+    debug_log "Install autossh: brew install autossh (macOS), apt-get install autossh (Ubuntu/Debian)"
+    
+    # Fall back to regular ssh
+    if [[ $USE_SSH_CONFIG -eq 1 ]]; then
+      ssh_cmd=(ssh -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N "$HOST")
+    else
+      ssh_cmd=(ssh -o "StrictHostKeyChecking=no" -o "IdentitiesOnly=yes" -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N)
+      
+      # Add SSH key if provided
+      if [[ -n "$SSH_KEY" ]]; then
+        ssh_cmd+=(-i "$SSH_KEY")
+      fi
+      
+      # Add user@host
+      ssh_cmd+=("$USER@$HOST")
+    fi
+  else
+    # Configure autossh
+    if [[ $USE_SSH_CONFIG -eq 1 ]]; then
+      ssh_cmd=(autossh -M 0 -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N "$HOST")
+    else
+      ssh_cmd=(autossh -M 0 -o "StrictHostKeyChecking=no" -o "IdentitiesOnly=yes" -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N)
+      
+      # Add SSH key if provided
+      if [[ -n "$SSH_KEY" ]]; then
+        ssh_cmd+=(-i "$SSH_KEY")
+      fi
+      
+      # Add user@host
+      ssh_cmd+=("$USER@$HOST")
+    fi
+  fi
+  
+  echo "${ssh_cmd[@]}"
 }
 
 # Function to read certificate files if they exist
@@ -305,41 +346,8 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE"
 fi
 
-# Check for autossh
-if ! command -v autossh >/dev/null 2>&1; then
-  debug_log "WARNING: autossh is not installed but recommended for reliable SSH tunnels"
-  debug_log "Install autossh: brew install autossh (macOS), apt-get install autossh (Ubuntu/Debian)"
-  
-  # Fall back to regular ssh
-  if [[ $USE_SSH_CONFIG -eq 1 ]]; then
-    SSH_CMD=(ssh -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N "$HOST")
-  else
-    SSH_CMD=(ssh -o "StrictHostKeyChecking=no" -o "IdentitiesOnly=yes" -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N)
-    
-    # Add SSH key if provided
-    if [[ -n "$SSH_KEY" ]]; then
-      SSH_CMD+=(-i "$SSH_KEY")
-    fi
-    
-    # Add user@host
-    SSH_CMD+=("$USER@$HOST")
-  fi
-else
-  # Configure autossh
-  if [[ $USE_SSH_CONFIG -eq 1 ]]; then
-    SSH_CMD=(autossh -M 0 -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N "$HOST")
-  else
-    SSH_CMD=(autossh -M 0 -o "StrictHostKeyChecking=no" -o "IdentitiesOnly=yes" -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "ExitOnForwardFailure=yes" -L "$PORT:localhost:6443" -N)
-    
-    # Add SSH key if provided
-    if [[ -n "$SSH_KEY" ]]; then
-      SSH_CMD+=(-i "$SSH_KEY")
-    fi
-    
-    # Add user@host
-    SSH_CMD+=("$USER@$HOST")
-  fi
-fi
+# Generate the SSH command
+SSH_CMD=($(generate_ssh_command))
 
 debug_log "Starting SSH tunnel: ${SSH_CMD[*]}"
 
