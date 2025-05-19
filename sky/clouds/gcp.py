@@ -427,6 +427,85 @@ class GCP(clouds.Cloud):
             raise
 
     @classmethod
+    def check_volume_name(cls,
+                          region: 'clouds.Region',
+                          zones: Optional[List['clouds.Zone']],
+                          use_mig: bool,
+                          volume_name: str,
+                          dryrun: bool = False) -> Dict[str, Any]:
+        """Check if the volume name exists and return the volume info."""
+        logger.debug(
+            f'Checking volume {volume_name} in region {region} and zones {zones}'
+        )
+        try:
+            compute = gcp.build('compute',
+                                'v1',
+                                credentials=None,
+                                cache_discovery=False)
+        except gcp.credential_error_exception():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Not able to build compute client') from None
+
+        project_id = cls.get_project_id(dryrun)
+        # If zones is None, check the region disk
+        # If zones is not None, check zone disks first, then region disk
+        if zones is None:
+            # Set zones to an empty list to normalize the logic below
+            zones = []
+        volume_info = None
+        for zone in zones:
+            try:
+                volume_info = compute.disks().get(project=project_id,
+                                                  zone=zone.name,
+                                                  disk=volume_name).execute()
+                if volume_info is not None:
+                    if use_mig:
+                        volume_info['selfLink'] = volume_name
+                    return volume_info
+            except gcp.http_error_exception() as e:
+                if e.resp.status == 403:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Not able to access the volume '
+                                         f'{volume_name!r}') from None
+                if e.resp.status == 404:
+                    continue  # Try next zone
+                raise
+
+        # If not found in any zone, check region disk
+        try:
+            volume_info = compute.regionDisks().get(project=project_id,
+                                                    region=region.name,
+                                                    disk=volume_name).execute()
+            # Check the zones are in the `replicaZones` of the region disk
+            # 'replicaZones':
+            #  ['https://www.googleapis.com/compute/v1/projects/sky-dev-465/zones/us-central1-a',
+            # 'https://www.googleapis.com/compute/v1/projects/sky-dev-465/zones/us-central1-c']
+            replica_zones = [
+                zone.split('/')[-1] for zone in volume_info['replicaZones']
+            ]
+            for zone in zones:
+                if zone.name not in replica_zones:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.DiskInstanceZoneMismatchError(
+                            f'Zone {zone.name} is not in the `replicaZones` {replica_zones} of the region disk {volume_name}'
+                        )
+            return volume_info
+        except exceptions.DiskInstanceZoneMismatchError as e:
+            raise exceptions.ResourcesUnavailableError(str(e)) from None
+        except gcp.http_error_exception() as e:
+            if e.resp.status == 403:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Not able to access the volume '
+                                     f'{volume_name!r}') from None
+            if e.resp.status == 404:
+                with ux_utils.print_exception_no_traceback():
+                    # Return a ResourcesUnavailableError to trigger failover
+                    raise exceptions.ResourcesUnavailableError(
+                        f'Volume {volume_name} not found in region {region} or zones {zones}'
+                    ) from None
+            raise
+
+    @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         del region  # Unused.
         return cls._get_image_size(image_id)
@@ -600,7 +679,7 @@ class GCP(clouds.Cloud):
                 ('gcp', 'force_enable_external_ips'), False)
 
         volumes, device_mount_points = GCP._get_volumes_specs(
-            r.instance_type, r.volumes)
+            region, zones, r.instance_type, r.volumes, use_mig, dryrun)
         resources_vars['volumes'] = volumes
 
         resources_vars['user_data'] = None
@@ -1090,6 +1169,16 @@ class GCP(clouds.Cloud):
                 raise exceptions.NotSupportedError(msg)
 
     @classmethod
+    def _translate_attach_mode(
+            cls, attach_mode: resources_utils.DiskAttachMode) -> str:
+        if attach_mode == resources_utils.DiskAttachMode.READ_WRITE:
+            return 'READ_WRITE'
+        elif attach_mode == resources_utils.DiskAttachMode.READ_ONLY:
+            return 'READ_ONLY'
+        else:
+            raise ValueError(f'Invalid attach mode: {attach_mode}')
+
+    @classmethod
     def _get_disk_type(
         cls,
         instance_type: Optional[str],
@@ -1169,8 +1258,13 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _get_volumes_specs(
-        cls, instance_type: Optional[str], volumes: Optional[List[Dict[str,
-                                                                       Any]]]
+            cls,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            instance_type: Optional[str],
+            volumes: Optional[List[Dict[str, Any]]],
+            use_mig: bool,
+            dryrun: bool = False
     ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         if volumes is None:
             return [], {}
@@ -1182,6 +1276,18 @@ class GCP(clouds.Cloud):
                 'device_name': f'sky-disk-{i}',
                 'auto_delete': volume['auto_delete'],
             }
+            if 'name' in volume:
+                volume_info = cls.check_volume_name(region, zones, use_mig,
+                                                    volume['name'], dryrun)
+                if volume_info is not None:
+                    volume_spec['source'] = volume_info['selfLink']
+                    volume_spec['attach_mode'] = cls._translate_attach_mode(
+                        volume['attach_mode'])
+                    volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
+                    volumes_specs.append(volume_spec)
+                    device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
+                    device_mount_points[device_name] = volume['path']
+                    continue
             if volume['storage_type'] == resources_utils.StorageType.INSTANCE:
                 volume_spec['disk_tier'] = constants.INSTANCE_STORAGE_DISK_TYPE
                 volume_spec[

@@ -746,8 +746,15 @@ class Resources:
         supported_storage_types = [
             storage_type.value for storage_type in resources_utils.StorageType
         ]
+        supported_attach_modes = [
+            attach_mode.value for attach_mode in resources_utils.DiskAttachMode
+        ]
         network_type = resources_utils.StorageType.NETWORK
+        read_write_mode = resources_utils.DiskAttachMode.READ_WRITE
         for volume in volumes:
+            existing_volume = False
+            if 'name' in volume:
+                existing_volume = True
             if 'path' not in volume:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Invalid volume {volume!r}. '
@@ -766,6 +773,27 @@ class Resources:
                     else:
                         volume['storage_type'] = resources_utils.StorageType(
                             storage_type_str)
+            if 'auto_delete' not in volume:
+                volume['auto_delete'] = False
+            if existing_volume:
+                if 'attach_mode' not in volume:
+                    volume['attach_mode'] = read_write_mode
+                else:
+                    if isinstance(volume['attach_mode'], str):
+                        attach_mode_str = str(volume['attach_mode']).lower()
+                        if attach_mode_str not in supported_attach_modes:
+                            logger.warning(
+                                f'Invalid attach_mode {attach_mode_str!r}. '
+                                f'Set it to {read_write_mode.value}.')
+                            volume['attach_mode'] = read_write_mode
+                        else:
+                            volume[
+                                'attach_mode'] = resources_utils.DiskAttachMode(
+                                    attach_mode_str)
+                volume['auto_delete'] = False
+                volume['storage_type'] = network_type
+                valid_volumes.append(volume)
+                continue
             if volume['storage_type'] == network_type:
                 if 'disk_size' not in volume:
                     with ux_utils.print_exception_no_traceback():
@@ -787,14 +815,12 @@ class Resources:
                     else:
                         volume['disk_tier'] = resources_utils.DiskTier(
                             disk_tier_str)
-            else:
+            elif volume['storage_type'] == network_type:
                 logger.debug(
                     f'No disk_tier specified for volume {volume["path"]}. '
                     f'Set it to {resources_utils.DiskTier.BEST.value}.')
                 volume['disk_tier'] = resources_utils.DiskTier.BEST
 
-            if 'auto_delete' not in volume:
-                volume['auto_delete'] = False
             valid_volumes.append(volume)
         self._volumes = valid_volumes
 
@@ -1173,6 +1199,8 @@ class Resources:
         if self.cloud is not None:
             try:
                 for volume in self.volumes:
+                    if 'disk_tier' not in volume:
+                        continue
                     # TODO(hailong): check instance local SSD
                     # support for instance_type.
                     # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
@@ -1455,6 +1483,10 @@ class Resources:
                     logger.info(f'Volume {volume["path"]} not in other volumes')
                     return False
                 other_volume = other_volumes_map[volume['path']]
+                if 'name' in volume:
+                    if volume['name'] != other_volume['name']:
+                        return False
+                    continue
                 if volume['storage_type'] != other_volume['storage_type']:
                     return False
                 if (volume['storage_type'] ==
@@ -1608,7 +1640,8 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         if self.volumes is not None:
             for volume in self.volumes:
-                if volume['disk_tier'] != resources_utils.DiskTier.BEST:
+                if 'disk_tier' in volume and volume[
+                        'disk_tier'] != resources_utils.DiskTier.BEST:
                     features.add(
                         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         return features
@@ -1830,6 +1863,9 @@ class Resources:
                 if 'storage_type' in volume_copy:
                     volume_copy['storage_type'] = volume_copy[
                         'storage_type'].value
+                if 'attach_mode' in volume_copy:
+                    volume_copy['attach_mode'] = volume_copy[
+                        'attach_mode'].value
                 volumes.append(volume_copy)
             config['volumes'] = volumes
         if self._autostop_config is not None:

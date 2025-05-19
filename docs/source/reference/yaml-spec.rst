@@ -64,13 +64,16 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
     :ref:`volumes <yaml-spec-resources-volumes>`:
-      # Network volume
+      # New volume - Network volume
       - path: /mnt/dir1
         disk_size: 100
         auto_delete: true
-      # Instance volume
+      # New volume - Instance volume
       - path: /mnt/dir2
         storage_type: instance
+      # Existing volume - Network volume only
+      - path: /mnt/dir3
+        volume_name: my-volume
 
   :ref:`envs <yaml-spec-envs>`:
     MY_BUCKET: skypilot-temp-gcs-test
@@ -747,15 +750,20 @@ Example:
 
   resources:
     volumes:
-      # Network volume
+      # New volume - Network volume
       - path: /mnt/dir1 # Path to mount the volume on the instance
         disk_size: 100 # Size of the volume in GB
         auto_delete: true # Whether to delete the volume when the instance is terminated, optional, default: false
         storage_type: network # Type of the volume, either 'network' or 'instance', optional, default: network
         disk_tier: best # Tier of the volume, same as `resources.disk_tier`, optional, default: best
-      # Instance volume, auto_delete is always true for instance volumes
+      # New volume - Instance volume
+      # auto_delete is always true for instance volumes
       - path: /mnt/dir2
         storage_type: instance
+      # Existing volume - Network volume only
+      - path: /mnt/dir3
+        volume_name: my-volume
+        attach_mode: read_write # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
 
 .. _yaml-spec-envs:
 

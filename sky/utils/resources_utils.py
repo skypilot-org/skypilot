@@ -58,6 +58,12 @@ class StorageType(enum.Enum):
     INSTANCE = 'instance'
 
 
+class DiskAttachMode(enum.Enum):
+    """Disk attach mode."""
+    READ_ONLY = 'read_only'
+    READ_WRITE = 'read_write'
+
+
 @dataclasses.dataclass
 class ClusterName:
     display_name: str
