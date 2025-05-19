@@ -475,7 +475,7 @@ _reload_config()
 
 def loaded() -> bool:
     """Returns if the user configurations are loaded."""
-    return bool(_get_loaded_config)
+    return bool(_get_loaded_config())
 
 
 @contextlib.contextmanager
