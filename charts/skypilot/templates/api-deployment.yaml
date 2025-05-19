@@ -130,6 +130,11 @@ spec:
           mountPath: /root/.lambda_cloud
           readOnly: true
         {{- end }}
+        {{- if .Values.nebiusCredentials.enabled }}
+        - name: nebius-config
+          mountPath: /root/.nebius
+          readOnly: true
+        {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
