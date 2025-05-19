@@ -57,6 +57,7 @@ class Context(object):
         self._log_file = None
         self._log_file_handle = None
         self.env_overrides = {}
+        self.config_context = None
 
     def cancel(self):
         """Cancel the context."""

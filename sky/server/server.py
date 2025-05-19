@@ -49,6 +49,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
@@ -327,25 +328,26 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
+    context.initialize()
+
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        dag, _ = admin_policy_utils.apply(
-            dag, request_options=validate_body.request_options)
-        # Skip validating workdir and file_mounts, as those need to be
-        # validated after the files are uploaded to the SkyPilot API server
-        # with `upload_mounts_to_api_server`.
-        dag.validate(skip_file_mounts=True, skip_workdir=True)
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag, request_options=validate_body.request_options) as dag:
+            # Skip validating workdir and file_mounts, as those need to be
+            # validated after the files are uploaded to the SkyPilot API server
+            # with `upload_mounts_to_api_server`.
+            dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        loop = asyncio.get_running_loop()
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await loop.run_in_executor(None, validate_dag, dag)
+        await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e

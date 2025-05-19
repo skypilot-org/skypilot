@@ -170,21 +170,70 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         if task.storage_mounts is not None:
             for storage in task.storage_mounts.values():
                 # Ensure the storage is constructed.
                 storage.construct()
-    dag, _ = admin_policy_utils.apply(
-        dag,
-        request_options=admin_policy.RequestOptions(
-            cluster_name=cluster_name,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            down=down,
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster_name,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            )) as dag:
+        return _execute_dag(
+            dag,
             dryrun=dryrun,
-        ))
+            down=down,
+            stream_logs=stream_logs,
+            handle=handle,
+            backend=backend,
+            retry_until_up=retry_until_up,
+            optimize_target=optimize_target,
+            stages=stages,
+            cluster_name=cluster_name,
+            detach_setup=detach_setup,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            no_setup=no_setup,
+            clone_disk_from=clone_disk_from,
+            skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            _quiet_optimizer=_quiet_optimizer,
+            _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+            _is_launched_by_sky_serve_controller=
+            _is_launched_by_sky_serve_controller)
+
+
+def _execute_dag(
+    dag: 'sky.Dag',
+    dryrun: bool,
+    down: bool,
+    stream_logs: bool,
+    handle: Optional[backends.ResourceHandle],
+    backend: Optional[backends.Backend],
+    retry_until_up: bool,
+    optimize_target: common.OptimizeTarget,
+    stages: Optional[List[Stage]],
+    cluster_name: Optional[str],
+    detach_setup: bool,
+    detach_run: bool,
+    idle_minutes_to_autostop: Optional[int],
+    no_setup: bool,
+    clone_disk_from: Optional[str],
+    skip_unnecessary_provisioning: bool,
+    # pylint: disable=invalid-name
+    _quiet_optimizer: bool,
+    _is_launched_by_jobs_controller: bool,
+    _is_launched_by_sky_serve_controller: bool,
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+    """Execute a DAG.
+
+    This is an internal helper function for _execute() and is expected to be
+    called only by _execute().
+    """
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
