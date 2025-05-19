@@ -40,7 +40,7 @@ export async function getCloudInfrastructure() {
         name: cloud,
         clusters: 0,
         jobs: 0,
-        enabled: false
+        enabled: true
       };
     });
     
@@ -48,7 +48,6 @@ export async function getCloudInfrastructure() {
       const cloud = cluster.cloud.toLowerCase();
       if (cloudsData[cloud]) {
         cloudsData[cloud].clusters += 1;
-        cloudsData[cloud].enabled = true;
       }
     });
     
@@ -69,7 +68,6 @@ export async function getCloudInfrastructure() {
     });
     
     const result = Object.values(cloudsData)
-      .filter(cloud => cloud.enabled)
       .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
     
     return result;

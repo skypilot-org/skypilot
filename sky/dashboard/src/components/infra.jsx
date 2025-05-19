@@ -267,12 +267,12 @@ export function GPUs() {
   };
 
   const renderCloudInfrastructure = () => {
-    if (cloudInfraData.length === 0) {
+    if (cloudInfraData.length === 0 && loading) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
             <h3 className="text-lg font-semibold mb-4">Cloud</h3>
-            <p className="text-sm text-gray-500">No cloud infrastructure data available.</p>
+            <p className="text-sm text-gray-500">Loading cloud data...</p>
           </div>
         </div>
       );
@@ -282,7 +282,7 @@ export function GPUs() {
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
           <div className="flex items-center mb-4">
-            <h3 className="text-lg font-semibold">Cloud Infrastructure</h3>
+            <h3 className="text-lg font-semibold">Cloud</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
               {cloudInfraData.length} clouds
             </span>
@@ -291,17 +291,33 @@ export function GPUs() {
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="p-3 text-left font-medium text-gray-600">Cloud</th>
-                  <th className="p-3 text-left font-medium text-gray-600">Clusters</th>
-                  <th className="p-3 text-left font-medium text-gray-600">Jobs</th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-32">Cloud</th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-24">Clusters</th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-24">Jobs</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {cloudInfraData.map(cloud => (
                   <tr key={cloud.name} className="hover:bg-gray-50">
-                    <td className="p-3 capitalize">{cloud.name}</td>
-                    <td className="p-3">{cloud.clusters}</td>
-                    <td className="p-3">{cloud.jobs}</td>
+                    <td className="p-3 capitalize font-medium text-gray-700">{cloud.name}</td>
+                    <td className="p-3">
+                      {cloud.clusters > 0 ? (
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                          {cloud.clusters}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">0</span>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      {cloud.jobs > 0 ? (
+                        <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                          {cloud.jobs}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">0</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
