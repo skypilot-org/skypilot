@@ -219,7 +219,6 @@ autosectionlabel_prefix_document = True
 
 suppress_warnings = ['autosectionlabel.*']
 
-
 # Adapted from vllm-project/vllm
 # see https://docs.readthedocs.io/en/stable/reference/environment-variables.html # noqa
 READTHEDOCS_VERSION_TYPE = os.environ.get('READTHEDOCS_VERSION_TYPE')
