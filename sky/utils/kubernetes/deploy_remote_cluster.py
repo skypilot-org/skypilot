@@ -457,8 +457,15 @@ def main():
         targets = load_ssh_targets(args.ssh_node_pools_file)
         clusters_config = get_cluster_config(targets, args.infra)
         
+        # Print information about clusters being processed
+        num_clusters = len(clusters_config)
+        cluster_names = list(clusters_config.keys())
+        cluster_info = f"Found {num_clusters} Node Pool{'s' if num_clusters > 1 else ''}: {', '.join(cluster_names)}"
+        print(f"SKYPILOT_CLUSTER_INFO: {cluster_info}")
+        
         # Process each cluster
         for cluster_name, cluster_config in clusters_config.items():
+            print(f"SKYPILOT_CURRENT_CLUSTER: {cluster_name}")
             print(f"{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}")
             hosts_info = prepare_hosts_info(cluster_config)
             
