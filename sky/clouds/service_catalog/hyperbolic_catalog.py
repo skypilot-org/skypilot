@@ -110,34 +110,18 @@ def get_gen_version(instance_type: str) -> Optional[str]:
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-    use_spot: bool = False,
-    instance_type: Optional[str] = None,
     all_regions: bool = False,
     require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """List available accelerators in Hyperbolic Cloud."""
-    # Only raise error if zone is explicitly set to a non-None value
-    if zone is not None and zone != '':
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Hyperbolic Cloud does not support zones.')
-    if use_spot:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Hyperbolic Cloud does not support spot instances.')
-    if instance_type is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Hyperbolic Cloud does not support instance type filtering.')
-
-    region_filter = region
-    quantity_filter = None
+    """Returns all instance types in Hyperbolic Cloud offering accelerators."""
+    del require_price  # Unused
     return common.list_accelerators_impl('Hyperbolic', _df, gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,
-                                         all_regions, require_price)
+                                         all_regions)
 
 
 def get_instance_type_from_catalog() -> dict:
