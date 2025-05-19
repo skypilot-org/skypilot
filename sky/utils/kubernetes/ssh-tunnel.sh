@@ -33,6 +33,49 @@ generate_expiration_timestamp() {
   date -u -v+${TTL_SECONDS}S +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+${TTL_SECONDS} seconds" +"%Y-%m-%dT%H:%M:%SZ"
 }
 
+# Acquire the lock, return 0 if successful, 1 if another process is already holding the lock
+acquire_lock() {
+  # Check for flock command
+  if ! command -v flock >/dev/null 2>&1; then
+    debug_log "flock command not available, using alternative lock mechanism"
+    # Simple file-based locking
+    if [ -f "$LOCK_FILE" ]; then
+      lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
+      if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+        debug_log "Another process ($lock_pid) is starting the tunnel, waiting briefly"
+        return 1
+      else
+        # Stale lock file
+        debug_log "Removing stale lock file"
+        rm -f "$LOCK_FILE"
+      fi
+    fi
+    # Create our lock
+    echo $$ > "$LOCK_FILE"
+    return 0
+  else
+    # Use flock for better locking
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+      debug_log "Another process is starting the tunnel, waiting briefly"
+      return 1
+    fi
+    return 0
+  fi
+}
+
+# Release the lock
+release_lock() {
+  if command -v flock >/dev/null 2>&1; then
+    # Using flock
+    exec 9>&- # Close file descriptor to release lock
+  else
+    # Using simple lock
+    rm -f "$LOCK_FILE"
+  fi
+  debug_log "Lock released"
+}
+
 # Function to read certificate files if they exist
 read_certificate_data() {
   local client_cert_file="$TUNNEL_DIR/$CONTEXT-cert.pem"
@@ -232,52 +275,20 @@ if nc -z localhost "$PORT" 2>/dev/null; then
   exit 0
 fi
 
-# Check for flock command
-if ! command -v flock >/dev/null 2>&1; then
-  debug_log "flock command not available, using alternative lock mechanism"
-  # Simple file-based locking
-  if [ -f "$LOCK_FILE" ]; then
-    lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
-    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
-      debug_log "Another process ($lock_pid) is starting the tunnel, waiting briefly"
-      # Wait briefly for the tunnel to be established
-      for i in {1..10}; do
-        if nc -z localhost "$PORT" 2>/dev/null; then
-          debug_log "Tunnel is now active"
-          
-          # Return valid credential format for kubectl with expiration
-          generate_credentials_json
-          exit 0
-        fi
-        sleep 0.2
-      done
-      debug_log "Waited for tunnel but port $PORT still not available"
-    else
-      # Stale lock file
-      debug_log "Removing stale lock file"
-      rm -f "$LOCK_FILE"
+# Try to acquire the lock
+if ! acquire_lock; then
+  # Wait briefly for the tunnel to be established
+  for i in {1..10}; do
+    if nc -z localhost "$PORT" 2>/dev/null; then
+      debug_log "Tunnel is now active"
+      
+      # Return valid credential format for kubectl with expiration
+      generate_credentials_json
+      exit 0
     fi
-  fi
-  # Create our lock
-  echo $$ > "$LOCK_FILE"
-else
-  # Use flock for better locking
-  exec 9>"$LOCK_FILE"
-  if ! flock -n 9; then
-    debug_log "Another process is starting the tunnel, waiting briefly"
-    # Wait briefly for the tunnel to be established
-    for i in {1..10}; do
-      if nc -z localhost "$PORT" 2>/dev/null; then
-        debug_log "Tunnel is now active"
-        
-        # Return valid credential format for kubectl with expiration
-        generate_credentials_json
-        exit 0
-      fi
-      sleep 0.2
-    done
-    debug_log "Waited for tunnel but port $PORT still not available"
-  fi
+    sleep 0.2
+  done
+  debug_log "Waited for tunnel but port $PORT still not available"
 fi
 
 # Check if we have a PID file with running process
@@ -336,7 +347,7 @@ debug_log "Starting SSH tunnel: ${SSH_CMD[*]}"
 "${SSH_CMD[@]}" >> "$LOG_FILE" 2>&1 &
 TUNNEL_PID=$!
 
-# Save PID immediately
+# Save PID
 echo $TUNNEL_PID > "$PID_FILE"
 debug_log "Tunnel started with PID $TUNNEL_PID"
 
@@ -352,13 +363,7 @@ for i in {1..20}; do
 done
 
 # Clean up lock file
-if command -v flock >/dev/null 2>&1; then
-  # Using flock
-  exec 9>&- # Close file descriptor to release lock
-else
-  # Using simple lock
-  rm -f "$LOCK_FILE"
-fi
+release_lock
 
 # Check if the tunnel process is still running
 if ! kill -0 $TUNNEL_PID 2>/dev/null; then
