@@ -70,6 +70,7 @@ def _get_single_resources_schema():
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
 
+    # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
     all_clouds = list(service_catalog.ALL_CLOUDS)
