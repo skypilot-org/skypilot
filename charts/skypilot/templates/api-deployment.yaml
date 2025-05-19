@@ -252,6 +252,27 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
+      {{- if .Values.nebiusCredentials.enabled }}
+      - name: create-nebius-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up Nebius credentials..."
+          mkdir -p /root/.nebius
+          cp /root/.nebius_cloud/credentials.json /root/.nebius/credentials.json
+          echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
+        volumeMounts:
+        - name: nebius-config
+          mountPath: /root/.nebius
+        - name: nebius-credentials
+          mountPath: /root/.nebius_cloud/credentials.json
+          subPath: credentials.json
+      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -279,6 +300,13 @@ spec:
       {{- if .Values.lambdaCredentials.enabled }}
       - name: lambda-config
         emptyDir: {}
+      {{- end }}
+      {{- if .Values.nebiusCredentials.enabled }}
+      - name: nebius-config
+        emptyDir: {}
+      - name: nebius-credentials
+        secret:
+          secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
       {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config

@@ -221,7 +221,7 @@ lambdaCredentials:
   # Name of the secret containing the Lambda credentials. Only used if enabled is true.
   lambdaSecretName: lambda-credentials
 
-# Populate Nebius credentials from the secret with key `api_key`
+# Populate Nebius credentials from the secret with nebius credentials.
 nebiusCredentials:
   enabled: false
   tenantId: null
