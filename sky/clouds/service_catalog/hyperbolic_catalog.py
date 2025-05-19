@@ -112,8 +112,13 @@ def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
     case_sensitive: bool = True,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    use_spot: bool = False,
+    instance_type: Optional[str] = None,
+    **kwargs,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    del gpus_only, name_filter, case_sensitive  # Unused
+    del gpus_only, name_filter, case_sensitive, region, zone, use_spot, instance_type, kwargs  # Unused
     # TODO: Implement accelerator listing
     return {}
 
