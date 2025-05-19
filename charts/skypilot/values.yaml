@@ -221,6 +221,13 @@ lambdaCredentials:
   # Name of the secret containing the Lambda credentials. Only used if enabled is true.
   lambdaSecretName: lambda-credentials
 
+# Populate Nebius credentials from the secret with key `api_key`
+nebiusCredentials:
+  enabled: false
+  tenantId: null
+  # Name of the secret containing the Nebius credentials. Only used if enabled is true.
+  nebiusSecretName: nebius-credentials
+
 # Set securityContext for the api pod
 podSecurityContext: {}
 
