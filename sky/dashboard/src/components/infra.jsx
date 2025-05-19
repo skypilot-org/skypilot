@@ -237,7 +237,7 @@ export function GPUs() {
                           style={{ width: `${usedPercentage}%` }}
                           className="bg-blue-500 h-full flex items-center justify-center text-white text-xs"
                         >
-                          {usedPercentage > 15 && `${usedGpus} Used`}
+                          {usedPercentage > 15 && `${usedGpus} used`}
                         </div>
                       )}
                       {freePercentage > 0 && (
@@ -245,7 +245,7 @@ export function GPUs() {
                           style={{ width: `${freePercentage}%` }}
                           className="bg-green-500 h-full flex items-center justify-center text-white text-xs"
                         >
-                          {freePercentage > 15 && `${gpu.gpu_free} Free`}
+                          {freePercentage > 15 && `${gpu.gpu_free} free`}
                         </div>
                       )}
                     </div>
@@ -512,16 +512,16 @@ export function GPUs() {
                             <td className="p-3 text-xs text-gray-600">
                               {requestableQtys || '-'} / node
                             </td>
-                            <td className="p-3 w-1/2">
+                            <td className="p-3 w-2/3">
                               <div className="flex items-center gap-3">
-                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[120px]">
+                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
                                   {usedPercentage > 0 && (
                                     <div
                                       style={{ width: `${usedPercentage}%` }}
                                       className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
                                       {usedPercentage > 15 &&
-                                        `${usedGpus} Used`}
+                                        `${usedGpus} used`}
                                     </div>
                                   )}
                                   {freePercentage > 0 && (
@@ -530,7 +530,7 @@ export function GPUs() {
                                       className="bg-green-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
                                       {freePercentage > 15 &&
-                                        `${gpu.gpu_free} Free`}
+                                        `${gpu.gpu_free} free`}
                                     </div>
                                   )}
                                 </div>
