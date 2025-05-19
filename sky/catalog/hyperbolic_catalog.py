@@ -119,7 +119,8 @@ def list_accelerators(
     require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """List available accelerators in Hyperbolic Cloud."""
-    if zone is not None:
+    # Only raise error if zone is explicitly set to a non-None value
+    if zone is not None and zone != '':
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Hyperbolic Cloud does not support zones.')
     if use_spot:
