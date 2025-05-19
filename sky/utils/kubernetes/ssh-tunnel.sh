@@ -97,7 +97,7 @@ read_certificate_data() {
 
 # Function to generate credentials JSON
 generate_credentials_json() {
-  local expiration_time=$1
+  local expiration_time=$(generate_expiration_timestamp)
   local cert_bundle=$(read_certificate_data)
   local client_cert_data=${cert_bundle%:*}
   local client_key_data=${cert_bundle#*:}
@@ -227,11 +227,8 @@ if nc -z localhost "$PORT" 2>/dev/null; then
     debug_log "Port $PORT is in use but no PID file exists"
   fi
   
-  # Generate expiration timestamp
-  EXPIRATION_TIME=$(generate_expiration_timestamp)
-  
   # Return valid credential format for kubectl with expiration
-  generate_credentials_json "$EXPIRATION_TIME"
+  generate_credentials_json
   exit 0
 fi
 
@@ -248,11 +245,8 @@ if ! command -v flock >/dev/null 2>&1; then
         if nc -z localhost "$PORT" 2>/dev/null; then
           debug_log "Tunnel is now active"
           
-          # Generate expiration timestamp
-          EXPIRATION_TIME=$(generate_expiration_timestamp)
-          
           # Return valid credential format for kubectl with expiration
-          generate_credentials_json "$EXPIRATION_TIME"
+          generate_credentials_json
           exit 0
         fi
         sleep 0.2
@@ -276,11 +270,8 @@ else
       if nc -z localhost "$PORT" 2>/dev/null; then
         debug_log "Tunnel is now active"
         
-        # Generate expiration timestamp
-        EXPIRATION_TIME=$(generate_expiration_timestamp)
-        
         # Return valid credential format for kubectl with expiration
-        generate_credentials_json "$EXPIRATION_TIME"
+        generate_credentials_json
         exit 0
       fi
       sleep 0.2
@@ -382,9 +373,6 @@ elif [[ $tunnel_up -eq 0 ]]; then
   debug_log "WARNING: Tunnel process is running but port $PORT is not responding"
 fi
 
-# Generate expiration timestamp
-EXPIRATION_TIME=$(generate_expiration_timestamp)
-
 # Return valid credential format with certificates if available
-generate_credentials_json "$EXPIRATION_TIME"
+generate_credentials_json
 exit 0 
