@@ -1662,6 +1662,9 @@ class Resources:
         resources_fields['infra'] = infra
 
         # Keep backward compatibility with cloud, region, zone
+        # Note: if both `infra` and any of `cloud`, `region`, `zone` are
+        # specified, it will raise an error during the Resources.__init__
+        # validation.
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
         resources_fields['region'] = config.pop('region', None)
