@@ -3431,17 +3431,31 @@ def show_gpus(
                 name_filter=name_filter,
                 quantity_filter=quantity_filter))
         if not realtime_gpu_availability_lists:
-            err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
-            debug_msg = 'To further debug, run: sky check '
-            if name_filter is not None:
-                gpu_info_msg = f' {name_filter!r}'
-                if quantity_filter is not None:
-                    gpu_info_msg += (' with requested quantity'
-                                     f' {quantity_filter}')
-                err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in any allowed Kubernetes cluster. ')
-                debug_msg = ('To show available accelerators on kubernetes,'
-                             ' run: sky show-gpus --cloud kubernetes ')
+            # Customize message based on context
+            if context and context.startswith('ssh-'):
+                err_msg = 'No GPUs found in SSH Node Pool. '
+                debug_msg = 'To further debug, run: sky check '
+                if name_filter is not None:
+                    gpu_info_msg = f' {name_filter!r}'
+                    if quantity_filter is not None:
+                        gpu_info_msg += (' with requested quantity'
+                                         f' {quantity_filter}')
+                    err_msg = (f'Resources{gpu_info_msg} not found '
+                               'in SSH Node Pool. ')
+                    debug_msg = ('To show available accelerators on SSH Node Pool,'
+                                 ' run: sky show-gpus --cloud kubernetes ')
+            else:
+                err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
+                debug_msg = 'To further debug, run: sky check '
+                if name_filter is not None:
+                    gpu_info_msg = f' {name_filter!r}'
+                    if quantity_filter is not None:
+                        gpu_info_msg += (' with requested quantity'
+                                         f' {quantity_filter}')
+                    err_msg = (f'Resources{gpu_info_msg} not found '
+                               'in any allowed Kubernetes cluster. ')
+                    debug_msg = ('To show available accelerators on kubernetes,'
+                                 ' run: sky show-gpus --cloud kubernetes ')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3474,7 +3488,8 @@ def show_gpus(
                         capacity = gpu_availability.capacity
                         # we want total, so skip permission denied.
                         available = max(gpu_availability.available, 0)
-                        if capacity > 0:
+                        # Only add to total if not a SSH node pool context
+                        if capacity > 0 and not (ctx and ctx.startswith('ssh-')):
                             total_gpu_info[gpu][0] += capacity
                             total_gpu_info[gpu][1] += available
                     realtime_gpu_infos.append((ctx, realtime_gpu_table))
@@ -3500,7 +3515,10 @@ def show_gpus(
 
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs
-        if len(realtime_gpu_infos) > 1:
+        # Only count non-SSH contexts for total table
+        non_ssh_contexts = [ctx for ctx, _ in realtime_gpu_infos 
+                           if not (ctx and ctx.startswith('ssh-'))]
+        if len(non_ssh_contexts) > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'TOTAL_GPUS', free_header])
             for gpu, stats in total_gpu_info.items():
@@ -3527,12 +3545,16 @@ def show_gpus(
                     node_name, node_info.accelerator_type,
                     node_info.total['accelerator_count'], available
                 ])
-        k8s_per_node_acc_message = (
-            'Kubernetes per node accelerator availability ')
+        # Use "SSH Node Pool" for SSH contexts
+        if context and context.startswith('ssh-'):
+            per_node_acc_message = f'SSH Node Pool per node accelerator availability ({context})'
+        else:
+            per_node_acc_message = f'Kubernetes per node accelerator availability ({context})'
+            
         if nodes_info.hint:
-            k8s_per_node_acc_message += nodes_info.hint
+            per_node_acc_message += nodes_info.hint
         return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                f'{k8s_per_node_acc_message}'
+                f'{per_node_acc_message}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
@@ -3589,9 +3611,15 @@ def show_gpus(
                     for (idx,
                          (ctx,
                           k8s_realtime_table)) in enumerate(k8s_realtime_infos):
-                        context_str = f'(Context: {ctx})' if ctx else ''
+                        # Use "SSH Node Pool GPUs" for SSH contexts
+                        if ctx and ctx.startswith('ssh-'):
+                            context_str = f'({ctx})' if ctx else ''
+                            header = f'SSH Node Pool GPUs {context_str}'
+                        else:
+                            context_str = f'(Context: {ctx})' if ctx else ''
+                            header = f'Kubernetes GPUs {context_str}'
                         yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                               f'Kubernetes GPUs {context_str}'
+                               f'{header}'
                                f'{colorama.Style.RESET_ALL}\n')
                         yield from k8s_realtime_table.get_string()
                         yield '\n\n'
@@ -3704,8 +3732,13 @@ def show_gpus(
                 # print individual tables
                 for (ctx, k8s_realtime_table) in k8s_realtime_infos:
                     context_str = f'(Context: {ctx})' if ctx else ''
+                    # Use "SSH Node Pool GPUs" for SSH contexts
+                    if ctx and ctx.startswith('ssh-'):
+                        header = f'SSH Node Pool GPUs {context_str}'
+                    else:
+                        header = f'Kubernetes GPUs {context_str}'
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs {context_str}'
+                           f'{header}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                     yield '\n\n'
