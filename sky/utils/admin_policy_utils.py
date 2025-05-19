@@ -1,8 +1,7 @@
 """Admin policy utils."""
-import contextlib
 import copy
 import importlib
-from typing import Iterator, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import colorama
 
@@ -49,29 +48,6 @@ def _get_policy_cls(
                 f'Policy class {policy!r} does not implement the AdminPolicy '
                 'interface. Please check with your policy admin for details.')
     return policy_cls
-
-
-@contextlib.contextmanager
-def apply_and_use_config_in_current_request(
-    entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
-    request_options: Optional[admin_policy.RequestOptions] = None,
-) -> Iterator['dag_lib.Dag']:
-    """Applies an admin policy and override SkyPilot config for current request
-
-    This is a helper function of `apply()` that applies an admin policy and
-    overrides the SkyPilot config for the current request as a context manager.
-    The original SkyPilot config will be restored when the context manager is
-    exited.
-
-    Refer to `apply()` for more details.
-    """
-    original_config = skypilot_config.to_dict()
-    dag, mutated_config = apply(entrypoint, request_options)
-    if mutated_config != original_config:
-        with skypilot_config.replace_skypilot_config(mutated_config):
-            yield dag
-    else:
-        yield dag
 
 
 def apply(

@@ -30,6 +30,7 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
@@ -39,6 +40,7 @@ from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import stream_utils
+from sky.server.requests import dags as request_dags
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -316,16 +318,11 @@ async def list_accelerator_counts(
 
 
 @app.post('/validate')
-async def validate(validate_body: payloads.ValidateBody) -> None:
+async def validate(validate_body: payloads.ValidateBody) -> str:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
-    # TODO: Our current launch process is split into three calls:
-    # validate, optimize, and launch. This requires us to apply the admin policy
-    # in each step, which may be an expensive operation. We should consolidate
-    # these into a single call or have a TTL cache for (task, admin_policy)
-    # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
@@ -336,18 +333,24 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        with admin_policy_utils.apply_and_use_config_in_current_request(
-                dag, request_options=validate_body.request_options) as dag:
+        dag, mutated_config = admin_policy_utils.apply(
+            dag, request_options=validate_body.request_options)
+        with skypilot_config.replace_skypilot_config(mutated_config):
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
             # with `upload_mounts_to_api_server`.
             dag.validate(skip_file_mounts=True, skip_workdir=True)
+        # Save the validated DAG and mutated config for following steps, this
+        # ensures the consistency between steps and avoid re-applying the admin
+        # policy. Note that we do not return the mutated dag and config to the
+        # client to ensure the admin policy enforcement at server-side.
+        return request_dags.save_dag_and_config(dag, mutated_config)
 
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await context_utils.to_thread(validate_dag, dag)
+        return await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e

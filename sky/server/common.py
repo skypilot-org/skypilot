@@ -655,11 +655,15 @@ def clear_local_api_server_database() -> None:
     The CLI can call this during cleanup of a local API server, or the API
     server can call it during startup.
     """
-    # Remove the database for requests including any files starting with
-    # api.constants.API_SERVER_REQUEST_DB_PATH
-    db_path = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
-    for extension in ['', '-shm', '-wal']:
-        try:
-            os.remove(f'{db_path}{extension}')
-        except FileNotFoundError:
-            logger.debug(f'Database file {db_path}{extension} not found.')
+    # Remove the database for requests and dags including any files starting
+    # with the db path prefix.
+    for path in [
+            server_constants.API_SERVER_REQUEST_DB_PATH,
+            server_constants.API_SERVER_DAG_DB_PATH
+    ]:
+        db_path = os.path.expanduser(path)
+        for extension in ['', '-shm', '-wal']:
+            try:
+                os.remove(f'{db_path}{extension}')
+            except FileNotFoundError:
+                logger.debug(f'Database file {db_path}{extension} not found.')

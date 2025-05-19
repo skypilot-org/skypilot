@@ -55,21 +55,27 @@ def up(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag)
-    request_id = sdk.optimize(dag)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    dag_id = sdk.validate(dag)
+    if dag_id is not None:
+        request_id = sdk.optimize(dag_id=dag_id)
+    else:
+        request_id = sdk.optimize(dag=dag)
+
     sdk.stream_and_get(request_id)
     if _need_confirmation:
         prompt = f'Launching a new service {service_name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    client_common.upload_mounts_to_api_server(upload_list)
 
-    body = payloads.ServeUpBody(
-        task=dag_str,
-        service_name=service_name,
-    )
+    body = payloads.ServeUpBody(service_name=service_name,)
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
+        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        body.task = dag_str
     response = requests.post(
         f'{server_common.get_server_url()}/serve/up',
         json=json.loads(body.model_dump_json()),
@@ -112,8 +118,12 @@ def update(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag)
-    request_id = sdk.optimize(dag)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    dag_id = sdk.validate(dag)
+    if dag_id is not None:
+        request_id = sdk.optimize(dag_id=dag_id)
+    else:
+        request_id = sdk.optimize(dag=dag)
     sdk.stream_and_get(request_id)
     if _need_confirmation:
         click.confirm(f'Updating service {service_name!r}. Proceed?',
@@ -121,13 +131,16 @@ def update(
                       abort=True,
                       show_default=True)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    client_common.upload_mounts_to_api_server(upload_list)
     body = payloads.ServeUpdateBody(
-        task=dag_str,
         service_name=service_name,
         mode=mode,
     )
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
+        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        body.task = dag_str
 
     response = requests.post(
         f'{server_common.get_server_url()}/serve/update',

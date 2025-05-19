@@ -19,6 +19,8 @@ MIN_AVAIL_MEM_GB = 2
 DEFAULT_HANDLER_NAME = 'default'
 # The path to the API request database.
 API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
+# The path to the cached DAG database.
+API_SERVER_DAG_DB_PATH = '~/.sky/api_server/dags.db'
 
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.

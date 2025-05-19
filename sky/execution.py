@@ -8,16 +8,17 @@ from typing import List, Optional, Tuple, Union
 
 import colorama
 
-from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -97,7 +98,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
 
 
 def _execute(
-    entrypoint: Union['sky.Task', 'sky.Dag'],
+    dag: 'sky.Dag',
     dryrun: bool = False,
     down: bool = False,
     stream_logs: bool = True,
@@ -170,70 +171,12 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         if task.storage_mounts is not None:
             for storage in task.storage_mounts.values():
                 # Ensure the storage is constructed.
                 storage.construct()
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag,
-            request_options=admin_policy.RequestOptions(
-                cluster_name=cluster_name,
-                idle_minutes_to_autostop=idle_minutes_to_autostop,
-                down=down,
-                dryrun=dryrun,
-            )) as dag:
-        return _execute_dag(
-            dag,
-            dryrun=dryrun,
-            down=down,
-            stream_logs=stream_logs,
-            handle=handle,
-            backend=backend,
-            retry_until_up=retry_until_up,
-            optimize_target=optimize_target,
-            stages=stages,
-            cluster_name=cluster_name,
-            detach_setup=detach_setup,
-            detach_run=detach_run,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            no_setup=no_setup,
-            clone_disk_from=clone_disk_from,
-            skip_unnecessary_provisioning=skip_unnecessary_provisioning,
-            _quiet_optimizer=_quiet_optimizer,
-            _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
-            _is_launched_by_sky_serve_controller=
-            _is_launched_by_sky_serve_controller)
 
-
-def _execute_dag(
-    dag: 'sky.Dag',
-    dryrun: bool,
-    down: bool,
-    stream_logs: bool,
-    handle: Optional[backends.ResourceHandle],
-    backend: Optional[backends.Backend],
-    retry_until_up: bool,
-    optimize_target: common.OptimizeTarget,
-    stages: Optional[List[Stage]],
-    cluster_name: Optional[str],
-    detach_setup: bool,
-    detach_run: bool,
-    idle_minutes_to_autostop: Optional[int],
-    no_setup: bool,
-    clone_disk_from: Optional[str],
-    skip_unnecessary_provisioning: bool,
-    # pylint: disable=invalid-name
-    _quiet_optimizer: bool,
-    _is_launched_by_jobs_controller: bool,
-    _is_launched_by_sky_serve_controller: bool,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
-    """Execute a DAG.
-
-    This is an internal helper function for _execute() and is expected to be
-    called only by _execute().
-    """
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -490,12 +433,14 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    config: Optional[config_utils.Config] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _admin_policy_applied: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a cluster or task.
@@ -549,6 +494,8 @@ def launch(
             different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
             skip provisioning and setup steps.
+        config: If set, use the config to replace the current skypilot config
+            for the launch request.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
@@ -639,28 +586,33 @@ def launch(
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
 
-    return _execute(
-        entrypoint=entrypoint,
-        dryrun=dryrun,
-        down=down,
-        stream_logs=stream_logs,
-        handle=handle,
-        backend=backend,
-        retry_until_up=retry_until_up,
-        optimize_target=optimize_target,
-        stages=stages,
-        cluster_name=cluster_name,
-        detach_setup=detach_setup,
-        detach_run=True,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        no_setup=no_setup,
-        clone_disk_from=clone_disk_from,
-        skip_unnecessary_provisioning=skip_unnecessary_provisioning,
-        _quiet_optimizer=_quiet_optimizer,
-        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
-        _is_launched_by_sky_serve_controller=
-        _is_launched_by_sky_serve_controller,
-    )
+    if not _admin_policy_applied:
+        dag, config = admin_policy_utils.apply(entrypoint)
+    else:
+        dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    with skypilot_config.replace_skypilot_config(config):
+        return _execute(
+            dag=dag,
+            dryrun=dryrun,
+            down=down,
+            stream_logs=stream_logs,
+            handle=handle,
+            backend=backend,
+            retry_until_up=retry_until_up,
+            optimize_target=optimize_target,
+            stages=stages,
+            cluster_name=cluster_name,
+            detach_setup=detach_setup,
+            detach_run=True,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            no_setup=no_setup,
+            clone_disk_from=clone_disk_from,
+            skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            _quiet_optimizer=_quiet_optimizer,
+            _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+            _is_launched_by_sky_serve_controller=
+            _is_launched_by_sky_serve_controller,
+        )
 
 
 @usage_lib.entrypoint
@@ -733,17 +685,19 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    return _execute(
-        entrypoint=entrypoint,
-        dryrun=dryrun,
-        down=down,
-        stream_logs=stream_logs,
-        handle=handle,
-        backend=backend,
-        stages=[
-            Stage.SYNC_WORKDIR,
-            Stage.EXEC,
-        ],
-        cluster_name=cluster_name,
-        detach_run=True,
-    )
+    dag, config = admin_policy_utils.apply(entrypoint)
+    with skypilot_config.replace_skypilot_config(config):
+        return _execute(
+            dag=dag,
+            dryrun=dryrun,
+            down=down,
+            stream_logs=stream_logs,
+            handle=handle,
+            backend=backend,
+            stages=[
+                Stage.SYNC_WORKDIR,
+                Stage.EXEC,
+            ],
+            cluster_name=cluster_name,
+            detach_run=True,
+        )
