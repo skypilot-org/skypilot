@@ -3442,8 +3442,8 @@ def show_gpus(
                                          f' {quantity_filter}')
                     err_msg = (f'Resources{gpu_info_msg} not found '
                                'in SSH Node Pool. ')
-                    debug_msg = ('To show available accelerators on SSH Node Pool,'
-                                 ' run: sky show-gpus --cloud kubernetes ')
+                    debug_msg = ('To show available accelerators in SSH Node Pools,'
+                                 ' run: sky show-gpus --cloud ssh ')
             else:
                 err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
                 debug_msg = 'To further debug, run: sky check '
@@ -6034,10 +6034,6 @@ def api_info():
                f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
 
 
-# TODO: Move these constants out
-# TODO: Add support for custom kubeconfig path.
-SSH_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
-
 @cli.group(cls=_NaturalOrderGroup)
 def ssh():
     """Commands for managing SSH targets."""
@@ -6047,21 +6043,16 @@ def ssh():
 @ssh.command('up', cls=_DocumentedCodeCommand)
 @click.option('--infra',
               help='Name of the cluster to set up in ssh_node_pools.yaml. If not specified, all clusters in the file will be used.')
-@click.option('--kubeconfig',
-              help=f'Path to save the Kubernetes configuration file. Default: {SSH_KUBECONFIG_PATH}')
 @click.option('--async', 'async_call', is_flag=True, hidden=True,
               help='Run the command asynchronously.')
-def ssh_up(infra, kubeconfig, async_call):
+def ssh_up(infra, async_call):
     """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
 
     This command sets up a Kubernetes cluster on the machines specified in
     ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
     """
-    kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
-
     try:
-        request_id = sdk.ssh_up(infra=infra,
-                                kubeconfig_path=kubeconfig_path)
+        request_id = sdk.ssh_up(infra=infra)
         if async_call:
             print(f'Request submitted with ID: {request_id}')
         else:
@@ -6074,21 +6065,16 @@ def ssh_up(infra, kubeconfig, async_call):
 @ssh.command('down', cls=_DocumentedCodeCommand)
 @click.option('--infra',
               help='Name of the cluster to clean up in ssh_node_pools.yaml. If not specified, all clusters in the file will be used.')
-@click.option('--kubeconfig',
-              help=f'Path to the Kubernetes configuration file to update. Default: {SSH_KUBECONFIG_PATH}')
 @click.option('--async', 'async_call', is_flag=True, hidden=True,
               help='Run the command asynchronously.')
-def ssh_down(infra, kubeconfig, async_call):
+def ssh_down(infra, async_call):
     """Clean up a cluster set up with 'sky ssh up'.
 
     This command removes the Kubernetes installation from the machines specified
     in ~/.sky/ssh_node_pools.yaml.
     """
-    kubeconfig_path = kubeconfig if kubeconfig else SSH_KUBECONFIG_PATH
-
     try:
-        request_id = sdk.ssh_down(infra=infra,
-                                  kubeconfig_path=kubeconfig_path)
+        request_id = sdk.ssh_down(infra=infra)
         if async_call:
             print(f'Request submitted with ID: {request_id}')
         else:

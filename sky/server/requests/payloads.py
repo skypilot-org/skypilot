@@ -488,7 +488,6 @@ class LocalUpBody(RequestBody):
 class SSHUpBody(RequestBody):
     """The request body for the SSH up/down endpoints."""
     infra: Optional[str] = None
-    kubeconfig_path: Optional[str] = None
     cleanup: bool = False
 
 

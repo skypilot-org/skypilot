@@ -1182,20 +1182,15 @@ def local_down() -> None:
 
 @usage_lib.entrypoint
 def ssh_up(infra: Optional[str] = None,
-           kubeconfig_path: Optional[str] = None,
            cleanup: bool = False) -> None:
     """Deploys or tears down a Kubernetes cluster on SSH targets.
     
     Args:
         infra: Name of the cluster configuration in ssh_node_pools.yaml.
             If None, the first cluster in the file is used.
-        kubeconfig_path: Path where the kubeconfig should be saved.
-            If None, ~/.kube/config will be used.
         cleanup: If True, clean up the cluster instead of deploying.
-        # TODO: Cleanup probably doesn't need to be an arg here, always True.
     """
     kubernetes_deploy_utils.deploy_ssh_cluster(
         cleanup=cleanup,
         infra=infra,
-        kubeconfig_path=kubeconfig_path
     )

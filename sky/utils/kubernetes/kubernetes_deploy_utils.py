@@ -20,6 +20,9 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Default path for Kubernetes configuration file
+DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
+
 def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
     
@@ -46,8 +49,9 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
     if infra:
         deploy_command.extend(['--infra', infra])
     
-    if kubeconfig_path:
-        deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
+    # Use the default kubeconfig path if none is provided
+    kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
+    deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
     
     # Setup logging paths
     run_timestamp = sky_logging.get_run_timestamp()
