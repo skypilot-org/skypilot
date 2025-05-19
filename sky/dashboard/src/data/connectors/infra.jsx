@@ -4,9 +4,23 @@ import {
   COMMON_GPUS,
 } from '@/data/connectors/constants';
 
+// Importing from the same directory
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
+
 export async function getCloudInfrastructure() {
   try {
-    const response = await fetch(`${ENDPOINT}/clusters`, {
+    // Use existing data connectors
+    const [clustersData, jobsData] = await Promise.all([
+      getClusters(),
+      getManagedJobs()
+    ]);
+    
+    const clusters = clustersData || [];
+    const jobs = jobsData?.jobs || [];
+    
+    // First get cloud availability information
+    const cloudAvailResponse = await fetch(`${ENDPOINT}/cloud_availability`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -14,66 +28,74 @@ export async function getCloudInfrastructure() {
       body: JSON.stringify({}),
     });
     
-    const id = response.headers.get('X-Skypilot-Request-ID') || 
-               response.headers.get('X-Request-ID');
+    const id = cloudAvailResponse.headers.get('X-Skypilot-Request-ID') || 
+               cloudAvailResponse.headers.get('X-Request-ID');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     const data = await fetchedData.json();
-    const clusters = data.return_value ? JSON.parse(data.return_value) : [];
-    
-    const jobsResponse = await fetch(`${ENDPOINT}/jobs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    });
-    
-    const jobsId = jobsResponse.headers.get('X-Skypilot-Request-ID') || 
-                   jobsResponse.headers.get('X-Request-ID');
-    const jobsFetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${jobsId}`);
-    const jobsData = await jobsFetchedData.json();
-    const jobs = jobsData.return_value ? JSON.parse(jobsData.return_value).jobs : [];
+    const cloudAvailability = data.return_value ? JSON.parse(data.return_value) : {};
     
     const cloudsData = {};
     
+    // Initialize with all clouds from CLOUDS_LIST
     CLOUDS_LIST.forEach(cloud => {
+      // Check if cloud is enabled in the user's config
+      const isEnabled = cloudAvailability[cloud] === true;
+      
       cloudsData[cloud] = {
         name: cloud,
         clusters: 0,
         jobs: 0,
-        enabled: true
+        enabled: isEnabled
       };
     });
     
+    // Count clusters per cloud
     clusters.forEach(cluster => {
-      const cloud = cluster.cloud.toLowerCase();
-      if (cloudsData[cloud]) {
-        cloudsData[cloud].clusters += 1;
-      }
-    });
-    
-    jobs.forEach(job => {
-      let cloud = job.cloud;
-      
-      if (!cloud && job.cluster_resources && job.cluster_resources !== '-') {
-        try {
-          cloud = job.cluster_resources.split('(')[0].split('x').pop().trim().toLowerCase();
-        } catch (error) {
-          cloud = null;
+      // Extract just the cloud name from the infra string
+      if (cluster.infra) {
+        const cloudName = cluster.infra.split(' ')[0].toLowerCase();
+        if (cloudsData[cloudName]) {
+          cloudsData[cloudName].clusters += 1;
+          // If we have clusters in a cloud, it must be enabled
+          cloudsData[cloudName].enabled = true;
         }
       }
-      
-      if (cloud && cloudsData[cloud]) {
-        cloudsData[cloud].jobs += 1;
+    });
+    
+    // Count jobs per cloud
+    jobs.forEach(job => {
+      // Extract just the cloud name from the infra string
+      if (job.infra) {
+        const cloudName = job.infra.split(' ')[0].toLowerCase();
+        if (cloudsData[cloudName]) {
+          cloudsData[cloudName].jobs += 1;
+          // If we have jobs in a cloud, it must be enabled
+          cloudsData[cloudName].enabled = true;
+        }
       }
     });
     
+    // Get total and enabled counts for the UI
+    const totalClouds = CLOUDS_LIST.length;
+    const enabledClouds = Object.values(cloudsData).filter(c => c.enabled).length;
+    
+    // Convert to array, filter to only enabled clouds, and sort
     const result = Object.values(cloudsData)
+      .filter(cloud => cloud.enabled)
       .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
     
-    return result;
+    return {
+      clouds: result,
+      totalClouds,
+      enabledClouds
+    };
   } catch (error) {
     console.error('Error fetching cloud infrastructure:', error);
-    return [];
+    return {
+      clouds: [],
+      totalClouds: CLOUDS_LIST.length,
+      enabledClouds: 0
+    };
   }
 }
 

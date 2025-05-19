@@ -28,6 +28,8 @@ export function GPUs() {
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
+  const [totalClouds, setTotalClouds] = useState(0);
+  const [enabledClouds, setEnabledClouds] = useState(0);
 
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
@@ -49,13 +51,17 @@ export function GPUs() {
       setAllGPUs(fetchedAllGPUs || []);
       setPerContextGPUs(fetchedPerContextGPUs || []);
       setPerNodeGPUs(fetchedPerNodeGPUs || []);
-      setCloudInfraData(cloudInfraResponse || []);
+      setCloudInfraData(cloudInfraResponse?.clouds || []);
+      setTotalClouds(cloudInfraResponse?.totalClouds || 0);
+      setEnabledClouds(cloudInfraResponse?.enabledClouds || 0);
     } catch (err) {
       console.error('Error fetching data:', err);
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
       setCloudInfraData([]);
+      setTotalClouds(0);
+      setEnabledClouds(0);
     } finally {
       setLoading(false);
       if (isInitialLoad) setIsInitialLoad(false);
@@ -267,7 +273,7 @@ export function GPUs() {
   };
 
   const renderCloudInfrastructure = () => {
-    if (cloudInfraData.length === 0 && loading) {
+    if (loading && cloudInfraData.length === 0) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -284,45 +290,49 @@ export function GPUs() {
           <div className="flex items-center mb-4">
             <h3 className="text-lg font-semibold">Cloud</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {cloudInfraData.length} clouds
+              {enabledClouds} of {totalClouds} enabled
             </span>
           </div>
-          <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="p-3 text-left font-medium text-gray-600 w-32">Cloud</th>
-                  <th className="p-3 text-left font-medium text-gray-600 w-24">Clusters</th>
-                  <th className="p-3 text-left font-medium text-gray-600 w-24">Jobs</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {cloudInfraData.map(cloud => (
-                  <tr key={cloud.name} className="hover:bg-gray-50">
-                    <td className="p-3 capitalize font-medium text-gray-700">{cloud.name}</td>
-                    <td className="p-3">
-                      {cloud.clusters > 0 ? (
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                          {cloud.clusters}
-                        </span>
-                      ) : (
-                        <span className="text-gray-500">0</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {cloud.jobs > 0 ? (
-                        <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                          {cloud.jobs}
-                        </span>
-                      ) : (
-                        <span className="text-gray-500">0</span>
-                      )}
-                    </td>
+          {cloudInfraData.length === 0 ? (
+            <p className="text-sm text-gray-500">No enabled clouds available.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-3 text-left font-medium text-gray-600 w-32">Cloud</th>
+                    <th className="p-3 text-left font-medium text-gray-600 w-24">Clusters</th>
+                    <th className="p-3 text-left font-medium text-gray-600 w-24">Jobs</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {cloudInfraData.map(cloud => (
+                    <tr key={cloud.name} className="hover:bg-gray-50">
+                      <td className="p-3 capitalize font-medium text-gray-700">{cloud.name}</td>
+                      <td className="p-3">
+                        {cloud.clusters > 0 ? (
+                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                            {cloud.clusters}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">0</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        {cloud.jobs > 0 ? (
+                          <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                            {cloud.jobs}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">0</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     );
