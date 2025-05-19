@@ -1,5 +1,5 @@
 apiService:
-  image: berkeleyskypilot/skypilot-nightly:latest
+  image: berkeleyskypilot/skypilot:0.9.2
   # Number of replicas to deploy - replicas > 1 is not well tested, and requires
   # a PVC that supports ReadWriteMany (see accessMode in storage section below).
   replicas: 1
@@ -47,7 +47,7 @@ apiService:
     limits:
       cpu: "4"
       memory: "8Gi"
-  
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
@@ -214,6 +214,19 @@ runpodCredentials:
   enabled: false
   # Name of the secret containing the RunPod credentials. Only used if enabled is true.
   runpodSecretName: runpod-credentials
+
+# Populate Lambda credentials from the secret with key `api_key`
+lambdaCredentials:
+  enabled: false
+  # Name of the secret containing the Lambda credentials. Only used if enabled is true.
+  lambdaSecretName: lambda-credentials
+
+# Populate Nebius credentials from the secret with nebius credentials.
+nebiusCredentials:
+  enabled: false
+  tenantId: null
+  # Name of the secret containing the Nebius credentials. Only used if enabled is true.
+  nebiusSecretName: nebius-credentials
 
 # Set securityContext for the api pod
 podSecurityContext: {}

@@ -209,7 +209,7 @@ jobs:
         id: create_release_branch
         run: |
           RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          BRANCH_NAME="release/${RELEASE_VERSION}"
+          BRANCH_NAME="releases/${RELEASE_VERSION}"
 
           # Configure git
           git config --local user.email "action@github.com"
@@ -233,7 +233,7 @@ jobs:
         id: create_test_branch
         run: |
           RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          BRANCH_NAME="release/${RELEASE_VERSION}"
+          BRANCH_NAME="releases/${RELEASE_VERSION}"
 
           # Checkout the base release branch
           echo "Checking out the release branch ${BRANCH_NAME}..."
@@ -243,6 +243,7 @@ jobs:
           echo "Updating __version__ in sky/__init__.py and Dockerfile to ${RELEASE_VERSION}..."
           sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/skypilot-nightly\[all\]/skypilot[all]==${RELEASE_VERSION}/g" Dockerfile
+          sed -i "s/image: berkeleyskypilot\/skypilot:.*/image: berkeleyskypilot\/skypilot:${RELEASE_VERSION}/g" charts/skypilot/values.yaml
 
           # Create the test branch from the *current* state (base branch with version bump)
           TEST_BRANCH="test_releases/${RELEASE_VERSION}"
@@ -252,6 +253,7 @@ jobs:
           # Commit the version change on the new test branch
           git add sky/__init__.py
           git add Dockerfile
+          git add charts/skypilot/values.yaml
           git commit -m "Release ${RELEASE_VERSION}"
 
           # Get the new commit SHA from the test branch

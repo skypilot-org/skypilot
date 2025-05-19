@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import sys
@@ -47,6 +48,7 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
@@ -140,14 +142,19 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     del app  # unused
     # Startup: Run background tasks
     for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
-        executor.schedule_request(
-            request_id=event.id,
-            request_name=event.name,
-            request_body=payloads.RequestBody(),
-            func=event.event_fn,
-            schedule_type=requests_lib.ScheduleType.SHORT,
-            is_skypilot_system=True,
-        )
+        try:
+            executor.schedule_request(
+                request_id=event.id,
+                request_name=event.name,
+                request_body=payloads.RequestBody(),
+                func=event.event_fn,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                is_skypilot_system=True,
+            )
+        except exceptions.RequestAlreadyExistsError:
+            # Lifespan will be executed in each uvicorn worker process, we
+            # can safely ignore the error if the task is already scheduled.
+            logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
     yield
     # Shutdown: Add any cleanup code here if needed
@@ -166,8 +173,36 @@ class InternalDashboardPrefixMiddleware(
         return await call_next(request)
 
 
+class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
+                                  ):
+    """Middleware to add cache control headers to static files."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/_next'):
+            response = await call_next(request)
+            response.headers['Cache-Control'] = 'max-age=3600'
+            return response
+        return await call_next(request)
+
+
+class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to check the path of requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/'):
+            # If the requested path is not relative to the expected directory,
+            # then the user is attempting path traversal, so deny the request.
+            parent = pathlib.Path('/dashboard')
+            request_path = pathlib.Path(posixpath.normpath(request.url.path))
+            if not _is_relative_to(request_path, parent):
+                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(PathCleanMiddleware)
+app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -673,24 +708,28 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    executor.schedule_request(
+    # Only initialize the context in logs handler to limit the scope of this
+    # experimental change.
+    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
+    context.initialize()
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
-        # should be responsive. However, it can be long running if the user's
-        # job keeps running, and we should avoid it taking the SHORT worker.
         schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=cluster_job_body.cluster_name,
     )
+    task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
-    request_task = requests_lib.get_request(request.state.request_id)
+    def cancel_task():
+        task.cancel()
 
+    # Cancel the task after the request is done or client disconnects
+    background_tasks.add_task(cancel_task)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(
-        request_id=request_task.request_id,
+        request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
@@ -1152,25 +1191,28 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
-# Add a route to serve static files
-@app.get('/{full_path:path}')
-async def serve_static_or_dashboard(full_path: str):
-    """Serves static files for any unmatched routes.
+@app.get('/dashboard/{full_path:path}')
+async def serve_dashboard(full_path: str):
+    """Serves the Next.js dashboard application.
 
-    Handles the /dashboard prefix from Next.js configuration.
+    Args:
+        full_path: The path requested by the client.
+        e.g. /clusters, /jobs
+
+    Returns:
+        FileResponse for static files or index.html for client-side routing.
+
+    Raises:
+        HTTPException: If the path is invalid or file not found.
     """
-    # Check if the path starts with 'dashboard/' and remove it if it does
-    if full_path.startswith('dashboard/'):
-        full_path = full_path[len('dashboard/'):]
-
-    # Try to serve the file directly from the out directory first
+    # Try to serve the staticfile directly e.g. /skypilot.svg,
+    # /favicon.ico, and /_next/, etc.
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
-    # If file not found, serve the index.html for client-side routing.
-    # For example, the non-matched arbitrary route (/ or /test) from
-    # client will be redirected to the index.html.
+    # Serve index.html for client-side routing
+    # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
@@ -1179,6 +1221,12 @@ async def serve_static_or_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+# Redirect the root path to dashboard
+@app.get('/')
+async def root():
+    return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
 if __name__ == '__main__':
