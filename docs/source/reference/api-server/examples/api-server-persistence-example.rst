@@ -1,23 +1,33 @@
-.. _api-server-persistence-example:
+.. _api-server-ha:
 
-Persisting API server state when using Helm deployment
-======================================================
+Advanced API Server High Availability across GKE Clusters
+=========================================================
 
-This example shows how a helm-deployed API server's state can be persisted using an external persistent disk.
+When a SkyPilot API server is :ref:`deployed using a Helm chart <sky-api-server-helm-deploy-command>`,
+the API server is deployed with states persisted through a PVC in the Kubernetes cluster.
 
-In this example, a SkyPilot API server is deployed using the Helm chart on a GKE cluster.
-This server's state is persisted with a GCP Persistent Disk, such that the server's state is not lost even if the GKE cluster is torn down.
+However, if you need to make the server resilient against Kubernetes cluster failures, you can further persist the API server states using cloud services,
+such as a `GCP persistent volume <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ .
+
+By configuring a persistent disk to back the SkyPilot state, the SkyPilot API server becomes resilient to catastrophic k8s cluster failures, including a full cluster deletion.
+
+To recover all SkyPilot state on a new cluster, simply:
+
+1. Create the cloud credential secrets
+2. Create the persistent volume definition
+3. Deploy API server from the helm chart, specifying the same persistent volume.
+
+The following is an end-to-end instruction for setting up a GKE cluster and a persistent volume to create a high-availability API server.
 
 Prerequisites
 -------------
 
-* A GKE cluster with LoadBalancer or NodePort service support
+* `A GKE cluster <https://cloud.google.com/kubernetes-engine/docs/how-to/creating-a-zonal-cluster>`_
 * `Helm <https://helm.sh/docs/intro/install/>`_
 * `kubectl <https://kubernetes.io/docs/tasks/tools/#kubectl>`_
 * `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_
-* [Optional] Lambda Cloud credentials
 
-.. _api-server-persistence-example-create-disk:
+.. _api-server-ha-create-disk:
 
 Create a persistent disk on GCP
 -------------------------------
@@ -35,7 +45,7 @@ First, create a persistent disk on GCP. This disk is used to persist the API ser
 
 Note the ``$ZONE`` variable must match the zone of the GKE cluster.
 
-.. _api-server-persistence-example-create-pv:
+.. _api-server-ha-create-pv:
 
 Create a persistent volume on GKE
 ---------------------------------
@@ -70,30 +80,19 @@ Apply the Persistent Volume to the GKE cluster.
 
 .. code-block:: bash
 
-    kubectl apply -f sky-pv.yaml
+    $ kubectl apply -f sky-pv.yaml
 
-
-.. _api-server-persistence-example-add-cloud-credentials:
-
-[Optional] Add lambda cloud credentials to the API server
----------------------------------------------------------
-
-Next, add cloud credentials to the API server.
-
-In this example, the API server is configured to use Lambda Cloud credentials.
-
-To learn how to configure the credentials for another cloud provider, please refer to :ref:`sky-api-server-configure-credentials`.
+Then, verify that the persistent volume is created with the correct retention policy:
 
 .. code-block:: bash
 
-    export NAMESPACE=skypilot
-    kubectl create namespace $NAMESPACE
-    kubectl create secret generic lambda-credentials \
-    --namespace $NAMESPACE \
-    --from-literal api_key=YOUR_API_KEY
+    $ kubectl get persistentvolume/sky-api-server-pv
+    NAME                CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM   STORAGECLASS              VOLUMEATTRIBUTESCLASS   REASON   AGE
+    sky-api-server-pv   10G        RWO            Retain           Available           sky-api-server-pv-class   <unset>                          18s
 
+The ``RECLAIM POLICY`` should be set to ``Retain``.
 
-.. _api-server-persistence-example-deploy-api-server:
+.. _api-server-ha-deploy-api-server:
 
 Deploy the API server using Helm
 --------------------------------
@@ -116,76 +115,32 @@ Next, deploy the API server using Helm with the following command.
     --create-namespace \
     --set ingress.authCredentials=$AUTH_STRING \
     --set storage.storageClassName=$PV_CLASS_NAME \
-    --set storage.size=$DISK_SIZE \
-    --set lambdaCredentials.enabled=true \
-    --set lambdaCredentials.lambdaSecretName=lambda-credentials
+    --set storage.size=$DISK_SIZE
 
-Once the API server is deployed, find the API server URL following the instructions in :ref:`sky-get-api-server-url` to get the API server URL, then log in to the API server using the following command:
+Note the last two lines of the command: ``--set storage.size=$DISK_SIZE`` and ``--set storage.storageClassName=$PV_CLASS_NAME``.
+These lines associate the API server with the persistent volume created in :ref:`api-server-ha-create-pv`,
+allowing the API server to use the persistent volume to store its state.
 
-.. code-block:: bash
+.. _api-server-ha-simulate-failure:
 
-    sky api login --endpoint $API_SERVER_URL
+Simulate a catastrophic failure of the GKE cluster
+--------------------------------------------------
 
+To simulate a catastrophic failure of the GKE cluster, delete the GKE cluster.
 
-If Lambda Cloud credentials are configured, check that Lambda Cloud is working by running:
+Then, create a new GKE cluster and repeat the following sections:
 
-.. code-block:: bash
-
-    sky check
-
-and verify that the list of enabled clouds include Lambda Cloud.
-
-
-.. _api-server-persistence-example-create-cluster:
-
-Create a SkyPilot cluster with the API server
----------------------------------------------
-
-Now, create a cluster with the API server.
-
-.. code-block:: bash
-
-    sky launch --name my-cluster --cloud lambda
-
-
-.. _api-server-persistence-example-delete-cluster:
-
-Delete and recreate the GKE cluster
------------------------------------
-
-To simulate a catastrophic failure of the GKE cluster, delete the GKE cluster and recreate it.
-
-Then, re-run the following sections:
-
-- :ref:`api-server-persistence-example-create-pv`
-- :ref:`api-server-persistence-example-add-cloud-credentials`
-- :ref:`api-server-persistence-example-deploy-api-server`
+- :ref:`api-server-ha-create-pv`
+- :ref:`api-server-ha-deploy-api-server`
 
 The new API server URL is different from the previous URL, so run ``sky api login`` again with the new server URL.
 
-.. _api-server-persistence-example-verify-state:
+Once the new API server is up and running, it should retain the same state as the previous API server!
 
-Verify the API server retains its state
----------------------------------------
-
-Verify the API server retains its state by checking the cluster status.
-
-.. code-block:: bash
-
-    sky status
-
-Since the API server retains its state, the cluster created from :ref:`api-server-persistence-example-create-cluster` is visible.
-
-.. _api-server-persistence-example-cleanup:
+.. _api-server-ha-cleanup:
 
 Cleanup
 -------
-
-Delete the cluster created from :ref:`api-server-persistence-example-create-cluster`.
-
-.. code-block:: bash
-
-    sky down -a
 
 Delete GKE cluster used for the exercise.
 
@@ -195,12 +150,12 @@ Delete the persistent disk on GCP.
 
     gcloud compute disks delete $DISK_NAME --zone=$ZONE
 
-.. _api-server-persistence-example-conclusion:
+.. _api-server-ha-conclusion:
 
 Conclusion
 ----------
 
-This example demonstrates how a PersistentVolume can be used to persist the API server's state.
+This document demonstrates how a PersistentVolume can be used to persist the API server's state.
 
-While this example uses a GKE cluster with a GCP persistent disk as a backing volume,
+While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
 the same can be done with other cloud providers that provide a CSI provider to a persistent block storage device.
