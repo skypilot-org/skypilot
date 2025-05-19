@@ -896,7 +896,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
-            template_pod_spec['metadata']['labels'] = pod_spec_copy['metadata'][
+            # Propagate the labels to the deployment for identification.
+            deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
                 'labels']
             try:
                 return kubernetes.apps_api(
