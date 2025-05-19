@@ -12,13 +12,18 @@ import yaml
 from typing import Dict, List, Optional, Any, Tuple, Set
 import base64
 
+# # Make stdout unbuffered to ensure immediate output for logs and progress indicators
+# # This allows us to remove all flush=True parameters from print statements
+# sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
+# sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
+
 # Colors for nicer UX
 RED = '\033[0;31m'
 GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'  # No color
 
-DEFAULT_SSH_TARGETS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
+DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 
@@ -27,28 +32,30 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Deploy a Kubernetes cluster on remote machines.')
-    parser.add_argument('--ips-file', dest='ips_file', help='File containing IP addresses or SSH host entries (one per line)')
-    parser.add_argument('--user', help='Username to use for SSH (overridden by SSH config if host exists there)')
-    parser.add_argument('--ssh-key', dest='ssh_key', help='Path to SSH private key (overridden by SSH config if host exists there)')
-    parser.add_argument('--context-name', dest='context_name', default='default', help='Kubernetes context name')
-    parser.add_argument('--cleanup', action='store_true', help='Clean up the cluster')
-    parser.add_argument('--password', help='Password for sudo')
     parser.add_argument('--infra', help='Name of the cluster in ssh_node_pools.yaml to use')
-    parser.add_argument('--ssh-targets-file', dest='ssh_targets_file', 
-                        default=DEFAULT_SSH_TARGETS_PATH,
-                        help=f'Path to SSH targets YAML file (default: {DEFAULT_SSH_TARGETS_PATH})')
+    parser.add_argument('--ssh-node-pools-file', dest='ssh_node_pools_file', 
+                        default=DEFAULT_SSH_NODE_POOLS_PATH,
+                        help=f'Path to SSH node pools YAML file (default: {DEFAULT_SSH_NODE_POOLS_PATH})')
     parser.add_argument('--kubeconfig-path', dest='kubeconfig_path',
                         default=DEFAULT_KUBECONFIG_PATH,
                         help=f'Path to save the kubeconfig file (default: {DEFAULT_KUBECONFIG_PATH})')
     parser.add_argument('--use-ssh-config', dest='use_ssh_config', action='store_true',
                         help='Use SSH config for host settings instead of explicit parameters')
+    #TODO(romilb): The `sky local up --ips` command is deprecated and these args are now captured in the ssh_node_pools.yaml file.
+    # Remove these args after 0.11.0 release.
+    parser.add_argument('--ips-file', dest='ips_file', help='[Deprecated, use --ssh-node-pools-file instead] File containing IP addresses or SSH host entries (one per line)')
+    parser.add_argument('--user', help='[Deprecated, use --ssh-node-pools-file instead] Username to use for SSH (overridden by SSH config if host exists there)')
+    parser.add_argument('--ssh-key', dest='ssh_key', help='[Deprecated, use --ssh-node-pools-file instead] Path to SSH private key (overridden by SSH config if host exists there)')
+    parser.add_argument('--context-name', dest='context_name', default='default', help='[Deprecated, use --ssh-node-pools-file instead] Kubernetes context name')
+    parser.add_argument('--cleanup', action='store_true', help='Clean up the cluster')
+    parser.add_argument('--password', help='[Deprecated, use --ssh-node-pools-file instead] Password for sudo')
     
     return parser.parse_args()
 
 def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     """Load SSH targets from YAML file."""
     if not os.path.exists(file_path):
-        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}", flush=True)
+        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}")
         sys.exit(1)
     
     try:
@@ -56,7 +63,7 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
             targets = yaml.safe_load(f)
         return targets
     except Exception as e:
-        print(f"{RED}Error loading SSH targets file: {e}{NC}", flush=True)
+        print(f"{RED}Error loading SSH targets file: {e}{NC}")
         sys.exit(1)
 
 def check_host_in_ssh_config(hostname: str) -> bool:
@@ -75,12 +82,12 @@ def check_host_in_ssh_config(hostname: str) -> bool:
 def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for specific clusters or all clusters."""
     if not targets:
-        print(f"{RED}Error: No clusters defined in SSH targets file{NC}", flush=True)
+        print(f"{RED}Error: No clusters defined in SSH targets file{NC}")
         sys.exit(1)
     
     if cluster_name:
         if cluster_name not in targets:
-            print(f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}", flush=True)
+            print(f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}")
             sys.exit(1)
         return {cluster_name: targets[cluster_name]}
     
@@ -90,7 +97,7 @@ def get_cluster_config(targets: Dict[str, Any], cluster_name: Optional[str] = No
 def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
     """Prepare list of hosts with resolved user, identity_file, and password."""
     if 'hosts' not in cluster_config or not cluster_config['hosts']:
-        print(f"{RED}Error: No hosts defined in cluster configuration{NC}", flush=True)
+        print(f"{RED}Error: No hosts defined in cluster configuration{NC}")
         sys.exit(1)
     
     # Get cluster-level defaults
@@ -115,7 +122,7 @@ def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                print(f"{RED}Warning: Host missing 'ip' field, skipping: {host}{NC}", flush=True)
+                print(f"{RED}Warning: Host missing 'ip' field, skipping: {host}{NC}")
                 continue
             
             # Check if this is an SSH config hostname
@@ -140,9 +147,9 @@ def run_command(cmd, shell=False):
     """Run a local command and return the output."""
     process = subprocess.run(cmd, shell=shell, capture_output=True, text=True)
     if process.returncode != 0:
-        print(f"{RED}Error executing command: {cmd}{NC}", flush=True)
-        print(f"STDOUT: {process.stdout}", flush=True)
-        print(f"STDERR: {process.stderr}", flush=True)
+        print(f"{RED}Error executing command: {cmd}{NC}")
+        print(f"STDOUT: {process.stdout}")
+        print(f"STDERR: {process.stderr}")
         return None
     return process.stdout.strip()
 
@@ -183,8 +190,8 @@ def run_remote(node, cmd, user='', ssh_key='', connect_timeout=30, use_ssh_confi
     
     process = subprocess.run(ssh_cmd, capture_output=True, text=True)
     if process.returncode != 0:
-        print(f"{RED}Error executing command {cmd} on {node}:{NC}", flush=True)
-        print(f"STDERR: {process.stderr}", flush=True)
+        print(f"{RED}Error executing command {cmd} on {node}:{NC}")
+        print(f"STDERR: {process.stderr}")
         return None
     return process.stdout.strip()
 
@@ -208,15 +215,15 @@ export SUDO_ASKPASS=$ASKPASS_SCRIPT
 
 def progress_message(message):
     """Show a progress message."""
-    print(f"{YELLOW}➜ {message}{NC}", flush=True)
+    print(f"{YELLOW}➜ {message}{NC}")
 
 def success_message(message):
     """Show a success message."""
-    print(f"{GREEN}✔ {message}{NC}", flush=True)
+    print(f"{GREEN}✔ {message}{NC}")
 
 def cleanup_server_node(node, user, ssh_key, askpass_block, use_ssh_config=False):
     """Uninstall k3s and clean up the state on a server node."""
-    print(f"{YELLOW}Cleaning up head node {node}...{NC}", flush=True)
+    print(f"{YELLOW}Cleaning up head node {node}...{NC}")
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -224,11 +231,11 @@ def cleanup_server_node(node, user, ssh_key, askpass_block, use_ssh_config=False
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    print(f"{GREEN}Node {node} cleaned up successfully.{NC}", flush=True)
+    print(f"{GREEN}Node {node} cleaned up successfully.{NC}")
 
 def cleanup_agent_node(node, user, ssh_key, askpass_block, use_ssh_config=False):
     """Uninstall k3s and clean up the state on an agent node."""
-    print(f"{YELLOW}Cleaning up node {node}...{NC}", flush=True)
+    print(f"{YELLOW}Cleaning up node {node}...{NC}")
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -236,7 +243,7 @@ def cleanup_agent_node(node, user, ssh_key, askpass_block, use_ssh_config=False)
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    print(f"{GREEN}Node {node} cleaned up successfully.{NC}", flush=True)
+    print(f"{GREEN}Node {node} cleaned up successfully.{NC}")
 
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
@@ -357,7 +364,7 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
     # Verify if we have extracted certificate data files
     has_cert_files = os.path.isfile(client_cert_file) and os.path.isfile(client_key_file)
     if has_cert_files:
-        print(f"{GREEN}Client certificate data extracted and will be used for authentication{NC}", flush=True)
+        print(f"{GREEN}Client certificate data extracted and will be used for authentication{NC}")
     
     if use_ssh_config:
         run_command([
@@ -381,9 +388,9 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
         ])
     
     success_message(f"SSH tunnel configured through kubectl credential plugin on port {port}")
-    print(f"{GREEN}Your kubectl connection is now tunneled through SSH (port {port}).{NC}", flush=True)
-    print(f"{GREEN}This tunnel will be automatically established when needed.{NC}", flush=True)
-    print(f"{GREEN}Credential TTL set to {ttl_seconds}s to ensure tunnel health is checked frequently.{NC}", flush=True)
+    print(f"{GREEN}Your kubectl connection is now tunneled through SSH (port {port}).{NC}")
+    print(f"{GREEN}This tunnel will be automatically established when needed.{NC}")
+    print(f"{GREEN}Credential TTL set to {ttl_seconds}s to ensure tunnel health is checked frequently.{NC}")
     
     return port
 
@@ -405,7 +412,7 @@ def cleanup_kubectl_ssh_tunnel(context_name):
         
         success_message(f"SSH tunnel for context {context_name} cleaned up")
     else:
-        print(f"{YELLOW}Cleanup script not found: {cleanup_script}{NC}", flush=True)
+        print(f"{YELLOW}Cleanup script not found: {cleanup_script}{NC}")
 
 def main():
     args = parse_args()
@@ -417,18 +424,18 @@ def main():
     if args.ips_file:
         # Using command line arguments - legacy mode
         if args.ssh_key and not os.path.isfile(args.ssh_key) and not global_use_ssh_config:
-            print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}", flush=True)
+            print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}")
             sys.exit(1)
         
         if not os.path.isfile(args.ips_file):
-            print(f"{RED}Error: IPs file not found: {args.ips_file}{NC}", flush=True)
+            print(f"{RED}Error: IPs file not found: {args.ips_file}{NC}")
             sys.exit(1)
         
         with open(args.ips_file, 'r') as f:
             hosts = [line.strip() for line in f if line.strip()]
         
         if not hosts:
-            print(f"{RED}Error: Hosts file is empty or not formatted correctly.{NC}", flush=True)
+            print(f"{RED}Error: Hosts file is empty or not formatted correctly.{NC}")
             sys.exit(1)
         
         head_node = hosts[0]
@@ -447,16 +454,16 @@ def main():
                        head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, args.cleanup)
     else:
         # Using YAML configuration
-        targets = load_ssh_targets(args.ssh_targets_file)
+        targets = load_ssh_targets(args.ssh_node_pools_file)
         clusters_config = get_cluster_config(targets, args.infra)
         
         # Process each cluster
         for cluster_name, cluster_config in clusters_config.items():
-            print(f"{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}", flush=True)
+            print(f"{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}")
             hosts_info = prepare_hosts_info(cluster_config)
             
             if not hosts_info:
-                print(f"{RED}Error: No valid hosts found for cluster '{cluster_name}'. Skipping.{NC}", flush=True)
+                print(f"{RED}Error: No valid hosts found for cluster '{cluster_name}'. Skipping.{NC}")
                 continue
             
             # Use the first host as the head node and the rest as worker nodes
@@ -481,7 +488,7 @@ def main():
                            head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, args.cleanup,
                            worker_hosts=worker_hosts)
             
-            print(f"{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}", flush=True)
+            print(f"{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}")
 
 def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, password,
                   head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, cleanup, 
@@ -498,12 +505,12 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     k3s_token = "mytoken"  # Any string can be used as the token
     
     # Pre-flight checks
-    print(f"{YELLOW}Checking SSH connection to head node...{NC}", flush=True)
+    print(f"{YELLOW}Checking SSH connection to head node...{NC}")
     run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
     
     # If --cleanup flag is set, uninstall k3s and exit
     if cleanup:
-        print(f"{YELLOW}Starting cleanup...{NC}", flush=True)
+        print(f"{YELLOW}Starting cleanup...{NC}")
         
         # Clean up SSH tunnel first
         cleanup_kubectl_ssh_tunnel(context_name)
@@ -538,13 +545,13 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
             
             success_message(f"Context '{context_name}' removed from local kubeconfig.")
         
-        print(f"{GREEN}Cleanup completed successfully.{NC}", flush=True)
+        print(f"{GREEN}Cleanup completed successfully.{NC}")
         return
     
     # Get effective IP for master node if using SSH config - needed for workers to connect
     if head_use_ssh_config:
         effective_master_ip = get_effective_host_ip(head_node)
-        print(f"{GREEN}Resolved head node {head_node} to {effective_master_ip} from SSH config{NC}", flush=True)
+        print(f"{GREEN}Resolved head node {head_node} to {effective_master_ip} from SSH config{NC}")
     else:
         effective_master_ip = head_node
     
@@ -575,12 +582,12 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     # Check if head node has a GPU
     install_gpu = False
     if check_gpu(head_node, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config):
-        print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}", flush=True)
+        print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}")
         install_gpu = True
     
     # Fetch the head node's internal IP (this will be passed to worker nodes)
     master_addr = run_remote(head_node, "hostname -I | awk '{print $1}'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
-    print(f"{GREEN}Master node internal IP: {master_addr}{NC}", flush=True)
+    print(f"{GREEN}Master node internal IP: {master_addr}{NC}")
     
     # Step 2: Install k3s on worker nodes and join them to the master node
     for i, node in enumerate(worker_nodes):
@@ -608,7 +615,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         
         # Check if worker node has a GPU
         if check_gpu(node, worker_user, worker_key, use_ssh_config=worker_config):
-            print(f"{YELLOW}GPU detected on worker node ({node}).{NC}", flush=True)
+            print(f"{YELLOW}GPU detected on worker node ({node}).{NC}")
             install_gpu = True
     
     # Step 3: Configure local kubectl to connect to the cluster
@@ -698,7 +705,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         has_end = "-----END CERTIFICATE-----" in cert_pem
                         
                         if not has_begin or not has_end:
-                            print(f"{YELLOW}Warning: Certificate data missing PEM markers, attempting to fix...{NC}", flush=True)
+                            print(f"{YELLOW}Warning: Certificate data missing PEM markers, attempting to fix...{NC}")
                             # Add PEM markers if missing
                             if not has_begin:
                                 cert_pem = f"-----BEGIN CERTIFICATE-----\n{cert_pem}"
@@ -711,7 +718,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         
                         # Verify the file was written correctly
                         if os.path.getsize(cert_file_path) > 0:
-                            print(f"{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}", flush=True)
+                            print(f"{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}")
                             
                             # Quick validation of PEM format
                             with open(cert_file_path, 'r') as f:
@@ -720,11 +727,11 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                                 last_line = content[-1].strip() if content else ""
                                 
                             if not first_line.startswith("-----BEGIN") or not last_line.startswith("-----END"):
-                                print(f"{YELLOW}Warning: Certificate may not be in proper PEM format{NC}", flush=True)
+                                print(f"{YELLOW}Warning: Certificate may not be in proper PEM format{NC}")
                         else:
-                            print(f"{RED}Error: Certificate file is empty{NC}", flush=True)
+                            print(f"{RED}Error: Certificate file is empty{NC}")
                     except Exception as e:
-                        print(f"{RED}Error processing certificate data: {e}{NC}", flush=True)
+                        print(f"{RED}Error processing certificate data: {e}{NC}")
                 
                 if client_key_data:
                     # Decode base64 data and save as PEM
@@ -756,7 +763,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                             has_end = any(marker in key_pem for marker in ["-----END PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"])
                             
                             if not has_begin or not has_end:
-                                print(f"{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}", flush=True)
+                                print(f"{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}")
                                 # Add PEM markers if missing
                                 if not has_begin:
                                     key_pem = f"-----BEGIN PRIVATE KEY-----\n{key_pem}"
@@ -771,7 +778,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         
                         # Verify the file was written correctly
                         if os.path.getsize(key_file_path) > 0:
-                            print(f"{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}", flush=True)
+                            print(f"{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}")
                             
                             # Quick validation of PEM format
                             with open(key_file_path, 'r') as f:
@@ -780,11 +787,11 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                                 last_line = content[-1].strip() if content else ""
                                 
                             if not first_line.startswith("-----BEGIN") or not last_line.startswith("-----END"):
-                                print(f"{YELLOW}Warning: Key may not be in proper PEM format{NC}", flush=True)
+                                print(f"{YELLOW}Warning: Key may not be in proper PEM format{NC}")
                         else:
-                            print(f"{RED}Error: Key file is empty{NC}", flush=True)
+                            print(f"{RED}Error: Key file is empty{NC}")
                     except Exception as e:
-                        print(f"{RED}Error processing key data: {e}{NC}", flush=True)
+                        print(f"{RED}Error processing key data: {e}{NC}")
         
         # First check if context name exists and delete it if it does
         # TODO(romilb): Should we throw an error here instead? 
@@ -812,12 +819,12 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     
     success_message(f"kubectl configured with new context '{context_name}'.")
     
-    print(f"Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}", flush=True)
-    print("You can now run 'kubectl get nodes' to verify the setup.", flush=True)
+    print(f"Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}")
+    print("You can now run 'kubectl get nodes' to verify the setup.")
     
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
-        print(f"{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}", flush=True)
+        print(f"{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}")
         cmd = f"""
             {askpass_block}
             curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
@@ -843,7 +850,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
         success_message("GPU Operator installed.")
     else:
-        print(f"{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}", flush=True)
+        print(f"{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}")
     
     # Configure SkyPilot
     progress_message("Configuring SkyPilot...")
@@ -855,12 +862,11 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     success_message("SkyPilot configured successfully.")
     
     # Display final success message
-    print(f"{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}", flush=True)
-    print("You can now interact with your Kubernetes cluster through SkyPilot: ", flush=True)
-    print("  • List available GPUs: sky show-gpus --cloud kubernetes", flush=True)
-    print("  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes --gpus A100:1", flush=True)
-    print("  • Connect to pod with SSH: ssh devbox", flush=True)
-    print("  • Connect to pod with VSCode: code --remote ssh-remote+devbox '/'", flush=True)
+    print(f"{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}")
+    print("You can now interact with your Kubernetes cluster through SkyPilot: ")
+    print("  • List available GPUs: sky show-gpus --cloud kubernetes")
+    print("  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes")
+    print("  • Connect to pod with VSCode: code --remote ssh-remote+devbox '/'")
 
 if __name__ == "__main__":
     main()
