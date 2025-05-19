@@ -21,7 +21,9 @@ async function getKubernetesContextGPUs() {
         body: JSON.stringify({}),
       }
     );
-    const id = response.headers.get('x-request-id');
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -62,7 +64,9 @@ async function getKubernetesPerNodeGPUs(context) {
         context: context,
       }),
     });
-    const id = response.headers.get('x-request-id');
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -192,7 +196,9 @@ export async function getCloudGPUs() {
         gpus_only: true,
       }),
     });
-    const id = response.headers.get('x-request-id');
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {

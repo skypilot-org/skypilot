@@ -193,12 +193,12 @@ export function TopBar() {
           <div className="border-l border-gray-200 h-6 mx-1"></div>
 
           <Link
-            href="/gpus"
-            className={getLinkClasses('/gpus')}
+            href="/infra"
+            className={getLinkClasses('/infra')}
             prefetch={false}
           >
             <ChipIcon className="w-4 h-4" />
-            {!isMobile && <span>GPUs</span>}
+            {!isMobile && <span>Infra</span>}
           </Link>
         </div>
 
