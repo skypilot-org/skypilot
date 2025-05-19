@@ -6042,10 +6042,10 @@ def ssh():
 
 @ssh.command('up', cls=_DocumentedCodeCommand)
 @click.option('--infra',
-              help='Name of the cluster to set up in ssh_node_pools.yaml. If not specified, all clusters in the file will be used.')
+              help='Name of the cluster to set up in ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.')
 @click.option('--async', 'async_call', is_flag=True, hidden=True,
               help='Run the command asynchronously.')
-def ssh_up(infra, async_call):
+def ssh_up(infra: Optional[str], async_call: bool):
     """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
 
     This command sets up a Kubernetes cluster on the machines specified in
@@ -6064,7 +6064,7 @@ def ssh_up(infra, async_call):
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
 @click.option('--infra',
-              help='Name of the cluster to clean up in ssh_node_pools.yaml. If not specified, all clusters in the file will be used.')
+              help='Name of the cluster to clean up in ssh_node_pools.yaml. If not specified, all clusters in the file will be cleaned up.')
 @click.option('--async', 'async_call', is_flag=True, hidden=True,
               help='Run the command asynchronously.')
 def ssh_down(infra, async_call):
