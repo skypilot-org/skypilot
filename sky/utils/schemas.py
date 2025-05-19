@@ -92,7 +92,8 @@ def _get_single_resources_schema():
 
     # Kubernetes specific pattern - matches:
     # 1. Just the word "kubernetes" or "k8s" by itself
-    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain slashes)
+    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain
+    # slashes)
     kubernetes_pattern = '(?i:kubernetes|k8s)(?:/.+)?'
 
     # Combine all patterns with alternation (|)
