@@ -63,6 +63,10 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
     else:
         msg_str = 'Deploying SkyPilot on SSH targets...'
     
+    # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+    
     with rich_utils.safe_status(
             ux_utils.spinner_message(msg_str,
                                      log_path=log_path,
@@ -74,7 +78,8 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
             stream_logs=False, # TODO: Fixme to False after we fix the logging
             line_processor=log_utils.SkySSHUpLineProcessor(
                 log_path=log_path, is_local=True),
-            cwd=cwd)
+            cwd=cwd,
+            env=env)
     
     if returncode == 0:
         success = True
@@ -148,6 +153,11 @@ def deploy_remote_cluster(ip_list: List[str],
             msg_str = 'Cleaning up remote cluster...'
         else:
             msg_str = 'Deploying remote cluster...'
+            
+        # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
+            
         with rich_utils.safe_status(
                 ux_utils.spinner_message(msg_str,
                                          log_path=log_path,
@@ -159,7 +169,8 @@ def deploy_remote_cluster(ip_list: List[str],
                 stream_logs=False,
                 line_processor=log_utils.SkyRemoteUpLineProcessor(
                     log_path=log_path, is_local=True),
-                cwd=cwd)
+                cwd=cwd,
+                env=env)
         if returncode == 0:
             success = True
         else:
