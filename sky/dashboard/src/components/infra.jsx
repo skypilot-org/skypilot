@@ -17,11 +17,14 @@ import { Button } from '@/components/ui/button';
 const GPU_REFRESH_INTERVAL = 60000;
 
 export function GPUs() {
-  const [loading, setLoading] = useState(true);
+  // Separate loading states for different data sources
+  const [kubeLoading, setKubeLoading] = useState(true);
+  const [cloudLoading, setCloudLoading] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const refreshDataRef = React.useRef(null);
   const isMobile = useMobile();
-  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  const [kubeDataLoaded, setKubeDataLoaded] = useState(false);
+  const [cloudDataLoaded, setCloudDataLoaded] = useState(false);
   const router = useRouter();
 
   const [allGPUs, setAllGPUs] = useState([]);
@@ -35,13 +38,13 @@ export function GPUs() {
   const [selectedContext, setSelectedContext] = useState(null);
 
   const fetchData = React.useCallback(async () => {
-    setLoading(true);
+    // Start loading for both data sources
+    setKubeLoading(true);
+    setCloudLoading(true);
+
+    // Fetch Kubernetes data
     try {
-      const [gpusResponse, cloudInfraResponse] = await Promise.all([
-        getGPUs(),
-        getCloudInfrastructure()
-      ]);
-      
+      const gpusResponse = await getGPUs();
       const {
         allGPUs: fetchedAllGPUs,
         perContextGPUs: fetchedPerContextGPUs,
@@ -51,21 +54,31 @@ export function GPUs() {
       setAllGPUs(fetchedAllGPUs || []);
       setPerContextGPUs(fetchedPerContextGPUs || []);
       setPerNodeGPUs(fetchedPerNodeGPUs || []);
-      setCloudInfraData(cloudInfraResponse?.clouds || []);
-      setTotalClouds(cloudInfraResponse?.totalClouds || 0);
-      setEnabledClouds(cloudInfraResponse?.enabledClouds || 0);
+      setKubeDataLoaded(true);
     } catch (err) {
-      console.error('Error fetching data:', err);
+      console.error('Error fetching Kubernetes data:', err);
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
+    } finally {
+      setKubeLoading(false);
+    }
+
+    // Fetch Cloud infrastructure data
+    try {
+      const cloudInfraResponse = await getCloudInfrastructure();
+      setCloudInfraData(cloudInfraResponse?.clouds || []);
+      setTotalClouds(cloudInfraResponse?.totalClouds || 0);
+      setEnabledClouds(cloudInfraResponse?.enabledClouds || 0);
+      setCloudDataLoaded(true);
+    } catch (err) {
+      console.error('Error fetching cloud infrastructure data:', err);
       setCloudInfraData([]);
       setTotalClouds(0);
       setEnabledClouds(0);
     } finally {
-      setLoading(false);
+      setCloudLoading(false);
       if (isInitialLoad) setIsInitialLoad(false);
-      setInitialDataLoaded(true);
     }
   }, [isInitialLoad]);
 
@@ -136,8 +149,8 @@ export function GPUs() {
   // Check URL on component mount to set initial context
   useEffect(() => {
     if (router.query.context) {
-      const contextParam = Array.isArray(router.query.context) 
-        ? router.query.context[0] 
+      const contextParam = Array.isArray(router.query.context)
+        ? router.query.context[0]
         : router.query.context;
       setSelectedContext(decodeURIComponent(contextParam));
     }
@@ -150,7 +163,7 @@ export function GPUs() {
     router.replace(
       {
         pathname: '/infra',
-        query: context ? { context } : undefined
+        query: context ? { context } : undefined,
       },
       context ? `/infra/${encodeURIComponent(context)}` : '/infra',
       { shallow: true }
@@ -161,11 +174,7 @@ export function GPUs() {
   const handleBackClick = () => {
     setSelectedContext(null);
     // Use replace and set as to the same URL
-    router.replace(
-      { pathname: '/infra' },
-      '/infra',
-      { shallow: true }
-    );
+    router.replace({ pathname: '/infra' }, '/infra', { shallow: true });
   };
 
   // Handle browser back/forward navigation
@@ -181,7 +190,7 @@ export function GPUs() {
     };
 
     router.events.on('routeChangeComplete', handleRouteChange);
-    
+
     return () => {
       router.events.off('routeChangeComplete', handleRouteChange);
     };
@@ -191,7 +200,7 @@ export function GPUs() {
   const renderContextDetails = (contextName) => {
     const gpusInContext = groupedPerContextGPUs[contextName] || [];
     const nodesInContext = groupedPerNodeGPUs[contextName] || [];
-    
+
     return (
       <div className="mb-4">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
@@ -200,16 +209,22 @@ export function GPUs() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               {gpusInContext.map((gpu) => {
                 const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-                const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-                
+                const freePercentage =
+                  gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
+                const usedPercentage =
+                  gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
+
                 return (
-                  <div key={gpu.gpu_name} className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
+                  <div
+                    key={gpu.gpu_name}
+                    className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
+                  >
                     <div className="flex justify-between items-center mb-1.5 flex-wrap">
                       <div className="font-medium text-gray-800 text-sm">
                         {gpu.gpu_name}
                         <span className="text-xs text-gray-500 ml-2">
-                          (Requestable: {gpu.gpu_requestable_qty_per_node} / node)
+                          (Requestable: {gpu.gpu_requestable_qty_per_node} /
+                          node)
                         </span>
                       </div>
                       <span className="text-xs font-medium">
@@ -238,7 +253,7 @@ export function GPUs() {
                 );
               })}
             </div>
-            
+
             {nodesInContext.length > 0 && (
               <>
                 <h4 className="text-lg font-semibold mb-4">Nodes</h4>
@@ -246,16 +261,26 @@ export function GPUs() {
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-100">
                       <tr>
-                        <th className="p-3 text-left font-medium text-gray-600">Node</th>
-                        <th className="p-3 text-left font-medium text-gray-600">GPU</th>
-                        <th className="p-3 text-right font-medium text-gray-600">Availability</th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Node
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          GPU
+                        </th>
+                        <th className="p-3 text-right font-medium text-gray-600">
+                          Availability
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {nodesInContext.map((node, index) => (
                         <tr key={`${node.node_name}-${index}`}>
-                          <td className="p-3 whitespace-nowrap text-gray-700">{node.node_name}</td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">{node.gpu_name}</td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.node_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.gpu_name}
+                          </td>
                           <td className="p-3 whitespace-nowrap text-right text-gray-700">
                             {`${node.gpu_free} of ${node.gpu_total} free`}
                           </td>
@@ -273,12 +298,15 @@ export function GPUs() {
   };
 
   const renderCloudInfrastructure = () => {
-    if (loading && cloudInfraData.length === 0) {
+    if (cloudLoading && !cloudDataLoaded) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
             <h3 className="text-lg font-semibold mb-4">Cloud</h3>
-            <p className="text-sm text-gray-500">Loading cloud data...</p>
+            <div className="flex items-center justify-center py-6">
+              <CircularProgress size={24} className="mr-3" />
+              <span className="text-gray-500">Loading cloud infra data...</span>
+            </div>
           </div>
         </div>
       );
@@ -294,28 +322,40 @@ export function GPUs() {
             </span>
           </div>
           {cloudInfraData.length === 0 ? (
-            <p className="text-sm text-gray-500">No enabled clouds available.</p>
+            <p className="text-sm text-gray-500">
+              No enabled clouds available.
+            </p>
           ) : (
             <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="p-3 text-left font-medium text-gray-600 w-32">Cloud</th>
-                    <th className="p-3 text-left font-medium text-gray-600 w-24">Clusters</th>
-                    <th className="p-3 text-left font-medium text-gray-600 w-24">Jobs</th>
+                    <th className="p-3 text-left font-medium text-gray-600 w-32">
+                      Cloud
+                    </th>
+                    <th className="p-3 text-left font-medium text-gray-600 w-24">
+                      Clusters
+                    </th>
+                    <th className="p-3 text-left font-medium text-gray-600 w-24">
+                      Jobs
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {cloudInfraData.map(cloud => (
+                  {cloudInfraData.map((cloud) => (
                     <tr key={cloud.name} className="hover:bg-gray-50">
-                      <td className="p-3 capitalize font-medium text-gray-700">{cloud.name}</td>
+                      <td className="p-3 font-medium text-gray-700">
+                        {cloud.name}
+                      </td>
                       <td className="p-3">
                         {cloud.clusters > 0 ? (
                           <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
                             {cloud.clusters}
                           </span>
                         ) : (
-                          <span className="text-gray-500">0</span>
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                            0
+                          </span>
                         )}
                       </td>
                       <td className="p-3">
@@ -324,7 +364,9 @@ export function GPUs() {
                             {cloud.jobs}
                           </span>
                         ) : (
-                          <span className="text-gray-500">0</span>
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                            0
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -339,50 +381,64 @@ export function GPUs() {
   };
 
   const renderKubernetesInfrastructure = () => {
-    if (isInitialLoad && loading) {
+    if (kubeLoading && !kubeDataLoaded) {
       return (
-        <div className="flex flex-col items-center justify-center h-64">
-          <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 text-lg">
-            Loading Infrastructure Data...
-          </span>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+          <div className="p-5">
+            <h3 className="text-lg font-semibold mb-4">Kubernetes</h3>
+            <div className="flex items-center justify-center py-6">
+              <CircularProgress size={24} className="mr-3" />
+              <span className="text-gray-500">
+                Loading Kubernetes infra data...
+              </span>
+            </div>
+          </div>
         </div>
       );
     }
 
-    if (initialDataLoaded && allGPUs.length > 0) {
+    if (kubeDataLoaded && allGPUs.length > 0) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
             <div className="flex items-center mb-4">
               <h3 className="text-lg font-semibold">Kubernetes</h3>
-
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                {/* <h4 className="text-base font-medium mb-3">Contexts</h4> */}
                 <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="p-3 text-left font-medium text-gray-600">Context
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Context
                           <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
                             {Object.keys(groupedPerContextGPUs).length} contexts
                           </span>
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
-                        <th className="p-3 text-left font-medium text-gray-600">GPU Types</th>
-                        <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Nodes
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          GPU Types
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          #GPUs
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {Object.keys(groupedPerContextGPUs).map(context => {
+                      {Object.keys(groupedPerContextGPUs).map((context) => {
                         const gpus = groupedPerContextGPUs[context] || [];
                         const nodes = groupedPerNodeGPUs[context] || [];
-                        const totalGpus = gpus.reduce((sum, gpu) => sum + (gpu.gpu_total || 0), 0);
+                        const totalGpus = gpus.reduce(
+                          (sum, gpu) => sum + (gpu.gpu_total || 0),
+                          0
+                        );
                         const gpuTypes = (() => {
                           const typeCounts = gpus.reduce((acc, gpu) => {
-                            acc[gpu.gpu_name] = (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
+                            acc[gpu.gpu_name] =
+                              (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
                             return acc;
                           }, {});
                           return Object.entries(typeCounts)
@@ -395,7 +451,9 @@ export function GPUs() {
                             className="hover:bg-gray-50 cursor-pointer"
                             onClick={() => handleContextClick(context)}
                           >
-                            <td className="p-3 text-blue-700 underline">{context}</td>
+                            <td className="p-3 text-blue-700 underline">
+                              {context}
+                            </td>
                             <td className="p-3">{nodes.length}</td>
                             <td className="p-3">{gpuTypes}</td>
                             <td className="p-3">{totalGpus}</td>
@@ -407,17 +465,19 @@ export function GPUs() {
                 </div>
               </div>
               <div>
-                {/* <h4 className="text-base font-medium mb-3">GPUs</h4> */}
                 <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="p-3 text-left font-medium text-gray-600 w-24 whitespace-nowrap">GPU
+                        <th className="p-3 text-left font-medium text-gray-600 w-24 whitespace-nowrap">
+                          GPU
                           <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
                             {grandTotalFreeGPUs} of {grandTotalGPUs} free
                           </span>
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">Requestable</th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Requestable
+                        </th>
                         <th className="p-3 text-left font-medium text-gray-600">
                           <div className="flex items-center">
                             <span>Utilization</span>
@@ -426,22 +486,32 @@ export function GPUs() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {allGPUs.map(gpu => {
+                      {allGPUs.map((gpu) => {
                         const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                        const freePercentage = gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-                        const usedPercentage = gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-                        
+                        const freePercentage =
+                          gpu.gpu_total > 0
+                            ? (gpu.gpu_free / gpu.gpu_total) * 100
+                            : 0;
+                        const usedPercentage =
+                          gpu.gpu_total > 0
+                            ? (usedGpus / gpu.gpu_total) * 100
+                            : 0;
+
                         // Find the requestable quantities from any context
                         const requestableQtys = perContextGPUs
-                          .filter(g => g.gpu_name === gpu.gpu_name)
-                          .map(g => g.gpu_requestable_qty_per_node)
+                          .filter((g) => g.gpu_name === gpu.gpu_name)
+                          .map((g) => g.gpu_requestable_qty_per_node)
                           .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
                           .join(', ');
-                          
+
                         return (
                           <tr key={gpu.gpu_name}>
-                            <td className="p-3 font-medium w-24 whitespace-nowrap">{gpu.gpu_name}</td>
-                            <td className="p-3 text-xs text-gray-600">{requestableQtys || '-'} / node</td>
+                            <td className="p-3 font-medium w-24 whitespace-nowrap">
+                              {gpu.gpu_name}
+                            </td>
+                            <td className="p-3 text-xs text-gray-600">
+                              {requestableQtys || '-'} / node
+                            </td>
                             <td className="p-3 w-1/2">
                               <div className="flex items-center gap-3">
                                 <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[120px]">
@@ -450,7 +520,8 @@ export function GPUs() {
                                       style={{ width: `${usedPercentage}%` }}
                                       className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
-                                      {usedPercentage > 15 && `${usedGpus} Used`}
+                                      {usedPercentage > 15 &&
+                                        `${usedGpus} Used`}
                                     </div>
                                   )}
                                   {freePercentage > 0 && (
@@ -458,7 +529,8 @@ export function GPUs() {
                                       style={{ width: `${freePercentage}%` }}
                                       className="bg-green-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
-                                      {freePercentage > 15 && `${gpu.gpu_free} Free`}
+                                      {freePercentage > 15 &&
+                                        `${gpu.gpu_free} Free`}
                                     </div>
                                   )}
                                 </div>
@@ -477,11 +549,13 @@ export function GPUs() {
       );
     }
 
-    if (initialDataLoaded && allGPUs.length === 0) {
+    if (kubeDataLoaded && allGPUs.length === 0) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
-            <h3 className="text-lg font-semibold mb-4">Kubernetes Infrastructure</h3>
+            <h3 className="text-lg font-semibold mb-4">
+              Kubernetes Infrastructure
+            </h3>
             <p className="text-sm text-gray-500">
               No Kubernetes GPUs found or Kubernetes is not configured.
             </p>
@@ -496,19 +570,32 @@ export function GPUs() {
   const renderKubernetesTab = () => {
     // If a context is selected, show its details instead of the summary
     if (selectedContext) {
+      if (kubeLoading && !kubeDataLoaded) {
+        return (
+          <div className="flex flex-col items-center justify-center h-64">
+            <CircularProgress size={32} className="mb-4" />
+            <span className="text-gray-500 text-lg">
+              Loading Context Data...
+            </span>
+          </div>
+        );
+      }
       return renderContextDetails(selectedContext);
     }
-    
+
     return (
       <>
         {/* Show Kubernetes Infrastructure first */}
         {renderKubernetesInfrastructure()}
-        
+
         {/* Then show Cloud Infrastructure */}
         {renderCloudInfrastructure()}
       </>
     );
   };
+
+  // Check if any data is currently loading
+  const isAnyLoading = kubeLoading || cloudLoading;
 
   return (
     <Layout highlighted="infra">
@@ -524,12 +611,12 @@ export function GPUs() {
               }
             }}
           >
-            Infra
+            Infrastructure
           </Link>
           {selectedContext && (
             <>
               <span className="mx-2 text-gray-500">›</span>
-              <span 
+              <span
                 className="text-sky-blue hover:underline cursor-pointer"
                 onClick={(e) => {
                   e.preventDefault();
@@ -544,7 +631,7 @@ export function GPUs() {
           )}
         </div>
         <div className="flex items-center">
-          {loading && (
+          {isAnyLoading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500">Loading...</span>
@@ -552,11 +639,11 @@ export function GPUs() {
           )}
           <button
             onClick={handleRefresh}
-            disabled={loading}
+            disabled={isAnyLoading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && "Refresh"}
+            {!isMobile && 'Refresh'}
           </button>
         </div>
       </div>
@@ -709,4 +796,3 @@ function CloudGpuTable({ data, title }) {
     </>
   );
 }
-

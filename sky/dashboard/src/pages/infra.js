@@ -6,9 +6,9 @@ export default function InfraPage() {
   return (
     <>
       <Head>
-        <title>Infrastructure | SkyPilot Dashboard</title>
+        <title>Infra | SkyPilot Dashboard</title>
       </Head>
       <GPUs />
     </>
   );
-} 
+}

@@ -13,88 +13,69 @@ export async function getCloudInfrastructure() {
     // Use existing data connectors
     const [clustersData, jobsData] = await Promise.all([
       getClusters(),
-      getManagedJobs()
+      getManagedJobs(),
     ]);
-    
+
     const clusters = clustersData || [];
     const jobs = jobsData?.jobs || [];
-    
-    // First get cloud availability information
-    const cloudAvailResponse = await fetch(`${ENDPOINT}/cloud_availability`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}),
-    });
-    
-    const id = cloudAvailResponse.headers.get('X-Skypilot-Request-ID') || 
-               cloudAvailResponse.headers.get('X-Request-ID');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-    const data = await fetchedData.json();
-    const cloudAvailability = data.return_value ? JSON.parse(data.return_value) : {};
-    
+
+    // Create a map to store cloud data
     const cloudsData = {};
-    
+
     // Initialize with all clouds from CLOUDS_LIST
-    CLOUDS_LIST.forEach(cloud => {
-      // Check if cloud is enabled in the user's config
-      const isEnabled = cloudAvailability[cloud] === true;
-      
+    CLOUDS_LIST.forEach((cloud) => {
       cloudsData[cloud] = {
         name: cloud,
         clusters: 0,
         jobs: 0,
-        enabled: isEnabled
+        enabled: false, // We'll mark clouds as enabled if they have clusters or jobs
       };
     });
-    
+
     // Count clusters per cloud
-    clusters.forEach(cluster => {
-      // Extract just the cloud name from the infra string
-      if (cluster.infra) {
-        const cloudName = cluster.infra.split(' ')[0].toLowerCase();
+    clusters.forEach((cluster) => {
+      if (cluster.cloud) {
+        const cloudName = cluster.cloud;
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].clusters += 1;
-          // If we have clusters in a cloud, it must be enabled
           cloudsData[cloudName].enabled = true;
         }
       }
     });
-    
+
     // Count jobs per cloud
-    jobs.forEach(job => {
-      // Extract just the cloud name from the infra string
-      if (job.infra) {
-        const cloudName = job.infra.split(' ')[0].toLowerCase();
+    jobs.forEach((job) => {
+      if (job.cloud) {
+        const cloudName = job.cloud;
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].jobs += 1;
-          // If we have jobs in a cloud, it must be enabled
           cloudsData[cloudName].enabled = true;
         }
       }
     });
-    
+
     // Get total and enabled counts for the UI
     const totalClouds = CLOUDS_LIST.length;
-    const enabledClouds = Object.values(cloudsData).filter(c => c.enabled).length;
-    
+    const enabledClouds = Object.values(cloudsData).filter(
+      (c) => c.enabled
+    ).length;
+
     // Convert to array, filter to only enabled clouds, and sort
     const result = Object.values(cloudsData)
-      .filter(cloud => cloud.enabled)
+      .filter((cloud) => cloud.enabled)
       .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
-    
+
     return {
       clouds: result,
       totalClouds,
-      enabledClouds
+      enabledClouds,
     };
   } catch (error) {
     console.error('Error fetching cloud infrastructure:', error);
     return {
       clouds: [],
       totalClouds: CLOUDS_LIST.length,
-      enabledClouds: 0
+      enabledClouds: 0,
     };
   }
 }

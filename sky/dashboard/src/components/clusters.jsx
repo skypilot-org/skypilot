@@ -286,7 +286,20 @@ export function ClusterTable({
                         content={item.full_infra || item.infra}
                         className="text-sm text-muted-foreground"
                       >
-                        <span>{item.infra}</span>
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {item.cloud}
+                          </Link>
+                          {item.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                item.infra.substring(item.infra.indexOf('('))}
+                            </span>
+                          )}
+                        </span>
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>
