@@ -666,4 +666,4 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. toctree::
    :hidden:
 
-   Persisting API Server State Example <examples/api-server-ha>
+   API Server High Availability <examples/api-server-ha>
