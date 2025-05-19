@@ -739,6 +739,8 @@ Mount network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g
 
 This is supported for GCP only for now.
 
+Note: When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the `path` is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
+
 Example:
 
 .. code-block:: yaml

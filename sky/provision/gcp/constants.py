@@ -133,10 +133,18 @@ DISK_MOUNT_USER_DATA_TEMPLATE = """
 
         # Check if filesystem is already formatted (ext4)
         if ! sudo blkid "$device_name" | grep -q 'TYPE="ext4"'; then
-            echo "Formatting $device_name as ext4..."
-            if ! sudo mkfs.ext4 -F "$device_name"; then
-                echo "Error: Failed to format $device_name"
-                return 1
+            if [[ "$device_name" == "/dev/disk/by-id/google-local-nvme-ssd"* ]]; then
+                echo "Formatting local SSD $device_name..."
+                if ! sudo mkfs.ext4 -F "$device_name"; then
+                    echo "Error: Failed to format $device_name"
+                    return 1
+                fi
+            else
+                echo "Formatting persistent disk $device_name..."
+                if ! sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$device_name"; then
+                    echo "Error: Failed to format $device_name"
+                    return 1
+                fi
             fi
         else
             echo "$device_name is already formatted."
@@ -156,9 +164,9 @@ DISK_MOUNT_USER_DATA_TEMPLATE = """
             fi
 
             # Add to fstab if not already present
-            if ! grep -q "$device_name $mount_point" /etc/fstab; then
+            if ! grep -q " $mount_point " /etc/fstab; then
                 echo "Adding mount entry to /etc/fstab..."
-                echo "$device_name $mount_point ext4 defaults,nofail 0 0" | sudo tee -a /etc/fstab
+                echo "UUID=`sudo blkid -s UUID -o value $device_name` $mount_point ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
             else
                 echo "Mount entry already exists in /etc/fstab"
             fi

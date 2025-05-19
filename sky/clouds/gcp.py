@@ -1112,6 +1112,8 @@ class GCP(clouds.Cloud):
         tier = cls._translate_disk_tier(disk_tier)
 
         # Define the default mapping from disk tiers to disk types.
+        # TODO(hailong): add `hyperdisk` support for data disks.
+        # Refer to https://cloud.google.com/compute/docs/disks/hyperdisks
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
@@ -1176,18 +1178,10 @@ class GCP(clouds.Cloud):
         device_mount_points: Dict[str, str] = {}
         ssd_index = 0
         for i, volume in enumerate(volumes):
-            disk_tier = cls.failover_disk_tier(instance_type,
-                                               volume['disk_tier'])
             volume_spec = {
-                'disk_tier': cls._get_disk_type(instance_type, disk_tier),
-                'auto_delete': volume['auto_delete'],
                 'device_name': f'sky-disk-{i}',
+                'auto_delete': volume['auto_delete'],
             }
-            if (disk_tier == resources_utils.DiskTier.ULTRA and
-                    volume_spec['disk_tier'] == 'pd-extreme'):
-                # Only pd-extreme supports custom iops.
-                # see https://cloud.google.com/compute/docs/disks#disk-types
-                volume_spec['disk_iops'] = 20000
             if volume['storage_type'] == resources_utils.StorageType.INSTANCE:
                 volume_spec['disk_tier'] = constants.INSTANCE_STORAGE_DISK_TYPE
                 volume_spec[
@@ -1199,6 +1193,15 @@ class GCP(clouds.Cloud):
             else:
                 volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
                 volume_spec['disk_size'] = volume['disk_size']
+                disk_tier = cls.failover_disk_tier(instance_type,
+                                                   volume['disk_tier'])
+                volume_spec['disk_tier'] = cls._get_disk_type(
+                    instance_type, disk_tier)
+                if (disk_tier == resources_utils.DiskTier.ULTRA and
+                        volume_spec['disk_tier'] == 'pd-extreme'):
+                    # Only pd-extreme supports custom iops.
+                    # see https://cloud.google.com/compute/docs/disks#disk-types
+                    volume_spec['disk_iops'] = 20000
             volumes_specs.append(volume_spec)
             device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
             if volume_spec['storage_type'] == constants.INSTANCE_STORAGE_TYPE:

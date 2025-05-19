@@ -788,7 +788,7 @@ class Resources:
                         volume['disk_tier'] = resources_utils.DiskTier(
                             disk_tier_str)
             else:
-                logger.warning(
+                logger.debug(
                     f'No disk_tier specified for volume {volume["path"]}. '
                     f'Set it to {resources_utils.DiskTier.BEST.value}.')
                 volume['disk_tier'] = resources_utils.DiskTier.BEST
@@ -1173,6 +1173,9 @@ class Resources:
         if self.cloud is not None:
             try:
                 for volume in self.volumes:
+                    # TODO(hailong): check instance local SSD
+                    # support for instance_type.
+                    # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
                     self.cloud.check_disk_tier_enabled(self.instance_type,
                                                        volume['disk_tier'])
             except exceptions.NotSupportedError:
@@ -1445,25 +1448,23 @@ class Resources:
         if self.volumes:
             if not other.volumes:
                 return False
-            else:
-                # Create a mapping of paths to volumes for easier lookup
-                other_volumes_map = {vol['path']: vol for vol in other.volumes}
-                for volume in self.volumes:
-                    if volume['path'] not in other_volumes_map:
-                        logger.info(
-                            f'Volume {volume["path"]} not in other volumes')
+            # Create a mapping of paths to volumes for easier lookup
+            other_volumes_map = {vol['path']: vol for vol in other.volumes}
+            for volume in self.volumes:
+                if volume['path'] not in other_volumes_map:
+                    logger.info(f'Volume {volume["path"]} not in other volumes')
+                    return False
+                other_volume = other_volumes_map[volume['path']]
+                if volume['storage_type'] != other_volume['storage_type']:
+                    return False
+                if (volume['storage_type'] ==
+                        resources_utils.StorageType.NETWORK):
+                    if volume['disk_size'] > other_volume['disk_size']:
                         return False
-                    other_volume = other_volumes_map[volume['path']]
-                    if volume['storage_type'] != other_volume['storage_type']:
-                        return False
-                    if (volume['storage_type'] ==
-                            resources_utils.StorageType.NETWORK):
-                        if volume['disk_size'] > other_volume['disk_size']:
+                    if volume['disk_tier'] != resources_utils.DiskTier.BEST:
+                        if not (volume['disk_tier'] <=
+                                other_volume['disk_tier']):
                             return False
-                        if volume['disk_tier'] != resources_utils.DiskTier.BEST:
-                            if not (volume['disk_tier'] <=
-                                    other_volume['disk_tier']):
-                                return False
 
         if check_ports:
             if self.ports is not None:
@@ -1605,6 +1606,11 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
+        if self.volumes is not None:
+            for volume in self.volumes:
+                if volume['disk_tier'] != resources_utils.DiskTier.BEST:
+                    features.add(
+                        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         return features
 
     @staticmethod
@@ -1815,7 +1821,7 @@ class Resources:
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
         if self.volumes is not None:
-            # Convert DiskTier enum to string value for each volume
+            # Convert DiskTier/StorageType enum to string value for each volume
             volumes = []
             for volume in self.volumes:
                 volume_copy = volume.copy()
