@@ -175,13 +175,13 @@ def cancellation_guard(func: F) -> F:
 
 # TODO(aylei): replace this with asyncio.to_thread once we drop support for
 # python 3.8
-async def to_thread(func, /, *args, **kwargs):
+def to_thread(func, /, *args, **kwargs):
     """Asynchronously run function *func* in a separate thread.
 
     This is same as asyncio.to_thread added in python 3.9
     """
     loop = asyncio.get_running_loop()
     # This is critical to pass the current coroutine context to the new thread
-    ctx = contextvars.copy_context()
-    func_call = functools.partial(ctx.run, func, *args, **kwargs)
-    return await loop.run_in_executor(None, func_call)
+    pyctx = contextvars.copy_context()
+    func_call = functools.partial(pyctx.run, func, *args, **kwargs)
+    return loop.run_in_executor(None, func_call)
