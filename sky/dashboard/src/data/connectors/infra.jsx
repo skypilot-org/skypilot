@@ -19,16 +19,44 @@ export async function getCloudInfrastructure() {
     const clusters = clustersData || [];
     const jobs = jobsData?.jobs || [];
 
+    // Get enabled clouds
+    let enabledCloudsList = [];
+    try {
+      const enabledCloudsResponse = await fetch(`${ENDPOINT}/enabled_clouds`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const id =
+        enabledCloudsResponse.headers.get('X-Skypilot-Request-ID') ||
+        enabledCloudsResponse.headers.get('X-Request-ID');
+      const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+      const data = await fetchedData.json();
+      enabledCloudsList = data.return_value
+        ? JSON.parse(data.return_value)
+        : [];
+      console.log('Enabled clouds:', enabledCloudsList);
+    } catch (error) {
+      console.error('Error fetching enabled clouds:', error);
+      // If there's an error, we'll use clusters and jobs to determine enabled clouds
+      enabledCloudsList = [];
+    }
+
     // Create a map to store cloud data
     const cloudsData = {};
 
     // Initialize with all clouds from CLOUDS_LIST
     CLOUDS_LIST.forEach((cloud) => {
+      // Check if the cloud is in the enabled clouds list
+      const isEnabled = enabledCloudsList.includes(cloud);
+
       cloudsData[cloud] = {
         name: cloud,
         clusters: 0,
         jobs: 0,
-        enabled: false, // We'll mark clouds as enabled if they have clusters or jobs
+        enabled: isEnabled,
       };
     });
 
@@ -38,6 +66,7 @@ export async function getCloudInfrastructure() {
         const cloudName = cluster.cloud;
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].clusters += 1;
+          // If we have clusters in a cloud, it must be enabled
           cloudsData[cloudName].enabled = true;
         }
       }
@@ -49,6 +78,7 @@ export async function getCloudInfrastructure() {
         const cloudName = job.cloud;
         if (cloudsData[cloudName]) {
           cloudsData[cloudName].jobs += 1;
+          // If we have jobs in a cloud, it must be enabled
           cloudsData[cloudName].enabled = true;
         }
       }
