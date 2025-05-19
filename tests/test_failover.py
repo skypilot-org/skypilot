@@ -5,7 +5,6 @@ import uuid
 import boto3
 import botocore.exceptions
 import moto
-import pandas as pd
 import pytest
 
 import sky
