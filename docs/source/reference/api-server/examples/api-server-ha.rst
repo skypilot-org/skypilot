@@ -88,15 +88,6 @@ Replace the variables in the above YAML.
 Note the ``$PROJECT`` and ``$ZONE`` variables must match the project and zone of the GKE cluster.
 In addition, ``$DISK_SIZE`` and ``$DISK_NAME`` must match the size and name of the persistent disk created on GCP.
 
-.. note::
-
-    While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
-    the same can be done with other cloud providers that provide a CSI provider to a persistent storage device.
-
-    For example, the following article describes how to create a persistent volume on an AWS EKS cluster backed by an EFS file system:
-
-    `AWS Persistent Storage for Kubernetes <https://aws.amazon.com/blogs/storage/persistent-storage-for-kubernetes/#:~:text=Static%20provisioning%20using%20Amazon%20EFS>`_
-
 Apply the Persistent Volume to the k8s cluster.
 
 .. code-block:: bash
