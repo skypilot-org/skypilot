@@ -337,8 +337,10 @@ class SkySSHUpLineProcessor(LineProcessor):
                     log_path=self.log_path,
                     is_local=self.is_local))
         if 'Kubernetes deployed on worker node' in log_line:
+            # Extract node name from log line which is in format "Kubernetes deployed on worker node ({node})"
+            node_name = log_line.split('(')[-1].strip(')')
             logger.info(f'{colorama.Fore.GREEN}'
-                        '✔ SkyPilot runtime successfully deployed on worker node.'
+                        f'✔ SkyPilot runtime successfully deployed on worker node {node_name}.'
                         f'{colorama.Style.RESET_ALL}')
 
         # Cluster configuration

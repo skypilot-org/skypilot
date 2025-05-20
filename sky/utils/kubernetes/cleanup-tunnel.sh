@@ -4,7 +4,7 @@
 # Usage: cleanup-tunnel.sh CONTEXT_NAME
 
 CONTEXT="${1:-default}"
-TUNNEL_DIR="$HOME/.sky/tunnel"
+TUNNEL_DIR="$HOME/.sky/ssh_node_pools_info"
 PID_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.pid"
 LOG_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.log"
 LOCK_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.lock"

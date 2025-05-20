@@ -243,7 +243,17 @@ def cleanup_agent_node(node, user, ssh_key, askpass_block, use_ssh_config=False)
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    print(f"{GREEN}Node {node} cleaned up successfully.{NC}")
+    success_message(f"Node {node} cleaned up successfully.")
+
+def start_agent_node(node, master_addr, k3s_token, user, ssh_key, askpass_block, use_ssh_config=False):
+    """Start a k3s agent node."""
+    cmd = f"""
+            {askpass_block}
+            curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="agent --node-label skypilot-ip={node}" \
+                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
+        """
+    run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    success_message(f"Kubernetes deployed on worker node ({node}).")
 
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
@@ -343,9 +353,9 @@ def setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh
     os.chmod(cleanup_script, 0o755)
     
     # Certificate files
-    cert_dir = os.path.expanduser("~/.sky/tunnel")
-    client_cert_file = os.path.join(cert_dir, f"{context_name}-cert.pem")
-    client_key_file = os.path.join(cert_dir, f"{context_name}-key.pem")
+    node_pools_info_dir = os.path.expanduser("~/.sky/ssh_node_pools_info")
+    client_cert_file = os.path.join(node_pools_info_dir, f"{context_name}-cert.pem")
+    client_key_file = os.path.join(node_pools_info_dir, f"{context_name}-key.pem")
     
     # Update kubeconfig to use localhost with the selected port
     run_command(["kubectl", "config", "set-cluster", context_name, 
@@ -466,6 +476,45 @@ def main():
                 print(f"{RED}Error: No valid hosts found for cluster '{cluster_name}'. Skipping.{NC}")
                 continue
             
+            # Generate a unique context name for each cluster
+            context_name = args.context_name
+            if context_name == 'default':
+                context_name = 'ssh-' + cluster_name
+            
+            # Check cluster history
+            node_pools_info_dir = os.path.expanduser(f"~/.sky/ssh_node_pools_info")
+            os.makedirs(node_pools_info_dir, exist_ok=True)
+            history_yaml_file = os.path.join(node_pools_info_dir, f"{context_name}-history.yaml")
+
+            history = None
+            if os.path.exists(history_yaml_file):
+                print(f"{YELLOW}Loading history from {history_yaml_file}{NC}")
+                with open(history_yaml_file, 'r') as f:
+                    history = yaml.safe_load(f)
+            else:
+                print(f"{YELLOW}No history found for {context_name}.{NC}")
+
+            history_workers_info = None
+            history_worker_nodes = None
+            history_use_ssh_config = None
+            # Do not support changing anything besides hosts for now
+            if history is not None:
+                for key in ['user', 'identity_file', 'password']:
+                    if history.get(key) != cluster_config.get(key):
+                        raise ValueError(
+                            f"Cluster configuration has changed for field '{key}'. "
+                            f"Previous value: {history.get(key)}, "
+                            f"Current value: {cluster_config.get(key)}")
+                history_hosts_info = prepare_hosts_info(history)
+                if history_hosts_info[0] != hosts_info[0]:
+                    raise ValueError(
+                        f"Cluster configuration has changed for master node. "
+                        f"Previous value: {history_hosts_info[0]}, "
+                        f"Current value: {hosts_info[0]}")
+                history_workers_info = history_hosts_info[1:] if len(history_hosts_info) > 1 else []
+                history_worker_nodes = [h['ip'] for h in history_workers_info]
+                history_use_ssh_config = [h.get('use_ssh_config', False) for h in history_workers_info]
+            
             # Use the first host as the head node and the rest as worker nodes
             head_host = hosts_info[0]
             worker_hosts = hosts_info[1:] if len(hosts_info) > 1 else []
@@ -478,25 +527,29 @@ def main():
             worker_use_ssh_config = [global_use_ssh_config or h.get('use_ssh_config', False) for h in worker_hosts]
             password = head_host['password']
             
-            # Generate a unique context name for each cluster
-            context_name = args.context_name
-            if context_name == 'default':
-                context_name = 'ssh-' + cluster_name
-            
             # Deploy this cluster
             deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, password,
                            head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, args.cleanup,
-                           worker_hosts=worker_hosts)
+                           worker_hosts=worker_hosts, history_worker_nodes=history_worker_nodes,
+                           history_workers_info=history_workers_info, history_use_ssh_config=history_use_ssh_config)
+
+            if not args.cleanup:
+                with open(history_yaml_file, 'w') as f:
+                    print(f"{YELLOW}Writing history to {history_yaml_file}{NC}")
+                    yaml.dump(cluster_config, f)
             
             print(f"{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}")
 
 def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, password,
                   head_use_ssh_config, worker_use_ssh_config, kubeconfig_path, cleanup, 
-                  worker_hosts=None):
+                  worker_hosts=None, history_worker_nodes=None, history_workers_info=None, history_use_ssh_config=None):
     """Deploy or clean up a single Kubernetes cluster."""
     # Ensure SSH key is expanded for paths with ~ (home directory)
     if ssh_key:
         ssh_key = os.path.expanduser(ssh_key)
+
+    node_pools_info_dir = os.path.expanduser(f"~/.sky/ssh_node_pools_info")
+    history_yaml_file = os.path.join(node_pools_info_dir, f"{context_name}-history.yaml")
     
     # Generate the askpass block if password is provided
     askpass_block = create_askpass_script(password)
@@ -507,30 +560,59 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     # Pre-flight checks
     print(f"{YELLOW}Checking SSH connection to head node...{NC}")
     run_remote(head_node, "echo 'SSH connection successful'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
+    history_exists = (history_worker_nodes is not None and history_workers_info is
+                      not None and history_use_ssh_config is not None)
+
+    # Cleanup history worker nodes
+    worker_nodes_to_cleanup = []
+    remove_worker_cmds = []
+    if history_exists:
+        for history_node, history_info, use_ssh_config in zip(
+            history_worker_nodes, history_workers_info, history_use_ssh_config):
+            if worker_hosts is not None and history_info not in worker_hosts:
+                print(f"{YELLOW}Worker node {history_node} not found in YAML config. "
+                    f"Removing from history...{NC}")
+                worker_nodes_to_cleanup.append(dict(
+                    node=history_node,
+                    user=ssh_user if history_info is None else history_info['user'],
+                    ssh_key=ssh_key if history_info is None else history_info['identity_file'],
+                    askpass_block=(askpass_block if history_info is None
+                                else create_askpass_script(history_info['password'])),
+                    use_ssh_config=use_ssh_config,
+                ))
+                remove_worker_cmds.append(f"kubectl drain -l skypilot-ip={history_node} --ignore-daemonsets --delete-emptydir-data")
+                remove_worker_cmds.append(f"kubectl delete node -l skypilot-ip={history_node}")
     
     # If --cleanup flag is set, uninstall k3s and exit
     if cleanup:
+        # Pickup all nodes
+        worker_nodes_to_cleanup.clear()
+        for node, info, use_ssh_config in zip(
+            worker_nodes, worker_hosts, worker_use_ssh_config):
+            worker_nodes_to_cleanup.append(dict(
+                node=node,
+                user=ssh_user if info is None else info['user'],
+                ssh_key=ssh_key if info is None else info['identity_file'],
+                askpass_block=(askpass_block if info is None
+                                else create_askpass_script(info['password'])),
+                use_ssh_config=use_ssh_config,
+            ))
         print(f"{YELLOW}Starting cleanup...{NC}")
-        
+            
         # Clean up SSH tunnel first
         cleanup_kubectl_ssh_tunnel(context_name)
         
         # Clean up head node
         cleanup_server_node(head_node, ssh_user, ssh_key, askpass_block, use_ssh_config=head_use_ssh_config)
         
-        # Clean up worker nodes
-        for i, node in enumerate(worker_nodes):
-            # If using YAML config with specific worker info
-            if worker_hosts and i < len(worker_hosts):
-                worker_user = worker_hosts[i]['user']
-                worker_key = worker_hosts[i]['identity_file']
-                worker_password = worker_hosts[i]['password']
-                worker_askpass = create_askpass_script(worker_password)
-                worker_config = worker_use_ssh_config[i]
-                cleanup_agent_node(node, worker_user, worker_key, worker_askpass, use_ssh_config=worker_config)
-            else:
-                cleanup_agent_node(node, ssh_user, ssh_key, askpass_block, use_ssh_config=worker_use_ssh_config[i])
+    # Clean up worker nodes
+    for kwargs in worker_nodes_to_cleanup:
+        cleanup_agent_node(**kwargs)
+    for cmd in remove_worker_cmds:
+        print('Cleaning up worker nodes:', cmd)
+        run_command(cmd, shell=True)
         
+    if cleanup:
         # Remove the context from local kubeconfig if it exists
         if os.path.isfile(kubeconfig_path):
             progress_message(f"Removing context '{context_name}' from local kubeconfig...")
@@ -541,9 +623,16 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
             # Update the current context to the first available context
             contexts = run_command(["kubectl", "config", "view", "-o", "jsonpath='{.contexts[0].name}'"], shell=False)
             if contexts:
-                run_command(["kubectl", "config", "use-context", contexts], shell=False)
+                # It will output an '' if there is no context
+                if contexts == "''":
+                    run_command(["kubectl", "config", "unset", "current-context"], shell=False)
+                else:
+                    run_command(["kubectl", "config", "use-context", contexts], shell=False)
             
             success_message(f"Context '{context_name}' removed from local kubeconfig.")
+
+        if os.path.exists(history_yaml_file):
+            os.remove(history_yaml_file)
         
         print(f"{GREEN}Cleanup completed successfully.{NC}")
         return
@@ -556,34 +645,37 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         effective_master_ip = head_node
     
     # Step 1: Install k3s on the head node
-    progress_message(f"Deploying Kubernetes on head node ({head_node})...")
-    cmd = f"""
-        {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} sudo -E -A sh - &&
-        mkdir -p ~/.kube &&
-        sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
-        sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
-        for i in {{1..3}}; do
-            if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
-                break
-            else
-                echo 'Waiting for nodes to be ready...'
-                sleep 5
-            fi
-        done
-        if [ $i -eq 3 ]; then
-            echo 'Failed to wait for nodes to be ready after 3 attempts'
-            exit 1
-        fi
-    """
-    run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
-    success_message("K3s deployed on head node.")
-    
     # Check if head node has a GPU
     install_gpu = False
-    if check_gpu(head_node, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config):
-        print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}")
-        install_gpu = True
+    if history_exists:
+        print(f"{YELLOW}History exists. Skipping deploying "
+              f"k3s on head node {head_node}.{NC}")
+    else:
+        progress_message(f"Deploying Kubernetes on head node ({head_node})...")
+        cmd = f"""
+            {askpass_block}
+            curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} sudo -E -A sh - &&
+            mkdir -p ~/.kube &&
+            sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
+            sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
+            for i in {{1..3}}; do
+                if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
+                    break
+                else
+                    echo 'Waiting for nodes to be ready...'
+                    sleep 5
+                fi
+            done
+            if [ $i -eq 3 ]; then
+                echo 'Failed to wait for nodes to be ready after 3 attempts'
+                exit 1
+            fi
+        """
+        run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
+        success_message("K3s deployed on head node.")
+        if check_gpu(head_node, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config):
+            print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}")
+            install_gpu = True
     
     # Fetch the head node's internal IP (this will be passed to worker nodes)
     master_addr = run_remote(head_node, "hostname -I | awk '{print $1}'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
@@ -595,6 +687,10 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         
         # If using YAML config with specific worker info
         if worker_hosts and i < len(worker_hosts):
+            if history_workers_info is not None and worker_hosts[i] in history_workers_info:
+                print(f"{YELLOW}Worker node {node} already exists in history. "
+                      f"Skipping...{NC}")
+                continue
             worker_user = worker_hosts[i]['user']
             worker_key = worker_hosts[i]['identity_file']
             worker_password = worker_hosts[i]['password']
@@ -606,12 +702,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
             worker_askpass = askpass_block
             worker_config = worker_use_ssh_config[i]
         
-        cmd = f"""
-            {worker_askpass}
-            curl -sfL https://get.k3s.io | K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
-        """
-        run_remote(node, cmd, worker_user, worker_key, use_ssh_config=worker_config)
-        success_message(f"Kubernetes deployed on worker node ({node}).")
+        start_agent_node(node, master_addr, k3s_token, worker_user, worker_key, worker_askpass, use_ssh_config=worker_config)
         
         # Check if worker node has a GPU
         if check_gpu(node, worker_user, worker_key, use_ssh_config=worker_config):
@@ -689,9 +780,6 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                     f_out.write(line)
                 
                 # Save certificate data if available
-                cert_dir = os.path.expanduser(f"~/.sky/tunnel")
-                os.makedirs(cert_dir, exist_ok=True)
-                
                 if client_cert_data:
                     # Decode base64 data and save as PEM
                     try:
@@ -700,7 +788,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         cert_pem = base64.b64decode(clean_cert_data).decode('utf-8')
                         
                         # Check if the data already looks like a PEM file
-                        cert_file_path = os.path.join(cert_dir, f"{context_name}-cert.pem")
+                        cert_file_path = os.path.join(node_pools_info_dir, f"{context_name}-cert.pem")
                         has_begin = "-----BEGIN CERTIFICATE-----" in cert_pem
                         has_end = "-----END CERTIFICATE-----" in cert_pem
                         
@@ -741,7 +829,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                         key_pem = base64.b64decode(clean_key_data).decode('utf-8')
                         
                         # Check if the data already looks like a PEM file
-                        key_file_path = os.path.join(cert_dir, f"{context_name}-key.pem")
+                        key_file_path = os.path.join(node_pools_info_dir, f"{context_name}-key.pem")
                         
                         # Check for EC key format
                         if "EC PRIVATE KEY" in key_pem:
@@ -813,7 +901,7 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         
         # Set the new context as the current context
         run_command(["kubectl", "config", "use-context", context_name], shell=False)
-    
+
     # Always set up SSH tunnel since we assume only port 22 is accessible
     setup_kubectl_ssh_tunnel(head_node, ssh_user, ssh_key, context_name, use_ssh_config=head_use_ssh_config)
     
