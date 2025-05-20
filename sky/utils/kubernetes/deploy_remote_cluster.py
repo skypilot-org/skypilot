@@ -580,7 +580,6 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
                                 else create_askpass_script(history_info['password'])),
                     use_ssh_config=use_ssh_config,
                 ))
-                remove_worker_cmds.append(f"kubectl drain -l skypilot-ip={history_node} --ignore-daemonsets --delete-emptydir-data")
                 remove_worker_cmds.append(f"kubectl delete node -l skypilot-ip={history_node}")
     
     # If --cleanup flag is set, uninstall k3s and exit
