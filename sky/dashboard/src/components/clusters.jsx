@@ -10,6 +10,7 @@ import { CircularProgress } from '@mui/material';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
+  REFRESH_INTERVAL,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -78,7 +79,7 @@ export function Clusters() {
         </div>
       </div>
       <ClusterTable
-        refreshInterval={10000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         onOpenSSHModal={(cluster) => {
@@ -285,7 +286,20 @@ export function ClusterTable({
                         content={item.full_infra || item.infra}
                         className="text-sm text-muted-foreground"
                       >
-                        <span>{item.infra}</span>
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {item.cloud}
+                          </Link>
+                          {item.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                item.infra.substring(item.infra.indexOf('('))}
+                            </span>
+                          )}
+                        </span>
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>

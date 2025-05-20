@@ -11,6 +11,7 @@ import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import Head from 'next/head';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -174,136 +175,147 @@ export function JobDetailPage() {
     }
   }
 
-  return (
-    <Layout highlighted="clusters">
-      <JobHeader
-        cluster={cluster}
-        job={job}
-        jobData={jobData}
-        onRefresh={handleManualRefresh}
-        isRefreshing={isRefreshing}
-        loading={loading}
-      />
-      {loading && isInitialLoad ? (
-        <div className="flex items-center justify-center h-64">
-          <CircularProgress size={24} className="mr-2" />
-          <span>Loading...</span>
-        </div>
-      ) : (
-        <div className="space-y-8">
-          {/* Info Section */}
-          <div id="details">
-            <Card>
-              <div className="flex items-center justify-between px-4 pt-4">
-                <h2 className="text-lg font-semibold">Details</h2>
-              </div>
-              <div className="p-4">
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Job ID
-                    </div>
-                    <div className="text-base mt-1">{jobData.id}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Job Name
-                    </div>
-                    <div className="text-base mt-1">{jobData.job}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Status
-                    </div>
-                    <div className="text-base mt-1">
-                      <StatusBadge status={jobData.status} />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      User
-                    </div>
-                    <div className="text-base mt-1">{jobData.user}</div>
-                  </div>
-                  {jobData.resources && (
-                    <div>
-                      <div className="text-gray-600 font-medium text-base">
-                        Requested Resources
-                      </div>
-                      <div className="text-base mt-1">
-                        {jobData.resources || 'N/A'}
-                      </div>
-                    </div>
-                  )}
-                  {jobData.cluster && (
-                    <div>
-                      <div className="text-gray-600 font-medium text-base">
-                        Cluster
-                      </div>
-                      <div className="text-base mt-1">
-                        <Link
-                          href={`/clusters/${jobData.cluster}`}
-                          className="text-sky-blue hover:underline"
-                        >
-                          {jobData.cluster}
-                        </Link>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </div>
+  const title =
+    cluster && job
+      ? `Job: ${job} @ ${cluster} | SkyPilot Dashboard`
+      : 'Job Details | SkyPilot Dashboard';
 
-          {/* Logs Section */}
-          <div id="logs" className="mt-6">
-            <Card>
-              <div className="flex items-center justify-between px-4 pt-4">
-                <div className="flex items-center">
-                  <h2 className="text-lg font-semibold">Logs</h2>
-                  <span className="ml-2 text-xs text-gray-500">
-                    (Logs are not streaming; click refresh to fetch the latest
-                    logs.)
-                  </span>
+  return (
+    <>
+      <Head>
+        <title>{title}</title>
+      </Head>
+      <Layout highlighted="clusters">
+        <JobHeader
+          cluster={cluster}
+          job={job}
+          jobData={jobData}
+          onRefresh={handleManualRefresh}
+          isRefreshing={isRefreshing}
+          loading={loading}
+        />
+        {loading && isInitialLoad ? (
+          <div className="flex items-center justify-center h-64">
+            <CircularProgress size={24} className="mr-2" />
+            <span>Loading...</span>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {/* Info Section */}
+            <div id="details">
+              <Card>
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <h2 className="text-lg font-semibold">Details</h2>
                 </div>
-                <Tooltip
-                  content="Refresh logs"
-                  className="text-muted-foreground"
-                >
-                  <button
-                    onClick={handleRefreshLogs}
-                    disabled={isLoadingLogs}
-                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                  >
-                    <RotateCwIcon
-                      className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                    />
-                  </button>
-                </Tooltip>
-              </div>
-              <div className="p-4">
-                {isPending ? (
-                  <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
-                    <span>
-                      Waiting for the job to start, please refresh after a while
+                <div className="p-4">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Job ID
+                      </div>
+                      <div className="text-base mt-1">{jobData.id}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Job Name
+                      </div>
+                      <div className="text-base mt-1">{jobData.job}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Status
+                      </div>
+                      <div className="text-base mt-1">
+                        <StatusBadge status={jobData.status} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        User
+                      </div>
+                      <div className="text-base mt-1">{jobData.user}</div>
+                    </div>
+                    {jobData.resources && (
+                      <div>
+                        <div className="text-gray-600 font-medium text-base">
+                          Resources
+                        </div>
+                        <div className="text-base mt-1">
+                          {jobData.resources || 'N/A'}
+                        </div>
+                      </div>
+                    )}
+                    {jobData.cluster && (
+                      <div>
+                        <div className="text-gray-600 font-medium text-base">
+                          Cluster
+                        </div>
+                        <div className="text-base mt-1">
+                          <Link
+                            href={`/clusters/${jobData.cluster}`}
+                            className="text-sky-blue hover:underline"
+                          >
+                            {jobData.cluster}
+                          </Link>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Logs Section */}
+            <div id="logs" className="mt-6">
+              <Card>
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <div className="flex items-center">
+                    <h2 className="text-lg font-semibold">Logs</h2>
+                    <span className="ml-2 text-xs text-gray-500">
+                      (Logs are not streaming; click refresh to fetch the latest
+                      logs.)
                     </span>
                   </div>
-                ) : isLoadingLogs ? (
-                  <div className="flex items-center justify-center py-4">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                ) : (
-                  <div className="max-h-96 overflow-y-auto">
-                    <LogFilter logs={logs.join('')} />
-                  </div>
-                )}
-              </div>
-            </Card>
+                  <Tooltip
+                    content="Refresh logs"
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={handleRefreshLogs}
+                      disabled={isLoadingLogs}
+                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                    >
+                      <RotateCwIcon
+                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                      />
+                    </button>
+                  </Tooltip>
+                </div>
+                <div className="p-4">
+                  {isPending ? (
+                    <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+                      <span>
+                        Waiting for the job to start, please refresh after a
+                        while
+                      </span>
+                    </div>
+                  ) : isLoadingLogs ? (
+                    <div className="flex items-center justify-center py-4">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  ) : (
+                    <div className="max-h-96 overflow-y-auto">
+                      <LogFilter logs={logs.join('')} />
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
           </div>
-        </div>
-      )}
-    </Layout>
+        )}
+      </Layout>
+    </>
   );
 }
 
