@@ -3556,7 +3556,8 @@ def show_gpus(
             total_table: 'prettytable.PrettyTable',
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
-            show_node_info: bool) -> Generator[str, None, None]:
+            show_node_info: bool,
+            cloud_name: Optional[str] = None) -> Generator[str, None, None]:
         
         # Separate out SSH Node Pool and Kubernetes contexts
         ssh_node_pool_realtime_infos = [(ctx, realtime_info) for ctx, realtime_info in k8s_realtime_infos if ctx and ctx.startswith('ssh-')]
@@ -3564,7 +3565,8 @@ def show_gpus(
         k8s_realtime_infos = [(ctx, realtime_info) for ctx, realtime_info in k8s_realtime_infos if ctx and not ctx.startswith('ssh-')]
         k8s_all_nodes_info = [(ctx, node_info) for ctx, node_info in all_nodes_info if ctx and not ctx.startswith('ssh-')]
 
-        if k8s_realtime_infos:
+        # Only show Kubernetes info if cloud_name is None or kubernetes/k8s
+        if (cloud_name is None or cloud_name.lower() in ['kubernetes', 'k8s']) and k8s_realtime_infos:
             yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                 'Kubernetes GPUs'
                 f'{colorama.Style.RESET_ALL}')
@@ -3589,11 +3591,13 @@ def show_gpus(
             if show_node_info:
                 yield '\n'
                 yield _format_kubernetes_node_info_combined(k8s_all_nodes_info, cloud_str='Kubernetes', context_title_str='CONTEXT')
-            if ssh_node_pool_realtime_infos:
-                # Add a separator between Kubernetes and SSH Node Pools
+            
+            # Only add a separator if both kubernetes and ssh will be shown
+            if cloud_name is None and ssh_node_pool_realtime_infos:
                 yield '\n\n'                
 
-        if ssh_node_pool_realtime_infos:
+        # Only show SSH Node Pool info if cloud_name is None or ssh
+        if (cloud_name is None or cloud_name.lower() == 'ssh') and ssh_node_pool_realtime_infos:
             yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                 'SSH Node Pools'
                 f'{colorama.Style.RESET_ALL}')
@@ -3662,7 +3666,8 @@ def show_gpus(
                         total_table,
                         k8s_realtime_infos,
                         all_nodes_info,
-                        show_node_info=True)
+                        show_node_info=True,
+                        cloud_name=cloud_name)
 
                 if kubernetes_autoscaling:
                     k8s_messages += (
@@ -3761,7 +3766,8 @@ def show_gpus(
                 yield from _format_kubernetes_realtime_gpu(total_table,
                                                            k8s_realtime_infos,
                                                            all_nodes_info,
-                                                           show_node_info=False)
+                                                           show_node_info=False,
+                                                           cloud_name=cloud_name)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
