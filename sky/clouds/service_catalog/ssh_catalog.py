@@ -64,7 +64,7 @@ def list_accelerators(
                               case_sensitive,
                               all_regions,
                               require_price,
-                              realtime=False)
+                              realtime=False)[0]
 
 
 def list_accelerators_realtime(
@@ -134,15 +134,14 @@ def _list_accelerators(
 
     # Call the Kubernetes _list_accelerators with the appropriate region filter
     if realtime:
-        return kubernetes_catalog.list_accelerators_realtime(gpus_only, name_filter,
-                                                 region_filter, quantity_filter,
-                                                 case_sensitive, all_regions,
-                                                 require_price)
+        return kubernetes_catalog.list_accelerators_realtime(
+            gpus_only, name_filter, region_filter, quantity_filter,
+            case_sensitive, all_regions, require_price)
     else:
-        return kubernetes_catalog.list_accelerators(gpus_only, name_filter,
-                                                 region_filter, quantity_filter,
-                                                 case_sensitive, all_regions,
-                                                 require_price)
+        result = kubernetes_catalog.list_accelerators(
+            gpus_only, name_filter, region_filter, quantity_filter,
+            case_sensitive, all_regions, require_price)
+        return result, {}, {}
 
 
 def validate_region_zone(
