@@ -3661,9 +3661,8 @@ def show_gpus(
                     context_str = f'Context: {ctx}'
                 else:
                     context_str = 'Default Context'
-                yield (
-                    f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
-                )
+                yield (f'{colorama.Fore.CYAN}{context_str}'
+                       f'{colorama.Style.RESET_ALL}\n')
                 yield from realtime_table.get_string()
 
             if show_node_info:
@@ -3694,9 +3693,8 @@ def show_gpus(
                     context_str = f'SSH Node Pool: {ctx}'
                 else:
                     context_str = 'Default Node Pool'
-                yield (
-                    f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
-                )
+                yield (f'{colorama.Fore.CYAN}{context_str}'
+                       f'{colorama.Style.RESET_ALL}\n')
                 yield from realtime_table.get_string()
 
             if show_node_info:
@@ -6165,9 +6163,8 @@ def ssh():
 @ssh.command('up', cls=_DocumentedCodeCommand)
 @click.option(
     '--infra',
-    help=
-    'Name of the cluster to set up in ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.'
-)
+    help='Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. '
+    'If not specified, all clusters in the file will be set up.')
 @click.option('--async',
               'async_call',
               is_flag=True,
@@ -6179,23 +6176,18 @@ def ssh_up(infra: Optional[str], async_call: bool):
     This command sets up a Kubernetes cluster on the machines specified in
     ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
     """
-    try:
-        request_id = sdk.ssh_up(infra=infra)
-        if async_call:
-            print(f'Request submitted with ID: {request_id}')
-        else:
-            sdk.stream_and_get(request_id)
-    except Exception as e:
-        print(f'Error setting up SSH cluster: {e}')
-        sys.exit(1)
+    request_id = sdk.ssh_up(infra=infra)
+    if async_call:
+        print(f'Request submitted with ID: {request_id}')
+    else:
+        sdk.stream_and_get(request_id)
 
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
 @click.option(
     '--infra',
-    help=
-    'Name of the cluster to clean up in ssh_node_pools.yaml. If not specified, all clusters in the file will be cleaned up.'
-)
+    help='Name of the cluster to clean up in ~/.sky/ssh_node_pools.yaml. '
+    'If not specified, all clusters in the file will be cleaned up.')
 @click.option('--async',
               'async_call',
               is_flag=True,
@@ -6207,15 +6199,11 @@ def ssh_down(infra, async_call):
     This command removes the Kubernetes installation from the machines specified
     in ~/.sky/ssh_node_pools.yaml.
     """
-    try:
-        request_id = sdk.ssh_down(infra=infra)
-        if async_call:
-            print(f'Request submitted with ID: {request_id}')
-        else:
-            sdk.stream_and_get(request_id)
-    except Exception as e:
-        print(f'Error cleaning up SSH cluster: {e}')
-        sys.exit(1)
+    request_id = sdk.ssh_down(infra=infra)
+    if async_call:
+        print(f'Request submitted with ID: {request_id}')
+    else:
+        sdk.stream_and_get(request_id)
 
 
 def main():

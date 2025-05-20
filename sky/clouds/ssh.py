@@ -27,9 +27,12 @@ SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 @registry.CLOUD_REGISTRY.register()
 class SSH(kubernetes.Kubernetes):
     """SSH cloud implementation.
+
+    This is used by SSH Node Pools in SkyPilot, which use Kubernetes to manage
+    the SSH clusters.
     
-    This cloud is a wrapper around Kubernetes that only uses contexts starting
-    with 'ssh-', which are managed through SkyPilot's SSH deployment mechanism.
+    This cloud is a thin wrapper around Kubernetes that only uses contexts 
+    starting with 'ssh-', which are managed through `sky ssh up` command.
     """
 
     _REPR = 'SSH'
@@ -48,7 +51,7 @@ class SSH(kubernetes.Kubernetes):
         return super()._unsupported_features_for_resources(resources)
 
     @classmethod
-    def _get_ssh_node_pool_contexts(cls) -> List[str]:
+    def get_ssh_node_pool_contexts(cls) -> List[str]:
         """Get context names from ssh_node_pools.yaml file.
         
         Reads the SSH node pools configuration file and returns a list of context names
@@ -98,7 +101,7 @@ class SSH(kubernetes.Kubernetes):
         ]
 
         # Get contexts from SSH node pools file
-        allowed_contexts = cls._get_ssh_node_pool_contexts()
+        allowed_contexts = cls.get_ssh_node_pool_contexts()
 
         if allowed_contexts:
             # Only include allowed contexts that exist

@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -28,10 +28,10 @@ def deploy_ssh_cluster(cleanup: bool = False,
                        infra: Optional[str] = None,
                        kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
-    
+
     This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a 
     Kubernetes cluster on the specified machines.
-    
+
     Args:
         cleanup: Whether to clean up the cluster instead of deploying.
         infra: Name of the cluster in ssh_node_pools.yaml to use.

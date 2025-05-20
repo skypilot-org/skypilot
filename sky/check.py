@@ -393,13 +393,15 @@ def _format_enabled_cloud(cloud_name: str,
             return _green_color(cloud_and_capabilities)
 
         # Get the cluster names by reading them directly from the node pools file
-        ssh_contexts = sky_clouds.SSH._get_ssh_node_pool_contexts()
+        ssh_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
 
         # Format the context info with consistent styling
         if len(ssh_contexts) > 1:
             contexts_formatted = []
             for i, context in enumerate(existing_contexts):
-                #TODO: This is a hack to remove the 'ssh-' prefix from the context name. Once we have a separate kubeconfig for SSH, this will not be required.
+                #TODO: This is a hack to remove the 'ssh-' prefix from the
+                # context name. Once we have a separate kubeconfig for SSH,
+                # this will not be required.
                 cleaned_context = context.lstrip('ssh-')
                 symbol = (ux_utils.INDENT_LAST_SYMBOL
                           if i == len(existing_contexts) -
