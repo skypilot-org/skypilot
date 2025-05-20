@@ -152,13 +152,13 @@ Unlike :code:`sky status` which lists only the SkyPilot resources launched by th
     $ sky status --k8s
     Kubernetes cluster state (context: mycluster)
     SkyPilot clusters
-    USER     NAME                           LAUNCHED    INFRA      RESOURCES                                      STATUS
-    alice    infer-svc-1                    23 hrs ago  Kubernetes 1x(cpus=1, mem=1, L4:1)                       UP
-    alice    sky-jobs-controller-80b50983   2 days ago  Kubernetes 1x(cpus=4, mem=4)                             UP
-    alice    sky-serve-controller-80b50983  23 hrs ago  Kubernetes 1x(cpus=4, mem=4)                             UP
-    bob      dev                            1 day ago   Kubernetes 1x(cpus=2, mem=8, H100:1)                     UP
-    bob      multinode-dev                  1 day ago   Kubernetes 2x(cpus=2, mem=2)                             UP
-    bob      sky-jobs-controller-2ea485ea   2 days ago  Kubernetes 1x(cpus=4, mem=4)                             UP
+    USER     NAME                           LAUNCHED    INFRA      RESOURCES                 STATUS
+    alice    infer-svc-1                    23 hrs ago  Kubernetes 1x(gpus=L4:1, ...)        UP
+    alice    sky-jobs-controller-80b50983   2 days ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
+    alice    sky-serve-controller-80b50983  23 hrs ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
+    bob      dev                            1 day ago   Kubernetes 1x(gpus=H100:1, ...)      UP
+    bob      multinode-dev                  1 day ago   Kubernetes 2x(cpus=2, mem=2, ...)    UP
+    bob      sky-jobs-controller-2ea485ea   2 days ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
 
     Managed jobs
     In progress tasks: 1 STARTING

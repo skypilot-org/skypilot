@@ -238,7 +238,7 @@ export function JobDetailPage() {
                     {jobData.resources && (
                       <div>
                         <div className="text-gray-600 font-medium text-base">
-                          Resources
+                          Requested Resources
                         </div>
                         <div className="text-base mt-1">
                           {jobData.resources || 'N/A'}
