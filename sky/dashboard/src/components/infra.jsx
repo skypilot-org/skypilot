@@ -409,6 +409,10 @@ export function GPUs() {
           <div className="p-5">
             <div className="flex items-center mb-4">
               <h3 className="text-lg font-semibold">Kubernetes</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {kubeContexts.length}{' '}
+                {kubeContexts.length === 1 ? 'context' : 'contexts'}
+              </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -416,24 +420,23 @@ export function GPUs() {
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/3">
                           Context
-                          <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                            {kubeContexts.length} contexts
-                          </span>
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                           Nodes
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/3">
                           GPU Types
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                           #GPUs
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody
+                      className={`bg-white divide-y divide-gray-200 ${kubeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                    >
                       {kubeContexts.map((context) => {
                         const gpus = groupedPerContextGPUs[context] || [];
                         const nodes = groupedPerNodeGPUs[context] || [];
@@ -447,16 +450,10 @@ export function GPUs() {
                               (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
                             return acc;
                           }, {});
-                          return Object.entries(typeCounts)
-                            .map(([type, count]) => `${type} (${count})`)
-                            .join(', ');
+                          return Object.keys(typeCounts).join(', ');
                         })();
                         return (
-                          <tr
-                            key={context}
-                            className="hover:bg-gray-50 cursor-pointer"
-                            onClick={() => handleContextClick(context)}
-                          >
+                          <tr key={context} className="hover:bg-gray-50">
                             <td className="p-3">
                               <NonCapitalizedTooltip
                                 content={context}
@@ -487,23 +484,25 @@ export function GPUs() {
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="p-3 text-left font-medium text-gray-600 w-24 whitespace-nowrap">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
                           GPU
                           <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
                             {grandTotalFreeGPUs} of {grandTotalGPUs} free
                           </span>
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                           Requestable
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/2">
                           <div className="flex items-center">
                             <span>Utilization</span>
                           </div>
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody
+                      className={`bg-white divide-y divide-gray-200 ${allGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                    >
                       {allGPUs.map((gpu) => {
                         const usedGpus = gpu.gpu_total - gpu.gpu_free;
                         const freePercentage =
