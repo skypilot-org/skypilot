@@ -1065,7 +1065,6 @@ def get_config_schema():
         'properties': {
             'ssh_timeout': {
                 'type': 'integer',
-                'description': 'Timeout in seconds for SSH connection during provisioning.',
                 'minimum': 1,
             },
         }

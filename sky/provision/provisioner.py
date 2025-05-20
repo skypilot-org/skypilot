@@ -315,8 +315,7 @@ def _wait_ssh_connection_direct(ip: str,
     except Exception as e:  # pylint: disable=broad-except
         stderr = f'Error: {common_utils.format_exception(e)}'
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
-                                 ssh_probe_timeout,
-                                 ssh_proxy_command)
+                                 ssh_probe_timeout, ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
                  f'{_shlex_join(command)}. '
                  f'{stderr}')
@@ -388,9 +387,13 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     def _retry_ssh_thread(ip_ssh_port: Tuple[str, int]):
         ip, ssh_port = ip_ssh_port
         success = False
-        ssh_probe_timeout = skypilot_config.get_nested(('provision', 'ssh_timeout'), 10)
+        ssh_probe_timeout = skypilot_config.get_nested(
+            ('provision', 'ssh_timeout'), 10)
         while not success:
-            success, stderr = waiter(ip, ssh_port, **ssh_credentials, ssh_probe_timeout=ssh_probe_timeout)
+            success, stderr = waiter(ip,
+                                     ssh_port,
+                                     **ssh_credentials,
+                                     ssh_probe_timeout=ssh_probe_timeout)
             if not success and time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
