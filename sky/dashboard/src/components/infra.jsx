@@ -703,9 +703,7 @@ export function GPUs() {
                               (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
                             return acc;
                           }, {});
-                          return Object.entries(typeCounts)
-                            .map(([type, count]) => `${type} (${count})`)
-                            .join(', ');
+                          return Object.keys(typeCounts).join(', ');
                         })();
                         const nodePoolName = context.replace(/^ssh-/, '');
                         return (
