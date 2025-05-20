@@ -843,7 +843,7 @@ def open_ports(
             # For the case when every new ports is already opened.
             if ip_permissions:
                 sg.authorize_ingress(IpPermissions=ip_permissions)
-                break
+            break
         except aws.botocore_exceptions().ClientError as e:
             # There is a race condition where the security group is still being
             # created if multiple nodes are started at the same time (TOCTOU).
