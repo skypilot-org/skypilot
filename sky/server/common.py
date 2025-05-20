@@ -139,7 +139,7 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
     cookie_file = get_api_cookie_jar_path()
     if cookie_file:
         cookie_path = pathlib.Path(cookie_file).expanduser().resolve()
-        if os.path.exists(cookie_path):
+        if cookie_path.exists():
             file_cookie_jar = MozillaCookieJar(cookie_path)
             file_cookie_jar.load()
             cookie_jar.update(file_cookie_jar)
@@ -226,20 +226,16 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                     return server_info
                 except (json.JSONDecodeError, AttributeError) as e:
                     # Try to check if we got redirected to a login page.
-                    response = requests.get(f'{server_url}/api/login',
-                                            timeout=2.5,
-                                            cookies=get_api_cookie_jar(),
-                                            allow_redirects=False)
-                    logger.debug('Second attempt to check redirect: '
-                                 f'{response.status_code}')
-                    if response.status_code == 302:
-                        location = response.headers.get('Location', '')
-                        logger.debug(f'Redirect URL: {location}')
-                        # Heuristic: check if the redirect url looks like a
-                        # login page or oauth flow.
-                        if any(key in location for key in ['login', 'oauth2']):
-                            logger.debug(f'Redirect URL {location} looks like '
-                                         'login, so try to get the cookie.')
+                    for prev_response in response.history:
+                        logger.debug(f'Previous response: {prev_response.url}')
+                        # Heuristic: check if the url looks like a login page or
+                        # oauth flow.
+                        if any(key in prev_response.url
+                               for key in ['login', 'oauth2']):
+                            logger.debug(
+                                f'URL {prev_response.url} looks like '
+                                'a login page or oauth flow, so try to '
+                                'get the cookie.')
                             return ApiServerInfo(
                                 status=ApiServerStatus.NEEDS_AUTH)
                     logger.warning('Failed to parse API server response: '

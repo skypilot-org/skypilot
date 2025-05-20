@@ -11,6 +11,7 @@ Usage example:
 
 """
 import base64
+import binascii
 import getpass
 from http import cookiejar
 import json
@@ -1830,23 +1831,43 @@ def api_login(endpoint: Optional[str] = None) -> None:
 
     server_status = server_common.check_server_healthy(endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH:
-        url = urlparse.urlparse(endpoint)
-        click.echo('Authentication is needed. Please visit this URL to get a '
-                   f'token:{colorama.Style.BRIGHT}\n\n{endpoint}/token'
+        # We detected an auth proxy, so go through the auth proxy cookie flow.
+        parsed_url = urlparse.urlparse(endpoint)
+        token_url = f'{endpoint}/token'
+        click.echo('Authentication is needed. Please visit this URL setup up '
+                   f'the token:{colorama.Style.BRIGHT}\n\n{token_url}'
                    f'\n{colorama.Style.RESET_ALL}')
+        if webbrowser.open(token_url):
+            click.echo('Opening browser...')
         token: str = click.prompt('Paste the token')
-        data = base64.b64decode(token)
-        cookie_dict: Dict[str, str] = json.loads(data)
+
+        # Parse the token.
+        # b64decode will ignore invalid characters, but does some length and
+        # padding checks.
+        try:
+            data = base64.b64decode(token)
+        except binascii.Error as e:
+            raise ValueError(f'Malformed token: {token}') from e
+        logger.debug(f'Token data: {data!r}')
+        try:
+            cookie_dict = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ValueError(f'Malformed token data: {data!r}') from e
         if not isinstance(cookie_dict, dict):
-            raise ValueError('XXX better error')
+            raise ValueError(f'Malformed token JSON: {cookie_dict}')
+
         cookie_jar = cookiejar.MozillaCookieJar()
         for (name, value) in cookie_dict.items():
-            if not isinstance(name, str) or not isinstance(value, str):
-                raise ValueError('xxx error2')
-            # CookieJar._cookie_from_cookie_tuple
+            # dict keys in JSON must be strings
+            assert isinstance(name, str)
+            if not isinstance(value, str):
+                raise ValueError('Malformed token - bad key/value: '
+                                 f'{name}: {value}')
+
+            # See CookieJar._cookie_from_cookie_tuple
             # oauth2proxy default is Max-Age 604800
             expires = int(time.time()) + 604800
-            domain = str(url.hostname)
+            domain = str(parsed_url.hostname)
             domain_initial_dot = domain.startswith('.')
             if not domain_initial_dot:
                 domain = '.' + domain
@@ -1866,13 +1887,15 @@ def api_login(endpoint: Optional[str] = None) -> None:
                     secure=False,
                     expires=expires,
                     discard=False,
-                    comment='Imported via sky api login --cookies',
+                    comment=None,
                     comment_url=None,
                     rest=dict(),
                 ))
-            cookie_jar_path = os.path.expanduser(
-                server_common.get_api_cookie_jar_path())
-            cookie_jar.save(cookie_jar_path)
+
+        # Now that the cookies are parsed, save them to the cookie jar.
+        cookie_jar_path = os.path.expanduser(
+            server_common.get_api_cookie_jar_path())
+        cookie_jar.save(cookie_jar_path)
 
     # Set the endpoint in the config file
     config_path = pathlib.Path(

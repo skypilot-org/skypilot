@@ -15,6 +15,7 @@ import posixpath
 import re
 import shutil
 import sys
+import textwrap
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -225,12 +226,12 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
     # Use base64 encoding to avoid having to escape anything in the HTML.
     json_bytes = json.dumps(request.cookies).encode('utf-8')
     base64_str = base64.b64encode(json_bytes).decode('utf-8')
-    return fastapi.responses.HTMLResponse(content=("""
+    return fastapi.responses.HTMLResponse(content=textwrap.dedent("""
         <!DOCTYPE html>
         <html lang="en">
             <head>
                 <meta charset="utf-8">
-                <title>SkyPilot Auth</title>
+                <title>SkyPilot API Server Login</title>
                 <style>
                 #token-box {
                     width: min(90vw, 50rem);
