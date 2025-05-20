@@ -12,8 +12,11 @@ from sky.utils import status_lib
 
 # Module-level constants
 CREDENTIALS_PATH = '~/.hyperbolic/api_key'
-CASTLE_BASE_URL = 'http://localhost:8080'
-GATEWAY_BASE_URL = 'http://localhost:8000'
+
+#TODO consolidate these URLs and update to prod endpoint
+CASTLE_BASE_URL = 'https://api.dev-hyperbolic.xyz' #'http://localhost:8080'
+GATEWAY_BASE_URL = 'https://api.dev-hyperbolic.xyz' #'http://localhost:8000'
+
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 TIMEOUT = 180
@@ -33,6 +36,7 @@ class HyperbolicInstanceStatus(enum.Enum):
     RUNNING = 'online'
     FAILED = 'failed'
     ERROR = 'error'
+    RESTARTING = 'restarting'
     TERMINATED = 'terminated'
 
     @classmethod
@@ -45,6 +49,7 @@ class HyperbolicInstanceStatus(enum.Enum):
             cls.RUNNING: status_lib.ClusterStatus.UP,
             cls.FAILED: status_lib.ClusterStatus.INIT,
             cls.ERROR: status_lib.ClusterStatus.INIT,
+            cls.RESTARTING: status_lib.ClusterStatus.INIT,
             cls.TERMINATED: None,
         }
 
