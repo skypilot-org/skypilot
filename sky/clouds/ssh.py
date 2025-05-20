@@ -23,8 +23,8 @@ class SSH(kubernetes.Kubernetes):
 
     This is used by SSH Node Pools in SkyPilot, which use Kubernetes to manage
     the SSH clusters.
-    
-    This cloud is a thin wrapper around Kubernetes that only uses contexts 
+
+    This cloud is a thin wrapper around Kubernetes that only uses contexts
     starting with 'ssh-', which are managed through `sky ssh up` command.
     """
 
@@ -46,10 +46,10 @@ class SSH(kubernetes.Kubernetes):
     @classmethod
     def get_ssh_node_pool_contexts(cls) -> List[str]:
         """Get context names from ssh_node_pools.yaml file.
-        
+
         Reads the SSH node pools configuration file and returns
         a list of context names by prepending 'ssh-' to each Node Pool name.
-        
+
         Returns:
             A list of SSH Kubernetes context names derived from the Node Pools
             in the SSH node pools file.
@@ -76,10 +76,10 @@ class SSH(kubernetes.Kubernetes):
     @classmethod
     def existing_allowed_contexts(cls) -> List[str]:
         """Get existing allowed contexts that start with 'ssh-'.
-        
+
         Override the Kubernetes implementation to only return contexts that
         start with 'ssh-', which are created by `sky ssh up`.
-        
+
         Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml.
         """
         # Get all contexts from the Kubernetes implementation
@@ -126,7 +126,7 @@ class SSH(kubernetes.Kubernetes):
         # Get SSH contexts
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
         if not existing_allowed_contexts:
@@ -148,7 +148,7 @@ class SSH(kubernetes.Kubernetes):
                             f'SSH cluster {context}: {check_result[1]}')
                 else:
                     reasons.append(f'SSH cluster {context}: {check_result[1]}')
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 reasons.append(f'SSH cluster {context}: {str(e)}')
 
         if success:

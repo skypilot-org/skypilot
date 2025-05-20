@@ -1,5 +1,5 @@
 """SSH-based Kubernetes Cluster Deployment Script"""
-# Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script.
+# Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script. # pylint: disable=line-too-long
 import argparse
 import base64
 import collections
@@ -13,11 +13,6 @@ import tempfile
 from typing import Any, Dict, List, Optional, Set
 
 import yaml
-
-# # Make stdout unbuffered to ensure immediate output for logs and progress indicators
-# # This allows us to remove all flush=True parameters from print statements
-# sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
-# sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
 
 # Colors for nicer UX
 RED = '\033[0;31m'
@@ -40,10 +35,10 @@ class UniqueKeySafeLoader(yaml.SafeLoader):
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
-                raise yaml.constructor.ConstructorError(note=(
-                    f'Duplicate cluster config for cluster {key!r}.\n'
-                    f'Please remove one of them from: {DEFAULT_SSH_NODE_POOLS_PATH}'
-                ))
+                raise yaml.constructor.ConstructorError(
+                    note=(f'Duplicate cluster config for cluster {key!r}.\n'
+                          'Please remove one of them from: '
+                          f'{DEFAULT_SSH_NODE_POOLS_PATH}'))
             value = self.construct_object(value_node, deep=deep)
             mapping[key] = value
         return mapping
@@ -1286,8 +1281,7 @@ def deploy_cluster(head_node,
     print(
         '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
     )
-    print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ' /
-          '')
+    print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
     # Print completion marker for current cluster
     print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
