@@ -94,13 +94,13 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
         if cleanup:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH Node Pools cleaned up successfully.',
+                    '\n🎉 SSH Node Pools cleaned up successfully.',
                     log_path=log_path,
                     is_local=True))
         else:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH Node Pools set up successfully.',
+                    '\n🎉 SSH Node Pools set up successfully.',
                     log_path=log_path,
                     is_local=True))
 

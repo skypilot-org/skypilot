@@ -347,7 +347,7 @@ class SkySSHUpLineProcessor(LineProcessor):
 
         # Pre-flight checks
         if 'Checking SSH connection to head node' in log_line:
-            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}{colorama.Style.DIM}'
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
                         f'Checking SSH connection to head node...{colorama.Style.RESET_ALL}')
             
         if 'SSH connection successful' in log_line:
@@ -432,6 +432,7 @@ class SkySSHUpLineProcessor(LineProcessor):
         if 'Node' in log_line and 'cleaned up successfully' in log_line:
             # Use INDENT_LAST_SYMBOL for worker nodes (assume they come last)
             indent = ux_utils.INDENT_LAST_SYMBOL if 'worker' in log_line else ux_utils.INDENT_SYMBOL
+            # TODO: Fix the indentation symbols for worker nodes
             logger.info(f'{indent}{colorama.Fore.GREEN}{log_line.strip()}{colorama.Style.RESET_ALL}')
 
         # Final status
