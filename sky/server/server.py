@@ -231,9 +231,9 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
     try:
         with open(token_page_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
-    except FileNotFoundError:
-        raise fastapi.HTTPException(status_code=500,
-                                    detail='Token page template not found.')
+    except FileNotFoundError as e:
+        raise fastapi.HTTPException(
+            status_code=500, detail='Token page template not found.') from e
 
     html_content = html_content.replace(
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER', base64_str)
@@ -242,7 +242,9 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
         content=html_content,
         headers={
             'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no'  # Useful for preventing buffering issues with some reverse proxies
+            # X-Accel-Buffering: no is useful for preventing buffering issues
+            # with some reverse proxies.
+            'X-Accel-Buffering': 'no'
         })
 
 
