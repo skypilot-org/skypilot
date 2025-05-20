@@ -119,7 +119,7 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
         sys.exit(1)
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             targets = yaml.load(f, Loader=UniqueKeySafeLoader)
         return targets
     except yaml.constructor.ConstructorError as e:
@@ -582,7 +582,7 @@ def main():
                   file=sys.stderr)
             sys.exit(1)
 
-        with open(args.ips_file, 'r') as f:
+        with open(args.ips_file, 'r', encoding='utf-8') as f:
             hosts = [line.strip() for line in f if line.strip()]
 
         if not hosts:
@@ -648,7 +648,7 @@ def main():
             history = None
             if os.path.exists(history_yaml_file):
                 print(f'{YELLOW}Loading history from {history_yaml_file}{NC}')
-                with open(history_yaml_file, 'r') as f:
+                with open(history_yaml_file, 'r', encoding='utf-8') as f:
                     history = yaml.safe_load(f)
             else:
                 print(f'{YELLOW}No history found for {context_name}.{NC}')
@@ -710,7 +710,7 @@ def main():
                            history_use_ssh_config=history_use_ssh_config)
 
             if not args.cleanup:
-                with open(history_yaml_file, 'w') as f:
+                with open(history_yaml_file, 'w', encoding='utf-8') as f:
                     print(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
                     yaml.dump(cluster_config, f)
 
@@ -1002,8 +1002,8 @@ def deploy_cluster(head_node,
 
         # Modify the temporary kubeconfig to update server address and context name
         modified_config = os.path.join(temp_dir, 'modified_config')
-        with open(temp_kubeconfig, 'r') as f_in:
-            with open(modified_config, 'w') as f_out:
+        with open(temp_kubeconfig, 'r', encoding='utf-8') as f_in:
+            with open(modified_config, 'w', encoding='utf-8') as f_out:
                 in_cluster = False
                 in_user = False
                 client_cert_data = None
@@ -1076,7 +1076,7 @@ def deploy_cluster(head_node,
                                 cert_pem = f'{cert_pem}\n-----END CERTIFICATE-----'
 
                         # Write the certificate
-                        with open(cert_file_path, 'w') as cert_file:
+                        with open(cert_file_path, 'w', encoding='utf-8') as cert_file:
                             cert_file.write(cert_pem)
 
                         # Verify the file was written correctly
@@ -1086,7 +1086,7 @@ def deploy_cluster(head_node,
                             )
 
                             # Quick validation of PEM format
-                            with open(cert_file_path, 'r') as f:
+                            with open(cert_file_path, 'r', encoding='utf-8') as f:
                                 content = f.readlines()
                                 first_line = content[0].strip(
                                 ) if content else ''
@@ -1158,7 +1158,7 @@ def deploy_cluster(head_node,
                                         key_pem)
 
                         # Write the key
-                        with open(key_file_path, 'w') as key_file:
+                        with open(key_file_path, 'w', encoding='utf-8') as key_file:
                             key_file.write(key_pem)
 
                         # Verify the file was written correctly
@@ -1168,7 +1168,7 @@ def deploy_cluster(head_node,
                             )
 
                             # Quick validation of PEM format
-                            with open(key_file_path, 'r') as f:
+                            with open(key_file_path, 'r', encoding='utf-8') as f:
                                 content = f.readlines()
                                 first_line = content[0].strip(
                                 ) if content else ''
@@ -1198,7 +1198,7 @@ def deploy_cluster(head_node,
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, 'merged_config')
         os.environ['KUBECONFIG'] = f'{kubeconfig_path}:{modified_config}'
-        with open(merged_config, 'w') as merged_file:
+        with open(merged_config, 'w', encoding='utf-8') as merged_file:
             kubectl_cmd = ['kubectl', 'config', 'view', '--flatten']
             result = run_command(kubectl_cmd, shell=False)
             if result:
