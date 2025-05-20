@@ -1,0 +1,50 @@
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: oauth2-proxy
+  name: {{ .Release.Name }}-oauth2-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        k8s-app: oauth2-proxy
+    spec:
+      containers:
+      - name: oauth2-proxy
+        image: quay.io/oauth2-proxy/oauth2-proxy:latest
+        imagePullPolicy: Always
+        args:
+        - --provider=oidc
+        - --oidc-issuer-url={{ index .Values.ingress "oauth2-proxy" "oidc-issuer-url" }}
+        - --email-domain={{ index .Values.ingress "oauth2-proxy" "email-domain" | default "*" }}
+        - --upstream=file:///dev/null
+        - --http-address=0.0.0.0:4180
+        - --skip-provider-button=true
+        - --reverse-proxy=true
+        {{- /* Auto-detect if we should use secure cookies based on ingress-nginx controller service type */}}
+        {{- if and (index .Values "ingress-nginx" "enabled") (eq (index .Values "ingress-nginx" "controller" "service" "type") "NodePort") }}
+        - --cookie-secure=false
+        {{- end }}
+        env:
+        - name: OAUTH2_PROXY_CLIENT_ID
+          value: {{ index .Values.ingress "oauth2-proxy" "client-id" | quote }}
+        - name: OAUTH2_PROXY_CLIENT_SECRET
+          value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
+        - name: OAUTH2_PROXY_COOKIE_SECRET
+          {{- if index .Values.ingress "oauth2-proxy" "cookie-secret" }}
+          value: {{ index .Values.ingress "oauth2-proxy" "cookie-secret" | quote }}
+          {{- else }}
+          # Generate a random cookie secret if not provided
+          value: {{ randAlphaNum 16 | b64enc | quote }}
+          {{- end }}
+        ports:
+        - containerPort: 4180
+          protocol: TCP
+{{- end }}

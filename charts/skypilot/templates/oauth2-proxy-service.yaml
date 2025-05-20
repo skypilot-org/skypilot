@@ -1,0 +1,17 @@
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: oauth2-proxy
+  name: {{ .Release.Name }}-oauth2-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: http
+    port: 4180
+    protocol: TCP
+    targetPort: 4180
+  selector:
+    k8s-app: oauth2-proxy
+{{- end }}
