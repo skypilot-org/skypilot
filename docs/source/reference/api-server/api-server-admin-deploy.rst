@@ -132,7 +132,8 @@ Our default of using a NodePort service is the recommended way to expose the API
 
             $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np --namespace $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
-            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
+            $ HOST=${NODE_IP}:${NODE_PORT}
+            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
             $ echo $ENDPOINT
             http://skypilot:yourpassword@1.1.1.1:30050
 
@@ -586,25 +587,31 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
     
     # The second API server, reusing the existing ingress controller and using a different path
     ANOTHER_RELEASE_NAME=skypilot2
+    ANOTHER_NAMESPACE=skypilot2
     # Replace with your username and password to configure the basic auth credentials for the second API server
     ANOTHER_WEB_USERNAME=skypilot
-    ANOTHER_WEB_PASSWORD=yourpassword
+    ANOTHER_WEB_PASSWORD=yourpassword2
     ANOTHER_AUTH_STRING=$(htpasswd -nb $ANOTHER_WEB_USERNAME $ANOTHER_WEB_PASSWORD)
     # Deploy the API server, either in the same namespace or a different namespace
     helm upgrade --install $ANOTHER_RELEASE_NAME skypilot/skypilot-nightly --devel \
-        --namespace $NAMESPACE \
+        --namespace $ANOTHER_NAMESPACE \
         --set ingress-nginx.enabled=false \
         --set ingress.path=/second-server \
         --set ingress.authCredentials=$ANOTHER_AUTH_STRING
 
-With the above commands, these two API servers will share the same ingress controller and serves under different paths of the endpoint you get from :ref:`Step 2: Get the API server URL <sky-get-api-server-url>`:
+With the above commands, these two API servers will share the same ingress controller and serves under different paths of the same host. To get the endpoints, follow :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` to get the host from the helm release that has the ingress-nginx controller deployed, and then append the basic auth and path to the host:
 
-- The first API server serves at ``https://<endpoint>/first-server``
-- The second API server serves at ``https://<endpoint>/second-server``
+.. code-block:: bash
 
-.. note::
-
-    :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` should be applied to the API server installation that has the ingress-nginx controller deployed. Other installations shares the same endpoint.
+    # HOST was the ingress host we got from Step 2
+    $ FIRST_PATH=$(kubectl get ingress ${RELEASE_NAME}-ingress --namespace $NAMESPACE -o jsonpath='{.metadata.annotations.skypilot\.co\/ingress-path}')
+    $ FIRST_ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}${FIRST_PATH}
+    $ SECOND_PATH=$(kubectl get ingress ${ANOTHER_RELEASE_NAME}-ingress --namespace $ANOTHER_NAMESPACE -o jsonpath='{.metadata.annotations.skypilot\.co\/ingress-path}')
+    $ SECOND_ENDPOINT=http://${ANOTHER_WEB_USERNAME}:${ANOTHER_WEB_PASSWORD}@${HOST}${SECOND_PATH}
+    $ echo $FIRST_ENDPOINT
+    http://skypilot:yourpassword@1.1.1.1/first-server
+    $ echo $SECOND_ENDPOINT
+    http://skypilot:yourpassword2@1.1.1.1/second-server
 
 The same approach also applies when you have a ingress-nginx controller deployed before installing the SkyPilot API server:
 

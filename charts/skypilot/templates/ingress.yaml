@@ -19,6 +19,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
     {{- if ne .Values.ingress.path "/" }}
     nginx.ingress.kubernetes.io/rewrite-target: /$2
+    skypilot.co/ingress-path: {{ .Values.ingress.path }}
     {{- end }}
     nginx.ingress.kubernetes.io/server-snippets: |
       location / {
