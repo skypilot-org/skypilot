@@ -1,10 +1,7 @@
-.. _api-server-ha:
+.. _api-server-persistence:
 
-API Server High Availability across GKE Clusters
-================================================
-
-  While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
-  this guide is applicable to other managed k8s offerings that provide a CSI provider to a persistent storage device.
+Persisting SkyPilot API Server State Across Kubernetes Clusters
+===============================================================
 
 When a SkyPilot API server is :ref:`deployed using a Helm chart <sky-api-server-helm-deploy-command>`,
 the API server is fault tolerant with all states persisted through a PVC in the Kubernetes cluster.
@@ -15,8 +12,10 @@ to persistently back the SkyPilot state.
 
 .. note::
 
-    This guide is optional and only needed if you want to make the SkyPilot API server resilient to catastrophic k8s cluster failures.
-    If you do not need the API server to be resilient to catastrophic k8s cluster failures, you can skip this guide.
+    This configuration is optional, recommended only for resilience against rare, catastrophic cluster failures (e.g., total cluster deletion).
+
+    While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
+    this guide is applicable to other managed k8s offerings that provide a CSI provider to a persistent storage device.
 
 TL;DR: Recover API server on another GKE cluster
 ------------------------------------------------
@@ -28,7 +27,7 @@ you can recover the API server on another GKE cluster by following these steps:
 2. Create the persistent volume definition
 3. Deploy API server from the helm chart, specifying the same persistent volume.
 
-The following is an end-to-end instruction for setting up a GKE cluster and a persistent volume to create a high-availability API server.
+The following is an end-to-end instruction for setting up a GKE cluster and a persistent volume to create a durable API server.
 
 Prerequisites
 -------------
@@ -38,7 +37,7 @@ Prerequisites
 * `kubectl <https://kubernetes.io/docs/tasks/tools/#kubectl>`_
 * `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_
 
-.. _api-server-ha-create-disk:
+.. _api-server-persistence-create-disk:
 
 Create a persistent disk on GCP
 -------------------------------
@@ -56,7 +55,7 @@ First, create a persistent disk on GCP. This disk is used to persist the API ser
 
 Note the ``$ZONE`` variable must match the zone of the GKE cluster.
 
-.. _api-server-ha-create-pv:
+.. _api-server-persistence-create-pv:
 
 Create a persistent volume on GKE
 ---------------------------------
@@ -104,7 +103,7 @@ Then, verify that the persistent volume is created with the correct retention po
 
 The ``RECLAIM POLICY`` should be set to ``Retain``.
 
-.. _api-server-ha-deploy-api-server:
+.. _api-server-persistence-deploy-api-server:
 
 Deploy the API server using Helm
 --------------------------------
@@ -134,7 +133,7 @@ Note the last two lines of the command:
 | ``--set storage.storageClassName=$PV_CLASS_NAME`` and
 | ``--set storage.size=$DISK_SIZE``.
 
-These lines associate the API server with the persistent volume created in :ref:`api-server-ha-create-pv`,
+These lines associate the API server with the persistent volume created in :ref:`api-server-persistence-create-pv`,
 allowing the API server to use the persistent volume to store its state.
 
 Cleanup

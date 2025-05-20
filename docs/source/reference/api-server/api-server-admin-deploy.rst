@@ -666,4 +666,4 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. toctree::
    :hidden:
 
-   API Server High Availability <examples/api-server-ha>
+    Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
