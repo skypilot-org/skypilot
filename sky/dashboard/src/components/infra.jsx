@@ -134,9 +134,49 @@ export function GPUs() {
     }, {});
   }, [perContextGPUs]);
 
-  const kubeContexts = React.useMemo(() => {
-    return Object.keys(groupedPerContextGPUs);
+  // Separate SSH contexts from Kubernetes contexts
+  const sshContexts = React.useMemo(() => {
+    return Object.keys(groupedPerContextGPUs).filter((context) =>
+      context.startsWith('ssh-')
+    );
   }, [groupedPerContextGPUs]);
+
+  const kubeContexts = React.useMemo(() => {
+    return Object.keys(groupedPerContextGPUs).filter(
+      (context) => !context.startsWith('ssh-')
+    );
+  }, [groupedPerContextGPUs]);
+
+  // Filter GPUs by context type (SSH vs Kubernetes)
+  const sshGPUs = React.useMemo(() => {
+    if (!perContextGPUs) return [];
+
+    // Create a map of GPU names from SSH contexts
+    const sshGpuNames = new Set();
+    perContextGPUs.forEach((gpu) => {
+      if (gpu.context.startsWith('ssh-')) {
+        sshGpuNames.add(gpu.gpu_name);
+      }
+    });
+
+    // Filter allGPUs based on whether they appear in SSH contexts
+    return allGPUs.filter((gpu) => sshGpuNames.has(gpu.gpu_name));
+  }, [allGPUs, perContextGPUs]);
+
+  const kubeGPUs = React.useMemo(() => {
+    if (!perContextGPUs) return [];
+
+    // Create a map of GPU names from Kubernetes contexts
+    const kubeGpuNames = new Set();
+    perContextGPUs.forEach((gpu) => {
+      if (!gpu.context.startsWith('ssh-')) {
+        kubeGpuNames.add(gpu.gpu_name);
+      }
+    });
+
+    // Filter allGPUs based on whether they appear in Kubernetes contexts
+    return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
+  }, [allGPUs, perContextGPUs]);
 
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
@@ -205,6 +245,10 @@ export function GPUs() {
   const renderContextDetails = (contextName) => {
     const gpusInContext = groupedPerContextGPUs[contextName] || [];
     const nodesInContext = groupedPerNodeGPUs[contextName] || [];
+
+    // Determine if this is an SSH context
+    const isSSHContext = contextName.startsWith('ssh-');
+    const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
     return (
       <div className="mb-4">
@@ -403,7 +447,7 @@ export function GPUs() {
       );
     }
 
-    if (kubeDataLoaded && allGPUs.length > 0) {
+    if (kubeDataLoaded && kubeGPUs.length > 0) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -487,7 +531,16 @@ export function GPUs() {
                         <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
                           GPU
                           <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
-                            {grandTotalFreeGPUs} of {grandTotalGPUs} free
+                            {kubeGPUs.reduce(
+                              (sum, gpu) => sum + gpu.gpu_free,
+                              0
+                            )}{' '}
+                            of{' '}
+                            {kubeGPUs.reduce(
+                              (sum, gpu) => sum + gpu.gpu_total,
+                              0
+                            )}{' '}
+                            free
                           </span>
                         </th>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/4">
@@ -501,9 +554,9 @@ export function GPUs() {
                       </tr>
                     </thead>
                     <tbody
-                      className={`bg-white divide-y divide-gray-200 ${allGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                      className={`bg-white divide-y divide-gray-200 ${kubeGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
                     >
-                      {allGPUs.map((gpu) => {
+                      {kubeGPUs.map((gpu) => {
                         const usedGpus = gpu.gpu_total - gpu.gpu_free;
                         const freePercentage =
                           gpu.gpu_total > 0
@@ -514,9 +567,13 @@ export function GPUs() {
                             ? (usedGpus / gpu.gpu_total) * 100
                             : 0;
 
-                        // Find the requestable quantities from any context
+                        // Find the requestable quantities from kubernetes contexts
                         const requestableQtys = perContextGPUs
-                          .filter((g) => g.gpu_name === gpu.gpu_name)
+                          .filter(
+                            (g) =>
+                              g.gpu_name === gpu.gpu_name &&
+                              !g.context.startsWith('ssh-')
+                          )
                           .map((g) => g.gpu_requestable_qty_per_node)
                           .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
                           .join(', ');
@@ -566,7 +623,7 @@ export function GPUs() {
       );
     }
 
-    if (kubeDataLoaded && allGPUs.length === 0) {
+    if (kubeDataLoaded && kubeGPUs.length === 0) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -575,6 +632,218 @@ export function GPUs() {
             </h3>
             <p className="text-sm text-gray-500">
               No Kubernetes GPUs found or Kubernetes is not configured.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderSSHNodePoolInfrastructure = () => {
+    if (kubeLoading && !kubeDataLoaded) {
+      return (
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+          <div className="p-5">
+            <h3 className="text-lg font-semibold mb-4">SSH Node Pool</h3>
+            <div className="flex items-center justify-center py-6">
+              <CircularProgress size={24} className="mr-3" />
+              <span className="text-gray-500">Loading SSH Node Pool...</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (kubeDataLoaded && sshContexts.length > 0) {
+      return (
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+          <div className="p-5">
+            <div className="flex items-center mb-4">
+              <h3 className="text-lg font-semibold">SSH Node Pool</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {sshContexts.length}{' '}
+                {sshContexts.length === 1 ? 'pool' : 'pools'}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/3">
+                          Node Pool
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                          Nodes
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/3">
+                          GPU Types
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                          #GPUs
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      className={`bg-white divide-y divide-gray-200 ${sshContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                    >
+                      {sshContexts.map((context) => {
+                        const gpus = groupedPerContextGPUs[context] || [];
+                        const nodes = groupedPerNodeGPUs[context] || [];
+                        const totalGpus = gpus.reduce(
+                          (sum, gpu) => sum + (gpu.gpu_total || 0),
+                          0
+                        );
+                        const gpuTypes = (() => {
+                          const typeCounts = gpus.reduce((acc, gpu) => {
+                            acc[gpu.gpu_name] =
+                              (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
+                            return acc;
+                          }, {});
+                          return Object.entries(typeCounts)
+                            .map(([type, count]) => `${type} (${count})`)
+                            .join(', ');
+                        })();
+                        const nodePoolName = context.replace(/^ssh-/, '');
+                        return (
+                          <tr key={context} className="hover:bg-gray-50">
+                            <td className="p-3">
+                              <NonCapitalizedTooltip
+                                content={nodePoolName}
+                                className="text-sm text-muted-foreground"
+                              >
+                                <span
+                                  className="text-blue-600 hover:underline cursor-pointer"
+                                  onClick={() => handleContextClick(context)}
+                                >
+                                  {nodePoolName.length > NAME_TRUNCATE_LENGTH
+                                    ? `${nodePoolName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${nodePoolName.substring(nodePoolName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+                                    : nodePoolName}
+                                </span>
+                              </NonCapitalizedTooltip>
+                            </td>
+                            <td className="p-3">{nodes.length}</td>
+                            <td className="p-3">{gpuTypes}</td>
+                            <td className="p-3">{totalGpus}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {sshGPUs.length > 0 && (
+                <div>
+                  <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
+                            GPU
+                            <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
+                              {sshGPUs.reduce(
+                                (sum, gpu) => sum + gpu.gpu_free,
+                                0
+                              )}{' '}
+                              of{' '}
+                              {sshGPUs.reduce(
+                                (sum, gpu) => sum + gpu.gpu_total,
+                                0
+                              )}{' '}
+                              free
+                            </span>
+                          </th>
+                          <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                            Requestable
+                          </th>
+                          <th className="p-3 text-left font-medium text-gray-600 w-1/2">
+                            <div className="flex items-center">
+                              <span>Utilization</span>
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        className={`bg-white divide-y divide-gray-200 ${sshGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                      >
+                        {sshGPUs.map((gpu) => {
+                          const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                          const freePercentage =
+                            gpu.gpu_total > 0
+                              ? (gpu.gpu_free / gpu.gpu_total) * 100
+                              : 0;
+                          const usedPercentage =
+                            gpu.gpu_total > 0
+                              ? (usedGpus / gpu.gpu_total) * 100
+                              : 0;
+
+                          // Find the requestable quantities from ssh contexts
+                          const requestableQtys = perContextGPUs
+                            .filter(
+                              (g) =>
+                                g.gpu_name === gpu.gpu_name &&
+                                g.context.startsWith('ssh-')
+                            )
+                            .map((g) => g.gpu_requestable_qty_per_node)
+                            .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
+                            .join(', ');
+
+                          return (
+                            <tr key={gpu.gpu_name}>
+                              <td className="p-3 font-medium w-24 whitespace-nowrap">
+                                {gpu.gpu_name}
+                              </td>
+                              <td className="p-3 text-xs text-gray-600">
+                                {requestableQtys || '-'} / node
+                              </td>
+                              <td className="p-3 w-2/3">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
+                                    {usedPercentage > 0 && (
+                                      <div
+                                        style={{ width: `${usedPercentage}%` }}
+                                        className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                      >
+                                        {usedPercentage > 15 &&
+                                          `${usedGpus} used`}
+                                      </div>
+                                    )}
+                                    {freePercentage > 0 && (
+                                      <div
+                                        style={{ width: `${freePercentage}%` }}
+                                        className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
+                                      >
+                                        {freePercentage > 15 &&
+                                          `${gpu.gpu_free} free`}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (kubeDataLoaded && sshContexts.length === 0) {
+      return (
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+          <div className="p-5">
+            <h3 className="text-lg font-semibold mb-4">SSH Node Pool</h3>
+            <p className="text-sm text-gray-500">
+              No SSH Node Pools found or SSH is not configured.
             </p>
           </div>
         </div>
@@ -600,7 +869,10 @@ export function GPUs() {
 
     return (
       <>
-        {/* Show Kubernetes Infrastructure first */}
+        {/* Show SSH Node Pool Infrastructure first */}
+        {renderSSHNodePoolInfrastructure()}
+
+        {/* Show Kubernetes Infrastructure second */}
         {renderKubernetesInfrastructure()}
 
         {/* Then show Cloud Infrastructure */}
@@ -631,17 +903,33 @@ export function GPUs() {
           {selectedContext && (
             <>
               <span className="mx-2 text-gray-500">›</span>
-              <span
-                className="text-sky-blue hover:underline cursor-pointer"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleBackClick();
-                }}
-              >
-                Kubernetes
-              </span>
+              {selectedContext.startsWith('ssh-') ? (
+                <span
+                  className="text-sky-blue hover:underline cursor-pointer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleBackClick();
+                  }}
+                >
+                  SSH Node Pool
+                </span>
+              ) : (
+                <span
+                  className="text-sky-blue hover:underline cursor-pointer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleBackClick();
+                  }}
+                >
+                  Kubernetes
+                </span>
+              )}
               <span className="mx-2 text-gray-500">›</span>
-              <span className="text-sky-blue">{selectedContext}</span>
+              <span className="text-sky-blue">
+                {selectedContext.startsWith('ssh-')
+                  ? selectedContext.replace(/^ssh-/, '')
+                  : selectedContext}
+              </span>
             </>
           )}
         </div>
