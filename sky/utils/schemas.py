@@ -1058,6 +1058,17 @@ def get_config_schema():
         }
     }
 
+    provision_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'ssh_timeout': {
+                'type': 'integer',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -1080,11 +1091,7 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
-            'provision_ssh_timeout': {
-                'type': 'integer',
-                'description': 'Timeout in seconds for SSH connection during provisioning',
-                'minimum': 1,
-            },
+            'provision': provision_configs,
             **cloud_configs,
         },
     }
