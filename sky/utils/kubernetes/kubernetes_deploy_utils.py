@@ -59,7 +59,7 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
                             'ssh_up.log')
     
     if cleanup:
-        msg_str = 'Cleaning up SkyPilot on SSH targets...'
+        msg_str = 'Cleaning up SSH Node Pools...'
     else:
         msg_str = 'Initializing deployment to SSH Node Pools...'
     
