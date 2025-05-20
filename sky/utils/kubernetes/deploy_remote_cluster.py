@@ -668,35 +668,31 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     # Step 1: Install k3s on the head node
     # Check if head node has a GPU
     install_gpu = False
-    if history_exists:
-        print(f"{YELLOW}History exists. Skipping deploying "
-              f"k3s on head node {head_node}.{NC}")
-    else:
-        progress_message(f"Deploying Kubernetes on head node ({head_node})...")
-        cmd = f"""
-            {askpass_block}
-            curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} sudo -E -A sh - &&
-            mkdir -p ~/.kube &&
-            sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
-            sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
-            for i in {{1..3}}; do
-                if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
-                    break
-                else
-                    echo 'Waiting for nodes to be ready...'
-                    sleep 5
-                fi
-            done
-            if [ $i -eq 3 ]; then
-                echo 'Failed to wait for nodes to be ready after 3 attempts'
-                exit 1
+    progress_message(f"Deploying Kubernetes on head node ({head_node})...")
+    cmd = f"""
+        {askpass_block}
+        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} sudo -E -A sh - &&
+        mkdir -p ~/.kube &&
+        sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
+        sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
+        for i in {{1..3}}; do
+            if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
+                break
+            else
+                echo 'Waiting for nodes to be ready...'
+                sleep 5
             fi
-        """
-        run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
-        success_message("K3s deployed on head node.")
-        if check_gpu(head_node, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config):
-            print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}")
-            install_gpu = True
+        done
+        if [ $i -eq 3 ]; then
+            echo 'Failed to wait for nodes to be ready after 3 attempts'
+            exit 1
+        fi
+    """
+    run_remote(head_node, cmd, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
+    success_message("K3s deployed on head node.")
+    if check_gpu(head_node, ssh_user, ssh_key, use_ssh_config=head_use_ssh_config):
+        print(f"{YELLOW}GPU detected on head node ({head_node}).{NC}")
+        install_gpu = True
     
     # Fetch the head node's internal IP (this will be passed to worker nodes)
     master_addr = run_remote(head_node, "hostname -I | awk '{print $1}'", ssh_user, ssh_key, use_ssh_config=head_use_ssh_config)
