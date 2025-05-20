@@ -3,18 +3,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    k8s-app: oauth2-proxy
+    app: {{ .Release.Name }}-oauth2-proxy
+    skypilot.co/component: oauth2-proxy
   name: {{ .Release.Name }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      k8s-app: oauth2-proxy
+      app: {{ .Release.Name }}-oauth2-proxy
   template:
     metadata:
       labels:
-        k8s-app: oauth2-proxy
+        app: {{ .Release.Name }}-oauth2-proxy
+        skypilot.co/component: oauth2-proxy
     spec:
       containers:
       - name: oauth2-proxy

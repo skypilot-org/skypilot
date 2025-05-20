@@ -8,6 +8,9 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-oauth2-proxy
+    skypilot.co/component: oauth2-proxy
   annotations:
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: nginx
