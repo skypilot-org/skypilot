@@ -376,7 +376,7 @@ if ! kill -0 $TUNNEL_PID 2>/dev/null; then
     rm -f "$PID_FILE"
   fi
   # Return error in case of tunnel failure
-  echo "Failed to establish SSH tunnel" >&2
+  echo "Failed to establish SSH tunnel. See $TUNNEL_DIR/$CONTEXT-tunnel.log for details." >&2
   exit 1
 elif [[ $tunnel_up -eq 0 ]]; then
   debug_log "WARNING: Tunnel process is running but port $PORT is not responding"

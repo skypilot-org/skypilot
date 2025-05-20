@@ -189,6 +189,9 @@ class Kubernetes(clouds.Cloud):
             if context in all_contexts:
                 existing_contexts.append(context)
             else:
+                # Skip SSH Node Pool contexts
+                if context.startswith('ssh-'):
+                    continue
                 skipped_contexts.append(context)
         cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
