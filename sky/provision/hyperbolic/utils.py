@@ -14,8 +14,8 @@ from sky.utils import status_lib
 CREDENTIALS_PATH = '~/.hyperbolic/api_key'
 
 #TODO consolidate these URLs and update to prod endpoint
-CASTLE_BASE_URL = 'https://api.dev-hyperbolic.xyz' #'http://localhost:8080'
-GATEWAY_BASE_URL = 'https://api.dev-hyperbolic.xyz' #'http://localhost:8000'
+CASTLE_BASE_URL = 'https://api.dev-hyperbolic.xyz'  #'http://localhost:8080'
+GATEWAY_BASE_URL = 'https://api.dev-hyperbolic.xyz'  #'http://localhost:8000'
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
