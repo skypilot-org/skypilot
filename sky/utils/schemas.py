@@ -676,7 +676,7 @@ _LABELS_SCHEMA = {
     }
 }
 
-_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
             'type': 'string'
@@ -800,7 +800,7 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'security_group_name':
-                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -1073,7 +1073,7 @@ def get_config_schema():
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
-                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
+                'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
             })
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
