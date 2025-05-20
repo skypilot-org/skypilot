@@ -336,14 +336,14 @@ class SkySSHUpLineProcessor(LineProcessor):
                         f'Cleaning up Node Pool: {self.current_cluster}',
                         log_path=self.log_path,
                         is_local=self.is_local))
-                logger.info(f'{colorama.Fore.CYAN}Cleaning up Node Pool: {self.current_cluster}{colorama.Style.RESET_ALL}')
+                logger.info(f'{colorama.Fore.CYAN}\nCleaning up Node Pool: {self.current_cluster}{colorama.Style.RESET_ALL}')
             else:
                 self.status_display.update(
                     ux_utils.spinner_message(
-                        f'Deploying SkyPilot ({self.current_cluster})',
+                        f'Deploying SkyPilot({self.current_cluster})',
                         log_path=self.log_path,
                         is_local=self.is_local))
-                logger.info(f'{colorama.Fore.CYAN}Setting up Node Pool: {self.current_cluster}{colorama.Style.RESET_ALL}')
+                logger.info(f'{colorama.Fore.CYAN}\nSetting up Node Pool: {self.current_cluster}{colorama.Style.RESET_ALL}')
 
         # Pre-flight checks
         if 'Checking SSH connection to head node' in log_line:
