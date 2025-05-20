@@ -724,7 +724,7 @@ _LABELS_SCHEMA = {
     }
 }
 
-_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
             'type': 'string'
@@ -848,7 +848,7 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'security_group_name':
-                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -1108,8 +1108,8 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_names = list(service_catalog.ALL_CLOUDS) + ['cloudflare']
-    allowed_workspace_regex = '|'.join(allowed_workspace_names)
+    allowed_workspace_cloud_names = list(service_catalog.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_cloud_regex = '|'.join(allowed_workspace_cloud_names)
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -1118,7 +1118,7 @@ def get_config_schema():
             'type': 'object',
             'additionalProperties': False,
             'patternProperties': {
-                allowed_workspace_regex: {
+                allowed_workspace_cloud_regex: {
                     'type': 'object',
                     'properties': {
                         'disabled': {
@@ -1143,11 +1143,24 @@ def get_config_schema():
         },
     }
 
+    provision_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'ssh_timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        }
+    }
+
+    
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update({
-                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
-            })
+            config['properties'].update(
+                {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
@@ -1171,6 +1184,7 @@ def get_config_schema():
             'api_server': api_server,
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
+            'provision': provision_configs,
             **cloud_configs,
         },
     }

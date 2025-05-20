@@ -135,6 +135,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         requested_resources: job.resources,
         resources_str: cluster_resources,
         resources_str_full: job.cluster_resources_full || cluster_resources,
+        cloud: cloud,
         infra: infra,
         full_infra: full_infra,
         recoveries: job.recovery_count,
