@@ -713,6 +713,10 @@ def deploy_cluster(head_node,
                 f"Context '{context_name}' removed from local kubeconfig.")
 
         print(f"{GREEN}Cleanup completed successfully.{NC}")
+        
+        # Print completion marker for current cluster
+        print(f"{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}")
+            
         return
 
     # Get effective IP for master node if using SSH config - needed for workers to connect
@@ -1118,6 +1122,8 @@ def deploy_cluster(head_node,
         "  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes"
     )
     print("  • Connect to pod with VSCode: code --remote ssh-remote+devbox '/'")
+    # Print completion marker for current cluster
+    print(f"{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}")
 
 
 if __name__ == "__main__":
