@@ -61,7 +61,7 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
     if cleanup:
         msg_str = 'Cleaning up SkyPilot on SSH targets...'
     else:
-        msg_str = 'Deploying SkyPilot on SSH targets...'
+        msg_str = 'Initializing deployment to SSH Node Pools...'
     
     # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
     env = os.environ.copy()
@@ -94,13 +94,13 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
         if cleanup:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH targets cleaned up successfully.',
+                    '🎉 SSH Node Pools cleaned up successfully.',
                     log_path=log_path,
                     is_local=True))
         else:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH targets set up successfully.',
+                    '🎉 SSH Node Pools set up successfully.',
                     log_path=log_path,
                     is_local=True))
 

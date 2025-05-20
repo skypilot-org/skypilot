@@ -93,6 +93,9 @@ jobs:
           sky -c
           sky check
           sky show-gpus
+          sky dashboard || (echo "Launch dashboard failed" && exit 1)
+          # Verify dashboard endpoint is accessible
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || (echo "Dashboard endpoint is not accessible" && exit 1)
           # Verify version
           EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
           INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
@@ -113,6 +116,16 @@ jobs:
     needs: [extract-version, publish-to-pypi]
     uses: ./.github/workflows/docker-build.yaml
     with:
+      package_name: 'skypilot'
+      version: ${{ needs.extract-version.outputs.version }}
+    secrets: inherit
+  
+  publish-helm:
+    needs: [extract-version, publish-to-pypi, trigger-docker-build]
+    uses: ./.github/workflows/publish-helm.yml
+    with:
+      version: ${{ needs.extract-version.outputs.version }}
+      commit_message: 'Update Helm charts for skypilot version ${{ needs.extract-version.outputs.version }}'
       package_name: 'skypilot'
     secrets: inherit
 

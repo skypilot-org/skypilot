@@ -104,7 +104,13 @@ _ACC_INSTANCE_TYPE_DICTS = {
     },
     'H100-MEGA': {
         8: ['a3-megagpu-8g'],
-    }
+    },
+    'H200': {
+        8: ['a3-ultragpu-8g'],
+    },
+    'B200': {
+        8: ['a4-highgpu-8g'],
+    },
 }
 # Enable GPU type inference from instance types
 _INSTANCE_TYPE_TO_ACC = {
