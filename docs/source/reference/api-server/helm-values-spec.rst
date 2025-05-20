@@ -19,7 +19,7 @@ The SkyPilot API server helm chart provides typical `helm values <https://helm.s
 * ``--set``: Specify overrides on the command line.
 
   .. code-block:: bash
-      
+
       helm install $RELEASE_NAME skypilot/skypilot-nightly --set apiService.image="berkeleyskypilot/skypilot:0.9.1"
 
 Values
@@ -387,9 +387,9 @@ Default: ``true``
 ``ingress.authSecret``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Name of the Kubernetes secret containing basic auth credentials for ingress. If not specified, a new secret will be created using ``authCredentials``.
+Name of the Kubernetes secret containing basic auth credentials for ingress. If not specified, a new secret will be created using ``authCredentials``. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set.
+One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
 Default: ``null``
 
@@ -403,9 +403,9 @@ Default: ``null``
 ``ingress.authCredentials``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Basic auth credentials in the format ``username:encrypted_password``. Used only if ``authSecret`` is not set.
+Basic auth credentials in the format ``username:encrypted_password``. Used only if ``authSecret`` is not set. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set.
+One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
 Default: ``"username:$apr1$encrypted_password"``
 
@@ -427,13 +427,15 @@ Default: ``'/'``
 
   ingress:
     path: '/'
-    
+
 .. _helm-values-ingress-oauth2-proxy:
 
 ``ingress.oauth2-proxy``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Configuration for the OAuth2 Proxy authentication for the API server. This enables SSO providers like Okta.
+
+If enabled, ``ingress.authSecret`` and ``ingress.authCredentials`` are ignored.
 
 Default: see the yaml below.
 
