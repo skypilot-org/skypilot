@@ -160,7 +160,7 @@ def format_resource(resource: 'resources_lib.Resources',
     if simplify:
         instance_type = common_utils.truncate_long_string(instance_type, 15)
     if not is_k8s:
-        components.append(f'type={instance_type}')
+        components.append(instance_type)
     if simplify:
         components.append('...')
     else:
