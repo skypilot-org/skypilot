@@ -2,9 +2,11 @@
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import dataclasses
 import datetime
+import json
 import logging
 import multiprocessing
 import os
@@ -216,6 +218,61 @@ app.add_middleware(
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+
+
+@app.get('/token')
+async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
+    # Use base64 encoding to avoid having to escape anything in the HTML.
+    json_bytes = json.dumps(request.cookies).encode('utf-8')
+    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+    return fastapi.responses.HTMLResponse(content=("""
+        <!DOCTYPE html>
+        <html lang="en">
+            <head>
+                <meta charset="utf-8">
+                <title>SkyPilot Auth</title>
+                <style>
+                #token-box {
+                    width: min(90vw, 50rem);
+                    height: 10rem;
+                    padding: 0.75rem;
+                    border: 1px solid #666;
+                    border-radius: 6px;
+                    overflow: auto;
+                    word-break: break-all;
+                    white-space: pre-wrap;
+                }
+                button {
+                    padding: 0.5rem 1rem;
+                    cursor: pointer;
+                }
+                </style>
+            </head>
+            <body>
+                <pre id="token-box">""" + base64_str + """</pre>
+                <button id="copy-btn">Copy</button>
+                <script>
+                    const tokenBox = document.getElementById('token-box');
+                    const copyBtn  = document.getElementById('copy-btn');
+                    function selectToken() {
+                        const range = document.createRange();
+                        range.selectNodeContents(tokenBox);
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                    }
+                    // Select the token when the page loads
+                    window.addEventListener('load', selectToken);
+                    copyBtn.addEventListener('click', () => {
+                        selectToken();
+                        document.execCommand('copy');
+                        copyBtn.textContent = 'Copied!';
+                        setTimeout(() => (copyBtn.textContent = 'Copy'), 2000);
+                    });
+                </script>
+            </body>
+        </html>
+        """))
 
 
 @app.post('/check')

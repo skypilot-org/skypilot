@@ -10,14 +10,18 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
+import base64
 import getpass
+from http import cookiejar
 import json
 import logging
 import os
 import pathlib
 import subprocess
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib import parse as urlparse
 import webbrowser
 
 import click
@@ -1824,7 +1828,51 @@ def api_login(endpoint: Optional[str] = None) -> None:
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
 
-    server_common.check_server_healthy(endpoint)
+    server_status = server_common.check_server_healthy(endpoint)
+    if server_status == server_common.ApiServerStatus.NEEDS_AUTH:
+        url = urlparse.urlparse(endpoint)
+        click.echo('Authentication is needed. Please visit this URL to get a '
+                   f'token:{colorama.Style.BRIGHT}\n\n{endpoint}/token'
+                   f'\n{colorama.Style.RESET_ALL}')
+        token: str = click.prompt('Paste the token')
+        data = base64.b64decode(token)
+        cookie_dict: Dict[str, str] = json.loads(data)
+        if not isinstance(cookie_dict, dict):
+            raise ValueError('XXX better error')
+        cookie_jar = cookiejar.MozillaCookieJar()
+        for (name, value) in cookie_dict.items():
+            if not isinstance(name, str) or not isinstance(value, str):
+                raise ValueError('xxx error2')
+            # CookieJar._cookie_from_cookie_tuple
+            # oauth2proxy default is Max-Age 604800
+            expires = int(time.time()) + 604800
+            domain = str(url.hostname)
+            domain_initial_dot = domain.startswith('.')
+            if not domain_initial_dot:
+                domain = '.' + domain
+
+            cookie_jar.set_cookie(
+                cookiejar.Cookie(
+                    version=0,
+                    name=name,
+                    value=value,
+                    port=None,
+                    port_specified=False,
+                    domain=domain,
+                    domain_specified=True,
+                    domain_initial_dot=domain_initial_dot,
+                    path='',
+                    path_specified=False,
+                    secure=False,
+                    expires=expires,
+                    discard=False,
+                    comment='Imported via sky api login --cookies',
+                    comment_url=None,
+                    rest=dict(),
+                ))
+            cookie_jar_path = os.path.expanduser(
+                server_common.get_api_cookie_jar_path())
+            cookie_jar.save(cookie_jar_path)
 
     # Set the endpoint in the config file
     config_path = pathlib.Path(
