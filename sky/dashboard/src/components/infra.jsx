@@ -106,14 +106,7 @@ export function InfrastructureSection({
                           return acc;
                         }, {});
                         
-                        // For SSH, include type counts; for K8s just list them
-                        if (isSSH) {
-                          return Object.entries(typeCounts)
-                            .map(([type, count]) => `${type} (${count})`)
-                            .join(', ');
-                        } else {
-                          return Object.keys(typeCounts).join(', ');
-                        }
+                        return Object.keys(typeCounts).join(', ');
                       })();
                       
                       // Format display name for SSH contexts
