@@ -26,8 +26,7 @@ Below is the configuration syntax and some example values.  See details under ea
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
   :ref:`resources <yaml-spec-resources>`:
-    # Infra to use. For example: ``aws``, ``aws/us-east-1``, ``kubernetes``,
-    # or, ``kubernetes/my-h100-cluster-context``.
+    # Infra to use. Click to see schema and example values.
     :ref:`infra <yaml-spec-resources-infra>`: aws
 
     # Hardware.
@@ -157,22 +156,27 @@ Per-node resource requirements (optional).
 ~~~~~~~~~~~~~~~~~~~
 
 
-Infrastructure to use (optional). Format: ``<cloud>``, ``<cloud>/<region>``, ``<cloud>/<region>/<zone>``, ``kubernetes/<context-name>``.
+Infrastructure to use (optional).
 
-Examples: ``aws``, ``aws/us-east-1``, ``aws/us-east-1/us-east-1a``, ``aws/*/us-east-1a``, ``kubernetes/my-cluster-context``.
+Schema: ``<cloud>/<region>/<zone>`` (region
+and zone are optional), or ``k8s/<context-name>`` (context-name is optional).
+Wildcards are supported in any component.
+
+Example values: ``aws``, ``aws/us-east-1``, ``aws/us-east-1/us-east-1a``,
+``aws/*/us-east-1a``, ``k8s``, ``k8s/my-cluster-context``.
 
 .. code-block:: yaml
 
   resources:
-    infra: aws
+    infra: aws  # Use any available AWS region/zone.
 
 
 .. code-block:: yaml
 
   resources:
-    infra: kubernetes
+    infra: k8s  # Use any available Kubernetes context.
 
-You can also specify a specific region, zone or kubernetes context.
+You can also specify a specific region, zone, or Kubernetes context.
 
 .. code-block:: yaml
 
@@ -189,7 +193,7 @@ You can also specify a specific region, zone or kubernetes context.
 .. code-block:: yaml
 
   resources:
-    infra: kubernetes/my-h100-cluster-context
+    infra: k8s/my-h100-cluster-context
 
 
 
