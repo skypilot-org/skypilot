@@ -12,9 +12,11 @@ import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { NonCapitalizedTooltip } from '@/components/utils';
 
 // Set the refresh interval to 1 minute for GPU data
 const GPU_REFRESH_INTERVAL = 60000;
+const NAME_TRUNCATE_LENGTH = 30;
 
 export function GPUs() {
   // Separate loading states for different data sources
@@ -283,7 +285,7 @@ export function GPUs() {
                       {usedPercentage > 0 && (
                         <div
                           style={{ width: `${usedPercentage}%` }}
-                          className="bg-blue-500 h-full flex items-center justify-center text-white text-xs"
+                          className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs"
                         >
                           {usedPercentage > 15 && `${usedGpus} used`}
                         </div>
@@ -291,7 +293,7 @@ export function GPUs() {
                       {freePercentage > 0 && (
                         <div
                           style={{ width: `${freePercentage}%` }}
-                          className="bg-green-500 h-full flex items-center justify-center text-white text-xs"
+                          className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                         >
                           {freePercentage > 15 && `${gpu.gpu_free} free`}
                         </div>
@@ -322,7 +324,7 @@ export function GPUs() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {nodesInContext.map((node, index) => (
-                        <tr key={`${node.node_name}-${index}`}>
+                        <tr key={`${node.node_name}-${index}`} className="hover:bg-gray-50">
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.node_name}
                           </td>
@@ -353,7 +355,7 @@ export function GPUs() {
             <h3 className="text-lg font-semibold mb-4">Cloud</h3>
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
-              <span className="text-gray-500">Loading cloud infra data...</span>
+              <span className="text-gray-500">Loading Cloud...</span>
             </div>
           </div>
         </div>
@@ -437,7 +439,7 @@ export function GPUs() {
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
               <span className="text-gray-500">
-                Loading Kubernetes infra data...
+                Loading Kubernetes...
               </span>
             </div>
           </div>
@@ -451,6 +453,9 @@ export function GPUs() {
           <div className="p-5">
             <div className="flex items-center mb-4">
               <h3 className="text-lg font-semibold">Kubernetes</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {kubeContexts.length} contexts
+              </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -460,9 +465,6 @@ export function GPUs() {
                       <tr>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/3">
                           Context
-                          <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                            {kubeContexts.length} contexts
-                          </span>
                         </th>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                           Nodes
@@ -475,7 +477,8 @@ export function GPUs() {
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody 
+                      className={`bg-white divide-y divide-gray-200 ${kubeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}>
                       {kubeContexts.map((context) => {
                         const gpus = groupedPerContextGPUs[context] || [];
                         const nodes = groupedPerNodeGPUs[context] || [];
@@ -496,11 +499,22 @@ export function GPUs() {
                         return (
                           <tr
                             key={context}
-                            className="hover:bg-gray-50 cursor-pointer"
-                            onClick={() => handleContextClick(context)}
+                            className="hover:bg-gray-50"
                           >
-                            <td className="p-3 text-blue-700 underline">
-                              {context}
+                            <td className="p-3">
+                              <NonCapitalizedTooltip 
+                                content={context} 
+                                className="text-sm text-muted-foreground"
+                              >
+                                <span
+                                  className="text-sky-blue underline cursor-pointer"
+                                  onClick={() => handleContextClick(context)}
+                                >
+                                  {context.length > NAME_TRUNCATE_LENGTH 
+                                    ? `${context.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${context.substring(context.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}` 
+                                    : context}
+                                </span>
+                              </NonCapitalizedTooltip>
                             </td>
                             <td className="p-3">{nodes.length}</td>
                             <td className="p-3">{gpuTypes}</td>
@@ -533,7 +547,8 @@ export function GPUs() {
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody 
+                      className={`bg-white divide-y divide-gray-200 ${kubeGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}>
                       {kubeGPUs.map((gpu) => {
                         const usedGpus = gpu.gpu_total - gpu.gpu_free;
                         const freePercentage =
@@ -566,7 +581,7 @@ export function GPUs() {
                                   {usedPercentage > 0 && (
                                     <div
                                       style={{ width: `${usedPercentage}%` }}
-                                      className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                      className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
                                       {usedPercentage > 15 &&
                                         `${usedGpus} used`}
@@ -575,7 +590,7 @@ export function GPUs() {
                                   {freePercentage > 0 && (
                                     <div
                                       style={{ width: `${freePercentage}%` }}
-                                      className="bg-green-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                      className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
                                       {freePercentage > 15 &&
                                         `${gpu.gpu_free} free`}
@@ -624,7 +639,7 @@ export function GPUs() {
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
               <span className="text-gray-500">
-                Loading SSH Node Pool data...
+                Loading SSH Node Pool...
               </span>
             </div>
           </div>
@@ -638,6 +653,9 @@ export function GPUs() {
           <div className="p-5">
             <div className="flex items-center mb-4">
               <h3 className="text-lg font-semibold">SSH Node Pool</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {sshContexts.length} {sshContexts.length === 1 ? 'pool' : 'pools'}
+              </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -647,9 +665,6 @@ export function GPUs() {
                       <tr>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/3">
                           Node Pool
-                          <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                            {sshContexts.length} pools
-                          </span>
                         </th>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                           Nodes
@@ -662,7 +677,8 @@ export function GPUs() {
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody 
+                      className={`bg-white divide-y divide-gray-200 ${sshContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}>
                       {sshContexts.map((context) => {
                         const gpus = groupedPerContextGPUs[context] || [];
                         const nodes = groupedPerNodeGPUs[context] || [];
@@ -680,16 +696,26 @@ export function GPUs() {
                             .map(([type, count]) => `${type} (${count})`)
                             .join(', ');
                         })();
-                        // Display the context name without the ssh- prefix
                         const nodePoolName = context.replace(/^ssh-/, '');
                         return (
                           <tr
                             key={context}
-                            className="hover:bg-gray-50 cursor-pointer"
-                            onClick={() => handleContextClick(context)}
+                            className="hover:bg-gray-50"
                           >
-                            <td className="p-3 text-blue-700 underline">
-                              {nodePoolName}
+                            <td className="p-3">
+                              <NonCapitalizedTooltip 
+                                content={nodePoolName} 
+                                className="text-sm text-muted-foreground"
+                              >
+                                <span
+                                  className="text-sky-blue underline cursor-pointer"
+                                  onClick={() => handleContextClick(context)}
+                                >
+                                  {nodePoolName.length > NAME_TRUNCATE_LENGTH 
+                                    ? `${nodePoolName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${nodePoolName.substring(nodePoolName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}` 
+                                    : nodePoolName}
+                                </span>
+                              </NonCapitalizedTooltip>
                             </td>
                             <td className="p-3">{nodes.length}</td>
                             <td className="p-3">{gpuTypes}</td>
@@ -723,7 +749,8 @@ export function GPUs() {
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
+                      <tbody 
+                        className={`bg-white divide-y divide-gray-200 ${sshGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}>
                         {sshGPUs.map((gpu) => {
                           const usedGpus = gpu.gpu_total - gpu.gpu_free;
                           const freePercentage =
@@ -756,7 +783,7 @@ export function GPUs() {
                                     {usedPercentage > 0 && (
                                       <div
                                         style={{ width: `${usedPercentage}%` }}
-                                        className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                        className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                       >
                                         {usedPercentage > 15 &&
                                           `${usedGpus} used`}
@@ -765,7 +792,7 @@ export function GPUs() {
                                     {freePercentage > 0 && (
                                       <div
                                         style={{ width: `${freePercentage}%` }}
-                                        className="bg-green-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                        className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
                                       >
                                         {freePercentage > 15 &&
                                           `${gpu.gpu_free} free`}
@@ -814,7 +841,7 @@ export function GPUs() {
           <div className="flex flex-col items-center justify-center h-64">
             <CircularProgress size={32} className="mb-4" />
             <span className="text-gray-500 text-lg">
-              Loading Context Data...
+              Loading Context...
             </span>
           </div>
         );
