@@ -325,7 +325,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={7}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters

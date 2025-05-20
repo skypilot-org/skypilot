@@ -11,10 +11,11 @@ import { useMobile } from '@/hooks/useMobile';
 import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { NonCapitalizedTooltip } from '@/components/utils';
 
 // Set the refresh interval to 1 minute for GPU data
 const GPU_REFRESH_INTERVAL = 60000;
+const NAME_TRUNCATE_LENGTH = 30;
 
 export function GPUs() {
   // Separate loading states for different data sources
@@ -133,6 +134,10 @@ export function GPUs() {
     }, {});
   }, [perContextGPUs]);
 
+  const kubeContexts = React.useMemo(() => {
+    return Object.keys(groupedPerContextGPUs);
+  }, [groupedPerContextGPUs]);
+
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
     if (!perNodeGPUs) return {};
@@ -235,7 +240,7 @@ export function GPUs() {
                       {usedPercentage > 0 && (
                         <div
                           style={{ width: `${usedPercentage}%` }}
-                          className="bg-blue-500 h-full flex items-center justify-center text-white text-xs"
+                          className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs"
                         >
                           {usedPercentage > 15 && `${usedGpus} used`}
                         </div>
@@ -243,7 +248,7 @@ export function GPUs() {
                       {freePercentage > 0 && (
                         <div
                           style={{ width: `${freePercentage}%` }}
-                          className="bg-green-500 h-full flex items-center justify-center text-white text-xs"
+                          className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
                         >
                           {freePercentage > 15 && `${gpu.gpu_free} free`}
                         </div>
@@ -274,7 +279,10 @@ export function GPUs() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {nodesInContext.map((node, index) => (
-                        <tr key={`${node.node_name}-${index}`}>
+                        <tr
+                          key={`${node.node_name}-${index}`}
+                          className="hover:bg-gray-50"
+                        >
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.node_name}
                           </td>
@@ -305,7 +313,7 @@ export function GPUs() {
             <h3 className="text-lg font-semibold mb-4">Cloud</h3>
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
-              <span className="text-gray-500">Loading cloud infra data...</span>
+              <span className="text-gray-500">Loading Cloud...</span>
             </div>
           </div>
         </div>
@@ -388,9 +396,7 @@ export function GPUs() {
             <h3 className="text-lg font-semibold mb-4">Kubernetes</h3>
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
-              <span className="text-gray-500">
-                Loading Kubernetes infra data...
-              </span>
+              <span className="text-gray-500">Loading Kubernetes...</span>
             </div>
           </div>
         </div>
@@ -413,7 +419,7 @@ export function GPUs() {
                         <th className="p-3 text-left font-medium text-gray-600">
                           Context
                           <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                            {Object.keys(groupedPerContextGPUs).length} contexts
+                            {kubeContexts.length} contexts
                           </span>
                         </th>
                         <th className="p-3 text-left font-medium text-gray-600">
@@ -428,7 +434,7 @@ export function GPUs() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {Object.keys(groupedPerContextGPUs).map((context) => {
+                      {kubeContexts.map((context) => {
                         const gpus = groupedPerContextGPUs[context] || [];
                         const nodes = groupedPerNodeGPUs[context] || [];
                         const totalGpus = gpus.reduce(
@@ -451,8 +457,20 @@ export function GPUs() {
                             className="hover:bg-gray-50 cursor-pointer"
                             onClick={() => handleContextClick(context)}
                           >
-                            <td className="p-3 text-blue-700 underline">
-                              {context}
+                            <td className="p-3">
+                              <NonCapitalizedTooltip
+                                content={context}
+                                className="text-sm text-muted-foreground"
+                              >
+                                <span
+                                  className="text-blue-600 hover:underline cursor-pointer"
+                                  onClick={() => handleContextClick(context)}
+                                >
+                                  {context.length > NAME_TRUNCATE_LENGTH
+                                    ? `${context.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${context.substring(context.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+                                    : context}
+                                </span>
+                              </NonCapitalizedTooltip>
                             </td>
                             <td className="p-3">{nodes.length}</td>
                             <td className="p-3">{gpuTypes}</td>
@@ -518,7 +536,7 @@ export function GPUs() {
                                   {usedPercentage > 0 && (
                                     <div
                                       style={{ width: `${usedPercentage}%` }}
-                                      className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                      className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
                                       {usedPercentage > 15 &&
                                         `${usedGpus} used`}
@@ -527,7 +545,7 @@ export function GPUs() {
                                   {freePercentage > 0 && (
                                     <div
                                       style={{ width: `${freePercentage}%` }}
-                                      className="bg-green-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                      className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
                                     >
                                       {freePercentage > 15 &&
                                         `${gpu.gpu_free} free`}
@@ -574,9 +592,7 @@ export function GPUs() {
         return (
           <div className="flex flex-col items-center justify-center h-64">
             <CircularProgress size={32} className="mb-4" />
-            <span className="text-gray-500 text-lg">
-              Loading Context Data...
-            </span>
+            <span className="text-gray-500 text-lg">Loading Context...</span>
           </div>
         );
       }

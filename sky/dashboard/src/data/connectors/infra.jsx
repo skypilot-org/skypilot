@@ -127,31 +127,33 @@ async function getKubernetesContextGPUs() {
         body: JSON.stringify({
           context: null,
           name_filter: null,
-          quantity_filter: null
+          quantity_filter: null,
         }),
       }
     );
-    
+
     // Handle non-success responses
     if (!response.ok) {
       if (response.status === 422) {
         console.log('No GPU resources available in Kubernetes contexts');
         return [];
       } else {
-        console.error(`Error fetching Kubernetes context GPUs: ${response.status} ${response.statusText}`);
+        console.error(
+          `Error fetching Kubernetes context GPUs: ${response.status} ${response.statusText}`
+        );
         return [];
       }
     }
-    
+
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
       response.headers.get('x-request-id');
-    
+
     if (!id) {
       console.error('No request ID returned for Kubernetes GPU availability');
       return [];
     }
-    
+
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -227,7 +229,7 @@ async function getKubernetesPerNodeGPUs(context) {
 async function getKubernetesGPUs() {
   try {
     const contextGPUs = await getKubernetesContextGPUs();
-    
+
     // Handle empty response case
     if (!contextGPUs || contextGPUs.length === 0) {
       console.log('No Kubernetes GPUs available');
