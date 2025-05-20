@@ -400,7 +400,7 @@ class SkySSHUpLineProcessor(LineProcessor):
             node_name = log_line.split('(')[-1].split(')')[0]
             logger.info(
                 f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
-                '✔ SkyPilot runtime successfully deployed on worker node'
+                '✔ SkyPilot runtime successfully deployed on worker node '
                 f'{node_name}.{colorama.Style.RESET_ALL}')
 
         # Cluster configuration
