@@ -192,6 +192,60 @@ DISK_MOUNT_USER_DATA_TEMPLATE = """
     echo "Device mounting process completed."
 """
 
+# The local SSDs will be attached automatically to the following
+# machine types with the following number of disks.
+# Refer to https://cloud.google.com/compute/docs/disks/local-ssd#lssd_disks_fixed
+SSD_AUTO_ATTACH_MACHINE_TYPES = {
+    'c4a-standard-4-lssd': 1,
+    'c4a-highmem-4-lssd': 1,
+    'c4a-standard-8-lssd': 2,
+    'c4a-highmem-8-lssd': 2,
+    'c4a-standard-16-lssd': 4,
+    'c4a-highmem-16-lssd': 4,
+    'c4a-standard-32-lssd': 6,
+    'c4a-highmem-32-lssd': 6,
+    'c4a-standard-48-lssd': 10,
+    'c4a-highmem-48-lssd': 10,
+    'c4a-standard-64-lssd': 14,
+    'c4a-highmem-64-lssd': 14,
+    'c4a-standard-72-lssd': 16,
+    'c4a-highmem-72-lssd': 16,
+    'c3-standard-4-lssd': 1,
+    'c3-standard-8-lssd': 2,
+    'c3-standard-22-lssd': 4,
+    'c3-standard-44-lssd': 8,
+    'c3-standard-88-lssd': 16,
+    'c3-standard-176-lssd': 32,
+    'c3d-standard-8-lssd': 1,
+    'c3d-highmem-8-lssd': 1,
+    'c3d-standard-16-lssd': 1,
+    'c3d-highmem-16-lssd': 1,
+    'c3d-standard-30-lssd': 2,
+    'c3d-highmem-30-lssd': 2,
+    'c3d-standard-60-lssd': 4,
+    'c3d-highmem-60-lssd': 4,
+    'c3d-standard-90-lssd': 8,
+    'c3d-highmem-90-lssd': 8,
+    'c3d-standard-180-lssd': 16,
+    'c3d-highmem-180-lssd': 16,
+    'c3d-standard-360-lssd': 32,
+    'c3d-highmem-360-lssd': 32,
+    'a4-highgpu-8g': 32,
+    'a3-ultragpu-8g': 32,
+    'a3-megagpu-8g': 16,
+    'a3-highgpu-1g': 2,
+    'a3-highgpu-2g': 4,
+    'a3-highgpu-4g': 8,
+    'a3-highgpu-8g': 16,
+    'a3-edgegpu-8g': 16,
+    'a2-ultragpu-1g': 1,
+    'a2-ultragpu-2g': 2,
+    'a2-ultragpu-4g': 4,
+    'a2-ultragpu-8g': 8,
+    'z3-highmem-88': 12,
+    'z3-highmem-176': 12,
+}
+
 # Below parameters are from the default VPC on GCP.
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc
 VPC_TEMPLATE: dict = {

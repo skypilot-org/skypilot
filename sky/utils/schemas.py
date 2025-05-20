@@ -160,6 +160,12 @@ def _get_single_resources_schema():
                         'storage_type': {
                             'type': 'string',
                         },
+                        'name': {
+                            'type': 'string',
+                        },
+                        'attach_mode': {
+                            'type': 'string',
+                        },
                     },
                 },
             },

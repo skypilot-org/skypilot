@@ -427,12 +427,9 @@ class GCP(clouds.Cloud):
             raise
 
     @classmethod
-    def check_volume_name(cls,
-                          region: 'clouds.Region',
-                          zones: Optional[List['clouds.Zone']],
-                          use_mig: bool,
-                          volume_name: str,
-                          dryrun: bool = False) -> Dict[str, Any]:
+    def check_volume_name(cls, region: 'clouds.Region',
+                          zones: Optional[List['clouds.Zone']], use_mig: bool,
+                          volume_name: str) -> Dict[str, Any]:
         """Check if the volume name exists and return the volume info."""
         logger.debug(
             f'Checking volume {volume_name} in region {region} and zones {zones}'
@@ -446,7 +443,7 @@ class GCP(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Not able to build compute client') from None
 
-        project_id = cls.get_project_id(dryrun)
+        project_id = cls.get_project_id()
         # If zones is None, check the region disk
         # If zones is not None, check zone disks first, then region disk
         if zones is None:
@@ -460,6 +457,9 @@ class GCP(clouds.Cloud):
                                                   disk=volume_name).execute()
                 if volume_info is not None:
                     if use_mig:
+                        # If using MIG, instance template will be used, in this case,
+                        # the `selfLink` for zonal disk needs to be the volume name
+                        # Refer to https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
                         volume_info['selfLink'] = volume_name
                     return volume_info
             except gcp.http_error_exception() as e:
@@ -679,7 +679,8 @@ class GCP(clouds.Cloud):
                 ('gcp', 'force_enable_external_ips'), False)
 
         volumes, device_mount_points = GCP._get_volumes_specs(
-            region, zones, r.instance_type, r.volumes, use_mig, dryrun)
+            region, zones, r.instance_type, r.volumes, use_mig,
+            resources_vars['tpu_vm'])
         resources_vars['volumes'] = volumes
 
         resources_vars['user_data'] = None
@@ -1258,19 +1259,20 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _get_volumes_specs(
-            cls,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            instance_type: Optional[str],
-            volumes: Optional[List[Dict[str, Any]]],
-            use_mig: bool,
-            dryrun: bool = False
+        cls,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        instance_type: Optional[str],
+        volumes: Optional[List[Dict[str, Any]]],
+        use_mig: bool,
+        tpu_vm: bool,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         if volumes is None:
             return [], {}
         volumes_specs: List[Dict[str, Any]] = []
         device_mount_points: Dict[str, str] = {}
         ssd_index = 0
+        tpu_disk_index = 1
         for i, volume in enumerate(volumes):
             volume_spec = {
                 'device_name': f'sky-disk-{i}',
@@ -1278,7 +1280,7 @@ class GCP(clouds.Cloud):
             }
             if 'name' in volume:
                 volume_info = cls.check_volume_name(region, zones, use_mig,
-                                                    volume['name'], dryrun)
+                                                    volume['name'])
                 if volume_info is not None:
                     volume_spec['source'] = volume_info['selfLink']
                     volume_spec['attach_mode'] = cls._translate_attach_mode(
@@ -1286,8 +1288,16 @@ class GCP(clouds.Cloud):
                     volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
                     volumes_specs.append(volume_spec)
                     device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
+                    if tpu_vm:
+                        # TPU VM does not support specifying the device name,
+                        # so we use the default device name.
+                        device_name = f'{constants.DEVICE_NAME_PREFIX}persistent-disk-{tpu_disk_index}'
+                        tpu_disk_index += 1
                     device_mount_points[device_name] = volume['path']
-                    continue
+                continue
+            if tpu_vm:
+                # TODO(hailong): support creating block storage for TPU VM
+                continue
             if volume['storage_type'] == resources_utils.StorageType.INSTANCE:
                 volume_spec['disk_tier'] = constants.INSTANCE_STORAGE_DISK_TYPE
                 volume_spec[
