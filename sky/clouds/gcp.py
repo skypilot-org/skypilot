@@ -1244,6 +1244,72 @@ class GCP(clouds.Cloud):
         return tier2name[tier]
 
     @classmethod
+    def _get_data_disk_type(
+        cls,
+        instance_type: Optional[str],
+        disk_tier: Optional[resources_utils.DiskTier],
+    ) -> str:
+
+        tier = cls._translate_disk_tier(disk_tier)
+
+        # Define the default mapping from disk tiers to disk types.
+        # Refer to https://cloud.google.com/compute/docs/disks/hyperdisks
+        # and https://cloud.google.com/compute/docs/disks/persistent-disks#pd-machine-series
+        tier2name = {
+            resources_utils.DiskTier.ULTRA: 'pd-extreme',
+            resources_utils.DiskTier.HIGH: 'pd-ssd',
+            resources_utils.DiskTier.MEDIUM: 'pd-balanced',
+            resources_utils.DiskTier.LOW: 'pd-standard',
+        }
+
+        if instance_type is None:
+            return tier2name[tier]
+
+        # Remap series-specific disk types.
+        # Reference: https://github.com/skypilot-org/skypilot/issues/4705        
+        series = instance_type.split('-')[0]
+
+        if series in ['c4a', 'c4d', 'c4', 'x4', 'm4', 'a4', 'a3']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+        elif series in ['c3', 'c3d']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
+            tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+        elif series in ['n4']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+        elif series in ['n2']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+        elif series in ['n2d', 'n1', 't2d', 't2a', 'e2', 'c2', 'c2d', 'a2']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'
+        elif series in ['z3']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+        elif series in ['h3']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+        elif series in ['m3']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
+            tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+        elif series in ['m2', 'm1']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+        elif series in ['g2']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'
+            tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+
+        return tier2name[tier]
+
+    @classmethod
     def _get_disk_specs(
             cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
@@ -1258,6 +1324,32 @@ class GCP(clouds.Cloud):
         return specs
 
     @classmethod
+    def _validate_instance_volumes(
+        cls,
+        instance_type: Optional[str],
+        volumes: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        if not volumes:
+            return
+        if instance_type is None:
+            logger.warning(
+                'Instance type is not specified, skipping instance volume validation'
+            )
+            return
+        instance_volume_count = 0
+        for volume in volumes:
+            if volume['storage_type'] == resources_utils.StorageType.INSTANCE:
+                instance_volume_count += 1
+        if instance_type in constants.SSD_AUTO_ATTACH_MACHINE_TYPES and instance_volume_count > constants.SSD_AUTO_ATTACH_MACHINE_TYPES[
+                instance_type]:
+            raise exceptions.ResourcesUnavailableError(
+                f'The instance type {instance_type} supports {constants.SSD_AUTO_ATTACH_MACHINE_TYPES[instance_type]} instance storage, but {instance_volume_count} are specified'
+            )
+        # TODO(hailong):
+        # check the instance storage count for the other instance types,
+        # refer to https://cloud.google.com/compute/docs/disks/local-ssd#lssd_disk_options
+
+    @classmethod
     def _get_volumes_specs(
         cls,
         region: 'clouds.Region',
@@ -1269,6 +1361,9 @@ class GCP(clouds.Cloud):
     ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         if volumes is None:
             return [], {}
+
+        cls._validate_instance_volumes(instance_type, volumes)
+
         volumes_specs: List[Dict[str, Any]] = []
         device_mount_points: Dict[str, str] = {}
         ssd_index = 0
@@ -1299,6 +1394,15 @@ class GCP(clouds.Cloud):
                 # TODO(hailong): support creating block storage for TPU VM
                 continue
             if volume['storage_type'] == resources_utils.StorageType.INSTANCE:
+                device_name = f'{constants.INSTANCE_STORAGE_DEVICE_NAME_PREFIX}{ssd_index}'
+                ssd_index += 1
+                device_mount_points[device_name] = volume['path']
+
+                if instance_type is not None and instance_type in constants.SSD_AUTO_ATTACH_MACHINE_TYPES:
+                    # The instance storage will be attached automatically,
+                    # so we skip the following steps.
+                    continue
+
                 volume_spec['disk_tier'] = constants.INSTANCE_STORAGE_DISK_TYPE
                 volume_spec[
                     'interface_type'] = constants.INSTANCE_STORAGE_INTERFACE_TYPE
@@ -1307,11 +1411,14 @@ class GCP(clouds.Cloud):
                 volume_spec['disk_size'] = None
                 volume_spec['auto_delete'] = True
             else:
+                device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
+                device_mount_points[device_name] = volume['path']
+
                 volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
                 volume_spec['disk_size'] = volume['disk_size']
                 disk_tier = cls.failover_disk_tier(instance_type,
                                                    volume['disk_tier'])
-                volume_spec['disk_tier'] = cls._get_disk_type(
+                volume_spec['disk_tier'] = cls._get_data_disk_type(
                     instance_type, disk_tier)
                 if (disk_tier == resources_utils.DiskTier.ULTRA and
                         volume_spec['disk_tier'] == 'pd-extreme'):
@@ -1319,17 +1426,7 @@ class GCP(clouds.Cloud):
                     # see https://cloud.google.com/compute/docs/disks#disk-types
                     volume_spec['disk_iops'] = 20000
             volumes_specs.append(volume_spec)
-            device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
-            if volume_spec['storage_type'] == constants.INSTANCE_STORAGE_TYPE:
-                # TODO(hailong):
-                # 1. check the instance storage count according to the instance type,
-                # refer to https://cloud.google.com/compute/docs/disks/local-ssd#lssd_disk_options
-                # 2. some instance types do not need to specify the instance storages,
-                # which will be attached automatically,
-                # refer to https://cloud.google.com/compute/docs/disks/local-ssd#lssd_disks_fixed
-                device_name = f'{constants.INSTANCE_STORAGE_DEVICE_NAME_PREFIX}{ssd_index}'
-                ssd_index += 1
-            device_mount_points[device_name] = volume['path']
+
         return volumes_specs, device_mount_points
 
     @classmethod
