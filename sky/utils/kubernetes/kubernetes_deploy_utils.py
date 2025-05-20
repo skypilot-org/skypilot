@@ -29,7 +29,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
                        kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
 
-    This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a 
+    This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a
     Kubernetes cluster on the specified machines.
 
     Args:

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+"""SSH-based Kubernetes Cluster Deployment Script"""
 # Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script.
 import argparse
 import base64
@@ -130,7 +130,7 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     except yaml.constructor.ConstructorError as e:
         print(f'{RED}{e.note}{NC}', file=sys.stderr)
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         print(f'{RED}Error loading SSH targets file: {e}{NC}', file=sys.stderr)
         sys.exit(1)
 
@@ -247,7 +247,7 @@ def get_effective_host_ip(hostname: str) -> str:
             for line in result.stdout.splitlines():
                 if line.startswith('hostname '):
                     return line.split(' ', 1)[1].strip()
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
         pass
     return hostname  # Return the original hostname if lookup fails
 
@@ -1094,9 +1094,9 @@ def deploy_cluster(head_node,
                             with open(cert_file_path, 'r') as f:
                                 content = f.readlines()
                                 first_line = content[0].strip(
-                                ) if content else ""
+                                ) if content else ''
                                 last_line = content[-1].strip(
-                                ) if content else ""
+                                ) if content else ''
 
                             if not first_line.startswith(
                                     '-----BEGIN') or not last_line.startswith(
@@ -1176,9 +1176,9 @@ def deploy_cluster(head_node,
                             with open(key_file_path, 'r') as f:
                                 content = f.readlines()
                                 first_line = content[0].strip(
-                                ) if content else ""
+                                ) if content else ''
                                 last_line = content[-1].strip(
-                                ) if content else ""
+                                ) if content else ''
 
                             if not first_line.startswith(
                                     '-----BEGIN') or not last_line.startswith(
@@ -1286,7 +1286,8 @@ def deploy_cluster(head_node,
     print(
         '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
     )
-    print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox '/'')
+    print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ' /
+          '')
     # Print completion marker for current cluster
     print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 

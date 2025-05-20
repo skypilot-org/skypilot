@@ -1,9 +1,4 @@
-"""SSH Cloud for SkyPilot.
-
-This cloud is a wrapper around Kubernetes that only uses SSH-specific contexts.
-It allows users to manage SSH-based Kubernetes clusters defined in ~/.sky/ssh_node_pools.yaml
-directly, without having to interact with Kubernetes-specific commands.
-"""
+"""SSH Node Pools"""
 
 import os
 import typing
@@ -11,8 +6,6 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
-from sky import exceptions
-from sky import skypilot_config
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import registry
@@ -54,11 +47,11 @@ class SSH(kubernetes.Kubernetes):
     def get_ssh_node_pool_contexts(cls) -> List[str]:
         """Get context names from ssh_node_pools.yaml file.
         
-        Reads the SSH node pools configuration file and returns a list of context names
-        by prepending 'ssh-' to each cluster name.
+        Reads the SSH node pools configuration file and returns
+        a list of context names by prepending 'ssh-' to each Node Pool name.
         
         Returns:
-            A list of SSH Kubernetes context names derived from the cluster names
+            A list of SSH Kubernetes context names derived from the Node Pools
             in the SSH node pools file.
         """
         contexts = []
@@ -68,7 +61,8 @@ class SSH(kubernetes.Kubernetes):
                 with open(SSH_NODE_POOLS_PATH, 'r') as f:
                     ssh_config = yaml.safe_load(f)
                     if ssh_config:
-                        # Get cluster names and prepend 'ssh-' to match context naming convention
+                        # Get cluster names and prepend 'ssh-' to match
+                        # context naming convention
                         contexts = [
                             f'ssh-{cluster_name}'
                             for cluster_name in ssh_config.keys()
@@ -84,7 +78,7 @@ class SSH(kubernetes.Kubernetes):
         """Get existing allowed contexts that start with 'ssh-'.
         
         Override the Kubernetes implementation to only return contexts that
-        start with 'ssh-', which are created by the SSH deployment mechanism.
+        start with 'ssh-', which are created by `sky ssh up`.
         
         Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml.
         """

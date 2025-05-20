@@ -392,7 +392,7 @@ def _format_enabled_cloud(cloud_name: str,
         if not existing_contexts:
             return _green_color(cloud_and_capabilities)
 
-        # Get the cluster names by reading them directly from the node pools file
+        # Get the cluster names by reading from the node pools file
         ssh_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
 
         # Format the context info with consistent styling

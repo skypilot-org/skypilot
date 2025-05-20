@@ -3,7 +3,6 @@
 This catalog inherits from the Kubernetes catalog as SSH cloud is a wrapper
 around Kubernetes that uses SSH-specific contexts.
 """
-import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
@@ -12,7 +11,6 @@ from sky.clouds import ssh
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import kubernetes_catalog
-from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -147,7 +145,7 @@ def validate_region_zone(
         clouds: CloudFilter = None) -> Tuple[Optional[str], Optional[str]]:
     """Validates the region and zone for SSH cloud.
 
-    Delegates to the Kubernetes catalog implementation but ensures 
+    Delegates to the Kubernetes catalog implementation but ensures
     the region is a valid SSH context.
     """
     # Delegate to Kubernetes implementation

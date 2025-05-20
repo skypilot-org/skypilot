@@ -1395,12 +1395,12 @@ def local_down() -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
-    """Deploys a Kubernetes cluster on SSH targets defined in ~/.sky/ssh_targets.yaml.
-    
+    """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
+
     Args:
         infra: Name of the cluster configuration in ssh_targets.yaml.
             If None, the first cluster in the file is used.
-    
+
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
@@ -1419,11 +1419,11 @@ def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
 @annotations.client_api
 def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     """Tears down a Kubernetes cluster on SSH targets.
-    
+
     Args:
         infra: Name of the cluster configuration in ssh_targets.yaml.
             If None, the first cluster in the file is used.
-    
+
     Returns:
         request_id: The request ID of the SSH cluster teardown request.
     """

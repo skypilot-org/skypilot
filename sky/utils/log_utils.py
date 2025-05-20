@@ -379,7 +379,8 @@ class SkySSHUpLineProcessor(LineProcessor):
                 self.current_cluster) else ''
             self.status_display.update(
                 ux_utils.spinner_message(
-                    f'Deploying SkyPilot runtime on head node{current_cluster_str}',
+                    'Deploying SkyPilot runtime on head node'
+                    f'{current_cluster_str}',
                     log_path=self.log_path,
                     is_local=self.is_local))
 
@@ -392,7 +393,7 @@ class SkySSHUpLineProcessor(LineProcessor):
         if 'Deploying Kubernetes on worker node' in log_line:
             self.status_display.update(
                 ux_utils.spinner_message(
-                    f'Deploying SkyPilot runtime on worker nodes' +
+                    'Deploying SkyPilot runtime on worker nodes' +
                     (f' \\[{self.current_cluster}]'
                      if self.current_cluster else ''),
                     log_path=self.log_path,
@@ -408,7 +409,7 @@ class SkySSHUpLineProcessor(LineProcessor):
         # Cluster configuration
         if 'Configuring local kubectl to connect to the cluster...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Setting up SkyPilot configuration' +
+                ux_utils.spinner_message('Setting up SkyPilot configuration' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
@@ -422,7 +423,7 @@ class SkySSHUpLineProcessor(LineProcessor):
         # GPU operator installation
         if 'Installing Nvidia GPU Operator...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Configuring Nvidia GPUs' +
+                ux_utils.spinner_message('Configuring Nvidia GPUs' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
@@ -436,7 +437,7 @@ class SkySSHUpLineProcessor(LineProcessor):
         # Cleanup steps
         if 'Cleaning up head node' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Cleaning up head node' +
+                ux_utils.spinner_message('Cleaning up head node' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
@@ -444,7 +445,7 @@ class SkySSHUpLineProcessor(LineProcessor):
 
         if 'Cleaning up worker node' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Cleaning up worker nodes' +
+                ux_utils.spinner_message('Cleaning up worker nodes' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
