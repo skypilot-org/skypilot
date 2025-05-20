@@ -111,7 +111,7 @@
         </div>
         <h1>Sign in to SkyPilot CLI</h1>
         <p>You are seeing this page because a SkyPilot command requires authentication.</p>
-        
+
         <p>Please copy the following token and paste it into your SkyPilot CLI prompt:</p>
         <div id="token-box" class="code-block">SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER</div>
         <button id="copy-btn" class="copy-button">Copy Token</button>
@@ -122,7 +122,7 @@
     <script>
         const tokenBox = document.getElementById('token-box');
         const copyBtn  = document.getElementById('copy-btn');
-        
+
         function selectToken() {
             // For <pre> or <div>, create a range to select its content
             const range = document.createRange();
@@ -133,8 +133,8 @@
         }
 
         // Optional: Select the token when the page loads or when token box is clicked
-        // tokenBox.addEventListener('click', selectToken); 
-        // window.addEventListener('load', selectToken); // Can be annoying if user misclicks
+        tokenBox.addEventListener('click', selectToken);
+        window.addEventListener('load', selectToken);
 
         copyBtn.addEventListener('click', () => {
             selectToken(); // Select the text
@@ -151,4 +151,4 @@
         });
     </script>
 </body>
-</html> 
+</html>
