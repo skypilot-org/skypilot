@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
+import collections
 from typing import Any, Dict, List, Optional, Set, Tuple
 import concurrent.futures as cf
 
@@ -31,6 +31,28 @@ SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        mapping = collections.OrderedDict()
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key: {key}",
+                    key_node.start_mark,
+                )
+            value = self.construct_object(value_node, deep=deep)
+            mapping[key] = value
+        return mapping
+
+# Register the custom constructor inside the class
+UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    UniqueKeySafeLoader.construct_mapping
+)
 
 
 def parse_args():
@@ -102,7 +124,7 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
 
     try:
         with open(file_path, 'r') as f:
-            targets = yaml.safe_load(f)
+            targets = yaml.load(f, Loader=UniqueKeySafeLoader)
         return targets
     except Exception as e:
         print(f"{RED}Error loading SSH targets file: {e}{NC}")
