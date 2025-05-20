@@ -235,7 +235,7 @@ def cleanup_server_node(node, user, ssh_key, askpass_block, use_ssh_config=False
 
 def cleanup_agent_node(node, user, ssh_key, askpass_block, use_ssh_config=False):
     """Uninstall k3s and clean up the state on an agent node."""
-    print(f"{YELLOW}Cleaning up node {node}...{NC}")
+    print(f"{YELLOW}Cleaning up worker node {node}...{NC}")
     cmd = f"""
         {askpass_block}
         echo 'Uninstalling k3s...' &&
@@ -419,6 +419,10 @@ def main():
     
     kubeconfig_path = os.path.expanduser(args.kubeconfig_path)
     global_use_ssh_config = args.use_ssh_config
+    
+    # Print cleanup mode marker if applicable
+    if args.cleanup:
+        print("SKYPILOT_CLEANUP_MODE: Cleanup mode activated")
     
     # Check if using YAML configuration or command line arguments
     if args.ips_file:
