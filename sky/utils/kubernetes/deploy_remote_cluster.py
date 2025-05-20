@@ -434,7 +434,7 @@ def setup_kubectl_ssh_tunnel(head_node,
     # Update kubeconfig to use localhost with the selected port
     run_command([
         "kubectl", "config", "set-cluster", context_name,
-        f"--server=https://localhost:{port}", "--insecure-skip-tls-verify=true"
+        f"--server=https://127.0.0.1:{port}", "--insecure-skip-tls-verify=true"
     ])
 
     # Build the exec args list based on auth method
