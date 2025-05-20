@@ -506,7 +506,7 @@ export function GPUs() {
                                 className="text-sm text-muted-foreground"
                               >
                                 <span
-                                  className="text-sky-blue underline cursor-pointer"
+                                  className="text-blue-600 hover:underline cursor-pointer"
                                   onClick={() => handleContextClick(context)}
                                 >
                                   {context.length > NAME_TRUNCATE_LENGTH
@@ -718,7 +718,7 @@ export function GPUs() {
                                 className="text-sm text-muted-foreground"
                               >
                                 <span
-                                  className="text-sky-blue underline cursor-pointer"
+                                  className="text-blue-600 hover:underline cursor-pointer"
                                   onClick={() => handleContextClick(context)}
                                 >
                                   {nodePoolName.length > NAME_TRUNCATE_LENGTH
