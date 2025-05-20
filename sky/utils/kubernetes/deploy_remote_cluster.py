@@ -460,11 +460,9 @@ def setup_kubectl_ssh_tunnel(head_node,
 
     # Paths to scripts
     tunnel_script = os.path.join(SCRIPT_DIR, "ssh-tunnel.sh")
-    cleanup_script = os.path.join(SCRIPT_DIR, "cleanup-tunnel.sh")
 
     # Make sure scripts are executable
     os.chmod(tunnel_script, 0o755)
-    os.chmod(cleanup_script, 0o755)
 
     # Certificate files
     node_pools_info_dir = os.path.expanduser("~/.sky/ssh_node_pools_info")
@@ -727,6 +725,9 @@ def deploy_cluster(head_node,
 
     node_pools_info_dir = os.path.expanduser(f"~/.sky/ssh_node_pools_info")
     history_yaml_file = os.path.join(node_pools_info_dir, f"{context_name}-history.yaml")
+    cert_file_path = os.path.join(node_pools_info_dir, f"{context_name}-cert.pem")
+    key_file_path = os.path.join(node_pools_info_dir, f"{context_name}-key.pem")
+    tunnel_log_file_path = os.path.join(node_pools_info_dir, f"{context_name}-tunnel.log")
 
     # Generate the askpass block if password is provided
     askpass_block = create_askpass_script(password)
@@ -764,6 +765,10 @@ def deploy_cluster(head_node,
                     use_ssh_config=use_ssh_config,
                 ))
                 remove_worker_cmds.append(f"kubectl delete node -l skypilot-ip={history_node}")
+        # If this is a create operation and there exists some stale log,
+        # cleanup the log for a new file to store new logs.
+        if not cleanup and os.path.exists(tunnel_log_file_path):
+            os.remove(tunnel_log_file_path)
 
     # If --cleanup flag is set, uninstall k3s and exit
     if cleanup:
@@ -781,9 +786,6 @@ def deploy_cluster(head_node,
             ))
 
         print(f"{YELLOW}Starting cleanup...{NC}")
-
-        # Clean up SSH tunnel first
-        cleanup_kubectl_ssh_tunnel(context_name)
 
         # Clean up head node
         cleanup_server_node(head_node,
@@ -827,8 +829,13 @@ def deploy_cluster(head_node,
             success_message(
                 f"Context '{context_name}' removed from local kubeconfig.")
 
-        if os.path.exists(history_yaml_file):
-            os.remove(history_yaml_file)
+        for file in [history_yaml_file, cert_file_path, key_file_path]:
+            if os.path.exists(file):
+                os.remove(file)
+
+        # Clean up SSH tunnel after clean up kubeconfig, because the kubectl
+        # will restart the ssh tunnel if it's not running.
+        cleanup_kubectl_ssh_tunnel(context_name)
 
         print(f"{GREEN}Cleanup completed successfully.{NC}")
         
@@ -1018,8 +1025,6 @@ def deploy_cluster(head_node,
                             'utf-8')
 
                         # Check if the data already looks like a PEM file
-                        cert_file_path = os.path.join(
-                            node_pools_info_dir, f"{context_name}-cert.pem")
                         has_begin = "-----BEGIN CERTIFICATE-----" in cert_pem
                         has_end = "-----END CERTIFICATE-----" in cert_pem
 
@@ -1072,8 +1077,6 @@ def deploy_cluster(head_node,
                             'utf-8')
 
                         # Check if the data already looks like a PEM file
-                        key_file_path = os.path.join(node_pools_info_dir,
-                                                     f"{context_name}-key.pem")
 
                         # Check for EC key format
                         if "EC PRIVATE KEY" in key_pem:
