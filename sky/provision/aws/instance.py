@@ -785,8 +785,8 @@ def open_ports(
             if sg is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Cannot find new security group '
-                                    f'{sg_name}. Please check the log '
-                                    'above and try again.')
+                                     f'{sg_name}. Please check the log '
+                                     'above and try again.')
             # For multinode cases, we need to change the SG for all instances.
             for instance in instance_list:
                 _maybe_move_to_new_sg(instance, sg)
@@ -799,17 +799,20 @@ def open_ports(
                 # Skip any rules that don't have a FromPort or ToPort.
                 if 'FromPort' in existing_rule and 'ToPort' in existing_rule:
                     existing_ports.update(
-                        range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
+                        range(existing_rule['FromPort'],
+                              existing_rule['ToPort'] + 1))
                 elif existing_rule['IpProtocol'] == '-1':
                     # For AWS, IpProtocol = -1 means all traffic
                     all_traffic_allowed: bool = False
                     for group_pairs in existing_rule['UserIdGroupPairs']:
                         if group_pairs['GroupId'] != sg.id:
-                            # We skip the port opening when the rule allows access from
-                            # other security groups, as that is likely added by a user
-                            # manually and satisfy their requirement.
-                            # The security group created by SkyPilot allows all traffic
-                            # from the same security group, which should not be skipped.
+                            # We skip the port opening when the rule allows
+                            # access from other security groups, as that is
+                            # likely added by a user manually and satisfy their
+                            # requirement.
+                            # The security group created by SkyPilot allows all
+                            # traffic from the same security group, which should
+                            # not be skipped.
                             existing_ports.add(-1)
                             all_traffic_allowed = True
                             break
@@ -844,8 +847,10 @@ def open_ports(
         except aws.botocore_exceptions().ClientError as e:
             # There is a race condition where the security group is still being
             # created if multiple nodes are started at the same time (TOCTOU).
-            # Updating the security group will fail with a ClientError if the ports are already opened.
-            # We can just ignore any that are already opened
+            # Updating the security group will fail with a ClientError if the
+            # ports are already opened. We can just ignore any that are already
+            # opened
+            logger.debug(f'Error opening ports: {e}')
             continue
 
 
