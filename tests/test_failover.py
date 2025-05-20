@@ -80,7 +80,7 @@ def test_aws_region_failover(enable_all_clouds, _mock_db_conn, mock_aws_backend,
         monkeypatch.setattr(aws_instance, '_create_instances',
                             mock_create_instances)
         task = sky.Task(run='echo hi')
-        task.set_resources(sky.Resources(sky.AWS(), instance_type='t2.micro'))
+        task.set_resources(sky.Resources(infra='aws', instance_type='t2.micro'))
 
         with unittest.mock.patch.object(
                 cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,

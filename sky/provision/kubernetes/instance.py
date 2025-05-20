@@ -67,6 +67,9 @@ def is_high_availability_cluster_by_kubectl(
         namespace: Optional[str] = None) -> bool:
     """Check if a cluster is a high availability controller by calling
     `kubectl get deployment`.
+
+    The deployment must have the label `skypilot-cluster-name` set to
+    `cluster_name`.
     """
     try:
         deployment_list = kubernetes.apps_api(
@@ -896,6 +899,9 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
+            # Propagate the labels to the deployment for identification.
+            deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
+                'labels']
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(

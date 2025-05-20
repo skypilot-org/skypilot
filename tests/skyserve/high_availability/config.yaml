@@ -1,6 +1,6 @@
 serve:
   controller:
     resources:
-      cloud: kubernetes
+      infra: kubernetes
       cpus: 2
     high_availability: true
