@@ -1408,10 +1408,9 @@ def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
         infra=infra,
         cleanup=False,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/ssh_up',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = requests.post(f'{server_common.get_server_url()}/ssh_up',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1432,10 +1431,9 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
         infra=infra,
         cleanup=True,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/ssh_down',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = requests.post(f'{server_common.get_server_url()}/ssh_down',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 

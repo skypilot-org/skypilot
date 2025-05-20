@@ -15,4 +15,4 @@ from sky.provision.kubernetes.instance import terminate_instances
 from sky.provision.kubernetes.instance import wait_instances
 from sky.provision.kubernetes.network import cleanup_ports
 from sky.provision.kubernetes.network import open_ports
-from sky.provision.kubernetes.network import query_ports 
+from sky.provision.kubernetes.network import query_ports

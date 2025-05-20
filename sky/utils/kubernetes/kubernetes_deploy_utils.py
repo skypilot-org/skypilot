@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -23,7 +23,10 @@ logger = sky_logging.init_logger(__name__)
 # Default path for Kubernetes configuration file
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
-def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubeconfig_path: Optional[str] = None):
+
+def deploy_ssh_cluster(cleanup: bool = False,
+                       infra: Optional[str] = None,
+                       kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
     
     This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a 
@@ -40,47 +43,46 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
     path_to_package = os.path.dirname(__file__)
     up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
     cwd = os.path.dirname(os.path.abspath(up_script_path))
-    
+
     deploy_command = [sys.executable, up_script_path]
-    
+
     if cleanup:
         deploy_command.append('--cleanup')
-    
+
     if infra:
         deploy_command.extend(['--infra', infra])
-    
+
     # Use the default kubeconfig path if none is provided
     kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
     deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
-    
+
     # Setup logging paths
     run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'ssh_up.log')
-    
+
     if cleanup:
         msg_str = 'Cleaning up SSH Node Pools...'
     else:
         msg_str = 'Initializing deployment to SSH Node Pools...'
-    
+
     # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
     env = os.environ.copy()
     env['PYTHONUNBUFFERED'] = '1'
-    
+
     with rich_utils.safe_status(
-            ux_utils.spinner_message(msg_str,
-                                     log_path=log_path,
+            ux_utils.spinner_message(msg_str, log_path=log_path,
                                      is_local=True)):
         returncode, _, stderr = log_lib.run_with_log(
             cmd=deploy_command,
             log_path=log_path,
             require_outputs=True,
-            stream_logs=False, # TODO: Fixme to False after we fix the logging
-            line_processor=log_utils.SkySSHUpLineProcessor(
-                log_path=log_path, is_local=True),
+            stream_logs=False,  # TODO: Fixme to False after we fix the logging
+            line_processor=log_utils.SkySSHUpLineProcessor(log_path=log_path,
+                                                           is_local=True),
             cwd=cwd,
             env=env)
-    
+
     if returncode == 0:
         success = True
     else:
@@ -89,18 +91,21 @@ def deploy_ssh_cluster(cleanup: bool = False, infra: Optional[str] = None, kubec
             raise RuntimeError('Failed to deploy SkyPilot on SSH targets. '
                                f'Full log: {log_hint}'
                                f'\nError: {stderr}')
-    
+
     if success:
+        # Add an empty line to separate the deployment logs from the final 
+        # message
+        logger.info('')
         if cleanup:
             logger.info(
                 ux_utils.finishing_message(
-                    '\n🎉 SSH Node Pools cleaned up successfully.',
+                    '🎉 SSH Node Pools cleaned up successfully.',
                     log_path=log_path,
                     is_local=True))
         else:
             logger.info(
                 ux_utils.finishing_message(
-                    '\n🎉 SSH Node Pools set up successfully.',
+                    '🎉 SSH Node Pools set up successfully.',
                     log_path=log_path,
                     is_local=True))
 
@@ -131,12 +136,10 @@ def deploy_remote_cluster(ip_list: List[str],
 
         # Use the legacy mode command line arguments for backward compatibility
         deploy_command = [
-            sys.executable, up_script_path, 
-            '--ips-file', ip_file.name, 
-            '--user', ssh_user, 
-            '--ssh-key', key_file.name
+            sys.executable, up_script_path, '--ips-file', ip_file.name,
+            '--user', ssh_user, '--ssh-key', key_file.name
         ]
-        
+
         if context_name is not None:
             deploy_command.extend(['--context-name', context_name])
         if password is not None:
@@ -153,11 +156,11 @@ def deploy_remote_cluster(ip_list: List[str],
             msg_str = 'Cleaning up remote cluster...'
         else:
             msg_str = 'Deploying remote cluster...'
-            
+
         # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
-            
+
         with rich_utils.safe_status(
                 ux_utils.spinner_message(msg_str,
                                          log_path=log_path,

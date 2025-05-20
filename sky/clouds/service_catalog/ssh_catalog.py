@@ -8,10 +8,10 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.clouds import ssh
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import kubernetes_catalog
-from sky.clouds import ssh
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -65,13 +65,15 @@ def list_accelerators(
 
 
 def list_accelerators_realtime(
-        gpus_only: bool,
-        name_filter: Optional[str],
-        region_filter: Optional[str],
-        quantity_filter: Optional[int],
-        case_sensitive: bool = True,
-        all_regions: bool = False,
-        require_price: bool = True) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str, int]]:
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
+                                                                          int]]:
     """List accelerators in SSH-based Kubernetes clusters with real-time information.
     
     Delegates to the Kubernetes _list_accelerators function but restricts to SSH contexts.
@@ -87,14 +89,16 @@ def list_accelerators_realtime(
 
 
 def _list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str],
-        region_filter: Optional[str],
-        quantity_filter: Optional[int],
-        case_sensitive: bool = True,
-        all_regions: bool = False,
-        require_price: bool = True,
-        realtime: bool = False) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str, int]]:
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True,
+    realtime: bool = False
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
+                                                                          int]]:
     """List accelerators in SSH-based Kubernetes clusters.
     
     This is a wrapper around the Kubernetes _list_accelerators function that
@@ -105,33 +109,28 @@ def _list_accelerators(
     # If a specific region is requested, ensure it's an SSH context
     if region_filter is not None and not region_filter.startswith('ssh-'):
         return {}, {}, {}
-    
+
     # Get SSH contexts
     ssh_contexts = ssh.SSH.existing_allowed_contexts()
-    
+
     # If no contexts found, return empty results
     if not ssh_contexts:
         return {}, {}, {}
-    
+
     # If a region filter is specified and it's not in the list of SSH contexts, return empty results
     if region_filter is not None and region_filter not in ssh_contexts:
         return {}, {}, {}
-    
+
     # If region_filter is None, use the first context if all_regions is False
     if region_filter is None and not all_regions and ssh_contexts:
         # Use the first SSH context if no specific region requested
         region_filter = ssh_contexts[0]
-    
+
     # Call the Kubernetes _list_accelerators with the appropriate region filter
-    return kubernetes_catalog._list_accelerators(
-        gpus_only,
-        name_filter,
-        region_filter,
-        quantity_filter,
-        case_sensitive,
-        all_regions,
-        require_price,
-        realtime)
+    return kubernetes_catalog._list_accelerators(gpus_only, name_filter,
+                                                 region_filter, quantity_filter,
+                                                 case_sensitive, all_regions,
+                                                 require_price, realtime)
 
 
 def validate_region_zone(
@@ -144,13 +143,14 @@ def validate_region_zone(
     the region is a valid SSH context.
     """
     # Delegate to Kubernetes implementation
-    region, zone = kubernetes_catalog.validate_region_zone(region_name, zone_name, clouds)
-    
+    region, zone = kubernetes_catalog.validate_region_zone(
+        region_name, zone_name, clouds)
+
     # Get SSH contexts
     ssh_contexts = ssh.SSH.existing_allowed_contexts()
-    
+
     # If a region is specified, ensure it's in the list of SSH contexts
     if region is not None and region not in ssh_contexts:
         return None, None
-    
-    return region, zone 
+
+    return region, zone
