@@ -15,7 +15,6 @@ import posixpath
 import re
 import shutil
 import sys
-import textwrap
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -226,54 +225,25 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
     # Use base64 encoding to avoid having to escape anything in the HTML.
     json_bytes = json.dumps(request.cookies).encode('utf-8')
     base64_str = base64.b64encode(json_bytes).decode('utf-8')
-    return fastapi.responses.HTMLResponse(content=textwrap.dedent("""
-        <!DOCTYPE html>
-        <html lang="en">
-            <head>
-                <meta charset="utf-8">
-                <title>SkyPilot API Server Login</title>
-                <style>
-                #token-box {
-                    width: min(90vw, 50rem);
-                    height: 10rem;
-                    padding: 0.75rem;
-                    border: 1px solid #666;
-                    border-radius: 6px;
-                    overflow: auto;
-                    word-break: break-all;
-                    white-space: pre-wrap;
-                }
-                button {
-                    padding: 0.5rem 1rem;
-                    cursor: pointer;
-                }
-                </style>
-            </head>
-            <body>
-                <pre id="token-box">""" + base64_str + """</pre>
-                <button id="copy-btn">Copy</button>
-                <script>
-                    const tokenBox = document.getElementById('token-box');
-                    const copyBtn  = document.getElementById('copy-btn');
-                    function selectToken() {
-                        const range = document.createRange();
-                        range.selectNodeContents(tokenBox);
-                        const sel = window.getSelection();
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                    }
-                    // Select the token when the page loads
-                    window.addEventListener('load', selectToken);
-                    copyBtn.addEventListener('click', () => {
-                        selectToken();
-                        document.execCommand('copy');
-                        copyBtn.textContent = 'Copied!';
-                        setTimeout(() => (copyBtn.textContent = 'Copy'), 2000);
-                    });
-                </script>
-            </body>
-        </html>
-        """))
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    token_page_path = html_dir / 'token_page.html'
+    try:
+        with open(token_page_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+    except FileNotFoundError:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail='Token page template not found.')
+
+    html_content = html_content.replace(
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER', base64_str)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no'  # Useful for preventing buffering issues with some reverse proxies
+        })
 
 
 @app.post('/check')
