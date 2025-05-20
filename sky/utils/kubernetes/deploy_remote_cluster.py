@@ -10,6 +10,7 @@ import tempfile
 import time
 import yaml
 from typing import Dict, List, Optional, Any, Tuple, Set
+import concurrent.futures as cf
 import base64
 
 # # Make stdout unbuffered to ensure immediate output for logs and progress indicators
@@ -246,7 +247,9 @@ def cleanup_agent_node(node, user, ssh_key, askpass_block, use_ssh_config=False)
     success_message(f"Node {node} cleaned up successfully.")
 
 def start_agent_node(node, master_addr, k3s_token, user, ssh_key, askpass_block, use_ssh_config=False):
-    """Start a k3s agent node."""
+    """Start a k3s agent node.
+
+    Returns: if the node has a GPU."""
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="agent --node-label skypilot-ip={node}" \
@@ -254,6 +257,11 @@ def start_agent_node(node, master_addr, k3s_token, user, ssh_key, askpass_block,
         """
     run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     success_message(f"Kubernetes deployed on worker node ({node}).")
+    # Check if worker node has a GPU
+    if check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
+        print(f"{YELLOW}GPU detected on worker node ({node}).{NC}")
+        return True
+    return False
 
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
@@ -605,11 +613,14 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
         cleanup_server_node(head_node, ssh_user, ssh_key, askpass_block, use_ssh_config=head_use_ssh_config)
         
     # Clean up worker nodes
-    for kwargs in worker_nodes_to_cleanup:
-        cleanup_agent_node(**kwargs)
-    for cmd in remove_worker_cmds:
-        print('Cleaning up worker nodes:', cmd)
-        run_command(cmd, shell=True)
+    with cf.ThreadPoolExecutor() as executor:
+        executor.map(lambda kwargs: cleanup_agent_node(**kwargs), worker_nodes_to_cleanup)
+    
+    with cf.ThreadPoolExecutor() as executor:
+        def run_cleanup_cmd(cmd):
+            print('Cleaning up worker nodes:', cmd)
+            run_command(cmd, shell=True)
+        executor.map(run_cleanup_cmd, remove_worker_cmds)
         
     if cleanup:
         # Remove the context from local kubeconfig if it exists
@@ -681,7 +692,9 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
     print(f"{GREEN}Master node internal IP: {master_addr}{NC}")
     
     # Step 2: Install k3s on worker nodes and join them to the master node
-    for i, node in enumerate(worker_nodes):
+    def deploy_worker(args):
+        (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key, 
+         askpass_block, worker_use_ssh_config, master_addr, k3s_token) = args
         progress_message(f"Deploying Kubernetes on worker node ({node})...")
         
         # If using YAML config with specific worker info
@@ -689,9 +702,9 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
             if history_workers_info is not None and worker_hosts[i] in history_workers_info:
                 print(f"{YELLOW}Worker node {node} already exists in history. "
                       f"Skipping...{NC}")
-                continue
+                return False
             worker_user = worker_hosts[i]['user']
-            worker_key = worker_hosts[i]['identity_file']
+            worker_key = worker_hosts[i]['identity_file'] 
             worker_password = worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
             worker_config = worker_use_ssh_config[i]
@@ -701,12 +714,20 @@ def deploy_cluster(head_node, worker_nodes, ssh_user, ssh_key, context_name, pas
             worker_askpass = askpass_block
             worker_config = worker_use_ssh_config[i]
         
-        start_agent_node(node, master_addr, k3s_token, worker_user, worker_key, worker_askpass, use_ssh_config=worker_config)
+        return start_agent_node(node, master_addr, k3s_token, worker_user,
+                                worker_key, worker_askpass, use_ssh_config=worker_config)
+
+    # Deploy workers in parallel using thread pool
+    with cf.ThreadPoolExecutor() as executor:
+        futures = []
+        for i, node in enumerate(worker_nodes):
+            args = (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
+                    askpass_block, worker_use_ssh_config, master_addr, k3s_token)
+            futures.append(executor.submit(deploy_worker, args))
         
-        # Check if worker node has a GPU
-        if check_gpu(node, worker_user, worker_key, use_ssh_config=worker_config):
-            print(f"{YELLOW}GPU detected on worker node ({node}).{NC}")
-            install_gpu = True
+        # Wait for all workers and collect results
+        for future in cf.as_completed(futures):
+            install_gpu = install_gpu or future.result()
     
     # Step 3: Configure local kubectl to connect to the cluster
     progress_message("Configuring local kubectl to connect to the cluster...")
