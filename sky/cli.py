@@ -3518,9 +3518,9 @@ def show_gpus(
 
     def _format_kubernetes_node_info_combined(
             contexts_info: List[Tuple[str,
-                                      'models.KubernetesNodesInfo']]) -> str:
+                                      'models.KubernetesNodesInfo']], cloud_str: str = 'Kubernetes', context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table(
-            ['CONTEXT', 'NODE', 'GPU', 'UTILIZATION'])
+            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3543,7 +3543,7 @@ def show_gpus(
                     'free'
                 ])
 
-        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -3557,30 +3557,65 @@ def show_gpus(
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             show_node_info: bool) -> Generator[str, None, None]:
-        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-               'Kubernetes GPUs'
-               f'{colorama.Style.RESET_ALL}')
-        # print total table
-        if total_table is not None:
-            yield '\n'
-            yield from total_table.get_string()
+        
+        # Separate out SSH Node Pool and Kubernetes contexts
+        ssh_node_pool_realtime_infos = [(ctx, realtime_info) for ctx, realtime_info in k8s_realtime_infos if ctx and ctx.startswith('ssh-')]
+        ssh_node_pool_all_nodes_info = [(ctx, node_info) for ctx, node_info in all_nodes_info if ctx and ctx.startswith('ssh-')]
+        k8s_realtime_infos = [(ctx, realtime_info) for ctx, realtime_info in k8s_realtime_infos if ctx and not ctx.startswith('ssh-')]
+        k8s_all_nodes_info = [(ctx, node_info) for ctx, node_info in all_nodes_info if ctx and not ctx.startswith('ssh-')]
 
-        # print individual infos.
-        for (ctx, k8s_realtime_table) in k8s_realtime_infos:
-            yield '\n'
-            # Print context header separately
-            if ctx:
-                context_str = f'Context: {ctx}'
-            else:
-                context_str = 'Default Context'
-            yield (
-                f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
-            )
-            yield from k8s_realtime_table.get_string()
+        if k8s_realtime_infos:
+            yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                'Kubernetes GPUs'
+                f'{colorama.Style.RESET_ALL}')
+            # print total table
+            if total_table is not None:
+                yield '\n'
+                yield from total_table.get_string()
 
-        if show_node_info:
-            yield '\n'
-            yield _format_kubernetes_node_info_combined(all_nodes_info)
+            # print individual infos.
+            for (ctx, realtime_table) in k8s_realtime_infos:
+                yield '\n'
+                # Print context header separately
+                if ctx:
+                    context_str = f'Context: {ctx}'
+                else:
+                    context_str = 'Default Context'
+                yield (
+                    f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
+                )
+                yield from realtime_table.get_string()
+
+            if show_node_info:
+                yield '\n'
+                yield _format_kubernetes_node_info_combined(k8s_all_nodes_info, cloud_str='Kubernetes', context_title_str='CONTEXT')
+            if ssh_node_pool_realtime_infos:
+                # Add a separator between Kubernetes and SSH Node Pools
+                yield '\n\n'                
+
+        if ssh_node_pool_realtime_infos:
+            yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+                'SSH Node Pools'
+                f'{colorama.Style.RESET_ALL}')
+            
+            # TODO(romilb): Add total table for SSH Node Pools?
+
+            # print individual infos.
+            for (ctx, realtime_table) in ssh_node_pool_realtime_infos:
+                yield '\n'
+                # Print context header separately
+                if ctx:
+                    context_str = f'SSH Node Pool: {ctx}'
+                else:
+                    context_str = 'Default Node Pool'
+                yield (
+                    f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
+                )
+                yield from realtime_table.get_string()
+
+            if show_node_info:
+                yield '\n'
+                yield _format_kubernetes_node_info_combined(ssh_node_pool_all_nodes_info, cloud_str='SSH Node Pools', context_title_str='NODE_POOL')
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
