@@ -69,6 +69,13 @@ Below is the available helm value keys and the default value of each key:
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: "username:$apr1$encrypted_password"
     :ref:`path <helm-values-ingress-path>`: '/'
+    :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
+      :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
+      :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: "https://your-okta-domain.okta.com"
+      :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
+      :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
+      :ref:`use-http <helm-values-ingress-oauth2-proxy-use-http>`: false
+      :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -420,6 +427,116 @@ Default: ``'/'``
 
   ingress:
     path: '/'
+    
+.. _helm-values-ingress-oauth2-proxy:
+
+``ingress.oauth2-proxy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for the OAuth2 Proxy authentication for the API server. This enables SSO providers like Okta.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      enabled: false
+      oidc-issuer-url: "https://your-okta-domain.okta.com"
+      client-id: ""
+      client-secret: ""
+      use-http: false
+      email-domain: "*"
+
+.. _helm-values-ingress-oauth2-proxy-enabled:
+
+``ingress.oauth2-proxy.enabled``
+''''''''''''''''''''''''''''''''''''
+
+Enable OAuth2 Proxy for authentication. When enabled, this will deploy an OAuth2 Proxy component and configure the ingress to use it for authentication instead of basic auth.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      enabled: true
+
+.. _helm-values-ingress-oauth2-proxy-oidc-issuer-url:
+
+``ingress.oauth2-proxy.oidc-issuer-url``
+''''''''''''''''''''''''''''''''''''''''
+
+The URL of the OIDC issuer (e.g., your Okta domain).
+
+Default: ``"https://your-okta-domain.okta.com"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      oidc-issuer-url: "https://mycompany.okta.com"
+
+.. _helm-values-ingress-oauth2-proxy-client-id:
+
+``ingress.oauth2-proxy.client-id``
+''''''''''''''''''''''''''''''''''
+
+The OAuth client ID from your OIDC provider (e.g., Okta).
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-id: "0abc123def456"
+
+.. _helm-values-ingress-oauth2-proxy-client-secret:
+
+``ingress.oauth2-proxy.client-secret``
+'''''''''''''''''''''''''''''''''''''''''
+
+The OAuth client secret from your OIDC provider (e.g., Okta).
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-secret: "abcdef123456"
+
+.. _helm-values-ingress-oauth2-proxy-use-http:
+
+``ingress.oauth2-proxy.use-http``
+'''''''''''''''''''''''''''''''''
+
+Set to ``true`` when using HTTP (not HTTPS) for the API server endpoint. This disables secure cookies, which is required for HTTP endpoints.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      use-http: true
+
+.. _helm-values-ingress-oauth2-proxy-email-domain:
+
+``ingress.oauth2-proxy.email-domain``
+'''''''''''''''''''''''''''''''''''''''
+
+Email domains to allow for authentication. Use ``"*"`` to allow all email domains.
+
+Default: ``"*"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      email-domain: "mycompany.com"
 
 .. _helm-values-ingress-nginx:
 
