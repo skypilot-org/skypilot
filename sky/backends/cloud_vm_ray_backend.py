@@ -8,7 +8,6 @@ import os
 import pathlib
 import re
 import shlex
-import shutil
 import signal
 import subprocess
 import sys
@@ -2157,11 +2156,18 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                table = log_utils.create_table(['Resource', 'Reason'])
+                table = log_utils.create_table(['INFRA', 'RESOURCES', 'REASON'])
                 for (resource, exception) in resource_exceptions.items():
-                    table.add_row(
-                        [resources_utils.format_resource(resource), exception])
-                table.max_table_width = shutil.get_terminal_size().columns
+                    table.add_row([
+                        resource.infra.formatted_str(),
+                        resources_utils.format_resource(resource,
+                                                        simplify=True),
+                        exception
+                    ])
+                # Set the max width of REASON column to 80 to avoid the table
+                # being wrapped in a unreadable way.
+                # pylint: disable=protected-access
+                table._max_width = {'REASON': 80}
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)

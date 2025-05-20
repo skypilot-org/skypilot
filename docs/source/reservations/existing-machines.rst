@@ -106,7 +106,7 @@ Deploying SkyPilot
       ✔ Remote k3s is running.
       ✔ Nvidia GPU Operator installed successfully.
       Cluster deployment done. You can now run tasks on this cluster.
-      E.g., run a task with: sky launch --cloud kubernetes -- echo hello world.
+      E.g., run a task with: sky launch --infra kubernetes -- echo hello world.
       🎉 Remote cluster deployed successfully.
 
 
@@ -120,7 +120,7 @@ Deploying SkyPilot
 
    .. code-block:: console
 
-      $ sky show-gpus --cloud k8s
+      $ sky show-gpus --infra k8s
       Kubernetes GPUs
       GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
       L4    1, 2, 4                   12 of 12
@@ -135,7 +135,7 @@ Deploying SkyPilot
       my-cluster-4               H100      8 of 8
       my-cluster-5               H100      8 of 8
 
-      $ sky launch --cloud k8s --gpus H100:1 -- nvidia-smi
+      $ sky launch --infra k8s --gpus H100:1 -- nvidia-smi
 
    .. tip::
 
@@ -194,27 +194,27 @@ You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi
 
    # ~/.sky/config.yaml
     allowed_contexts:
-      - cluster1
-      - cluster2
+      - cluster1-ctx
+      - cluster2-ctx
 
 
 .. code-block:: bash
 
     # Run on cluster1
-    sky launch --cloud k8s --region cluster1 -- echo "Running on cluster 1"
+    sky launch --infra k8s/cluster1-ctx -- echo "Running on cluster 1"
 
     # Run on cluster2
-    sky launch --cloud k8s --region cluster2 -- echo "Running on cluster 2"
+    sky launch --infra k8s/cluster2-ctx -- echo "Running on cluster 2"
 
     # Let SkyPilot automatically select the cluster with available resources
-    sky launch --cloud k8s -- echo "Running on SkyPilot selected cluster"
+    sky launch --infra k8s -- echo "Running on SkyPilot selected cluster"
 
 You can view the available clusters and GPUs using:
 
 .. code-block:: bash
 
     # List GPUs on cluster1
-    sky show-gpus --cloud k8s --region cluster1
+    sky show-gpus --infra k8s/cluster1-ctx
 
     # List GPUs on cluster2
-    sky show-gpus --cloud k8s --region cluster2
+    sky show-gpus --infra k8s/cluster2-ctx

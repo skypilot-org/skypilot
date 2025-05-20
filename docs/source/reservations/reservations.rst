@@ -77,7 +77,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
 .. code-block:: yaml
 
     resources:
-      cloud: aws
+      infra: aws
       accelerators: A100:8
 
     num_nodes: 2
@@ -95,7 +95,7 @@ SkyPilot will utilize the capacity reservation/block as follows:
 
 .. hint::
 
-    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --region us-east-1 --gpus H100:8 task.yaml`` to let SkyPilot automatically wait until the starting time is reached. Namely, you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
+    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --infra aws/us-east-1 --gpus H100:8 task.yaml`` to let SkyPilot automatically wait until the starting time is reached. Namely, you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
 
 
 GCP reservations
@@ -163,7 +163,7 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
           provision_timeout: 900
 
     resources:
-      cloud: gcp
+      infra: gcp
       accelerators: A100:8
 
     num_nodes: 4
@@ -188,7 +188,7 @@ To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS con
         provision_timeout: 900
 
     resources:
-      cloud: kubernetes
+      infra: kubernetes
       accelerators: A100:8
       labels:
         kueue.x-k8s.io/queue-name: dws-local-queue

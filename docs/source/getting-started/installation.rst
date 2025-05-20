@@ -21,7 +21,7 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
@@ -50,7 +50,7 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[aws]"
@@ -83,7 +83,7 @@ Install SkyPilot using pip:
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install -e ".[kubernetes]"
           pip install -e ".[aws]"

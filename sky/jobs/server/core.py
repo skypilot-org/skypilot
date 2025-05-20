@@ -395,7 +395,7 @@ def queue(refresh: bool,
     if returncode != 0:
         logger.error(job_table_payload + stderr)
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
-                           f'{returncode}')
+                           f'{returncode}.\n{job_table_payload + stderr}')
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
 
