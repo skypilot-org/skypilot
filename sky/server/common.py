@@ -297,7 +297,6 @@ def _start_api_server(deploy: bool = False,
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        cmd = f'{" ".join(args)} > {log_path} 2>&1 < /dev/null'
 
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
@@ -305,10 +304,13 @@ def _start_api_server(deploy: bool = False,
         # the API server.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
-        proc = subprocess.Popen(cmd,
-                                shell=True,
-                                start_new_session=True,
-                                env=server_env)
+        with open(log_path, 'w', encoding='utf-8') as log_file:
+            proc = subprocess.Popen(args,
+                                    stdout=log_file,
+                                    stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL,
+                                    start_new_session=True,
+                                    env=server_env)
 
         start_time = time.time()
         while True:
