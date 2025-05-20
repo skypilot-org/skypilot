@@ -1,5 +1,5 @@
 resources:
-  cloud: aws
+  infra: aws
   instance_type: g4dn.xlarge
   image_id:
     us-west-2: skypilot:gpu-ubuntu-1804

@@ -4,11 +4,11 @@ import enum
 import itertools
 import json
 import math
-import re
 import typing
 from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
 
@@ -139,32 +139,54 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
+    resource = resource.assert_launchable()
+    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+        resource.instance_type)
+
+    components = []
+
+    if resource.accelerators is not None:
+        acc, count = list(resource.accelerators.items())[0]
+        components.append(f'gpus={acc}:{count}')
+
+    is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    if (resource.accelerators is None or is_k8s or not simplify):
+        if vcpu is not None:
+            components.append(f'cpus={int(vcpu)}')
+        if mem is not None:
+            components.append(f'mem={int(mem)}')
+
+    instance_type = resource.instance_type
     if simplify:
-        cloud = resource.cloud
-        if resource.accelerators is None:
-            vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-                resource.instance_type)
-            hardware = f'vCPU={int(vcpu)}'
-        else:
-            hardware = f'{resource.accelerators}'
-        spot = '[Spot]' if resource.use_spot else ''
-        return f'{cloud}({spot}{hardware})'
+        instance_type = common_utils.truncate_long_string(instance_type, 15)
+    if not is_k8s:
+        components.append(instance_type)
+    if simplify:
+        components.append('...')
     else:
-        # accelerator_args is way too long.
-        # Convert from:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-        # to:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-        pattern = ', accelerator_args={.*}'
-        launched_resource_str = re.sub(pattern, '...', str(resource))
-        return launched_resource_str
+        image_id = resource.image_id
+        if image_id is not None:
+            if None in image_id:
+                components.append(f'image_id={image_id[None]}')
+            else:
+                components.append(f'image_id={image_id}')
+        components.append(f'disk={resource.disk_size}')
+        disk_tier = resource.disk_tier
+        if disk_tier is not None:
+            components.append(f'disk_tier={disk_tier.value}')
+        ports = resource.ports
+        if ports is not None:
+            components.append(f'ports={ports}')
+
+    spot = '[spot]' if resource.use_spot else ''
+    return f'{spot}({"" if not components else ", ".join(components)})'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                 simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x '
+        return (f'{handle.launched_nodes}x'
                 f'{format_resource(handle.launched_resources, simplify)}')
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
 
@@ -248,6 +270,7 @@ def make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
+        assert launchable_resources.cloud is not None, 'Cloud must be specified'
         optimize_by_zone = (override_optimize_by_zone or
                             launchable_resources.cloud.optimize_by_zone())
         # It is possible that we force the optimize_by_zone but some clouds

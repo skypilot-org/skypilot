@@ -5,6 +5,11 @@ Deploy SkyPilot on existing machines
 
 This guide will help you deploy SkyPilot on your existing machines — whether they are on-premises or reserved instances on a cloud provider.
 
+
+.. tip::
+
+    To run SkyPilot on your local machine, use ``sky local up`` to :ref:`deploy a kubernetes cluster <kubernetes-setup-kind>` with `kind <https://kind.sigs.k8s.io/>`_.
+
 **Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
 
@@ -101,7 +106,7 @@ Deploying SkyPilot
       ✔ Remote k3s is running.
       ✔ Nvidia GPU Operator installed successfully.
       Cluster deployment done. You can now run tasks on this cluster.
-      E.g., run a task with: sky launch --cloud kubernetes -- echo hello world.
+      E.g., run a task with: sky launch --infra kubernetes -- echo hello world.
       🎉 Remote cluster deployed successfully.
 
 
@@ -115,22 +120,22 @@ Deploying SkyPilot
 
    .. code-block:: console
 
-      $ sky show-gpus --cloud k8s
+      $ sky show-gpus --infra k8s
       Kubernetes GPUs
-      GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-      L4    1, 2, 4                   12          12
-      H100  1, 2, 4, 8                16          16
+      GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+      L4    1, 2, 4                   12 of 12
+      H100  1, 2, 4, 8                16 of 16
 
       Kubernetes per node GPU availability
-      NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-      my-cluster-0               L4        4           4
-      my-cluster-1               L4        4           4
-      my-cluster-2               L4        2           2
-      my-cluster-3               L4        2           2
-      my-cluster-4               H100      8           8
-      my-cluster-5               H100      8           8
+      NODE                       GPU       UTILIZATION
+      my-cluster-0               L4        4 of 4
+      my-cluster-1               L4        4 of 4
+      my-cluster-2               L4        2 of 2
+      my-cluster-3               L4        2 of 2
+      my-cluster-4               H100      8 of 8
+      my-cluster-5               H100      8 of 8
 
-      $ sky launch --cloud k8s --gpus H100:1 -- nvidia-smi
+      $ sky launch --infra k8s --gpus H100:1 -- nvidia-smi
 
    .. tip::
 
@@ -189,27 +194,27 @@ You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi
 
    # ~/.sky/config.yaml
     allowed_contexts:
-      - cluster1
-      - cluster2
+      - cluster1-ctx
+      - cluster2-ctx
 
 
 .. code-block:: bash
 
     # Run on cluster1
-    sky launch --cloud k8s --region cluster1 -- echo "Running on cluster 1"
+    sky launch --infra k8s/cluster1-ctx -- echo "Running on cluster 1"
 
     # Run on cluster2
-    sky launch --cloud k8s --region cluster2 -- echo "Running on cluster 2"
+    sky launch --infra k8s/cluster2-ctx -- echo "Running on cluster 2"
 
     # Let SkyPilot automatically select the cluster with available resources
-    sky launch --cloud k8s -- echo "Running on SkyPilot selected cluster"
+    sky launch --infra k8s -- echo "Running on SkyPilot selected cluster"
 
 You can view the available clusters and GPUs using:
 
 .. code-block:: bash
 
     # List GPUs on cluster1
-    sky show-gpus --cloud k8s --region cluster1
+    sky show-gpus --infra k8s/cluster1-ctx
 
     # List GPUs on cluster2
-    sky show-gpus --cloud k8s --region cluster2
+    sky show-gpus --infra k8s/cluster2-ctx

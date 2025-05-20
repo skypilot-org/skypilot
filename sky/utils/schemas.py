@@ -33,11 +33,75 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
+_AUTOSTOP_SCHEMA = {
+    'anyOf': [
+        {
+            # Use boolean to disable autostop completely, e.g.
+            #   autostop: false
+            'type': 'boolean',
+        },
+        {
+            # Shorthand to set idle_minutes by directly specifying, e.g.
+            #   autostop: 5
+            'type': 'integer',
+            'minimum': 0,
+        },
+        {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'idle_minutes': {
+                    'type': 'integer',
+                    'minimum': 0,
+                },
+                'down': {
+                    'type': 'boolean',
+                },
+            },
+        },
+    ],
+}
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
+
+    # Building the regex pattern for the infra field
+    # Format: cloud[/region[/zone]] or wildcards or kubernetes context
+    # Match any cloud name (case insensitive)
+    all_clouds = list(service_catalog.ALL_CLOUDS)
+    all_clouds.remove('kubernetes')
+    cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
+
+    # Optional /region followed by optional /zone
+    # /[^/]+ matches a slash followed by any characters except slash (region or
+    # zone name)
+    # The outer (?:...)? makes the entire region/zone part optional
+    region_zone_pattern = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Wildcard patterns:
+    # 1. * - any cloud
+    # 2. */region - any cloud with specific region
+    # 3. */*/zone - any cloud, any region, specific zone
+    wildcard_cloud = '\\*'  # Wildcard for cloud
+    wildcard_with_region = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Kubernetes specific pattern - matches:
+    # 1. Just the word "kubernetes" or "k8s" by itself
+    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain
+    # slashes)
+    kubernetes_pattern = '(?i:kubernetes|k8s)(?:/.+)?'
+
+    # Combine all patterns with alternation (|)
+    # ^ marks start of string, $ marks end of string
+    infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
+                     f'{wildcard_cloud}{wildcard_with_region}|'
+                     f'{kubernetes_pattern})$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -53,6 +117,21 @@ def _get_single_resources_schema():
             },
             'zone': {
                 'type': 'string',
+            },
+            'infra': {
+                'type': 'string',
+                'description':
+                    ('Infrastructure specification in format: '
+                     'cloud[/region[/zone]]. Use "*" as a wildcard.'),
+                # Pattern validates:
+                # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
+                #    "aws/us-east-1/us-east-1a"
+                # 2. Wildcard patterns - e.g. "*", "*/us-east-1",
+                #    "*/*/us-east-1a", "aws/*/us-east-1a"
+                # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
+                #    "k8s/context-name",
+                #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
+                'pattern': infra_pattern,
             },
             'cpus': {
                 'anyOf': [{
@@ -165,6 +244,7 @@ def _get_single_resources_schema():
                     'type': 'null',
                 }]
             },
+            'autostop': _AUTOSTOP_SCHEMA,
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -725,29 +805,6 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
-    autostop_schema = {
-        'anyOf': [
-            {
-                # Use boolean to disable autostop completely, e.g.
-                #   autostop: false
-                'type': 'boolean',
-            },
-            {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'idle_minutes': {
-                        'type': 'integer',
-                        'minimum': 0,
-                    },
-                    'down': {
-                        'type': 'boolean',
-                    },
-                },
-            },
-        ],
-    }
     controller_resources_schema = {
         'type': 'object',
         'required': [],
@@ -762,7 +819,7 @@ def get_config_schema():
                     'high_availability': {
                         'type': 'boolean',
                     },
-                    'autostop': autostop_schema,
+                    'autostop': _AUTOSTOP_SCHEMA,
                 }
             },
             'bucket': {
@@ -836,6 +893,12 @@ def get_config_schema():
                 },
                 'enable_gvnic': {
                     'type': 'boolean'
+                },
+                'enable_gpu_direct': {
+                    'type': 'boolean'
+                },
+                'placement_policy': {
+                    'type': 'string',
                 },
                 'vpc_name': {
                     'oneOf': [
@@ -966,7 +1029,9 @@ def get_config_schema():
         'nebius': {
             'type': 'object',
             'required': [],
-            'properties': {},
+            'properties': {
+                **_NETWORK_CONFIG_SCHEMA,
+            },
             'additionalProperties': {
                 'type': 'object',
                 'required': [],

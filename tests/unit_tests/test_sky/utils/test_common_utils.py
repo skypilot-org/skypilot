@@ -9,6 +9,64 @@ from sky.utils import common_utils
 MOCKED_USER_HASH = 'ab12cd34'
 
 
+class TestTruncateLongString:
+
+    def test_no_truncation_needed(self):
+        s = "short string"
+        result = common_utils.truncate_long_string(s, 15)
+        assert result == s
+
+    def test_end_truncation(self):
+        s = "this is a very long string that needs truncation"
+        result = common_utils.truncate_long_string(s, 20)
+        assert len(result) <= 20 + 3  # +3 for '...'
+        assert result.endswith('...')
+        assert result.startswith('this is a very')
+
+    def test_middle_truncation(self):
+        s = "us-west-2-availability-zone-1"
+        result = common_utils.truncate_long_string(s, 20, truncate_middle=True)
+        assert len(result) <= 20
+        assert '...' in result
+        assert result.startswith('us-west')
+        assert result.endswith('zone-1')
+
+    def test_middle_truncation_odd_length(self):
+        s = "us-west-2-availability-zone-1"
+        result = common_utils.truncate_long_string(s, 15, truncate_middle=True)
+        assert len(result) <= 15
+        assert '...' in result
+        assert result.startswith('us-w')
+        assert result.endswith('ne-1')
+
+    def test_middle_truncation_very_short(self):
+        s = "us-west-2-availability-zone-1"
+        result = common_utils.truncate_long_string(s, 3, truncate_middle=True)
+        assert result == '...'
+
+    def test_empty_string(self):
+        assert common_utils.truncate_long_string('', 10) == ''
+
+    def test_exact_length_no_truncation(self):
+        assert common_utils.truncate_long_string(
+            'abcde', 5, truncate_middle=True) == 'abcde'
+
+    def test_one_less_than_length(self):
+        assert common_utils.truncate_long_string('abcde',
+                                                 4,
+                                                 truncate_middle=True) == 'a...'
+
+    def test_middle_truncation_even_length(self):
+        assert common_utils.truncate_long_string(
+            'abcdefghijklmnopqrstuvwxyz', 10,
+            truncate_middle=True) == 'abcd...xyz'
+
+    def test_middle_truncation_odd_max_length(self):
+        assert common_utils.truncate_long_string(
+            'abcdefghijklmnopqrstuvwxyz', 11,
+            truncate_middle=True) == 'abcd...wxyz'
+
+
 class TestCheckClusterNameIsValid:
 
     def test_check(self):

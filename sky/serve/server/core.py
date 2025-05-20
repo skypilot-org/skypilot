@@ -219,17 +219,12 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        controller_idle_minutes_to_autostop, controller_down = (
-            controller_utils.get_controller_autostop_config(
-                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER))
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
             controller_job_id, controller_handle = execution.launch(
                 task=controller_task,
                 cluster_name=controller_name,
-                idle_minutes_to_autostop=controller_idle_minutes_to_autostop,
-                down=controller_down,
                 retry_until_up=True,
                 _disable_controller_check=True,
             )

@@ -301,10 +301,10 @@ Job statuses can be checked via ``sky jobs queue``:
   Fetching managed jobs...
   Managed jobs
   In progress tasks: 10 RUNNING
-  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-  10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
-  9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
-  8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
+  ID  TASK  NAME        REQUESTED   SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  10  -     train-job10 1x[V100:4]  5 mins ago   5m 5s          1m 12s        0            RUNNING
+  9   -     train-job9  1x[V100:4]  6 mins ago   6m 11s         2m 23s        0            RUNNING
+  8   -     train-job8  1x[V100:4]  7 mins ago   7m 15s         3m 31s        0            RUNNING
   ...
 
 

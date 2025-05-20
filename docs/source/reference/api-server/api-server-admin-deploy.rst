@@ -22,29 +22,9 @@ Prerequisites
 
     You can also deploy the API server on cloud VMs using an existing SkyPilot installation. See :ref:`sky-api-server-cloud-deploy`.
 
-Step 1: Create a namespace and add Helm repository
---------------------------------------------------
-
-The API server will be deployed in a namespace of your choice. You can either create the namespace manually:
-
-.. code-block:: bash
-
-    # The NAMESPACE variable will be used throughout the guide
-    NAMESPACE=skypilot
-    kubectl create namespace $NAMESPACE
-
-Or, let Helm create it automatically by adding the ``--create-namespace`` flag to the helm install command in Step 2.
-
-Next, add the SkyPilot Helm repository:
-
-.. code-block:: bash
-
-    helm repo add skypilot https://helm.skypilot.co
-    helm repo update
-
 .. _sky-api-server-helm-deploy-command:
 
-Step 2: Deploy the API server Helm chart
+Step 1: Deploy the API server Helm chart
 ----------------------------------------
 
 Install the SkyPilot Helm chart with the following command:
@@ -55,37 +35,40 @@ Install the SkyPilot Helm chart with the following command:
 
 .. code-block:: bash
 
+    # Ensure the helm repository is added and up to date
+    helm repo add skypilot https://helm.skypilot.co
+    helm repo update
+
     # The following variables will be used throughout the guide
+    # NAMESPACE is the namespace to deploy the API server in
+    NAMESPACE=skypilot
+    # RELEASE_NAME is the name of the helm release, must be unique within the namespace
     RELEASE_NAME=skypilot
+    # Replace with your username and password to configure the basic auth credentials for the API server
     WEB_USERNAME=skypilot
-    # Replace with your password to configure the password for the API server
     WEB_PASSWORD=yourpassword
     AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+    # Deploy the API server
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
       --create-namespace \
       --set ingress.authCredentials=$AUTH_STRING
 
-The ``--namespace`` flag specifies which namespace to deploy the API server in, and ``--create-namespace`` will create the namespace if it doesn't exist.
+.. dropdown:: Flags explanation
 
-To install a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
+    Here is a breakdown of the flags used in the command above:
+
+    * ``upgrade --install``: Upgrade the API server if it already exists, or install it if it doesn't exist.
+    * ``--devel``: Use the latest development version of the SkyPilot helm chart. To use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
+    * ``--namespace $NAMESPACE``: Specify the namespace to deploy the API server in.
+    * ``--create-namespace``: Create the namespace if it doesn't exist.
+    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials for the API server.
+
+    For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
 .. tip::
 
     The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for more clouds and Kubernetes clusters.
-
-.. dropdown:: Use existing basic auth credentials
-
-    If you already have a Kubernetes secret containing basic auth credentials, you can use it directly by setting ``ingress.authSecret`` instead of ``ingress.authCredentials``:
-
-    .. code-block:: bash
-
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-          --namespace $NAMESPACE \
-          --create-namespace \
-          --set ingress.authSecret=my-existing-auth-secret
-
-    The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
 After the API server is deployed, you can inspect the API server pod status with:
 
@@ -97,7 +80,7 @@ You should see the pod is initializing and finally becomes running and ready. If
 
 .. _sky-get-api-server-url:
 
-Step 3: Get the API server URL
+Step 2: Get the API server URL
 ------------------------------
 
 Once the API server is deployed, we can fetch the API server URL. We use nginx ingress to expose the API server.
@@ -160,7 +143,7 @@ Our default of using a NodePort service is the recommended way to expose the API
             To avoid frequent IP address changes on nodes by your cloud provider, you can attach a static IP address to your nodes (`instructions for GKE <https://cloud.google.com/compute/docs/ip-addresses/configure-static-external-ip-address>`_) and use it as the ``NODE_IP`` in the command above.
 
 
-Step 4: Test the API server
+Step 3: Test the API server
 ---------------------------
 
 Test the API server by curling the health endpoint:
@@ -350,6 +333,79 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set runpodCredentials.enabled=true \
                     --set runpodCredentials.runpodSecretName=your_secret_name
 
+    .. tab-item:: Lambda
+        :sync: lambda-creds-tab
+
+        SkyPilot API server uses an **API key** to authenticate with Lambda. To configure Lambda access, go to the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page on your Lambda Cloud console and generate an **API key**.
+
+        Once the key is generated, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic lambda-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Lambda credentials by setting ``lambdaCredentials.enabled=true``
+
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              # keep the Helm chart values set in the previous step
+              --reuse-values \
+              --set lambdaCredentials.enabled=true
+
+        .. dropdown:: Use existing Lambda credentials
+
+            You can also set the following values to use a secret that already contains your Lambda credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set lambdaCredentials.enabled=true \
+                    --set lambdaCredentials.lambdaSecretName=your_secret_name
+
+    .. tab-item:: Nebius
+        :sync: nebius-creds-tab
+
+        We use service accounts to authenticate with Nebius. Refer to :ref:`Nebius service account <nebius-service-account>` guide on how to set up a service account.
+
+        Once you have the JSON credentials for your service account, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic nebius-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials.json=$HOME/.nebius/credentials.json
+
+        When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
+
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              # keep the Helm chart values set in the previous step
+              --reuse-values \
+              --set nebiusCredentials.enabled=true \
+              --set nebiusCredentials.tenantId=YOUR_TENANT_ID
+
+        .. dropdown:: Use existing Nebius credentials
+
+            You can also set the following values to use a secret that already contains your Nebius credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set nebiusCredentials.enabled=true \
+                    --set nebiusCredentials.nebiusSecretName=your_secret_name
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
@@ -478,7 +534,17 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
       --reuse-values \
       --set-file apiService.config=config.yaml
 
-You can also directly set config values in the ``values.yaml`` file.
+You can also directly set config values in the ``values.yaml`` file, e.g.:
+
+.. code-block:: yaml
+
+    apiService:
+      config: |
+        allowed_clouds:
+        - aws
+        - kubernetes
+
+To apply a new config, rerun ``helm upgrade`` with the updated ``values.yaml`` file.
 
 Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -632,3 +698,9 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. tip::
 
     If you are installing SkyPilot API client in the same environment, we recommend using a different python environment (venv, conda, etc.) to avoid conflicts with the SkyPilot installation used to deploy the API server.
+
+
+.. toctree::
+   :hidden:
+
+    Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>

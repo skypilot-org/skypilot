@@ -6,7 +6,7 @@ service:
 
 resources:
   ports: 8081
-  cloud: azure
+  infra: azure
 
 workdir: examples/serve/http_server
 

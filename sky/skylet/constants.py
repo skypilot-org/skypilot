@@ -370,6 +370,9 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
     ('gcp', 'managed_instance_group'),
+    ('gcp', 'enable_gvnic'),
+    ('gcp', 'enable_gpu_direct'),
+    ('gcp', 'placement_policy'),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.

@@ -7,7 +7,10 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip, REFRESH_INTERVAL } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+} from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -324,15 +327,15 @@ export function ClusterTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
+                onClick={() => requestSort('infra')}
               >
-                Resources{getSortDirection('resources_str')}
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
+                onClick={() => requestSort('resources_str')}
               >
-                Region{getSortDirection('region')}
+                Resources{getSortDirection('resources_str')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -382,8 +385,22 @@ export function ClusterTable({
                         {item.workspace || 'default'}
                       </Link>
                     </TableCell>
-                    <TableCell>{item.resources_str}</TableCell>
-                    <TableCell>{item.region}</TableCell>
+                    <TableCell>
+                      <NonCapitalizedTooltip
+                        content={item.full_infra || item.infra}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>{item.infra}</span>
+                      </NonCapitalizedTooltip>
+                    </TableCell>
+                    <TableCell>
+                      <NonCapitalizedTooltip
+                        content={item.resources_str_full || item.resources_str}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>{item.resources_str}</span>
+                      </NonCapitalizedTooltip>
+                    </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
                     <TableCell>
                       <div className="flex flex-col">

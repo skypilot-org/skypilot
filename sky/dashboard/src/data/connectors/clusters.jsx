@@ -4,6 +4,38 @@ import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import { ENDPOINT } from '@/data/connectors/constants';
 
+/**
+ * Truncates a string in the middle, preserving parts from beginning and end.
+ * @param {string} str - The string to truncate
+ * @param {number} maxLength - Maximum length of the truncated string
+ * @return {string} - Truncated string
+ */
+function truncateMiddle(str, maxLength = 15) {
+  if (!str || str.length <= maxLength) return str;
+
+  // Reserve 3 characters for '...'
+  if (maxLength <= 3) return '...';
+
+  // Calculate how many characters to keep from beginning and end
+  const halfLength = Math.floor((maxLength - 3) / 2);
+  const remainder = (maxLength - 3) % 2;
+
+  // Keep one more character at the beginning if maxLength - 3 is odd
+  const startLength = halfLength + remainder;
+  const endLength = halfLength;
+
+  // When endLength is 0, just show the start part and '...'
+  if (endLength === 0) {
+    return str.substring(0, startLength) + '...';
+  }
+
+  return (
+    str.substring(0, startLength) +
+    '...' +
+    str.substring(str.length - endLength)
+  );
+}
+
 const clusterStatusMap = {
   UP: 'RUNNING',
   STOPPED: 'STOPPED',
@@ -77,16 +109,33 @@ export async function getClusters({ clusterNames = null } = {}) {
       const cost = costKey
         ? costs[costKey] || { total_cost: 0, cost_per_hour: 0 }
         : { total_cost: 0, cost_per_hour: 0 };
+      let region_or_zone = '';
+      if (cluster.zone) {
+        region_or_zone = cluster.zone;
+      } else {
+        region_or_zone = cluster.region;
+      }
+      // Store the full value before truncation
+      const full_region_or_zone = region_or_zone;
+      // Truncate region_or_zone in the middle if it's too long
+      if (region_or_zone && region_or_zone.length > 25) {
+        region_or_zone = truncateMiddle(region_or_zone, 25);
+      }
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
-        infra: cluster.cloud,
-        region: cluster.region,
+        infra: region_or_zone
+          ? cluster.cloud + ' (' + region_or_zone + ')'
+          : cluster.cloud,
+        full_infra: full_region_or_zone
+          ? `${cluster.cloud} (${full_region_or_zone})`
+          : cluster.cloud,
         cpus: cluster.cpus,
         mem: cluster.memory,
         gpus: cluster.accelerators,
         resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,

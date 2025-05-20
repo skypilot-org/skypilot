@@ -159,6 +159,14 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
+                <div className="text-base mt-1">
+                  <StatusBadge status={clusterData.status} />
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
                   Cluster
                 </div>
                 <div className="text-base mt-1">{clusterData.cluster}</div>
@@ -168,11 +176,9 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                 <div className="text-base mt-1">{clusterData.user}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
-                  Status
-                </div>
+                <div className="text-gray-600 font-medium text-base">Infra</div>
                 <div className="text-base mt-1">
-                  <StatusBadge status={clusterData.status} />
+                  {clusterData.full_infra || clusterData.infra || 'N/A'}
                 </div>
               </div>
               <div>
@@ -180,15 +186,19 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                   Resources
                 </div>
                 <div className="text-base mt-1">
-                  {clusterData.resources_str || 'N/A'}
+                  {clusterData.resources_str_full ||
+                    clusterData.resources_str ||
+                    'N/A'}
                 </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">
-                  Region
+                  Started
                 </div>
                 <div className="text-base mt-1">
-                  {clusterData.region || 'N/A'}
+                  {clusterData.time
+                    ? new Date(clusterData.time).toLocaleString()
+                    : 'N/A'}
                 </div>
               </div>
             </div>

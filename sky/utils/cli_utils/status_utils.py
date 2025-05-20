@@ -33,17 +33,15 @@ class StatusColumn:
     def __init__(self,
                  name: str,
                  calc_func: Callable,
-                 trunc_length: int = 0,
+                 truncate: bool = True,
                  show_by_default: bool = True):
         self.name = name
         self.calc_func = calc_func
-        self.trunc_length = trunc_length
+        self.truncate: bool = truncate
         self.show_by_default = show_by_default
 
     def calc(self, record):
-        val = self.calc_func(record)
-        if self.trunc_length != 0:
-            val = common_utils.truncate_long_string(str(val), self.trunc_length)
+        val = self.calc_func(record, self.truncate)
         return val
 
 
@@ -63,24 +61,30 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     status_columns = [
         StatusColumn('NAME', _get_name),
-        StatusColumn('USER', _get_user_name, show_by_default=show_user),
-        StatusColumn('USER_ID', _get_user_hash, show_by_default=False),
+    ]
+    if show_user:
+        status_columns.append(StatusColumn('USER', _get_user_name))
+        status_columns.append(
+            StatusColumn('USER_ID', _get_user_hash, show_by_default=False))
+
+    status_columns += [
         StatusColumn('WORKSPACE',
                      _get_workspace,
                      show_by_default=show_workspaces),
-        StatusColumn('LAUNCHED', _get_launched),
-        StatusColumn('RESOURCES',
-                     _get_resources,
-                     trunc_length=70 if not show_all else 0),
-        StatusColumn('REGION', _get_region, show_by_default=False),
-        StatusColumn('ZONE', _get_zone, show_by_default=False),
+        StatusColumn('INFRA', _get_infra, truncate=not show_all),
+        StatusColumn('RESOURCES', _get_resources, truncate=not show_all),
         StatusColumn('STATUS', _get_status_colored),
         StatusColumn('AUTOSTOP', _get_autostop),
-        StatusColumn('HEAD_IP', _get_head_ip, show_by_default=False),
-        StatusColumn('COMMAND',
-                     _get_command,
-                     trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0),
+        StatusColumn('LAUNCHED', _get_launched),
     ]
+    if show_all:
+        status_columns += [
+            StatusColumn('HEAD_IP', _get_head_ip, show_by_default=False),
+            StatusColumn('COMMAND',
+                         _get_command,
+                         truncate=not show_all,
+                         show_by_default=False),
+        ]
 
     columns = []
     for status_column in status_columns:
@@ -161,10 +165,10 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
     status_columns = [
         StatusColumn('NAME', _get_name),
         StatusColumn('LAUNCHED', _get_launched),
-        StatusColumn('DURATION', _get_duration, trunc_length=20),
+        StatusColumn('DURATION', _get_duration, truncate=False),
         StatusColumn('RESOURCES',
                      _get_resources_for_cost_report,
-                     trunc_length=70 if not show_all else 0),
+                     truncate=False),
         StatusColumn('STATUS',
                      _get_status_for_cost_report,
                      show_by_default=True),
@@ -202,12 +206,13 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             controller = controller_utils.Controllers.from_name(controller_name)
             if controller is None:
                 raise ValueError(f'Controller {controller_name} not found.')
-            autostop_minutes, _ = (
-                controller_utils.get_controller_autostop_config(
-                    controller=controller))
-            if autostop_minutes is not None:
+            controller_handle: backends.CloudVmRayResourceHandle = (
+                cluster_records[0]['handle'])
+            autostop_config = (
+                controller_handle.launched_resources.autostop_config)
+            if autostop_config is not None:
                 autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
-                                f'idle for {autostop_minutes}min)'
+                                f'idle for {autostop_config.idle_minutes}min)'
                                 f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
@@ -221,48 +226,73 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # Some of these lambdas are invoked on both _ClusterRecord and
 # _ClusterCostReportRecord, which is okay as we guarantee the queried fields
 # exist in those cases.
-_get_name = (lambda cluster_record: cluster_record['name'])
-_get_user_hash = (lambda cluster_record: cluster_record['user_hash'])
-_get_workspace = (lambda cluster_record: cluster_record['workspace'])
-_get_user_name = (lambda cluster_record: cluster_record.get('user_name', '-'))
-_get_launched = (lambda cluster_record: log_utils.readable_time_duration(
+_get_name = (lambda cluster_record, _: cluster_record['name'])
+_get_user_hash = (lambda cluster_record, _: cluster_record['user_hash'])
+_get_user_name = (
+    lambda cluster_record, _: cluster_record.get('user_name', '-'))
+_get_launched = (lambda cluster_record, _: log_utils.readable_time_duration(
     cluster_record['launched_at']))
-_get_region = (
-    lambda clusters_status: clusters_status['handle'].launched_resources.region)
-_get_command = (lambda cluster_record: cluster_record['last_use'])
-_get_duration = (lambda cluster_record: log_utils.readable_time_duration(
+_get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 
 
-def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:
+def _get_command(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+    command = cluster_record.get('last_use', '-')
+    if truncate:
+        return common_utils.truncate_long_string(command, COMMAND_TRUNC_LENGTH)
+    return command
+
+
+def _get_status(cluster_record: _ClusterRecord,
+                truncate: bool = True) -> status_lib.ClusterStatus:
+    del truncate
     return cluster_record['status']
 
+def _get_workspace(cluster_record: _ClusterRecord,
+                   truncate: bool = True) -> str:
+    del truncate
+    return cluster_record['workspace']
 
-def _get_status_colored(cluster_record: _ClusterRecord) -> str:
+
+def _get_status_colored(cluster_record: _ClusterRecord,
+                        truncate: bool = True) -> str:
+    del truncate
     return _get_status(cluster_record).colored_str()
 
 
-def _get_resources(cluster_record: _ClusterRecord) -> str:
-    if 'resources_str' in cluster_record:
-        return cluster_record['resources_str']
+def _get_resources(cluster_record: _ClusterRecord,
+                   truncate: bool = True) -> str:
+    """Get the resources information for a cluster.
+
+    Returns:
+        A string in one of the following formats:
+        - For cloud VMs: "Nx instance_type" (e.g., "1x m6i.2xlarge")
+        - For K8S/SSH: "Nx (...)"
+        - "-" if no resource information is available
+    """
     handle = cluster_record['handle']
-    if isinstance(handle, backends.LocalDockerResourceHandle):
-        resources_str = 'docker'
-    elif isinstance(handle, backends.CloudVmRayResourceHandle):
-        resources_str = resources_utils.get_readable_resources_repr(handle)
-    else:
-        raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-    return resources_str
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
+        launched_resources = handle.launched_resources
+        if launched_resources is None:
+            return '-'
+
+        # For cloud VMs, show instance type directly
+        # For K8S/SSH, show (...) as the resource type
+        resources_str = cluster_record.get('resources_str', None)
+        if not truncate:
+            resources_str_full = cluster_record.get('resources_str_full', None)
+            if resources_str_full is not None:
+                resources_str = resources_str_full
+        if resources_str is None:
+            resources_str = resources_utils.get_readable_resources_repr(
+                handle, simplify=truncate)
+
+        return resources_str
+    return '-'
 
 
-def _get_zone(cluster_record: _ClusterRecord) -> str:
-    zone_str = cluster_record['handle'].launched_resources.zone
-    if zone_str is None:
-        zone_str = '-'
-    return zone_str
-
-
-def _get_autostop(cluster_record: _ClusterRecord) -> str:
+def _get_autostop(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+    del truncate
     autostop_str = ''
     separation = ''
     if cluster_record['autostop'] >= 0:
@@ -277,7 +307,8 @@ def _get_autostop(cluster_record: _ClusterRecord) -> str:
     return autostop_str
 
 
-def _get_head_ip(cluster_record: _ClusterRecord) -> str:
+def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+    del truncate  # Unused
     handle = cluster_record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return '-'
@@ -290,6 +321,25 @@ def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
     # autostop < 0 means nothing scheduled.
     return cluster_record['autostop'] >= 0 and _get_status(
         cluster_record) != status_lib.ClusterStatus.STOPPED
+
+
+def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+    """Get the infrastructure information for a cluster.
+
+    Returns:
+        A string in one of the following formats:
+        - AWS/region (e.g., "AWS/us-east-1")
+        - K8S/context (e.g., "K8S/my-ctx")
+        - SSH/hostname (e.g., "SSH/my-tobi-box")
+        - "-" if no infrastructure information is available
+    """
+    handle = cluster_record['handle']
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
+        if handle.launched_resources is None:
+            # If launched_resources is None, try to get infra from the record
+            return cluster_record.get('infra', '-')
+        return handle.launched_resources.infra.formatted_str(truncate)
+    return '-'
 
 
 # ---- 'sky cost-report' helper functions below ----
@@ -348,14 +398,13 @@ def show_kubernetes_cluster_status_table(
         show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
-        StatusColumn('USER', lambda c: c.user),
-        StatusColumn('NAME', lambda c: c.cluster_name),
-        StatusColumn('LAUNCHED',
-                     lambda c: log_utils.readable_time_duration(c.launched_at)),
-        StatusColumn('RESOURCES',
-                     lambda c: c.resources_str,
-                     trunc_length=70 if not show_all else 0),
-        StatusColumn('STATUS', lambda c: c.status.colored_str()),
+        StatusColumn('USER', lambda c, _: c.user),
+        StatusColumn('NAME', lambda c, _: c.cluster_name),
+        StatusColumn('RESOURCES', lambda c, _: c.resources_str, truncate=False),
+        StatusColumn('STATUS', lambda c, _: c.status.colored_str()),
+        StatusColumn(
+            'LAUNCHED',
+            lambda c, _: log_utils.readable_time_duration(c.launched_at)),
         # TODO(romilb): We should consider adding POD_NAME field here when --all
         #  is passed to help users fetch pod name programmatically.
     ]

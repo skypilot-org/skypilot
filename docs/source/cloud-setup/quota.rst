@@ -17,7 +17,7 @@ AWS
 
 1. Go to the `EC2 Quotas console <https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas>`_.
 2. **Select a region** on the top right.
-3. Choose an EC2 instance type from the list (e.g, ``Running On-Demand P instances`` or ``All P Spot Instance Requests``). Use ``sky show-gpus --cloud aws --all`` or check `here <https://aws.amazon.com/ec2/instance-types/>`__ for more instance types.
+3. Choose an EC2 instance type from the list (e.g, ``Running On-Demand P instances`` or ``All P Spot Instance Requests``). Use ``sky show-gpus --infra aws --all`` or check `here <https://aws.amazon.com/ec2/instance-types/>`__ for more instance types.
 4. Click the quota name, and then choose **Request quota increase**.
 5. For **Change quota value**, enter the new value.
 6. Choose **Request**.
@@ -57,7 +57,7 @@ OCI
 1. Go to the `OCI Limits, Quotas and Usage console <https://cloud.oracle.com/limits>`_ to check your current resources status.
 2. Click the **request a service limit increase** link on the page if you want to increase quotas.
 3. Choose a **Service Category** from the list (e.g, ``Compute``). 
-4. Choose a **Resource** from the list (e.g, ``GPUs for GPU.A10 based VM and BM Instances``). Use ``sky show-gpus --cloud oci --all`` or check `here <https://docs.oracle.com/en-us/iaas/Content/Compute/References/computeshapes.htm>`__ for more instance types.
+4. Choose a **Resource** from the list (e.g, ``GPUs for GPU.A10 based VM and BM Instances``). Use ``sky show-gpus --infra oci --all`` or check `here <https://docs.oracle.com/en-us/iaas/Content/Compute/References/computeshapes.htm>`__ for more instance types.
 5. Enter the **Limit** field for your new limit and **Reason for request** for justification.
 6. Click **Create Support Request** to submit.
 7. You may check `OCI Service Limits <https://docs.oracle.com/en-us/iaas/Content/General/Concepts/servicelimits.htm#computelimits>`_ for more information.

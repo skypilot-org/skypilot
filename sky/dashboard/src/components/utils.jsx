@@ -90,6 +90,24 @@ export const CustomTooltip = ({ children, ...props }) => {
   );
 };
 
+export const NonCapitalizedTooltip = ({ children, ...props }) => {
+  const content = props.content;
+  props.content = undefined;
+  return (
+    <Tooltip
+      {...DEFAULT_TOOLTIP_PROPS}
+      {...props}
+      content={
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded">
+          {content}
+        </span>
+      }
+    >
+      {children}
+    </Tooltip>
+  );
+};
+
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
   if (!durationInSeconds && durationInSeconds !== 0) return '-';

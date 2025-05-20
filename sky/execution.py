@@ -226,11 +226,44 @@ def _execute(
     requested_features |= task.get_required_cloud_features()
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
+    # Figure out autostop config.
+    # Note: Ideally this can happen after provisioning, so we can check the
+    # autostop config from the launched resources. Before provisioning,
+    # we aren't sure which resources will be launched, and different
+    # resources may have different autostop configs.
     if isinstance(backend, backends.CloudVmRayBackend):
         if down and idle_minutes_to_autostop is None:
             # Use auto{stop,down} to terminate the cluster after the task is
             # done.
             idle_minutes_to_autostop = 0
+        elif not down and idle_minutes_to_autostop is None:
+            # No autostop config specified on command line, use the
+            # config from resources.
+            # TODO(cooperc): This should be done after provisioning, in order to
+            # support different autostop configs for different resources.
+            # Blockers:
+            # - Need autostop config to set requested_features before
+            #   provisioning.
+            # - Need to send info message about idle_minutes_to_autostop==0 here
+            # - Need to check if autostop is supported by the backend.
+            resources = list(task.resources)
+            for resource in resources:
+                if resource.autostop_config != resources[0].autostop_config:
+                    raise ValueError(
+                        'All resources must have the same autostop config.')
+            resource_autostop_config = resources[0].autostop_config
+
+            if resource_autostop_config is not None:
+                if resource_autostop_config.enabled:
+                    idle_minutes_to_autostop = (
+                        resource_autostop_config.idle_minutes)
+                    down = resource_autostop_config.down
+                else:
+                    # Autostop is explicitly disabled, so cancel it if it's
+                    # already set.
+                    assert not resource_autostop_config.enabled
+                    idle_minutes_to_autostop = -1
+                    down = False
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
                 # idle_minutes_to_autostop=0 can cause the following problem:
@@ -432,7 +465,7 @@ def launch(
             import sky
             task = sky.Task(run='echo hello SkyPilot')
             task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+                sky.Resources(infra='aws', accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
 

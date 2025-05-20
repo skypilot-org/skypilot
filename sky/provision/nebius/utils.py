@@ -158,7 +158,7 @@ def start(instance_id: str) -> None:
 
 def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
            preset: str, region: str, image_family: str, disk_size: int,
-           user_data: str) -> str:
+           user_data: str, associate_public_ip_address: bool) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -242,7 +242,9 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
                     subnet_id=sub_net.items[0].metadata.id,
                     ip_address=nebius.compute().IPAddress(),
                     name='network-interface-0',
-                    public_ip_address=nebius.compute().PublicIPAddress())
+                    public_ip_address=nebius.compute().PublicIPAddress()
+                    if associate_public_ip_address else None,
+                )
             ]))).wait()
     instance_id = ''
     retry_count = 0

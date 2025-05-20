@@ -21,7 +21,7 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
@@ -50,7 +50,7 @@ Install SkyPilot using pip:
           conda create -y -n sky python=3.10
           conda activate sky
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[aws]"
@@ -83,7 +83,7 @@ Install SkyPilot using pip:
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
 
-          # Choose your cloud:
+          # Choose your infra:
 
           pip install -e ".[kubernetes]"
           pip install -e ".[aws]"
@@ -132,10 +132,10 @@ Installing via ``uv`` is also supported:
 .. code-block:: shell
 
   uv venv --seed --python 3.10
-  uv pip install --prerelease allow 'azure-cli>=2.65.0'
-  # Explicitly install prerelease dependency to work around https://docs.astral.sh/uv/pip/compatibility/#pre-release-compatibility
-  # Optionally only install specific clouds - e.g. 'skypilot[aws,gcp,kubernetes]'
-  uv pip install 'omegaconf>=2.4.0dev3' 'skypilot[all]'
+  uv pip install "skypilot[kubernetes,aws,gcp]"
+  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+  uv pip install --prerelease allow azure-cli
+  uv pip install "skypilot[all]"
 
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
@@ -228,6 +228,9 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
   cp /path/to/kubeconfig ~/.kube/config
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+
+.. tip::
+   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
 
 .. _aws-installation:
 

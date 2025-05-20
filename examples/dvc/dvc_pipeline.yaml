@@ -2,8 +2,8 @@
 name: dvc-pipeline
 resources:
   accelerators: T4:1
-  cloud: aws
-  region: us-east-2
+  infra: aws/us-east-2
+
 workdir: .
 file_mounts: 
   ~/.ssh/id_rsa: ~/.ssh/id_rsa
