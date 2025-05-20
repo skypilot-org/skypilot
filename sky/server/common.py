@@ -302,6 +302,13 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
+        # Because the log file is opened using a with statement, it may seem
+        # that the file will be closed when the with statement is exited causing
+        # the child process to be unable to write to the log file.
+        # However, Popen makes the file descriptor inheritable which means
+        # the child process will inherit its own copy of the fd,
+        # independent of the parent's fd table which enables to child process
+        # to continue writing to the log file.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         with open(log_path, 'w', encoding='utf-8') as log_file:
