@@ -11,7 +11,6 @@ import { useMobile } from '@/hooks/useMobile';
 import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
 import { NonCapitalizedTooltip } from '@/components/utils';
 
 // Set the refresh interval to 1 minute for GPU data
@@ -455,7 +454,8 @@ export function GPUs() {
             <div className="flex items-center mb-4">
               <h3 className="text-lg font-semibold">Kubernetes</h3>
               <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                {kubeContexts.length} contexts
+                {kubeContexts.length}{' '}
+                {kubeContexts.length === 1 ? 'context' : 'contexts'}
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -494,9 +494,7 @@ export function GPUs() {
                               (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
                             return acc;
                           }, {});
-                          return Object.entries(typeCounts)
-                            .map(([type, count]) => `${type} (${count})`)
-                            .join(', ');
+                          return Object.keys(typeCounts).join(', ');
                         })();
                         return (
                           <tr key={context} className="hover:bg-gray-50">

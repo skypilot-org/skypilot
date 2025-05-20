@@ -3347,33 +3347,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return returncode
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
-            if returncode == 255:
-                is_message_too_long = False
+
+            def _load_setup_log_and_match(match_str: str) -> bool:
                 try:
                     with open(os.path.expanduser(setup_log_path),
                               'r',
                               encoding='utf-8') as f:
-                        if 'too long' in f.read():
-                            is_message_too_long = True
+                        return match_str.lower() in f.read().lower()
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't crash the setup if we cannot read the log file.
                     # Instead, we should retry the setup with dumping the script
                     # to a file to be safe.
-                    logger.debug('Failed to read setup log file '
-                                 f'{setup_log_path}: {e}')
-                    is_message_too_long = True
-
-                if is_message_too_long:
-                    # If the setup script is too long, we retry it with dumping
-                    # the script to a file and running it with SSH. We use a
-                    # general length limit check before but it could be
-                    # inaccurate on some systems.
                     logger.debug(
-                        'Failed to run setup command inline due to '
-                        'command length limit. Dumping setup script to '
-                        'file and running it with SSH.')
-                    _dump_final_script(setup_script)
-                    returncode = _run_setup(setup_cmd)
+                        f'Failed to read setup log file {setup_log_path}: {e}')
+                    return True
+
+            if ((returncode == 255 and _load_setup_log_and_match('too long')) or
+                (returncode == 1 and
+                 _load_setup_log_and_match('request-uri too large'))):
+                # If the setup script is too long, we retry it with dumping
+                # the script to a file and running it with SSH. We use a
+                # general length limit check before but it could be
+                # inaccurate on some systems.
+                # When there is a cloudflare proxy in front of the remote, it
+                # could cause `414 Request-URI Too Large` error.
+                logger.debug('Failed to run setup command inline due to '
+                             'command length limit. Dumping setup script to '
+                             'file and running it with SSH.')
+                _dump_final_script(setup_script)
+                returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case
@@ -3489,18 +3491,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
-        if managed_job_dag is not None:
-            # Add the managed job to job queue database.
-            managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-            managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
-            # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, even if it needs to
-            # wait to be submitted.
-            # We cannot set the managed job to PENDING state in the job template
-            # (jobs-controller.yaml.j2), as it may need to wait for the run
-            # commands to be scheduled on the job controller in high-load cases.
-            job_submit_cmd += ' && ' + managed_job_code
+        def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
+            if managed_job_dag is not None:
+                # Add the managed job to job queue database.
+                managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                managed_job_code = managed_job_codegen.set_pending(
+                    job_id, managed_job_dag)
+                # Set the managed job to PENDING state to make sure that this
+                # managed job appears in the `sky jobs queue`, even if it needs
+                # to wait to be submitted.
+                # We cannot set the managed job to PENDING state in the job
+                # template (jobs-controller.yaml.j2), as it may need to wait for
+                # the run commands to be scheduled on the job controller in
+                # high-load cases.
+                job_submit_cmd += ' && ' + managed_job_code
+            return job_submit_cmd
+
+        job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3510,15 +3517,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # running a job. Necessitating calling `sky launch`.
         backend_utils.check_stale_runtime_on_remote(returncode, stderr,
                                                     handle.cluster_name)
-        if returncode == 255 and 'too long' in stdout + stderr:
+        output = stdout + stderr
+        if ((returncode == 255 and 'too long' in output.lower()) or
+            (returncode == 1 and 'request-uri too large' in output.lower())):
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
             # length limit check before but it could be inaccurate on some
             # systems.
+            # When there is a cloudflare proxy in front of the remote, it could
+            # cause `414 Request-URI Too Large` error.
             logger.debug('Failed to submit job due to command length limit. '
-                         'Dumping job to file and running it with SSH.')
+                         'Dumping job to file and running it with SSH. '
+                         f'Output: {output}')
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
+            job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
