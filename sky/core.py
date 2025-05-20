@@ -1187,8 +1187,7 @@ def local_down() -> None:
 
 
 @usage_lib.entrypoint
-def ssh_up(infra: Optional[str] = None,
-           cleanup: bool = False) -> None:
+def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     """Deploys or tears down a Kubernetes cluster on SSH targets.
     
     Args:

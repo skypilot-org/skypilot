@@ -3441,8 +3441,9 @@ def show_gpus(
                                          f' {quantity_filter}')
                     err_msg = (f'Resources{gpu_info_msg} not found '
                                'in SSH Node Pool. ')
-                    debug_msg = ('To show available accelerators in SSH Node Pools,'
-                                 ' run: sky show-gpus --cloud ssh ')
+                    debug_msg = (
+                        'To show available accelerators in SSH Node Pools,'
+                        ' run: sky show-gpus --cloud ssh ')
             else:
                 err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
                 debug_msg = 'To further debug, run: sky check '
@@ -3503,8 +3504,10 @@ def show_gpus(
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs.
         # Only count non-SSH contexts for aggregated table.
-        non_ssh_contexts = [ctx for ctx, _ in realtime_gpu_infos
-                           if not (ctx and ctx.startswith('ssh-'))]
+        non_ssh_contexts = [
+            ctx for ctx, _ in realtime_gpu_infos
+            if not (ctx and ctx.startswith('ssh-'))
+        ]
         if len(non_ssh_contexts) > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
@@ -3517,8 +3520,9 @@ def show_gpus(
         return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
     def _format_kubernetes_node_info_combined(
-            contexts_info: List[Tuple[str,
-                                      'models.KubernetesNodesInfo']], cloud_str: str = 'Kubernetes', context_title_str: str = 'CONTEXT') -> str:
+            contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            cloud_str: str = 'Kubernetes',
+            context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table(
             [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
 
@@ -3558,18 +3562,29 @@ def show_gpus(
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             show_node_info: bool,
             cloud_name: Optional[str] = None) -> Generator[str, None, None]:
-        
+
         # Separate out SSH Node Pool and Kubernetes contexts
-        ssh_node_pool_realtime_infos = [(ctx, realtime_info) for ctx, realtime_info in k8s_realtime_infos if ctx and ctx.startswith('ssh-')]
-        ssh_node_pool_all_nodes_info = [(ctx, node_info) for ctx, node_info in all_nodes_info if ctx and ctx.startswith('ssh-')]
-        k8s_realtime_infos = [(ctx, realtime_info) for ctx, realtime_info in k8s_realtime_infos if ctx and not ctx.startswith('ssh-')]
-        k8s_all_nodes_info = [(ctx, node_info) for ctx, node_info in all_nodes_info if ctx and not ctx.startswith('ssh-')]
+        ssh_node_pool_realtime_infos = [
+            (ctx, realtime_info)
+            for ctx, realtime_info in k8s_realtime_infos
+            if ctx and ctx.startswith('ssh-')
+        ]
+        ssh_node_pool_all_nodes_info = [(ctx, node_info)
+                                        for ctx, node_info in all_nodes_info
+                                        if ctx and ctx.startswith('ssh-')]
+        k8s_realtime_infos = [(ctx, realtime_info)
+                              for ctx, realtime_info in k8s_realtime_infos
+                              if ctx and not ctx.startswith('ssh-')]
+        k8s_all_nodes_info = [(ctx, node_info)
+                              for ctx, node_info in all_nodes_info
+                              if ctx and not ctx.startswith('ssh-')]
 
         # Only show Kubernetes info if cloud_name is None or kubernetes/k8s
-        if (cloud_name is None or cloud_name.lower() in ['kubernetes', 'k8s']) and k8s_realtime_infos:
+        if (cloud_name is None or cloud_name.lower()
+                in ['kubernetes', 'k8s']) and k8s_realtime_infos:
             yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                'Kubernetes GPUs'
-                f'{colorama.Style.RESET_ALL}')
+                   'Kubernetes GPUs'
+                   f'{colorama.Style.RESET_ALL}')
             # print total table
             if total_table is not None:
                 yield '\n'
@@ -3590,18 +3605,22 @@ def show_gpus(
 
             if show_node_info:
                 yield '\n'
-                yield _format_kubernetes_node_info_combined(k8s_all_nodes_info, cloud_str='Kubernetes', context_title_str='CONTEXT')
-            
+                yield _format_kubernetes_node_info_combined(
+                    k8s_all_nodes_info,
+                    cloud_str='Kubernetes',
+                    context_title_str='CONTEXT')
+
             # Only add a separator if both kubernetes and ssh will be shown
             if cloud_name is None and ssh_node_pool_realtime_infos:
-                yield '\n\n'                
+                yield '\n\n'
 
         # Only show SSH Node Pool info if cloud_name is None or ssh
-        if (cloud_name is None or cloud_name.lower() == 'ssh') and ssh_node_pool_realtime_infos:
+        if (cloud_name is None or
+                cloud_name.lower() == 'ssh') and ssh_node_pool_realtime_infos:
             yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-                'SSH Node Pools'
-                f'{colorama.Style.RESET_ALL}')
-            
+                   'SSH Node Pools'
+                   f'{colorama.Style.RESET_ALL}')
+
             # TODO(romilb): Add total table for SSH Node Pools?
 
             # print individual infos.
@@ -3619,7 +3638,10 @@ def show_gpus(
 
             if show_node_info:
                 yield '\n'
-                yield _format_kubernetes_node_info_combined(ssh_node_pool_all_nodes_info, cloud_str='SSH Node Pools', context_title_str='NODE_POOL')
+                yield _format_kubernetes_node_info_combined(
+                    ssh_node_pool_all_nodes_info,
+                    cloud_str='SSH Node Pools',
+                    context_title_str='NODE_POOL')
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3763,11 +3785,12 @@ def show_gpus(
                  all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
                      context=region, name_filter=name, quantity_filter=quantity)
 
-                yield from _format_kubernetes_realtime_gpu(total_table,
-                                                           k8s_realtime_infos,
-                                                           all_nodes_info,
-                                                           show_node_info=False,
-                                                           cloud_name=cloud_name)
+                yield from _format_kubernetes_realtime_gpu(
+                    total_table,
+                    k8s_realtime_infos,
+                    all_nodes_info,
+                    show_node_info=False,
+                    cloud_name=cloud_name)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
@@ -6067,9 +6090,15 @@ def ssh():
 
 
 @ssh.command('up', cls=_DocumentedCodeCommand)
-@click.option('--infra',
-              help='Name of the cluster to set up in ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.')
-@click.option('--async', 'async_call', is_flag=True, hidden=True,
+@click.option(
+    '--infra',
+    help=
+    'Name of the cluster to set up in ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.'
+)
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
               help='Run the command asynchronously.')
 def ssh_up(infra: Optional[str], async_call: bool):
     """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
@@ -6089,9 +6118,15 @@ def ssh_up(infra: Optional[str], async_call: bool):
 
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
-@click.option('--infra',
-              help='Name of the cluster to clean up in ssh_node_pools.yaml. If not specified, all clusters in the file will be cleaned up.')
-@click.option('--async', 'async_call', is_flag=True, hidden=True,
+@click.option(
+    '--infra',
+    help=
+    'Name of the cluster to clean up in ssh_node_pools.yaml. If not specified, all clusters in the file will be cleaned up.'
+)
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
               help='Run the command asynchronously.')
 def ssh_down(infra, async_call):
     """Clean up a cluster set up with 'sky ssh up'.
@@ -6108,6 +6143,7 @@ def ssh_down(infra, async_call):
     except Exception as e:
         print(f'Error cleaning up SSH cluster: {e}')
         sys.exit(1)
+
 
 def main():
     return cli()

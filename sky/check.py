@@ -385,16 +385,16 @@ def _format_enabled_cloud(cloud_name: str,
         return (f'{_green_color(cloud_and_capabilities)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
                 f'{colorama.Style.RESET_ALL}')
-    
+
     elif cloud_name == repr(sky_clouds.SSH()):
         # Get enabled contexts for SSH
         existing_contexts = sky_clouds.SSH.existing_allowed_contexts()
         if not existing_contexts:
             return _green_color(cloud_and_capabilities)
-        
+
         # Get the cluster names by reading them directly from the node pools file
         ssh_contexts = sky_clouds.SSH._get_ssh_node_pool_contexts()
-        
+
         # Format the context info with consistent styling
         if len(ssh_contexts) > 1:
             contexts_formatted = []
@@ -408,9 +408,9 @@ def _format_enabled_cloud(cloud_name: str,
             context_info = f'  SSH Node Pools:{"".join(contexts_formatted)}'
         else:
             context_info = f'  SSH Node Pool: {existing_contexts[0]}'
-        
+
         return (f'{_green_color(cloud_and_capabilities)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
                 f'{colorama.Style.RESET_ALL}')
-                
+
     return _green_color(cloud_and_capabilities)

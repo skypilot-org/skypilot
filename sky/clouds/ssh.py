@@ -7,8 +7,9 @@ directly, without having to interact with Kubernetes-specific commands.
 
 import os
 import typing
-import yaml
 from typing import Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from sky import exceptions
 from sky import skypilot_config
@@ -22,6 +23,7 @@ if typing.TYPE_CHECKING:
 
 SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 
+
 @registry.CLOUD_REGISTRY.register()
 class SSH(kubernetes.Kubernetes):
     """SSH cloud implementation.
@@ -31,7 +33,7 @@ class SSH(kubernetes.Kubernetes):
     """
 
     _REPR = 'SSH'
-    
+
     # Keep track of contexts that have been logged as unreachable
     logged_unreachable_contexts: Set[str] = set()
 
@@ -44,7 +46,7 @@ class SSH(kubernetes.Kubernetes):
     ) -> Dict[kubernetes.clouds.CloudImplementationFeatures, str]:
         # Inherit all Kubernetes unsupported features
         return super()._unsupported_features_for_resources(resources)
-    
+
     @classmethod
     def _get_ssh_node_pool_contexts(cls) -> List[str]:
         """Get context names from ssh_node_pools.yaml file.
@@ -57,18 +59,21 @@ class SSH(kubernetes.Kubernetes):
             in the SSH node pools file.
         """
         contexts = []
-        
+
         if os.path.exists(SSH_NODE_POOLS_PATH):
             try:
                 with open(SSH_NODE_POOLS_PATH, 'r') as f:
                     ssh_config = yaml.safe_load(f)
                     if ssh_config:
                         # Get cluster names and prepend 'ssh-' to match context naming convention
-                        contexts = [f'ssh-{cluster_name}' for cluster_name in ssh_config.keys()]
+                        contexts = [
+                            f'ssh-{cluster_name}'
+                            for cluster_name in ssh_config.keys()
+                        ]
             except Exception:
                 # If there's an error reading the file, return empty list
                 pass
-        
+
         return contexts
 
     @classmethod
@@ -84,15 +89,17 @@ class SSH(kubernetes.Kubernetes):
         all_contexts = kubernetes_utils.get_all_kube_context_names()
         if not all_contexts:
             return []
-        
+
         all_contexts = set(all_contexts)
-        
+
         # Filter for SSH contexts (those starting with 'ssh-')
-        ssh_contexts = [context for context in all_contexts if context.startswith('ssh-')]
-        
+        ssh_contexts = [
+            context for context in all_contexts if context.startswith('ssh-')
+        ]
+
         # Get contexts from SSH node pools file
         allowed_contexts = cls._get_ssh_node_pool_contexts()
-        
+
         if allowed_contexts:
             # Only include allowed contexts that exist
             existing_contexts = []
@@ -104,10 +111,10 @@ class SSH(kubernetes.Kubernetes):
                     skipped_contexts.append(context)
             cls._log_skipped_contexts_once(tuple(skipped_contexts))
             return existing_contexts
-        
+
         # If no allowed_contexts found, return all SSH contexts
         return ssh_contexts
-    
+
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Check if the user has access credentials to SSH contexts."""
@@ -124,10 +131,11 @@ class SSH(kubernetes.Kubernetes):
             existing_allowed_contexts = cls.existing_allowed_contexts()
         except Exception as e:
             return (False, f'Failed to get SSH contexts: {str(e)}')
-        
+
         if not existing_allowed_contexts:
-            return (False, 'No SSH clusters found. Run "sky ssh up" to create one.')
-        
+            return (False,
+                    'No SSH clusters found. Run "sky ssh up" to create one.')
+
         # Check credentials for each context
         reasons = []
         hints = []
@@ -139,15 +147,17 @@ class SSH(kubernetes.Kubernetes):
                 if check_result[0]:
                     success = True
                     if check_result[1] is not None:
-                        hints.append(f'SSH cluster {context}: {check_result[1]}')
+                        hints.append(
+                            f'SSH cluster {context}: {check_result[1]}')
                 else:
                     reasons.append(f'SSH cluster {context}: {check_result[1]}')
             except Exception as e:
                 reasons.append(f'SSH cluster {context}: {str(e)}')
-        
+
         if success:
             return (True, cls._format_credential_check_results(hints, reasons))
-        
-        return (False, 'Failed to find available SSH clusters with working '
-                'credentials. Run "sky ssh up" to create one, or check details:\n' + 
-                '\n'.join(reasons)) 
+
+        return (
+            False, 'Failed to find available SSH clusters with working '
+            'credentials. Run "sky ssh up" to create one, or check details:\n' +
+            '\n'.join(reasons))
