@@ -3,7 +3,7 @@
 Using an Auth Proxy with the SkyPilot API Server
 ================================================
 
-You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/>`__, to use SSO providers such as Okta.
+You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as Okta.
 
 The SkyPilot implementation is quite flexible and will generally work behind most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta, see :ref:`oauth2-proxy-okta`.
 
@@ -58,7 +58,7 @@ This will copy the relevant auth cookies from the browser into the CLI.
 Setting up OAuth2 Proxy with Okta
 ---------------------------------
 
-The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/>`__ to provide an out-of-the-box auth proxy setup.
+The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup.
 
 Here's how to set it up:
 
