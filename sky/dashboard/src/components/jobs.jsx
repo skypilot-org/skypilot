@@ -17,7 +17,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration } from '@/components/utils';
+import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
@@ -87,7 +87,7 @@ export function ManagedJobs() {
         </div>
       </div>
       <ManagedJobsTable
-        refreshInterval={20000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
       />
