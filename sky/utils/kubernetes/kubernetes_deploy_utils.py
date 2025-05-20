@@ -93,7 +93,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
                                f'\nError: {stderr}')
 
     if success:
-        # Add an empty line to separate the deployment logs from the final 
+        # Add an empty line to separate the deployment logs from the final
         # message
         logger.info('')
         if cleanup:

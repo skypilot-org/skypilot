@@ -2,15 +2,15 @@
 # Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script.
 import argparse
 import base64
+import collections
+import concurrent.futures as cf
 import os
 import random
 import re
 import subprocess
 import sys
 import tempfile
-import collections
 from typing import Any, Dict, List, Optional, Set, Tuple
-import concurrent.futures as cf
 
 import yaml
 
@@ -32,25 +32,27 @@ SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
 class UniqueKeySafeLoader(yaml.SafeLoader):
+
     def construct_mapping(self, node, deep=False):
         mapping = collections.OrderedDict()
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
-                raise yaml.constructor.ConstructorError(
-                    note=(f"Duplicate cluster config for cluster '{key}'.\n"
-                          f"Please remove one of them from: {DEFAULT_SSH_NODE_POOLS_PATH}")
-                )
+                raise yaml.constructor.ConstructorError(note=(
+                    f"Duplicate cluster config for cluster '{key}'.\n"
+                    f"Please remove one of them from: {DEFAULT_SSH_NODE_POOLS_PATH}"
+                ))
             value = self.construct_object(value_node, deep=deep)
             mapping[key] = value
         return mapping
 
+
 # Register the custom constructor inside the class
 UniqueKeySafeLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    UniqueKeySafeLoader.construct_mapping
-)
+    UniqueKeySafeLoader.construct_mapping)
 
 
 def parse_args():
@@ -152,14 +154,15 @@ def get_cluster_config(targets: Dict[str, Any],
                        cluster_name: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for specific clusters or all clusters."""
     if not targets:
-        print(f"{RED}Error: No clusters defined in SSH targets file{NC}")
+        print(f"{RED}Error: No clusters defined in SSH targets file{NC}",
+              file=sys.stderr)
         sys.exit(1)
 
     if cluster_name:
         if cluster_name not in targets:
             print(
-                f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}"
-            )
+                f"{RED}Error: Cluster '{cluster_name}' not found in SSH targets file{NC}",
+                file=sys.stderr)
             sys.exit(1)
         return {cluster_name: targets[cluster_name]}
 
@@ -170,7 +173,8 @@ def get_cluster_config(targets: Dict[str, Any],
 def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
     """Prepare list of hosts with resolved user, identity_file, and password."""
     if 'hosts' not in cluster_config or not cluster_config['hosts']:
-        print(f"{RED}Error: No hosts defined in cluster configuration{NC}")
+        print(f"{RED}Error: No hosts defined in cluster configuration{NC}",
+              file=sys.stderr)
         sys.exit(1)
 
     # Get cluster-level defaults
@@ -343,7 +347,13 @@ def cleanup_agent_node(node,
     success_message(f"Node {node} cleaned up successfully.")
 
 
-def start_agent_node(node, master_addr, k3s_token, user, ssh_key, askpass_block, use_ssh_config=False):
+def start_agent_node(node,
+                     master_addr,
+                     k3s_token,
+                     user,
+                     ssh_key,
+                     askpass_block,
+                     use_ssh_config=False):
     """Start a k3s agent node.
     Returns: if the node has a GPU."""
     cmd = f"""
@@ -468,8 +478,10 @@ def setup_kubectl_ssh_tunnel(head_node,
 
     # Certificate files
     node_pools_info_dir = os.path.expanduser("~/.sky/ssh_node_pools_info")
-    client_cert_file = os.path.join(node_pools_info_dir, f"{context_name}-cert.pem")
-    client_key_file = os.path.join(node_pools_info_dir, f"{context_name}-key.pem")
+    client_cert_file = os.path.join(node_pools_info_dir,
+                                    f"{context_name}-cert.pem")
+    client_key_file = os.path.join(node_pools_info_dir,
+                                   f"{context_name}-key.pem")
 
     # Update kubeconfig to use localhost with the selected port
     run_command([
@@ -566,11 +578,13 @@ def main():
         # Using command line arguments - legacy mode
         if args.ssh_key and not os.path.isfile(
                 args.ssh_key) and not global_use_ssh_config:
-            print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}")
+            print(f"{RED}Error: SSH key not found: {args.ssh_key}{NC}",
+                  file=sys.stderr)
             sys.exit(1)
 
         if not os.path.isfile(args.ips_file):
-            print(f"{RED}Error: IPs file not found: {args.ips_file}{NC}")
+            print(f"{RED}Error: IPs file not found: {args.ips_file}{NC}",
+                  file=sys.stderr)
             sys.exit(1)
 
         with open(args.ips_file, 'r') as f:
@@ -578,8 +592,8 @@ def main():
 
         if not hosts:
             print(
-                f"{RED}Error: Hosts file is empty or not formatted correctly.{NC}"
-            )
+                f"{RED}Error: Hosts file is empty or not formatted correctly.{NC}",
+                file=sys.stderr)
             sys.exit(1)
 
         head_node = hosts[0]
@@ -624,16 +638,17 @@ def main():
                 )
                 continue
 
-
             # Generate a unique context name for each cluster
             context_name = args.context_name
             if context_name == 'default':
                 context_name = 'ssh-' + cluster_name
 
             # Check cluster history
-            node_pools_info_dir = os.path.expanduser(f"~/.sky/ssh_node_pools_info")
+            node_pools_info_dir = os.path.expanduser(
+                f"~/.sky/ssh_node_pools_info")
             os.makedirs(node_pools_info_dir, exist_ok=True)
-            history_yaml_file = os.path.join(node_pools_info_dir, f"{context_name}-history.yaml")
+            history_yaml_file = os.path.join(node_pools_info_dir,
+                                             f"{context_name}-history.yaml")
 
             history = None
             if os.path.exists(history_yaml_file):
@@ -660,9 +675,12 @@ def main():
                         f"Cluster configuration has changed for master node. "
                         f"Previous value: {history_hosts_info[0]}, "
                         f"Current value: {hosts_info[0]}")
-                history_workers_info = history_hosts_info[1:] if len(history_hosts_info) > 1 else []
+                history_workers_info = history_hosts_info[1:] if len(
+                    history_hosts_info) > 1 else []
                 history_worker_nodes = [h['ip'] for h in history_workers_info]
-                history_use_ssh_config = [h.get('use_ssh_config', False) for h in history_workers_info]
+                history_use_ssh_config = [
+                    h.get('use_ssh_config', False) for h in history_workers_info
+                ]
 
             # Use the first host as the head node and the rest as worker nodes
             head_host = hosts_info[0]
@@ -726,10 +744,13 @@ def deploy_cluster(head_node,
         ssh_key = os.path.expanduser(ssh_key)
 
     node_pools_info_dir = os.path.expanduser(f"~/.sky/ssh_node_pools_info")
-    history_yaml_file = os.path.join(node_pools_info_dir, f"{context_name}-history.yaml")
-    cert_file_path = os.path.join(node_pools_info_dir, f"{context_name}-cert.pem")
+    history_yaml_file = os.path.join(node_pools_info_dir,
+                                     f"{context_name}-history.yaml")
+    cert_file_path = os.path.join(node_pools_info_dir,
+                                  f"{context_name}-cert.pem")
     key_file_path = os.path.join(node_pools_info_dir, f"{context_name}-key.pem")
-    tunnel_log_file_path = os.path.join(node_pools_info_dir, f"{context_name}-tunnel.log")
+    tunnel_log_file_path = os.path.join(node_pools_info_dir,
+                                        f"{context_name}-tunnel.log")
 
     # Generate the askpass block if password is provided
     askpass_block = create_askpass_script(password)
@@ -746,27 +767,35 @@ def deploy_cluster(head_node,
                use_ssh_config=head_use_ssh_config)
 
     # Checking history
-    history_exists = (history_worker_nodes is not None and history_workers_info is
-                      not None and history_use_ssh_config is not None)
+    history_exists = (history_worker_nodes is not None and
+                      history_workers_info is not None and
+                      history_use_ssh_config is not None)
 
     # Cleanup history worker nodes
     worker_nodes_to_cleanup = []
     remove_worker_cmds = []
     if history_exists:
         for history_node, history_info, use_ssh_config in zip(
-            history_worker_nodes, history_workers_info, history_use_ssh_config):
+                history_worker_nodes, history_workers_info,
+                history_use_ssh_config):
             if worker_hosts is not None and history_info not in worker_hosts:
-                print(f"{YELLOW}Worker node {history_node} not found in YAML config. "
+                print(
+                    f"{YELLOW}Worker node {history_node} not found in YAML config. "
                     f"Removing from history...{NC}")
-                worker_nodes_to_cleanup.append(dict(
-                    node=history_node,
-                    user=ssh_user if history_info is None else history_info['user'],
-                    ssh_key=ssh_key if history_info is None else history_info['identity_file'],
-                    askpass_block=(askpass_block if history_info is None
-                                else create_askpass_script(history_info['password'])),
-                    use_ssh_config=use_ssh_config,
-                ))
-                remove_worker_cmds.append(f"kubectl delete node -l skypilot-ip={history_node}")
+                worker_nodes_to_cleanup.append(
+                    dict(
+                        node=history_node,
+                        user=ssh_user
+                        if history_info is None else history_info['user'],
+                        ssh_key=ssh_key if history_info is None else
+                        history_info['identity_file'],
+                        askpass_block=(askpass_block if history_info is None
+                                       else create_askpass_script(
+                                           history_info['password'])),
+                        use_ssh_config=use_ssh_config,
+                    ))
+                remove_worker_cmds.append(
+                    f"kubectl delete node -l skypilot-ip={history_node}")
         # If this is a create operation and there exists some stale log,
         # cleanup the log for a new file to store new logs.
         if not cleanup and os.path.exists(tunnel_log_file_path):
@@ -776,16 +805,17 @@ def deploy_cluster(head_node,
     if cleanup:
         # Pickup all nodes
         worker_nodes_to_cleanup.clear()
-        for node, info, use_ssh_config in zip(
-            worker_nodes, worker_hosts, worker_use_ssh_config):
-            worker_nodes_to_cleanup.append(dict(
-                node=node,
-                user=ssh_user if info is None else info['user'],
-                ssh_key=ssh_key if info is None else info['identity_file'],
-                askpass_block=(askpass_block if info is None
-                                else create_askpass_script(info['password'])),
-                use_ssh_config=use_ssh_config,
-            ))
+        for node, info, use_ssh_config in zip(worker_nodes, worker_hosts,
+                                              worker_use_ssh_config):
+            worker_nodes_to_cleanup.append(
+                dict(
+                    node=node,
+                    user=ssh_user if info is None else info['user'],
+                    ssh_key=ssh_key if info is None else info['identity_file'],
+                    askpass_block=(askpass_block if info is None else
+                                   create_askpass_script(info['password'])),
+                    use_ssh_config=use_ssh_config,
+                ))
 
         print(f"{YELLOW}Starting cleanup...{NC}")
 
@@ -797,12 +827,15 @@ def deploy_cluster(head_node,
                             use_ssh_config=head_use_ssh_config)
     # Clean up worker nodes
     with cf.ThreadPoolExecutor() as executor:
-        executor.map(lambda kwargs: cleanup_agent_node(**kwargs), worker_nodes_to_cleanup)
+        executor.map(lambda kwargs: cleanup_agent_node(**kwargs),
+                     worker_nodes_to_cleanup)
 
     with cf.ThreadPoolExecutor() as executor:
+
         def run_cleanup_cmd(cmd):
             print('Cleaning up worker nodes:', cmd)
             run_command(cmd, shell=True)
+
         executor.map(run_cleanup_cmd, remove_worker_cmds)
 
     if cleanup:
@@ -840,10 +873,10 @@ def deploy_cluster(head_node,
         cleanup_kubectl_ssh_tunnel(context_name)
 
         print(f"{GREEN}Cleanup completed successfully.{NC}")
-        
+
         # Print completion marker for current cluster
         print(f"{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}")
-            
+
         return
 
     # Get effective IP for master node if using SSH config - needed for workers to connect
@@ -904,13 +937,14 @@ def deploy_cluster(head_node,
 
     # Step 2: Install k3s on worker nodes and join them to the master node
     def deploy_worker(args):
-        (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key, 
+        (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
          askpass_block, worker_use_ssh_config, master_addr, k3s_token) = args
         progress_message(f"Deploying Kubernetes on worker node ({node})...")
 
         # If using YAML config with specific worker info
         if worker_hosts and i < len(worker_hosts):
-            if history_workers_info is not None and worker_hosts[i] in history_workers_info:
+            if history_workers_info is not None and worker_hosts[
+                    i] in history_workers_info:
                 print(f"{YELLOW}Worker node {node} already exists in history. "
                       f"Skipping...{NC}")
                 return False
@@ -925,15 +959,21 @@ def deploy_cluster(head_node,
             worker_askpass = askpass_block
             worker_config = worker_use_ssh_config[i]
 
-        return start_agent_node(node, master_addr, k3s_token, worker_user,
-                                worker_key, worker_askpass, use_ssh_config=worker_config)
+        return start_agent_node(node,
+                                master_addr,
+                                k3s_token,
+                                worker_user,
+                                worker_key,
+                                worker_askpass,
+                                use_ssh_config=worker_config)
 
     # Deploy workers in parallel using thread pool
     with cf.ThreadPoolExecutor() as executor:
         futures = []
         for i, node in enumerate(worker_nodes):
-            args = (i, node, worker_hosts, history_workers_info, ssh_user, ssh_key,
-                    askpass_block, worker_use_ssh_config, master_addr, k3s_token)
+            args = (i, node, worker_hosts, history_workers_info, ssh_user,
+                    ssh_key, askpass_block, worker_use_ssh_config, master_addr,
+                    k3s_token)
             futures.append(executor.submit(deploy_worker, args))
 
         # Check if worker node has a GPU
