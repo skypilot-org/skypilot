@@ -41,6 +41,7 @@ ALLOWED_TERMS = {
     'Samsung',
     'Google',
     'Amazon',
+    'Okta',
     # Framework names
     'vLLM',
     'TGI',
@@ -56,7 +57,8 @@ ALLOWED_TERMS = {
 MULTI_WORD_TERMS = {
     'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
     'Google Cloud', 'LoadBalancer Service', 'Dynamic Workload Scheduler',
-    'Sky Computing', 'VS Code', 'Cudo Compute', 'Samsung Cloud Platform'
+    'Sky Computing', 'VS Code', 'Cudo Compute', 'Samsung Cloud Platform',
+    'OAuth2 Proxy',
 }
 
 
