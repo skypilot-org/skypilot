@@ -724,7 +724,7 @@ _LABELS_SCHEMA = {
     }
 }
 
-_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
             'type': 'string'
@@ -848,7 +848,7 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'security_group_name':
-                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -1106,11 +1106,22 @@ def get_config_schema():
         }
     }
 
+    provision_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'ssh_timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update({
-                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
-            })
+            config['properties'].update(
+                {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
@@ -1128,6 +1139,7 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'provision': provision_configs,
             **cloud_configs,
         },
     }
