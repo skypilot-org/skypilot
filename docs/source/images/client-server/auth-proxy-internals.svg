@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
    version="1.1"
-   viewBox="0 0 960 450"
+   viewBox="0 0 950 450"
    fill="none"
    stroke="none"
    stroke-linecap="square"
    stroke-miterlimit="10"
    id="svg131"
    sodipodi:docname="auth-proxy-internals.svg"
-   width="960"
+   width="950"
    height="450"
    inkscape:version="1.4.1 (93de688d07, 2025-03-30)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
@@ -28,8 +28,8 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="1.5713484"
-     inkscape:cx="507.2077"
-     inkscape:cy="264.10438"
+     inkscape:cx="488.75221"
+     inkscape:cy="252.64925"
      inkscape:window-width="2520"
      inkscape:window-height="1331"
      inkscape:window-x="26"
@@ -46,7 +46,7 @@
   <g
      clip-path="url(#g35c2d60710f_0_5.0)"
      id="g131"
-     transform="translate(0,-45.82052)">
+     transform="translate(-4.4547727,-45.184124)">
     <path
        fill="#ffffff"
        d="M 0,0 H 960 V 540 H 0 Z"
@@ -82,7 +82,7 @@
        fill-rule="nonzero"
        id="path7" />
     <path
-       fill="#e6b8af"
+       fill="#f4cccc"
        d="M 596.4147,73.637794 H 734.61947 V 466.36222 H 596.4147 Z"
        fill-rule="evenodd"
        id="path8" />
@@ -112,7 +112,7 @@
     <path
        fill="#000000"
        fill-opacity="0"
-       d="m 37.312893,281.01956 q 18.99157,12.91409 37.938786,0"
+       d="m 37.312893,284.4965 q 18.99157,-0.99359 37.938786,0"
        fill-rule="evenodd"
        id="path13" />
     <path
@@ -134,7 +134,7 @@
        stroke-width="1"
        stroke-linejoin="round"
        stroke-linecap="butt"
-       d="m 37.312893,281.01956 q 18.99157,12.91409 37.938786,0"
+       d="m 37.312893,284.4965 q 18.99157,-0.99359 37.938786,0"
        fill-rule="evenodd"
        id="path16" />
     <path

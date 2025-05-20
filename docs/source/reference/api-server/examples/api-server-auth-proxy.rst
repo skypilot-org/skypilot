@@ -31,12 +31,17 @@ While logging into an API server, SkyPilot will attempt to detect an auth proxy.
 
 Opening ``http://a.b.c.d/token`` in the browser will force the user to authenticate as required by the auth proxy.
 
+.. image:: ../../../images/client-server/okta.png
+    :alt: Okta auth page
+    :align: center
+    :width: 60%
+
 After authentication, the user will be redirected to the SkyPilot token page:
 
 .. image:: ../../../images/client-server/token-page.png
     :alt: SkyPilot token page
     :align: center
-    :width: 70%
+    :width: 80%
 
 Copy and paste the token into the terminal to save the auth for the SkyPilot CLI.
 
@@ -70,6 +75,13 @@ From your Okta admin panel, navigate to **Applications > Applications**, then cl
 * For **Sign-in method**, choose **OIDC - OpenID Connect**
 * For **Application type**, chose **Web Application**
 
+.. image:: ../../../images/client-server/okta-setup.png
+    :alt: SkyPilot token page
+    :align: center
+    :width: 80%
+
+Click **Next**.
+
 Optionally, set a name for the application such as ``SkyPilot API Server``. Then, set the following settings:
 
 * Set the **Sign-in redirect URIs** to ``<ENDPOINT>/oauth2/callback``, where ``<ENDPOINT>`` is your API server endpoint.
@@ -90,15 +102,18 @@ Set up the environment variables for your API server deployment. ``NAMESPACE`` a
     VERSION=1.0.0-dev20250410 # TODO: change to the version you want to upgrade to
     IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
-Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-oauth2-proxy`` deployment. Replace ``<CLIENT ID>`` and ``<CLIENT SECRET>`` with the values from the Okta admin console above.
+Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-oauth2-proxy`` deployment. Replace ``<CLIENT ID>`` and ``<CLIENT SECRET>`` with the values from the Okta admin console above, and ``<OKTA URL>`` with your Okta login URL.
 
 .. code-block:: console
 
     $ # --reuse-values is critical to keep the old values that aren't being updated here.
     $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set ingress.oauth2-proxy.enabled=true \
+      --set ingress.oauth2-proxy.oidc-issuer-url=https://<OKTA URL>.okta.com \
       --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
       --set ingress.oauth2-proxy.client-secret=<CLIENT SECRET>
+
+If your API server endpoint only has HTTP, not HTTPS, add ``--set ingress.oauth2-proxy.use-http=true``.
 
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to Okta to sign in.
 
@@ -106,10 +121,10 @@ Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for
 
 .. _auth-proxy-byo:
 
-Bring your own auth proxy
--------------------------
+Optional: Bring your own auth proxy
+-----------------------------------
 
-Under the hood, SkyPilot uses cookies just like a browser to authenticate to an auth proxy. This means that most web authentication proxies should work with the SkyPilot API server.
+Under the hood, SkyPilot uses cookies just like a browser to authenticate to an auth proxy. This means that most web authentication proxies should work with the SkyPilot API server. This can be convenient if you already have a standardized auth proxy setup for services you deploy.
 
 To bring your own auth proxy, just configure it in front of the underlying SkyPilot API server, just like any other web application. Then, use the proxy's address as the API server endpoint.
 
