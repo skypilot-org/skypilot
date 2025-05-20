@@ -126,9 +126,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       INFRA                RESOURCES                                      STATUS   AUTOSTOP  LAUNCHED     
-  mygcp      GCP (us-central1-a)  1x(cpus=4, mem=16, type=n2-standard-4, ...)    STOPPED  -         1 day ago   
-  mycluster  AWS (us-east-1)      1x(gpus=A100:8, type=p4d.24xlarge, ...)        UP       -         4 mins ago  
+  NAME       INFRA                RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED     
+  mygcp      GCP (us-central1-a)  1x(cpus=4, mem=16, n2-standard-4, ...)      STOPPED  -         1 day ago   
+  mycluster  AWS (us-east-1)      1x(gpus=A100:8, p4d.24xlarge, ...)          UP       -         4 mins ago  
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 

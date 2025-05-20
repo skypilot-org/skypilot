@@ -39,7 +39,7 @@ def test_status_table_format():
 
     # Test the resources format
     resources_str = status_utils._get_resources(mock_record)
-    assert resources_str == '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)'
+    assert resources_str == '1x(cpus=8, mem=32, m6i.2xlarge, ...)'
 
     # Test Kubernetes case
     mock_k8s_resources = Resources(infra='k8s/my-ctx', cpus='2+', memory='4+')
@@ -137,8 +137,8 @@ def test_show_status_table():
             'user_name': 'test_user',
             'user_hash': 'abc123',
             'head_ip': '1.2.3.4',
-            'resources_str': '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)',
-            'resources_str_full': ('1x(cpus=8, mem=32, type=m6i.2xlarge, '
+            'resources_str': '1x(cpus=8, mem=32, m6i.2xlarge, ...)',
+            'resources_str_full': ('1x(cpus=8, mem=32, m6i.2xlarge, '
                                    'disk=50)'),
         }
 
@@ -241,17 +241,17 @@ def test_get_resources():
         launched_resources=mock_resources)
     mock_record = {
         'handle': mock_handle,
-        'resources_str': '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)',
-        'resources_str_full': '1x(cpus=8, mem=32, type=m6i.2xlarge, disk=50)',
+        'resources_str': '1x(cpus=8, mem=32, m6i.2xlarge, ...)',
+        'resources_str_full': '1x(cpus=8, mem=32, m6i.2xlarge, disk=50)',
     }
 
     # Test normal resources
     resources_str = status_utils._get_resources(mock_record)
-    assert resources_str == '1x(cpus=8, mem=32, type=m6i.2xlarge, ...)'
+    assert resources_str == '1x(cpus=8, mem=32, m6i.2xlarge, ...)'
 
     # Test full resources
     resources_str = status_utils._get_resources(mock_record, truncate=False)
-    assert resources_str == '1x(cpus=8, mem=32, type=m6i.2xlarge, disk=50)'
+    assert resources_str == '1x(cpus=8, mem=32, m6i.2xlarge, disk=50)'
 
     # Test no resources
     mock_record['handle'].launched_resources = None

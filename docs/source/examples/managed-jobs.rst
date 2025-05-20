@@ -584,9 +584,9 @@ To see your current jobs controller, use :code:`sky status`.
 
   Clusters
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED     
-  my-cluster-1                  AWS (us-east-1)   1x(cpus=16, type=m6i.4xlarge)              STOPPED  -         1 week ago   
-  my-other-cluster              GCP (us-central1) 1x(cpus=16, type=n2-standard-16)           STOPPED  -         1 week ago   
-  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, type=r6i.xlarge, disk_size=50)  STOPPED  10m       1 day ago    
+  my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago   
+  my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago   
+  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, r6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago    
 
   Managed jobs
   No in-progress managed jobs.
