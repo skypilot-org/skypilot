@@ -58,7 +58,7 @@ class SSH(kubernetes.Kubernetes):
 
         if os.path.exists(SSH_NODE_POOLS_PATH):
             try:
-                with open(SSH_NODE_POOLS_PATH, 'r') as f:
+                with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
                     ssh_config = yaml.safe_load(f)
                     if ssh_config:
                         # Get cluster names and prepend 'ssh-' to match
@@ -67,7 +67,7 @@ class SSH(kubernetes.Kubernetes):
                             f'ssh-{cluster_name}'
                             for cluster_name in ssh_config.keys()
                         ]
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 # If there's an error reading the file, return empty list
                 pass
 
@@ -80,7 +80,7 @@ class SSH(kubernetes.Kubernetes):
         Override the Kubernetes implementation to only return contexts that
         start with 'ssh-', which are created by `sky ssh up`.
 
-        Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml.
+        Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml
         """
         # Get all contexts from the Kubernetes implementation
         all_contexts = kubernetes_utils.get_all_kube_context_names()

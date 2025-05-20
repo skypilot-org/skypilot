@@ -29,7 +29,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
-
+    """Custom YAML loader that raises an error if there are duplicate keys."""
     def construct_mapping(self, node, deep=False):
         mapping = collections.OrderedDict()
         for key_node, value_node in node.value:
@@ -282,7 +282,7 @@ def run_remote(node,
 def create_askpass_script(password):
     """Create an askpass script block for sudo with password."""
     if not password:
-        return ""
+        return ''
 
     return f"""
 # Create temporary askpass script
