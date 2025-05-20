@@ -397,10 +397,11 @@ class SkySSHUpLineProcessor(LineProcessor):
                                          is_local=self.is_local))
                     
         if 'Kubernetes deployed on worker node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
             logger.info(
                 f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
-                '✔ SkyPilot runtime successfully deployed on worker node.'
-                f'{colorama.Style.RESET_ALL}')
+                '✔ SkyPilot runtime successfully deployed on worker node'
+                f'{node_name}.{colorama.Style.RESET_ALL}')
 
         # Cluster configuration
         if 'Configuring local kubectl to connect to the cluster...' in log_line:

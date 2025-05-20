@@ -19,7 +19,7 @@ HOST=""
 USER=""
 PORT=6443  # Default port if not specified
 
-# Debug log to ~/.sky/tunnel/$CONTEXT-tunnel.log
+# Debug log to ~/.sky/ssh_node_pools_info/$CONTEXT-tunnel.log
 debug_log() {
     local message="$(date): $1"
     echo "$message" >> "$LOG_FILE"
@@ -276,7 +276,7 @@ if [[ -z "$HOST" ]]; then
 fi
 
 # Setup directories
-TUNNEL_DIR="$HOME/.sky/tunnel"
+TUNNEL_DIR="$HOME/.sky/ssh_node_pools_info"
 mkdir -p "$TUNNEL_DIR"
 
 # Get context name for PID file
