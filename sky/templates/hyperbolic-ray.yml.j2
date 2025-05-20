@@ -1,5 +1,7 @@
 # Ray cluster config template for Hyperbolic Cloud
 
+# NOTE: Before launching, ensure your SSH public key is added in the Hyperbolic web app.
+
 cluster_name: {{cluster_name_on_cloud}}
 
 # Hyperbolic only supports a single node (the head node).
@@ -25,8 +27,7 @@ available_node_types:
       # Format: 1x-T4-4-17 -> gpu_count=1, gpu_model=Tesla-T4
       GPUCount: {{instance_type.split('-')[0].replace('x', '')}}
       GPUModel: {{instance_type.split('-')[1].upper()}}
-      AuthorizedKey: |
-        skypilot:ssh_public_key_content
+      # No AuthorizedKey field: SSH public key must be added in Hyperbolic app
 
 head_node_type: ray_head_default
 
