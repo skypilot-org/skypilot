@@ -1859,8 +1859,10 @@ def test_long_setup_run_script(generic_cloud: str):
                 f'sky logs {name} --status 1',
                 f'sky logs {name} --status 2',
                 f'sky logs {name} --status 3',
+                f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
+                f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name}; sky jobs cancel -n {name}',
         )
         smoke_tests_utils.run_one_test(test)
 

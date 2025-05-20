@@ -3484,18 +3484,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
-        if managed_job_dag is not None:
-            # Add the managed job to job queue database.
-            managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-            managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
-            # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, even if it needs to
-            # wait to be submitted.
-            # We cannot set the managed job to PENDING state in the job template
-            # (jobs-controller.yaml.j2), as it may need to wait for the run
-            # commands to be scheduled on the job controller in high-load cases.
-            job_submit_cmd += ' && ' + managed_job_code
+        def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
+            if managed_job_dag is not None:
+                # Add the managed job to job queue database.
+                managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                managed_job_code = managed_job_codegen.set_pending(
+                    job_id, managed_job_dag)
+                # Set the managed job to PENDING state to make sure that this
+                # managed job appears in the `sky jobs queue`, even if it needs to
+                # wait to be submitted.
+                # We cannot set the managed job to PENDING state in the job template
+                # (jobs-controller.yaml.j2), as it may need to wait for the run
+                # commands to be scheduled on the job controller in high-load cases.
+                job_submit_cmd += ' && ' + managed_job_code
+            return job_submit_cmd
+
+        job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3519,6 +3523,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          f'Output: {output}')
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
+            job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
