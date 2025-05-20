@@ -8,7 +8,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import collections
 from typing import Any, Dict, List, Optional, Set, Tuple
 import concurrent.futures as cf
 
@@ -34,7 +33,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
     def construct_mapping(self, node, deep=False):
-        mapping = collections.OrderedDict()
+        mapping = {}
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
