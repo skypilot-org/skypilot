@@ -778,7 +778,6 @@ def open_ports(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Instance with cluster name '
                              f'{cluster_name_on_cloud} not found.')
-
     sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:
         with ux_utils.print_exception_no_traceback():
@@ -803,13 +802,11 @@ def open_ports(
             all_traffic_allowed: bool = False
             for group_pairs in existing_rule['UserIdGroupPairs']:
                 if group_pairs['GroupId'] != sg.id:
-                    # We skip the port opening when the rule allows
-                    # access from other security groups, as that is
-                    # likely added by a user manually and satisfy their
-                    # requirement.
-                    # The security group created by SkyPilot allows all
-                    # traffic from the same security group, which should
-                    # not be skipped.
+                    # We skip the port opening when the rule allows access from
+                    # other security groups, as that is likely added by a user
+                    # manually and satisfy their requirement.
+                    # The security group created by SkyPilot allows all traffic
+                    # from the same security group, which should not be skipped.
                     existing_ports.add(-1)
                     all_traffic_allowed = True
                     break
