@@ -1,4 +1,5 @@
 """Constants used by the GCP provisioner."""
+import textwrap
 
 VERSION = 'v1'
 # Using v2 according to
@@ -53,7 +54,7 @@ CLUSTER_PREFIX_LENGTH = 10
 
 COMPACT_GROUP_PLACEMENT_POLICY = 'compact'
 COLLOCATED_COLLOCATION = 'COLLOCATED'
-GPU_DIRECT_TCPX_USER_DATA = """
+GPU_DIRECT_TCPX_USER_DATA = textwrap.dedent("""
     # Install GPU Direct TCPX
     cos-extensions install gpu -- --version=latest;
     sudo mount --bind /var/lib/nvidia /var/lib/nvidia;
@@ -81,7 +82,7 @@ GPU_DIRECT_TCPX_USER_DATA = """
     sudo mount --bind /var/lib/tcpx /var/lib/tcpx;
     sudo mount -o remount,exec /var/lib/tcpx;
     echo "GPU Direct TCPX installed"
-    """
+    """)
 
 GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--cap-add=IPC_LOCK',
@@ -111,11 +112,11 @@ INSTANCE_STORAGE_INTERFACE_TYPE = 'NVME'
 INSTANCE_STORAGE_DEVICE_NAME_PREFIX = '/dev/disk/by-id/google-local-nvme-ssd-'
 DEVICE_NAME_PREFIX = '/dev/disk/by-id/google-'
 
-BASH_SCRIPT_START = """#!/bin/bash
-    set -e
-    set -x
-"""
-DISK_MOUNT_USER_DATA_TEMPLATE = """
+BASH_SCRIPT_START = textwrap.dedent("""#!/bin/bash
+set -e
+set -x
+""")
+DISK_MOUNT_USER_DATA_TEMPLATE = textwrap.dedent("""
     # Define arrays for devices and mount points
     declare -A device_mounts=(
         {device_mounts}
@@ -190,7 +191,7 @@ DISK_MOUNT_USER_DATA_TEMPLATE = """
     done
 
     echo "Device mounting process completed."
-"""
+""")
 
 # The local SSDs will be attached automatically to the following
 # machine types with the following number of disks.

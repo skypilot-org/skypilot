@@ -1266,16 +1266,35 @@ class GCP(clouds.Cloud):
             return tier2name[tier]
 
         # Remap series-specific disk types.
-        # Reference: https://github.com/skypilot-org/skypilot/issues/4705        
+        # Reference: https://github.com/skypilot-org/skypilot/issues/4705
+        # There is very high requirement for hyperdisk-extreme, so we
+        # use hypterdisk-balanced as the ultra disk tier if supported.
+        # Refer to https://cloud.google.com/compute/docs/disks/hyperdisks#machine_type_restrictions
+        # TODO(hailong): even the hyperdisk-balanced disk tier needs to check the machine type further.
         series = instance_type.split('-')[0]
 
-        if series in ['c4a', 'c4d', 'c4', 'x4', 'm4', 'a4', 'a3']:
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
-            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-extreme'
+        if series in ['c4a', 'c4d', 'c4', 'x4', 'm4', 'a4']:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+            tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+        elif series in ['a3']:
+            if (instance_type.startswith('a3-ultragpu') or
+                    instance_type.startswith('a3-megagpu') or
+                    instance_type.startswith('a3-edgegpu') or
+                    instance_type.startswith('a3-highgpu-8g')):
+                tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+                tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+                tier2name[
+                    resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
+                tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+            else:
+                tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'
+                tier2name[resources_utils.DiskTier.HIGH] = 'pd-ssd'
+                tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-balanced'
+                tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
         elif series in ['c3', 'c3d']:
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
             tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
@@ -1285,23 +1304,23 @@ class GCP(clouds.Cloud):
             tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
         elif series in ['n2']:
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
         elif series in ['n2d', 'n1', 't2d', 't2a', 'e2', 'c2', 'c2d', 'a2']:
             tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'
         elif series in ['z3']:
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
         elif series in ['h3']:
             tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
         elif series in ['m3']:
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
             tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
         elif series in ['m2', 'm1']:
-            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
             tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
         elif series in ['g2']:
             tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'

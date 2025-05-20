@@ -128,7 +128,7 @@ available_node_types:
               skypilot:ssh_user:skypilot:ssh_public_key_content
       {%- if user_data is not none %}
         startup-script: |-
-          {{ user_data | indent(6) }}
+          {{ user_data | indent(10) }}
       {%- endif %}
   {%- if use_spot %}
       schedulingConfig:
@@ -197,7 +197,7 @@ available_node_types:
   {%- if user_data is not none %}
           - key: user-data
             value: |-
-              {{ user_data | indent(10) }}
+              {{ user_data | indent(14) }}
   {%- endif %}
   {%- if use_spot or gpu is not none %}
       scheduling:

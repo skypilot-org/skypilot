@@ -63,29 +63,33 @@ Below is the configuration syntax and some example values.  See details under ea
 
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
-    :ref:`volumes <yaml-spec-resources-volumes>`:
-      # New volume - Network volume
-      - path: /mnt/dir1
-        disk_size: 100
-        auto_delete: true
-      # New volume - Instance volume
-      - path: /mnt/dir2
-        storage_type: instance
-      # Existing volume - Network volume only
-      - path: /mnt/dir3
-        volume_name: my-volume
-
   :ref:`envs <yaml-spec-envs>`:
     MY_BUCKET: skypilot-temp-gcs-test
     MY_LOCAL_PATH: tmp-workdir
     MODEL_SIZE: 13b
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
+    # Sync a local directory to a remote directory
     /remote/path: /local/path
+    # Mount a S3 bucket to a remote directory
     /checkpoints:
       source: s3://existing-bucket
       mode: MOUNT
     /datasets-s3: s3://my-awesome-dataset
+    # Mount a volume to a remote directory
+    /mnt/path1:
+      name: volume-name
+      source: /local/path1
+      store: volume
+    /mnt/path2:
+      store: volume
+      config:
+        size: 10
+        disk_tier: high
+    /mnt/path3:
+      store: volume
+      config:
+        storage_type: instance
 
   :ref:`setup <yaml-spec-setup>`: |
     echo "Begin setup."
@@ -731,40 +735,6 @@ OR
       strategy: EAGER_NEXT_REGION
       max_restarts_on_errors: 3
 
-.. _yaml-spec-resources-volumes:
-
-``resources.volumes``
-~~~~~~~~~~~~~~~~~~~~~
-
-Volumes configuration.
-
-Mount network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
-
-This is supported for GCP only for now.
-
-Note: When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the `path` is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
-
-Example:
-
-.. code-block:: yaml
-
-  resources:
-    volumes:
-      # New volume - Network volume
-      - path: /mnt/dir1 # Path to mount the volume on the instance
-        disk_size: 100 # Size of the volume in GB
-        auto_delete: true # Whether to delete the volume when the instance is terminated, optional, default: false
-        storage_type: network # Type of the volume, either 'network' or 'instance', optional, default: network
-        disk_tier: best # Tier of the volume, same as `resources.disk_tier`, optional, default: best
-      # New volume - Instance volume
-      # auto_delete is always true for instance volumes
-      - path: /mnt/dir2
-        storage_type: instance
-      # Existing volume - Network volume only
-      - path: /mnt/dir3
-        volume_name: my-volume
-        attach_mode: read_write # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
-
 .. _yaml-spec-envs:
 
 ``envs``
@@ -862,6 +832,57 @@ OR
       source: ~/local_models
       store: gcs
       mode: MOUNT
+
+SkyPilot also supports volumes mount.
+
+You can mount network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
+
+This is supported for GCP only for now.
+
+Note: When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path1: # Path to mount the volume on the instance
+      name: volume-name # Name of an existing volume to mount, if not specified, new volume will be created, optional
+      source: /local/path1 # Source local path, do not set it if no need to sync data from local to volume, if specified, the data will be synced to the /mnt/path1/data directory, optional
+      store: volume # For volume mount
+      persistent: True  # If set to False, the newly created volume will be deleted after cluster is downed, for existing volume, it is always True, optional, default: False
+      config:
+        size: 100 # Size of the volume in GB
+        storage_type: network # Type of the volume, either 'network' or 'instance', optional, default: network
+        disk_tier: best # Tier of the volume, same as `resources.disk_tier`, optional, default: best
+        attach_mode: read_write # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
+
+- Mount with existing volume:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path1:
+      name: volume-name
+      store: volume
+
+- Mount with a new network volume:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path2:
+      store: volume
+      config:
+        size: 100
+
+- Mount with a new instance volume:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path3:
+      store: volume
+      config:
+        storage_type: instance
 
 .. _yaml-spec-setup:
 
