@@ -168,7 +168,7 @@ class ClusterInfo:
         """Return the instance ids in the same order of ip_tuples."""
         id_list = []
         if self.head_instance_id is not None:
-            id_list.append(self.head_instance_id + '-0')
+            id_list.append(str(self.head_instance_id) + '-0')
         for inst_id, instances in self.instances.items():
             start_idx = 0
             if inst_id == self.head_instance_id:
