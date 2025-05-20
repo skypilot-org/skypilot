@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
+import collections
 from typing import Any, Dict, List, Optional, Set, Tuple
 import concurrent.futures as cf
 
@@ -31,6 +31,26 @@ SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        mapping = collections.OrderedDict()
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    note=(f"Duplicate cluster config for cluster '{key}'.\n"
+                          f"Please remove one of them from: {DEFAULT_SSH_NODE_POOLS_PATH}")
+                )
+            value = self.construct_object(value_node, deep=deep)
+            mapping[key] = value
+        return mapping
+
+# Register the custom constructor inside the class
+UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    UniqueKeySafeLoader.construct_mapping
+)
 
 
 def parse_args():
@@ -97,15 +117,19 @@ def parse_args():
 def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     """Load SSH targets from YAML file."""
     if not os.path.exists(file_path):
-        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}")
+        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}",
+              file=sys.stderr)
         sys.exit(1)
 
     try:
         with open(file_path, 'r') as f:
-            targets = yaml.safe_load(f)
+            targets = yaml.load(f, Loader=UniqueKeySafeLoader)
         return targets
+    except yaml.constructor.ConstructorError as e:
+        print(f"{RED}{e.note}{NC}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"{RED}Error loading SSH targets file: {e}{NC}")
+        print(f"{RED}Error loading SSH targets file: {e}{NC}", file=sys.stderr)
         sys.exit(1)
 
 
