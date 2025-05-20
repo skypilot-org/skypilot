@@ -30,8 +30,7 @@ spec:
         - --http-address=0.0.0.0:4180
         - --skip-provider-button=true
         - --reverse-proxy=true
-        {{- /* Auto-detect if we should use secure cookies based on ingress-nginx controller service type */}}
-        {{- if and (index .Values "ingress-nginx" "enabled") (eq (index .Values "ingress-nginx" "controller" "service" "type") "NodePort") }}
+        {{- if (index .Values.ingress "oauth2-proxy" "use-http") }}
         - --cookie-secure=false
         {{- end }}
         env:
