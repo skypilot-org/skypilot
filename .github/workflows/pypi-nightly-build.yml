@@ -26,6 +26,7 @@ jobs:
     if: ${{ needs.check-date.outputs.should_run != 'false' }}
     outputs:
       buildkite_json: ${{ steps.trigger_buildkite.outputs.json }}
+      version: ${{ steps.set-release-version.outputs.version }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
@@ -55,11 +56,14 @@ jobs:
           build
           --user
       - name: Set release version
+        id: set-release-version
         run: |
           RELEASE_VERSION=$(date +%Y%m%d)
           sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
+          echo "version=1.0.0.dev${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: $version"
       - name: Build a binary wheel and a source tarball
         run: >-
           python -m
@@ -105,7 +109,7 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   publish-to-pypi:
-    needs: wait-for-buildkite
+    needs: [nightly-build-pypi, wait-for-buildkite]
     if: needs.wait-for-buildkite.outputs.build_status == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -121,6 +125,32 @@ jobs:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+
+      - name: Validate published package
+        run: |
+          # Wait a moment for package to be available
+          sleep 30
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+          pip install fastapi
+          # Install skypilot from Test PyPI with fallback to PyPI for dependencies
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot-nightly
+          # Verify installation
+          sky -v
+          sky -c
+          sky check
+          sky show-gpus
+          sky dashboard || (echo "Launch dashboard failed" && exit 1)
+          # Verify dashboard endpoint is accessible
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || (echo "Dashboard endpoint is not accessible" && exit 1)
+          # Verify version
+          EXPECTED_VERSION="${{ needs.nightly-build-pypi.outputs.version }}"
+          INSTALLED_VERSION=$(pip show skypilot-nightly | grep Version | awk '{print $2}')
+          echo "Expected version: $EXPECTED_VERSION, Installed version: $INSTALLED_VERSION"
+          if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch!"
+            exit 1
+          fi
+          echo "Version verified successfully!"
 
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

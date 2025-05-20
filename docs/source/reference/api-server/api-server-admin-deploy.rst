@@ -333,6 +333,79 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set runpodCredentials.enabled=true \
                     --set runpodCredentials.runpodSecretName=your_secret_name
 
+    .. tab-item:: Lambda
+        :sync: lambda-creds-tab
+
+        SkyPilot API server uses an **API key** to authenticate with Lambda. To configure Lambda access, go to the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page on your Lambda Cloud console and generate an **API key**.
+
+        Once the key is generated, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic lambda-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Lambda credentials by setting ``lambdaCredentials.enabled=true``
+
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              # keep the Helm chart values set in the previous step
+              --reuse-values \
+              --set lambdaCredentials.enabled=true
+
+        .. dropdown:: Use existing Lambda credentials
+
+            You can also set the following values to use a secret that already contains your Lambda credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set lambdaCredentials.enabled=true \
+                    --set lambdaCredentials.lambdaSecretName=your_secret_name
+
+    .. tab-item:: Nebius
+        :sync: nebius-creds-tab
+
+        We use service accounts to authenticate with Nebius. Refer to :ref:`Nebius service account <nebius-service-account>` guide on how to set up a service account.
+
+        Once you have the JSON credentials for your service account, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic nebius-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials.json=$HOME/.nebius/credentials.json
+
+        When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
+
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              # keep the Helm chart values set in the previous step
+              --reuse-values \
+              --set nebiusCredentials.enabled=true \
+              --set nebiusCredentials.tenantId=YOUR_TENANT_ID
+
+        .. dropdown:: Use existing Nebius credentials
+
+            You can also set the following values to use a secret that already contains your Nebius credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set nebiusCredentials.enabled=true \
+                    --set nebiusCredentials.nebiusSecretName=your_secret_name
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
@@ -625,3 +698,9 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. tip::
 
     If you are installing SkyPilot API client in the same environment, we recommend using a different python environment (venv, conda, etc.) to avoid conflicts with the SkyPilot installation used to deploy the API server.
+
+
+.. toctree::
+   :hidden:
+
+    Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>

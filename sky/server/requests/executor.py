@@ -477,7 +477,8 @@ def prepare_request(
                                    cluster_name=request_cluster_name)
 
     if not api_requests.create_if_not_exists(request):
-        raise RuntimeError(f'Request {request_id} already exists.')
+        raise exceptions.RequestAlreadyExistsError(
+            f'Request {request_id} already exists.')
 
     request.log_path.touch()
     return request

@@ -586,4 +586,8 @@ class ExecutionRetryableError(Exception):
 
 class ExecutionPoolFullError(Exception):
     """Raised when the execution pool is full."""
+
+
+class RequestAlreadyExistsError(Exception):
+    """Raised when a request is already exists."""
     pass

@@ -671,7 +671,7 @@ class Optimizer:
         plan: Dict[task_lib.Task, resources_lib.Resources],
     ) -> float:
         """Estimates the total cost of running the DAG by the plan."""
-        total_cost = 0
+        total_cost = 0.
         for node in topo_order:
             resources = plan[node]
             if node.time_estimator_func is None:
@@ -777,10 +777,13 @@ class Optimizer:
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
             cloud = resources.cloud
-            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+            assert cloud is not None, 'Cloud must be specified'
+            assert (resources.instance_type is not None), \
+                'Instance type must be specified'
+            vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
-            def format_number(x):
+            def format_number(x: Optional[float]) -> str:
                 if x is None:
                     return '-'
                 elif x.is_integer():
@@ -788,8 +791,8 @@ class Optimizer:
                 else:
                     return f'{x:.1f}'
 
-            vcpus = format_number(vcpus)
-            mem = format_number(mem)
+            vcpus = format_number(vcpus_)
+            mem = format_number(mem_)
 
             if resources.zone is None:
                 region_or_zone = resources.region
@@ -814,11 +817,12 @@ class Optimizer:
 
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
+            resources = resources.assert_launchable()
             cloud = resources.cloud
-            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+            vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
 
-            def format_number(x):
+            def format_number(x: Optional[float]) -> str:
                 if x is None:
                     return '-'
                 elif x.is_integer():
@@ -826,8 +830,8 @@ class Optimizer:
                 else:
                     return f'{x:.1f}'
 
-            vcpus = format_number(vcpus)
-            mem = format_number(mem)
+            vcpus = format_number(vcpus_)
+            mem = format_number(mem_)
 
             if resources.zone is None:
                 region_or_zone = resources.region
@@ -1195,10 +1199,12 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             all_clouds_specified.add(cloud_str)
 
         # Explicitly check again to update the enabled cloud list.
-        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                   quiet=True,
-                                   clouds=list(clouds_need_recheck -
-                                               global_disabled_clouds))
+        clouds_to_check_again = list(clouds_need_recheck -
+                                     global_disabled_clouds)
+        if len(clouds_to_check_again) > 0:
+            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                       quiet=True,
+                                       clouds=clouds_to_check_again)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
