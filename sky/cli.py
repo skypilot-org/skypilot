@@ -520,13 +520,16 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
 
 
-def _complete_request_id(ctx: click.Context,
-                         param: click.Parameter) -> List[str]:
-    """Handle shell completion for SkyPilot API request IDs."""
-    del ctx, param  # Unused.
-
+def _complete_request_id(ctx: click.Context, param: click.Parameter,
+                         incomplete: str) -> List[str]:
+    """Shell completion for SkyPilot API request IDs."""
+    del ctx, param  # Unused
     requests_results = sdk.api_status(all_status=True)
-    return [r.request_id for r in requests_results]
+    return [
+        r.request_id
+        for r in requests_results
+        if r.request_id and r.request_id.startswith(incomplete)
+    ]
 
 
 def _get_click_major_version():
@@ -5854,12 +5857,12 @@ def api_stop():
     sdk.api_stop()
 
 
-@api.command('logs', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
-@click.argument('request_ids',
+@api.command('logs')
+# @config_option(expose_value=False)
+@click.argument('request_id',
                 required=False,
                 type=str,
-                **_get_shell_complete_args(_complete_request_id))
+                shell_complete=_complete_request_id)
 @click.option('--server-logs',
               is_flag=True,
               default=False,
@@ -5899,7 +5902,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
 @config_option(expose_value=False)
-@click.argument('request_ids',
+@click.argument('request_id',
                 required=False,
                 type=str,
                 nargs=-1,
