@@ -73,7 +73,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
     with rich_utils.safe_status(
             ux_utils.spinner_message(msg_str, log_path=log_path,
                                      is_local=True)):
-        returncode, stdout, stderr = log_lib.run_with_log(
+        returncode, _, stderr = log_lib.run_with_log(
             cmd=deploy_command,
             log_path=log_path,
             require_outputs=True,

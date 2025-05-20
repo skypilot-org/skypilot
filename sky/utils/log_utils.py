@@ -460,15 +460,6 @@ class SkySSHUpLineProcessor(LineProcessor):
                 f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}✔ SkyPilot runtime is up.{colorama.Style.RESET_ALL}'
             )
 
-        if 'found duplicate key: ' in log_line:
-            cluster_name = log_line.split('found duplicate key: ')[-1].strip()
-            logger.info(
-                f'{colorama.Fore.RED}Error: Duplicate cluster config for cluster '
-                f'{cluster_name}. Please remove one of them from '
-                f'~/.sky/ssh_node_pools.yaml.{colorama.Style.RESET_ALL}'
-            )
-            
-
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
                  traceback: Optional[types.TracebackType]) -> None:

@@ -39,10 +39,8 @@ class UniqueKeySafeLoader(yaml.SafeLoader):
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
                 raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    f"found duplicate key: {key}",
-                    key_node.start_mark,
+                    note=(f"Duplicate cluster config for cluster '{key}'.\n"
+                          f"Please remove one of them from: {DEFAULT_SSH_NODE_POOLS_PATH}")
                 )
             value = self.construct_object(value_node, deep=deep)
             mapping[key] = value
@@ -119,15 +117,19 @@ def parse_args():
 def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     """Load SSH targets from YAML file."""
     if not os.path.exists(file_path):
-        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}")
+        print(f"{RED}Error: SSH targets file not found: {file_path}{NC}",
+              file=sys.stderr)
         sys.exit(1)
 
     try:
         with open(file_path, 'r') as f:
             targets = yaml.load(f, Loader=UniqueKeySafeLoader)
         return targets
+    except yaml.constructor.ConstructorError as e:
+        print(f"{RED}{e.note}{NC}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"{RED}Error loading SSH targets file: {e}{NC}")
+        print(f"{RED}Error loading SSH targets file: {e}{NC}", file=sys.stderr)
         sys.exit(1)
 
 
