@@ -83,9 +83,9 @@ generate_ssh_command() {
     
     # Fall back to regular ssh
     if [[ $USE_SSH_CONFIG -eq 1 ]]; then
-      SSH_CMD=("ssh" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N" "$HOST")
+      SSH_CMD=("ssh" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:127.0.0.1:6443" "-N" "$HOST")
     else
-      SSH_CMD=("ssh" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N")
+      SSH_CMD=("ssh" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:127.0.0.1:6443" "-N")
       
       # Add SSH key if provided
       if [[ -n "$SSH_KEY" ]]; then
@@ -98,9 +98,9 @@ generate_ssh_command() {
   else
     # Configure autossh
     if [[ $USE_SSH_CONFIG -eq 1 ]]; then
-      SSH_CMD=("autossh" "-M" "0" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N" "$HOST")
+      SSH_CMD=("autossh" "-M" "0" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:127.0.0.1:6443" "-N" "$HOST")
     else
-      SSH_CMD=("autossh" "-M" "0" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:localhost:6443" "-N")
+      SSH_CMD=("autossh" "-M" "0" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:127.0.0.1:6443" "-N")
       
       # Add SSH key if provided
       if [[ -n "$SSH_KEY" ]]; then
@@ -292,7 +292,7 @@ debug_log "Starting ssh-tunnel.sh for context $CONTEXT, host $HOST, port $PORT"
 debug_log "SSH Config: $USE_SSH_CONFIG, User: $USER, TTL: ${TTL_SECONDS}s"
 
 # Check if specified port is already in use (tunnel may be running)
-if nc -z localhost "$PORT" 2>/dev/null; then
+if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
   debug_log "Port $PORT already in use, checking if it's our tunnel"
   
   # Check if there's a PID file and if that process is running
@@ -316,7 +316,7 @@ fi
 if ! acquire_lock; then
   # Wait briefly for the tunnel to be established
   for i in {1..10}; do
-    if nc -z localhost "$PORT" 2>/dev/null; then
+    if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
       debug_log "Tunnel is now active"
       
       # Return valid credential format for kubectl with expiration
@@ -358,7 +358,7 @@ debug_log "Tunnel started with PID $TUNNEL_PID"
 # Wait for tunnel to establish
 tunnel_up=0
 for i in {1..20}; do
-  if nc -z localhost "$PORT" 2>/dev/null; then
+  if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
     debug_log "Tunnel established successfully on port $PORT"
     tunnel_up=1
     break
