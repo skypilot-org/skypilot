@@ -373,8 +373,7 @@ Example:
 Timeout in seconds for SSH connection probing during provisioning (optional).
 
 Cluster SSH connection is probed during provisioning to check if a cluster is up. This timeout
-determines how long to wait for the connection to be established. Being able to configure this 
-timeout can prove useful when working remotely with a jump server.
+determines how long to wait for the connection to be established.
 
 Default: ``10``.
 
