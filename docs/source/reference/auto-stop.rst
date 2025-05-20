@@ -58,15 +58,15 @@ To view the status of the cluster, use ``sky status [--refresh]``:
 .. code-block:: bash
 
    $ sky status
-   NAME         LAUNCHED    RESOURCES            STATUS   AUTOSTOP       COMMAND
-   mycluster    1 min ago   2x AWS(m4.2xlarge)   UP       10 min         sky launch -d -c ...
-   mycluster2   1 min ago   2x AWS(m4.2xlarge)   UP       10 min(down)   sky launch -d -c ...
+   NAME         INFRA           RESOURCES                     STATUS   AUTOSTOP       LAUNCHED
+   mycluster    AWS (us-east-1) 2x(cpus=8, type=m4.2xlarge)   UP       10 min         1 min ago
+   mycluster2   AWS (us-east-1) 2x(cpus=8, type=m4.2xlarge)   UP       10 min(down)   1 min ago
 
    # Refresh the statuses by querying the cloud providers
    $ sky status --refresh
    I 06-27 13:36:11 backend_utils.py:2273] Autodowned cluster: mycluster2
-   NAME         LAUNCHED    RESOURCES            STATUS   AUTOSTOP  COMMAND
-   mycluster    11 min ago  2x AWS(m4.2xlarge)   STOPPED  10 min    sky launch -d -c ...
+   NAME         INFRA           RESOURCES                     STATUS   AUTOSTOP  LAUNCHED
+   mycluster    AWS (us-east-1) 2x(cpus=8, type=m4.2xlarge)   STOPPED  10 min    11 min ago
 
 Note that :code:`sky status` shows the cached statuses, which can be outdated for clusters with autostop/autodown scheduled.
 To query the latest statuses of those clusters, use :code:`sky status --refresh`.

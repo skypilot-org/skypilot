@@ -37,8 +37,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
@@ -214,8 +213,7 @@ Example:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         # optionally set specific cloud/region
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # default resources:
         cpus: 4+
         memory: 8x

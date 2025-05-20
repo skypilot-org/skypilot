@@ -96,11 +96,11 @@ To check the enabled Kubernetes clusters, you can run ``sky check k8s``.
         ├── my-h100-cluster
         └── my-tpu-cluster
 
-To check GPUs available in a Kubernetes cluster, you can run ``sky show-gpus --cloud k8s``.
+To check GPUs available in a Kubernetes cluster, you can run ``sky show-gpus --infra k8s``.
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud k8s
+    $ sky show-gpus --infra k8s
     Kubernetes GPUs
     GPU   UTILIZATION
     H100  16 of 16 free  
@@ -128,31 +128,33 @@ through the Kubernetes clusters in the same order as they are specified in the f
 
 .. code-block:: console
 
-    $ sky launch --gpus H100 --cloud k8s echo 'Hello World'
+    $ sky launch --gpus H100 --infra k8s echo 'Hello World'
 
     Considered resources (1 node):
-    ------------------------------------------------------------------------------------------------------------
-    CLOUD        INSTANCE           vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE           COST ($)   CHOSEN
-    ------------------------------------------------------------------------------------------------------------
-    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-gke   0.00          ✔
-    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-eks   0.00
-    ------------------------------------------------------------------------------------------------------------
+    ---------------------------------------------------------------------------------------------------------
+     INFRA                           INSTANCE          vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
+    ---------------------------------------------------------------------------------------------------------
+     Kubernetes (my-eks-cluster)     2CPU--2GB         2       2         -        0.00       ✔
+     Kubernetes (gke-skypilot)       4CPU--8GB         4       8         -        0.00      
+     AWS (us-east-1)                 m6i.large         2       8         -        0.10     
+     GCP (us-central1-a)             n2-standard-2     2       8         -        0.10     
+    ---------------------------------------------------------------------------------------------------------
 
 
 Launching in a specific Kubernetes cluster
 ------------------------------------------
 
-SkyPilot uses the ``region`` field to denote a Kubernetes context. You can point to a Kubernetes cluster
-by specifying the ``--region`` with the context name for that cluster.
+SkyPilot uses the ``infra`` field to denote a Kubernetes context. You can point to a Kubernetes cluster
+by specifying the ``--infra`` with the context name for that cluster.
 
 .. code-block:: console
 
 
     $ # Launch in a specific Kubernetes cluster.
-    $ sky launch --cloud k8s --region my-tpu-cluster echo 'Hello World'
+    $ sky launch --infra k8s/my-tpu-cluster echo 'Hello World'
 
     $ # Check the GPUs available in a Kubernetes cluster
-    $ sky show-gpus --cloud k8s --region my-h100-cluster                                                  ✭ ✱
+    $ sky show-gpus --infra k8s/my-h100-cluster
     Kubernetes GPUs
     Context: my-h100-cluster
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
@@ -163,7 +165,7 @@ by specifying the ``--region`` with the context name for that cluster.
     my-h100-cluster  gke-skypilotalpha-largecpu-05dae726-1usy      H100      8 of 8 free  
     my-h100-cluster  gke-skypilotalpha-largecpu-05dae726-4rxa      H100      8 of 8 free  
 
-When launching a SkyPilot cluster or task, you can also specify the context name with ``--region`` to launch the cluster or task in.
+When launching a SkyPilot cluster or task, you can also specify the context name with ``--infra`` to launch the cluster or task in.
 
 
 Dynamically updating clusters to use

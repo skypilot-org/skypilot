@@ -527,8 +527,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # Specify the maximum number of services that can be run concurrently.
         cpus: 2+  # number of vCPUs, max concurrent services = min(4 * cpus, memory in GiB)
         # Specify the disk_size in GB of the SkyServe controller.
