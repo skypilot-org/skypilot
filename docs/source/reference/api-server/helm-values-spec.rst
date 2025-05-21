@@ -542,7 +542,7 @@ Default: ``"quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"``
 .. _helm-values-ingress-oauth2-proxy-use-https:
 
 ``ingress.oauth2-proxy.use-https``
-'''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''
 
 Set to ``true`` when using HTTPS for the API server endpoint. When set to ``false``, secure cookies are disabled, which is required for HTTP endpoints.
 
