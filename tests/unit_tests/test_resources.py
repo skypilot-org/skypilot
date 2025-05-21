@@ -50,8 +50,9 @@ def _run_label_test(allowed_labels: Dict[str, str],
         r = Resources(cloud=cloud, labels=l)
         with pytest.raises(ValueError):
             r.validate()
-            assert False, (f'Resources were initialized with '
-                           f'invalid label {invalid_label}={value}')
+            assert False, (f'Resources {r.to_yaml_config()} were initialized '
+                           f'with invalid label {invalid_label}={value} but no '
+                           'error was raised.')
 
 
 def test_gcp_labels_resources():
@@ -208,3 +209,283 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                             dryrun=True)
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
+
+
+@pytest.mark.parametrize(['resources_kwargs', 'expected_yaml_config'], [
+    ({
+        'infra': '*/*/us-east-1b',
+        'accelerators': 'A10'
+    }, {
+        'infra': '*/*/us-east-1b',
+        'accelerators': {
+            'A10': 1
+        },
+        'disk_size': 256,
+    }),
+    ({
+        'infra': 'gcp/*/us-east1-b',
+        'accelerators': 'A10:8',
+        'labels': {
+            'key': 'value'
+        }
+    }, {
+        'infra': 'gcp/*/us-east1-b',
+        'accelerators': {
+            'A10': 8
+        },
+        'labels': {
+            'key': 'value'
+        },
+        'disk_size': 256,
+    }),
+])
+def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
+    r = Resources(**resources_kwargs)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config == expected_yaml_config
+
+    loaded_r = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_r.cloud == r.cloud
+    assert loaded_r.region == r.region
+    assert loaded_r.zone == r.zone
+    original_accelerators = r.accelerators
+    assert loaded_r.accelerators == original_accelerators
+    assert original_accelerators == r.accelerators
+    assert loaded_r.labels == r.labels
+
+
+def test_resources_any_of():
+    """Test Resources creation with any_of option."""
+    # Test any_of with different resources options
+    config = {
+        'any_of': [
+            {
+                'cpus': 8,
+                'memory': 16
+            },
+            {
+                'cpus': 4,
+                'memory': 32
+            },
+            {
+                'accelerators': 'V100:1'
+            },
+        ]
+    }
+    resources_set = Resources.from_yaml_config(config)
+
+    # Verify it returns a set of resources
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 3
+
+    # Validate the resources options are correctly created
+    resources_list = list(resources_set)
+
+    # Find resources by properties (order may not be preserved)
+    r_cpus8 = next((r for r in resources_list if r.cpus == '8'), None)
+    r_cpus4 = next((r for r in resources_list if r.cpus == '4'), None)
+    r_gpu = next((r for r in resources_list if r.accelerators is not None),
+                 None)
+
+    assert r_cpus8 is not None
+    assert r_cpus8.memory == '16'
+
+    assert r_cpus4 is not None
+    assert r_cpus4.memory == '32'
+
+    assert r_gpu is not None
+    assert r_gpu.accelerators == {'V100': 1}
+
+
+def test_resources_ordered():
+    """Test Resources creation with ordered option."""
+    # Test ordered with different resources options
+    config = {
+        'ordered': [
+            {
+                'infra': 'gcp',
+                'accelerators': 'A100:8'
+            },
+            {
+                'infra': 'aws',
+                'accelerators': 'V100:8'
+            },
+            {
+                'accelerators': 'T4:8'
+            },
+        ]
+    }
+    resources_list = Resources.from_yaml_config(config)
+
+    # Verify it returns a list of resources
+    assert isinstance(resources_list, list)
+    assert len(resources_list) == 3
+
+    # Ordered resources should preserve order
+    assert resources_list[0].infra.cloud.lower() == 'gcp'
+    assert resources_list[0].accelerators == {'A100': 8}
+
+    assert resources_list[1].infra.cloud.lower() == 'aws'
+    assert resources_list[1].accelerators == {'V100': 8}
+
+    assert resources_list[2].accelerators == {'T4': 8}
+
+
+def test_resources_any_of_spot_flag():
+    """Test Resources with any_of option including spot flag variations."""
+    config = {
+        'accelerators': 'A100:8',
+        'any_of': [{
+            'use_spot': True
+        }, {
+            'use_spot': False
+        }]
+    }
+    resources_set = Resources.from_yaml_config(config)
+
+    # Verify it returns a set of resources
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 2
+
+    # Find spot and on-demand resources
+    resources_list = list(resources_set)
+    r_spot = next((r for r in resources_list if r.use_spot), None)
+    r_ondemand = next((r for r in resources_list if not r.use_spot), None)
+
+    assert r_spot is not None
+    assert r_spot.accelerators == {'A100': 8}
+    assert r_spot.use_spot is True
+
+    assert r_ondemand is not None
+    assert r_ondemand.accelerators == {'A100': 8}
+    assert r_ondemand.use_spot is False
+
+
+def test_resources_ordered_preference():
+    """Test Resources creation with ordered preference correctly preserves order."""
+    config = {
+        'ordered': [
+            {
+                'infra': 'aws/us-east-1',
+                'accelerators': 'A100:8'
+            },
+            {
+                'infra': 'gcp/us-central1',
+                'accelerators': 'A100:8'
+            },
+            {
+                'infra': 'azure/eastus',
+                'accelerators': 'A100:8'
+            },
+        ]
+    }
+    resources_list = Resources.from_yaml_config(config)
+
+    # Verify order matches the input order
+    assert resources_list[0].infra.cloud.lower() == 'aws'
+    assert resources_list[0].infra.region == 'us-east-1'
+
+    assert resources_list[1].infra.cloud.lower() == 'gcp'
+    assert resources_list[1].infra.region == 'us-central1'
+
+    assert resources_list[2].infra.cloud.lower() == 'azure'
+    assert resources_list[2].infra.region == 'eastus'
+
+
+def test_resources_any_of_ordered_exclusive():
+    """Test that Resources raises ValueError if both any_of and ordered are specified."""
+    config = {'any_of': [{'cpus': 8}], 'ordered': [{'cpus': 4}]}
+
+    # Should raise ValueError because both any_of and ordered are specified
+    with pytest.raises(ValueError,
+                       match='Cannot specify both "any_of" and "ordered"'):
+        Resources.from_yaml_config(config)
+
+
+def test_resources_any_of_with_base_infra():
+    """Test Resources creation with any_of option and base infra."""
+    # Test any_of with base infra and additional infra specifications
+    config = {
+        'infra': 'aws',  # Base infra
+        'cpus': 8,
+        'any_of': [
+            {
+                'infra': 'aws/us-east-1'
+            },  # Override with specific region
+            {
+                'infra': 'aws/us-west-2'
+            },  # Different region
+            {
+                'infra': 'gcp/us-central1'
+            },  # Different cloud
+        ]
+    }
+    resources_set = Resources.from_yaml_config(config)
+
+    # Verify it returns a set of resources
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 3
+
+    # Validate the resources are correctly created with proper infra
+    resources_list = list(resources_set)
+
+    # All resources should have cpus=8 from the base config
+    for r in resources_list:
+        assert r.cpus == '8'
+
+    # Find resources by infra properties
+    r_east = next((r for r in resources_list if r.infra.region == 'us-east-1'),
+                  None)
+    r_west = next((r for r in resources_list if r.infra.region == 'us-west-2'),
+                  None)
+    r_gcp = next((r for r in resources_list if r.infra.cloud.lower() == 'gcp'),
+                 None)
+
+    assert r_east is not None
+    assert str(r_east.cloud).lower() == 'aws'
+
+    assert r_west is not None
+    assert str(r_west.cloud).lower() == 'aws'
+
+    assert r_gcp is not None
+    assert r_gcp.infra.region == 'us-central1'
+
+
+def test_resources_ordered_with_base_infra():
+    """Test Resources creation with ordered option and base infra."""
+    # Test ordered with base infra and additional infra specifications
+    config = {
+        'infra': 'azure',  # Base infra
+        'accelerators': 'A100:8',  # Base accelerator
+        'ordered': [
+            {
+                'infra': 'gcp/us-central1'
+            },  # Specific region in same cloud
+            {
+                'infra': 'aws/us-east-1'
+            },  # Different cloud
+            {
+                'accelerators': 'T4:8'
+            },  # Another cloud
+        ]
+    }
+    resources_list = Resources.from_yaml_config(config)
+
+    # Verify it returns a list of resources with right length
+    assert isinstance(resources_list, list)
+    assert len(resources_list) == 3
+
+    # All resources should have A100:8 from the base config
+    assert resources_list[0].accelerators == {'A100': 8}
+    assert resources_list[1].accelerators == {'A100': 8}
+    assert resources_list[2].accelerators == {'T4': 8}
+
+    # Ordered resources should preserve order and have correct infra
+    assert str(resources_list[0].cloud).lower() == 'gcp'
+    assert resources_list[0].region == 'us-central1'
+
+    assert str(resources_list[1].cloud).lower() == 'aws'
+    assert resources_list[1].region == 'us-east-1'
+
+    assert str(resources_list[2].cloud).lower() == 'azure'
+    assert resources_list[2].region is None

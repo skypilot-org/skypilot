@@ -37,8 +37,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
@@ -54,6 +53,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`: false
 
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
+
+  :ref:`provision <config-yaml-provision>`:
+    :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -214,8 +216,7 @@ Example:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         # optionally set specific cloud/region
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # default resources:
         cpus: 4+
         memory: 8x
@@ -356,6 +357,23 @@ Example:
 .. code-block:: yaml
 
   admin_policy: my_package.SkyPilotPolicyV1
+
+.. _config-yaml-provision:
+
+``provision``
+~~~~~~~~~~~~~
+
+.. _config-yaml-provision-ssh-timeout:
+
+``provision.ssh_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for SSH connection probing during provisioning (optional).
+
+Cluster SSH connection is probed during provisioning to check if a cluster is up. This timeout
+determines how long to wait for the connection to be established.
+
+Default: ``10``.
 
 .. _config-yaml-aws:
 

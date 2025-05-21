@@ -74,9 +74,8 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         cluster_name_on_cloud='test-cluster1',
         cluster_yaml=_generate_tmp_yaml(tmp_path, 'cluster1.yaml'),
         launched_nodes=2,
-        launched_resources=sky.Resources(sky.AWS(),
-                                         instance_type='p3.2xlarge',
-                                         region='us-east-1'),
+        launched_resources=sky.Resources(infra='aws/us-east-1',
+                                         instance_type='p3.2xlarge'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster1',
@@ -88,10 +87,9 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         cluster_name_on_cloud='test-cluster2',
         cluster_yaml=_generate_tmp_yaml(tmp_path, 'cluster2.yaml'),
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.GCP(),
+        launched_resources=sky.Resources(infra='gcp/us-west1',
                                          instance_type='a2-highgpu-4g',
-                                         accelerators={'A100': 4},
-                                         region='us-west1'),
+                                         accelerators={'A100': 4}),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster2',
@@ -103,9 +101,8 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         cluster_name_on_cloud='test-cluster3',
         cluster_yaml=_generate_tmp_yaml(tmp_path, 'cluster3.yaml'),
         launched_nodes=4,
-        launched_resources=sky.Resources(sky.Azure(),
-                                         instance_type='Standard_D4s_v3',
-                                         region='eastus'),
+        launched_resources=sky.Resources(infra='AZURE/eastus',
+                                         instance_type='Standard_D4s_v3'),
     )
     global_user_state.add_or_update_cluster(
         'test-cluster3',
@@ -121,9 +118,8 @@ def _mock_jobs_controller(_mock_db_conn, tmp_path):
         cluster_name_on_cloud=common.JOB_CONTROLLER_NAME,
         cluster_yaml=_generate_tmp_yaml(tmp_path, 'jobs_controller.yaml'),
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.AWS(),
-                                         instance_type='m4.2xlarge',
-                                         region='us-west-1'),
+        launched_resources=sky.Resources(infra='aws/us-west-1',
+                                         instance_type='m4.2xlarge'),
     )
     global_user_state.add_or_update_cluster(
         common.JOB_CONTROLLER_NAME,
@@ -140,9 +136,8 @@ def _mock_serve_controller(_mock_db_conn, tmp_path):
         cluster_name_on_cloud=common.SKY_SERVE_CONTROLLER_NAME,
         cluster_yaml=yaml_path,
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.AWS(),
-                                         instance_type='m4.2xlarge',
-                                         region='us-west-1'),
+        launched_resources=sky.Resources(infra='aws/us-west-1',
+                                         instance_type='m4.2xlarge'),
         stable_internal_external_ips=[('1.2.3.4', '4.3.2.1')],
         stable_ssh_ports=[22],
     )

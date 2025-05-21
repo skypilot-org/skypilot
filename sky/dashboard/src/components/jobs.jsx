@@ -17,11 +17,15 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration } from '@/components/utils';
+import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
-import { CustomTooltip as Tooltip, relativeTime } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+  relativeTime,
+} from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
@@ -83,7 +87,7 @@ export function ManagedJobs() {
         </div>
       </div>
       <ManagedJobsTable
-        refreshInterval={20000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
       />
@@ -490,22 +494,23 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources')}
+                onClick={() => requestSort('resources_str')}
               >
-                Resources{getSortDirection('resources')}
+                Requested{getSortDirection('resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('infra')}
+              >
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('cluster')}
               >
-                Cluster{getSortDirection('cluster')}
+                Resources{getSortDirection('cluster')}
               </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
-              >
-                Region{getSortDirection('region')}
-              </TableHead>
+
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('recoveries')}
@@ -520,7 +525,7 @@ export function ManagedJobsTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={12}
+                  colSpan={11}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -556,9 +561,25 @@ export function ManagedJobsTable({
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell>{item.resources}</TableCell>
-                      <TableCell>{item.cluster}</TableCell>
-                      <TableCell>{item.region}</TableCell>
+                      <TableCell>{item.requested_resources}</TableCell>
+                      <TableCell>
+                        <NonCapitalizedTooltip
+                          content={item.full_infra || item.infra}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.infra}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell>
+                        <NonCapitalizedTooltip
+                          content={
+                            item.resources_str_full || item.resources_str
+                          }
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.resources_str}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
                       <TableCell>{item.recoveries}</TableCell>
                       <TableCell>
                         {item.details ? (
@@ -583,7 +604,7 @@ export function ManagedJobsTable({
                     {expandedRowId === item.id && (
                       <ExpandedDetailsRow
                         text={item.details}
-                        colSpan={12}
+                        colSpan={11}
                         innerRef={expandedRowRef}
                       />
                     )}
@@ -592,7 +613,7 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-6">
+                <TableCell colSpan={11} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">

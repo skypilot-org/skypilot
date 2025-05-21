@@ -35,19 +35,19 @@ train = sky.Task(
 
 train.set_resources({
     ##### Fully specified
-    sky.Resources(sky.AWS(), 'p3.2xlarge'),
-    # sky.Resources(sky.GCP(), 'n1-standard-16'),
+    sky.Resources(infra='aws', instance_type='p3.2xlarge'),
+    # sky.Resources(infra='gcp', instance_type='n1-standard-16'),
     #sky.Resources(
-    #     sky.GCP(),
-    #     'n1-standard-8',
+    #     infra='gcp',
+    #     instance_type='n1-standard-8',
     # Options: 'V100', {'V100': <num>}.
-    #     'V100',
+    #     accelerators='V100',
     #),
     ##### Partially specified
     #sky.Resources(accelerators='V100'),
     # sky.Resources(accelerators='tpu-v3-8'),
-    # sky.Resources(sky.AWS(), accelerators={'V100': 4}),
-    # sky.Resources(sky.AWS(), accelerators='V100'),
+    # sky.Resources(infra='aws', accelerators={'V100': 4}),
+    # sky.Resources(infra='aws', accelerators='V100'),
 })
 
 sky.launch(train, cluster_name='dth')

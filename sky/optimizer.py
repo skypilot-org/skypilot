@@ -167,7 +167,7 @@ class Optimizer:
 
         def make_dummy(name):
             dummy = task_lib.Task(name)
-            dummy.set_resources({DummyResources(DummyCloud(), None)})
+            dummy.set_resources({DummyResources(cloud=DummyCloud())})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
 
@@ -321,10 +321,10 @@ class Optimizer:
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
-                    #    Resources('V100')
+                    #    Resources(accelerators='V100')
                     # and treats their launchable versions
-                    #    Resources(AWS, 'p3.2xlarge'),
-                    #    Resources(GCP, '...', 'V100'),
+                    #    Resources(infra='aws', instance_type='p3.2xlarge'),
+                    #    Resources(infra='gcp', accelerators='V100'),
                     #    ...
                     # as having the same run time.
                     # FIXME(zongheng): take 'num_nodes' as an arg/into
@@ -772,6 +772,15 @@ class Optimizer:
                     f'{colorama.Style.BRIGHT}Estimated total cost: '
                     f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
 
+        def _instance_type_str(resources: 'resources_lib.Resources') -> str:
+            instance_type = resources.instance_type
+            assert instance_type is not None, 'Instance type must be specified'
+            if isinstance(resources.cloud, clouds.Kubernetes):
+                instance_type = '-'
+                if resources.use_spot:
+                    instance_type = ''
+            return instance_type
+
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
             accelerators = resources.get_accelerators_str()
@@ -794,22 +803,20 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
-            if resources.zone is None:
-                region_or_zone = resources.region
-            else:
-                region_or_zone = resources.zone
+            # Format infra as CLOUD (REGION/ZONE)
+            infra = resources.infra.formatted_str()
+
             return [
-                str(cloud),
-                resources.instance_type + spot,
+                infra,
+                _instance_type_str(resources) + spot,
                 vcpus,
                 mem,
                 str(accelerators),
-                str(region_or_zone),
             ]
 
         Row = collections.namedtuple('Row', [
-            'cloud', 'instance', 'vcpus', 'mem', 'accelerators',
-            'region_or_zone', 'cost_str', 'chosen_str'
+            'infra', 'instance', 'vcpus', 'mem', 'accelerators', 'cost_str',
+            'chosen_str'
         ])
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
@@ -833,18 +840,15 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
-            if resources.zone is None:
-                region_or_zone = resources.region
-            else:
-                region_or_zone = resources.zone
+            infra = resources.infra.formatted_str()
 
             chosen_str = ''
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(cloud, resources.instance_type + spot, vcpus, mem,
-                      str(accelerators), str(region_or_zone), cost_str,
-                      chosen_str)
+            row = Row(infra,
+                      _instance_type_str(resources) + spot, vcpus, mem,
+                      str(accelerators), cost_str, chosen_str)
 
             return row
 
@@ -862,10 +866,7 @@ class Optimizer:
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
-            'REGION/ZONE'
-        ]
+        resource_fields = ['INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS']
         if len(ordered_best_plan) > 1:
             best_plan_rows = []
             for t, r in ordered_best_plan.items():
@@ -993,13 +994,19 @@ class Optimizer:
                     if len(candidate_list) > 1:
                         is_multi_instances = True
                         instance_list = [
-                            res.instance_type for res in candidate_list
+                            res.instance_type
+                            for res in candidate_list
+                            if res.instance_type is not None
                         ]
+                        candidate_str = resources_utils.format_resource(
+                            candidate_list[0], simplify=True)
+
                         logger.info(
-                            f'Multiple {cloud} instances satisfy '
-                            f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]!r} is considered '
-                            f'among:\n{instance_list}.')
+                            f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
+                            f'satisfy {acc_name}:{int(acc_count)}. '
+                            f'The cheapest {candidate_str} is considered '
+                            f'among: {", ".join(instance_list)}.'
+                            f'{colorama.Style.RESET_ALL}')
             if is_multi_instances:
                 logger.info(
                     f'To list more details, run: sky show-gpus {acc_name}\n')

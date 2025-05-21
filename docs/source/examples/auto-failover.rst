@@ -23,6 +23,50 @@ searching for regions (or clouds) that can provide the requested resources.
   If specific :code:`cloud`, ``region``, or ``zone`` are requested for a
   task, auto-failover retries only within the specified location.
 
+Specifying infra choices
+------------------------
+
+The :code:`resources.infra` field in the SkyPilot YAML can be used to specify
+the infrastructure choice(s) to use when provisioning any compute.
+
+Schema:
+
+- ``<cloud>/<region>/<zone>`` (region and zone are optional)
+- ``k8s/<context-name>`` (context-name is optional)
+- Wildcards are supported in any component.
+
+Example values:
+
+.. code-block:: yaml
+
+  resources:
+    infra: aws  # Use any available AWS region/zone.
+    infra: aws/us-east-1  # Use a particular region.
+    infra: aws/us-east-1/us-east-1a  # Use a particular zone.
+    infra: aws/*/us-east-1a  # Same as above.
+
+    infra: k8s  # Use any available Kubernetes context.
+    infra: k8s/*  # Same as above.
+    infra: k8s/my-cluster-context  # Use a particular Kubernetes context.
+
+See :ref:`yaml-spec-resources-infra` for more details.
+
+If you are using CLI commands, the ``--infra`` argument accepts the same schema:
+
+.. code-block:: console
+
+  sky launch --infra aws
+  sky launch --infra aws/us-east-1
+  sky launch --infra aws/us-east-1/us-east-1a
+  sky launch --infra 'aws/*/us-east-1a'
+  sky launch --infra k8s
+  sky launch --infra 'k8s/*'
+  sky launch --infra k8s/my-cluster-context
+
+See :ref:`cli` for all the commands that accept ``--infra``.
+
+
+
 Provisioning GPUs
 ----------------------
 
@@ -91,11 +135,11 @@ GCP, where it succeeded after one region:
 
   Considered resources (1 node):
   ----------------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
+   INFRA                    INSTANCE              vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   ----------------------------------------------------------------------------------------------------
-   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔
-   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39
-   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77
+   Azure (eastus)           Standard_ND96asr_v4   96      900       A100:8   27.20         ✔
+   GCP (us-central1-a)      a2-highgpu-8g         96      680       A100:8   29.39
+   AWS (us-east-1)          p4d.24xlarge          96      1152      A100:8   32.77
   ----------------------------------------------------------------------------------------------------
   Launching a new cluster 'a100-8'. Proceed? [Y/n]:
 
@@ -135,11 +179,11 @@ A10, L4, and A10g GPUs, using :code:`sky launch task.yaml`.
   $ sky launch task.yaml
   ...
   -----------------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE                 vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+   INFRA                  INSTANCE                 vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   -----------------------------------------------------------------------------------------------------
-   Azure   Standard_NV6ads_A10_v5   6       55        A10:1          eastus        0.45          ✔
-   GCP     g2-standard-4            4       16        L4:1           us-east4-a    0.70
-   AWS     g5.xlarge                4       16        A10G:1         us-east-1     1.01
+   Azure (eastus)         Standard_NV6ads_A10_v5   6       55        A10:1    0.45          ✔
+   GCP (us-east4-a)       g2-standard-4            4       16        L4:1     0.70
+   AWS (us-east-1)        g5.xlarge                4       16        A10G:1   1.01
   -----------------------------------------------------------------------------------------------------
 
 
@@ -165,11 +209,10 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
 
   resources:
     ordered: # Candidate resources in a preference order
-      - cloud: gcp
+      - infra: gcp
         accelerators: A100-80GB
       - instance_type: g5.xlarge
-      - cloud: azure
-        region: eastus
+      - infra: azure/eastus
         accelerators: A100
 
 
@@ -178,11 +221,10 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
 
     resources:
       any_of: # Candidate resources that can be chosen in any order
-        - cloud: gcp
+        - infra: gcp
           accelerators: A100-80GB
         - instance_type: g5.xlarge
-        - cloud: azure
-          region: eastus
+        - infra: azure/eastus
           accelerators: A100
 
 .. tip::
@@ -198,18 +240,18 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
     accelerators: {A10g:8, A10:8, L4:8, A100:8}
     any_of:
       # AWS:
-      - region: us-east-1
-      - region: us-east-2
-      - region: us-west-1
-      - region: us-west-2
+      - infra: aws/us-east-1
+      - infra: aws/us-east-2
+      - infra: aws/us-west-1
+      - infra: aws/us-west-2
       # GCP
-      - region: us-central1
-      - region: us-east1
-      - region: us-east4
-      - region: us-west1
-      - region: us-west2
-      - region: us-west3
-      - region: us-west4
+      - infra: gcp/us-central1
+      - infra: gcp/us-east1
+      - infra: gcp/us-east4
+      - infra: gcp/us-west1
+      - infra: gcp/us-west2
+      - infra: gcp/us-west3
+      - infra: gcp/us-west4
 
 .. hint::
 
@@ -224,12 +266,12 @@ This will generate the following output:
 
   Considered resources (1 node):
   ---------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE         vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+   INFRA                  INSTANCE         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
   ---------------------------------------------------------------------------------------------
-   GCP     g2-standard-96   96      384       L4:8           us-east4-a    7.98          ✔
-   AWS     g5.48xlarge      192     768       A10G:8         us-east-1     16.29
-   GCP     a2-highgpu-8g    96      680       A100:8         us-east1-b    29.39
-   AWS     p4d.24xlarge     96      1152      A100:8         us-east-1     32.77
+   GCP (us-east4-a)       g2-standard-96   96      384       L4:8     7.98          ✔
+   AWS (us-east-1)        g5.48xlarge      192     768       A10G:8   16.29
+   GCP (us-east1-b)       a2-highgpu-8g    96      680       A100:8   29.39
+   AWS (us-east-1)        p4d.24xlarge     96      1152      A100:8   32.77
   ---------------------------------------------------------------------------------------------
 
   Launching a new cluster 'mycluster'. Proceed? [Y/n]:
