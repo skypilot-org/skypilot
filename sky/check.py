@@ -70,10 +70,8 @@ def check_capabilities(
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
                      [cloudflare.NAME])
 
-    explicit_check = False
     if clouds is not None:
         cloud_list = clouds
-        explicit_check = True
     else:
         cloud_list = get_all_clouds()
     clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
@@ -92,7 +90,7 @@ def check_capabilities(
     # Throw errors for clouds explicitly checked that are not allowed.
     disallowed_explicit_check_cloud_names = [
         c for c, _ in clouds_to_check if c not in config_allowed_cloud_names
-    ] if explicit_check else []
+    ] if clouds is not None else []
     # Check only the clouds which are allowed in the config.
     clouds_to_check = [
         c for c in clouds_to_check if c[0] in config_allowed_cloud_names
