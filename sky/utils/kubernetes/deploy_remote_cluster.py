@@ -13,8 +13,6 @@ from typing import Any, Dict, List, Optional, Set
 
 import yaml
 
-from sky.utils import ux_utils
-
 # Colors for nicer UX
 RED = '\033[0;31m'
 GREEN = '\033[0;32m'
@@ -800,9 +798,11 @@ def deploy_cluster(head_node,
         # For SkySSHUpLineProcessor
         print_output=True)
     if result is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Failed to connect to head node. '
-                               'Please check the SSH configuration.')
+        print(
+            f'{RED}Failed to SSH to head node ({head_node}). '
+            f'Please check the SSH configuration.{NC}',
+            file=sys.stderr)
+        sys.exit(1)
 
     # Checking history
     history_exists = (history_worker_nodes is not None and
@@ -959,8 +959,9 @@ def deploy_cluster(head_node,
                         ssh_key,
                         use_ssh_config=head_use_ssh_config)
     if result is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Failed to deploy K3s on head node.')
+        print(f'{RED}Failed to deploy K3s on head node ({head_node}). {NC}',
+              file=sys.stderr)
+        sys.exit(1)
     success_message(f'K3s deployed on head node ({head_node}).')
 
     # Check if head node has a GPU
@@ -979,8 +980,11 @@ def deploy_cluster(head_node,
                              ssh_key,
                              use_ssh_config=head_use_ssh_config)
     if master_addr is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Failed to get master node internal IP.')
+        print(
+            f'{RED}Failed to SSH to head node ({head_node}). '
+            f'Please check the SSH configuration.{NC}',
+            file=sys.stderr)
+        sys.exit(1)
     print(f'{GREEN}Master node internal IP: {master_addr}{NC}')
 
     # Step 2: Install k3s on worker nodes and join them to the master node
