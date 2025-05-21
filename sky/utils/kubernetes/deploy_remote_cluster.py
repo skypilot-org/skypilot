@@ -2,7 +2,6 @@
 # Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script. # pylint: disable=line-too-long
 import argparse
 import base64
-import collections
 import concurrent.futures as cf
 import os
 import random
@@ -33,7 +32,7 @@ class UniqueKeySafeLoader(yaml.SafeLoader):
     """Custom YAML loader that raises an error if there are duplicate keys."""
 
     def construct_mapping(self, node, deep=False):
-        mapping = collections.OrderedDict()
+        mapping = {}
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
