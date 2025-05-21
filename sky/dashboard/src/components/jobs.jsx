@@ -110,6 +110,30 @@ const formatSubmittedTime = (timestamp) => {
     return 'now';
   }
 
+  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "~1 hr ago"
+  const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
+  if (aboutMatch) {
+    const num = aboutMatch[1];
+    const unit = aboutMatch[2];
+    const unitMap = {
+      'second': 'sec',
+      'seconds': 'secs',
+      'minute': 'min',
+      'minutes': 'mins',
+      'hour': 'hr',
+      'hours': 'hrs',
+      'day': 'd',
+      'days': 'd',
+      'month': 'mo',
+      'months': 'mos',
+      'year': 'yr',
+      'years': 'yrs'
+    };
+    if (unitMap[unit]) {
+      return `~ ${num} ${unitMap[unit]} ago`;
+    }
+  }
+
   // Handle "a minute ago", "an hour ago", etc.
   const singleUnitMatch = timeString.match(/^a[n]?\s+(\w+)\s+ago$/);
   if (singleUnitMatch) {
