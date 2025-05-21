@@ -4,8 +4,7 @@ import itertools
 import os
 import traceback
 from types import ModuleType
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import click
 import colorama
@@ -44,7 +43,8 @@ def check_capabilities(
     def check_one_cloud_one_capability(
         payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
                        sky_cloud.CloudCapability]
-    ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[str]]]:
+    ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
+            str, Dict[str, str]]]]]:
         cloud_tuple, capability = payload
         _, cloud = cloud_tuple
         try:
@@ -53,7 +53,9 @@ def check_capabilities(
             return None
         except Exception:  # pylint: disable=broad-except
             ok, reason = False, traceback.format_exc()
-        return capability, ok, reason.strip() if reason else None
+        if not isinstance(reason, dict):
+            reason = reason.strip() if reason else None
+        return (capability, ok, reason)
 
     def get_cloud_tuple(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
@@ -100,13 +102,18 @@ def check_capabilities(
     check_results_dict: Dict[
         Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
         List[Tuple[sky_cloud.CloudCapability, bool,
-                   Optional[str]]]] = collections.defaultdict(list)
+                   Optional[Union[str,
+                                  Dict[str,
+                                       str]]]]]] = collections.defaultdict(list)
+    cloud2ctx2text: Dict[str, Dict[str, str]] = {}
     for combination, check_result in zip(combinations, check_results):
         if check_result is None:
             continue
-        capability, ok, _ = check_result
+        capability, ok, ctx2text = check_result
         cloud_tuple, _ = combination
         cloud_repr = cloud_tuple[0]
+        if isinstance(ctx2text, dict):
+            cloud2ctx2text[cloud_repr] = ctx2text
         if ok:
             enabled_clouds.setdefault(cloud_repr, []).append(capability)
         else:
@@ -115,7 +122,8 @@ def check_capabilities(
 
     for cloud_tuple, check_result_list in sorted(check_results_dict.items(),
                                                  key=lambda item: item[0][0]):
-        _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list)
+        _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list,
+                             cloud2ctx2text.get(cloud_repr, {}))
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
@@ -290,7 +298,8 @@ def _print_checked_cloud(
     verbose: bool,
     cloud_tuple: Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
     cloud_capabilities: List[Tuple[sky_cloud.CloudCapability, bool,
-                                   Optional[str]]],
+                                   Optional[Union[str, Dict[str, str]]]]],
+    ctx2text: Dict[str, str],
 ) -> None:
     """Prints whether a cloud is enabled, and the capabilities that are enabled.
     If any hints (for enabled capabilities) or
@@ -317,30 +326,81 @@ def _print_checked_cloud(
     for capability, ok, reason in cloud_capabilities:
         if ok:
             enabled_capabilities.append(capability)
+        # `dict` reasons for K8s and SSH will be printed in detail in
+        # _format_enabled_cloud. Skip here.
+        if not isinstance(reason, str):
+            continue
+        if ok:
             if reason is not None:
                 hints_to_capabilities.setdefault(reason, []).append(capability)
         elif reason is not None:
             reasons_to_capabilities.setdefault(reason, []).append(capability)
+    style_str = f'{colorama.Style.DIM}'
     status_msg: str = 'disabled'
-    styles: Dict[str, Any] = {'dim': True}
     capability_string: str = ''
+    detail_string: str = ''
     activated_account: Optional[str] = None
     if enabled_capabilities:
+        style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
-        styles = {'fg': 'green', 'bold': False}
         capability_string = f'[{", ".join(enabled_capabilities)}]'
         if verbose and cloud is not cloudflare:
             activated_account = cloud.get_active_user_identity_str()
-
+    # TODO(tian): Add k8s here
+    if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
+        detail_string = '\n' + _format_context_details(cloud_tuple[1], ctx2text)
     echo(
-        click.style(f'  {cloud_repr}: {status_msg} {capability_string}',
-                    **styles))
+        click.style(
+            f'{style_str}  {cloud_repr}: {status_msg} {capability_string}'
+            f'{colorama.Style.RESET_ALL}{detail_string}'))
     if activated_account is not None:
         echo(f'    Activated account: {activated_account}')
     for reason, caps in hints_to_capabilities.items():
         echo(f'    Hint [{", ".join(caps)}]: {_yellow_color(reason)}')
     for reason, caps in reasons_to_capabilities.items():
         echo(f'    Reason [{", ".join(caps)}]: {reason}')
+
+
+def _green_color(str_to_format: str) -> str:
+    return f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}'
+
+
+def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
+                            ctx2text: Optional[Dict[str, str]] = None) -> str:
+    if isinstance(cloud, str):
+        cloud_type = registry.CLOUD_REGISTRY.from_str(cloud)
+        assert cloud_type is not None
+    else:
+        cloud_type = cloud
+    if isinstance(cloud_type, sky_clouds.SSH):
+        # Get the cluster names by reading from the node pools file
+        contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+    else:
+        assert isinstance(cloud_type, sky_clouds.Kubernetes)
+        contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+
+    # Format the context info with consistent styling
+    contexts_formatted = []
+    for i, context in enumerate(contexts):
+        if isinstance(cloud_type, sky_clouds.SSH):
+            # TODO: This is a hack to remove the 'ssh-' prefix from the
+            # context name. Once we have a separate kubeconfig for SSH,
+            # this will not be required.
+            cleaned_context = context.lstrip('ssh-')
+        else:
+            cleaned_context = context
+        symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(contexts) -
+                  1 else ux_utils.INDENT_SYMBOL)
+        text_suffix = (f': {ctx2text[context]}'
+                       if ctx2text is not None and context in ctx2text else '')
+        contexts_formatted.append(
+            f'\n    {symbol}{cleaned_context}{text_suffix}')
+    identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
+                    else 'Allowed contexts')
+    context_info = f'  {identity_str}:{"".join(contexts_formatted)}'
+
+    return (f'  {colorama.Style.DIM}{context_info}'
+            f'{colorama.Style.RESET_ALL}')
 
 
 def _format_enabled_cloud(cloud_name: str,
@@ -355,64 +415,10 @@ def _format_enabled_cloud(cloud_name: str,
         A string of the formatted cloud and capabilities.
     """
     cloud_and_capabilities = f'{cloud_name} [{", ".join(capabilities)}]'
+    title = _green_color(cloud_and_capabilities)
 
-    def _green_color(str_to_format: str) -> str:
-        return (
-            f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}')
+    if cloud_name in [repr(sky_clouds.Kubernetes()), repr(sky_clouds.SSH())]:
+        return (f'{title}\n'
+                f'{_format_context_details(cloud_name)}')
 
-    if cloud_name == repr(sky_clouds.Kubernetes()):
-        # Get enabled contexts for Kubernetes
-        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
-        if not existing_contexts:
-            return _green_color(cloud_and_capabilities)
-
-        # Check if allowed_contexts is explicitly set in config
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
-
-        # Format the context info with consistent styling
-        if allowed_contexts is not None:
-            contexts_formatted = []
-            for i, context in enumerate(existing_contexts):
-                symbol = (ux_utils.INDENT_LAST_SYMBOL
-                          if i == len(existing_contexts) -
-                          1 else ux_utils.INDENT_SYMBOL)
-                contexts_formatted.append(f'\n    {symbol}{context}')
-            context_info = f'  Allowed contexts:{"".join(contexts_formatted)}'
-        else:
-            context_info = f'  Active context: {existing_contexts[0]}'
-
-        return (f'{_green_color(cloud_and_capabilities)}\n'
-                f'  {colorama.Style.DIM}{context_info}'
-                f'{colorama.Style.RESET_ALL}')
-
-    elif cloud_name == repr(sky_clouds.SSH()):
-        # Get enabled contexts for SSH
-        existing_contexts = sky_clouds.SSH.existing_allowed_contexts()
-        if not existing_contexts:
-            return _green_color(cloud_and_capabilities)
-
-        # Get the cluster names by reading from the node pools file
-        ssh_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
-
-        # Format the context info with consistent styling
-        if len(ssh_contexts) > 1:
-            contexts_formatted = []
-            for i, context in enumerate(existing_contexts):
-                #TODO: This is a hack to remove the 'ssh-' prefix from the
-                # context name. Once we have a separate kubeconfig for SSH,
-                # this will not be required.
-                cleaned_context = context.lstrip('ssh-')
-                symbol = (ux_utils.INDENT_LAST_SYMBOL
-                          if i == len(existing_contexts) -
-                          1 else ux_utils.INDENT_SYMBOL)
-                contexts_formatted.append(f'\n    {symbol}{cleaned_context}')
-            context_info = f'  SSH Node Pools:{"".join(contexts_formatted)}'
-        else:
-            context_info = f'  SSH Node Pool: {existing_contexts[0]}'
-
-        return (f'{_green_color(cloud_and_capabilities)}\n'
-                f'  {colorama.Style.DIM}{context_info}'
-                f'{colorama.Style.RESET_ALL}')
-
-    return _green_color(cloud_and_capabilities)
+    return title
