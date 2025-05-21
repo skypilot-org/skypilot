@@ -19,6 +19,7 @@
 # Change cloud for generic tests to gcp
 # > pytest tests/smoke_tests/test_volume_mount.py --generic-cloud gcp
 
+from datetime import datetime
 import pathlib
 import tempfile
 from typing import TextIO
@@ -33,7 +34,9 @@ def test_volume_mount_tpu():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
     instance_type = 'n2-standard-2'
-    disk_name = 'test-volume-mount-region-3'
+    now = datetime.now()
+    formatted_time = now.strftime("%Y%m%d%H%M%S")
+    disk_name = f'volume-mount1-{formatted_time}'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
@@ -52,7 +55,9 @@ def test_volume_mount_tpu_container():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
     instance_type = 'n2-standard-2'
-    disk_name = 'test-volume-mount-region-4'
+    now = datetime.now()
+    formatted_time = now.strftime("%Y%m%d%H%M%S")
+    disk_name = f'volume-mount2-{formatted_time}'
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -73,7 +78,9 @@ def test_volume_mount_compute():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
     instance_type = 'n2-standard-2'
-    disk_name = 'test-volume-mount-region-1'
+    now = datetime.now()
+    formatted_time = now.strftime("%Y%m%d%H%M%S")
+    disk_name = f'volume-mount3-{formatted_time}'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
@@ -93,7 +100,9 @@ def test_volume_mount_compute_container():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
     instance_type = 'n2-standard-2'
-    disk_name = 'test-volume-mount-region-2'
+    now = datetime.now()
+    formatted_time = now.strftime("%Y%m%d%H%M%S")
+    disk_name = f'volume-mount4-{formatted_time}'
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -114,7 +123,9 @@ def test_volume_mount_mig():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
     instance_type = 'g2-standard-4'
-    disk_name = 'test-volume-mount-zone-1'
+    now = datetime.now()
+    formatted_time = now.strftime("%Y%m%d%H%M%S")
+    disk_name = f'volume-mount5-{formatted_time}'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
@@ -133,7 +144,9 @@ def test_volume_mount_mig_container():
     name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
     instance_type = 'g2-standard-4'
-    disk_name = 'test-volume-mount-zone-2'
+    now = datetime.now()
+    formatted_time = now.strftime("%Y%m%d%H%M%S")
+    disk_name = f'volume-mount6-{formatted_time}'
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
