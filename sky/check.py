@@ -129,10 +129,12 @@ def check_capabilities(
 
             return {}
 
+        workspace_str = f' for workspace: {current_workspace_name!r}'
+        if hide_workspace_str:
+            workspace_str = ''
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Checking infra choices for workspace: '
-                    f'{current_workspace_name!r}...')):
+                    f'Checking infra choices{workspace_str}...')):
             check_results = subprocess_utils.run_in_parallel(
                 check_one_cloud_one_capability, combinations)
 
