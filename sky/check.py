@@ -16,6 +16,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
+from sky.skylet import constants
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -49,9 +50,8 @@ def check_capabilities(
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
         hide_per_cloud_details: bool,
-        is_single_specified_check_run: bool,
-        original_active_workspace_name: str,
-    ) -> Tuple[Dict[str, List[sky_cloud.CloudCapability]], bool]:
+        hide_workspace_str: bool,
+    ) -> Dict[str, List[sky_cloud.CloudCapability]]:
         nonlocal echo, verbose, clouds, quiet
 
         enabled_clouds_for_workspace: Dict[
@@ -121,18 +121,14 @@ def check_capabilities(
 
         if not combinations:
             echo(
-                click.style(
-                    'No clouds to check for workspace '
-                    f'{current_workspace_name}. '
-                    'This could be due to `allowed_clouds` or workspace '
-                    'configurations.',
-                    fg='yellow'))
-            return {}, False
+                _summary_message(enabled_clouds_for_workspace,
+                                 current_workspace_name, hide_workspace_str))
+            return {}
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Checking infra choices for workspace: {current_workspace_name}...'
-                )):
+                    f'Checking infra choices for workspace: '
+                    f'{current_workspace_name!r}...')):
             check_results = subprocess_utils.run_in_parallel(
                 check_one_cloud_one_capability, combinations)
 
@@ -195,136 +191,55 @@ def check_capabilities(
                 all_enabled_clouds_for_workspace_set.union(
                     enabled_clouds_for_capability))
 
-        has_any_enabled_clouds = bool(all_enabled_clouds_for_workspace_set)
+        echo(
+            _summary_message(enabled_clouds_for_workspace,
+                             current_workspace_name, hide_workspace_str))
 
-        if not has_any_enabled_clouds:
-            is_critical_failure_point = (
-                is_single_specified_check_run or
-                (not is_single_specified_check_run and
-                 current_workspace_name == original_active_workspace_name))
-            msg_color = 'red' if is_critical_failure_point else 'yellow'
-            msg = (
-                f'No cloud is enabled for workspace '
-                f'{click.style(current_workspace_name, bold=True)}. '
-                'SkyPilot will not be able to run any task in this workspace. '
-                'Run `sky check` for more info.')
-            echo(click.style(msg, fg=msg_color, bold=True))
-        else:
-            if not quiet:
-                enabled_clouds_str = '\n  ' + '\n  '.join([
-                    _format_enabled_cloud(cloud_name_str, caps)
-                    for cloud_name_str, caps in sorted(
-                        enabled_clouds_for_workspace.items(),
-                        key=lambda item: item[0])
-                ])
-                echo(
-                    f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
-                    f'Enabled infra for workspace: {click.style(current_workspace_name, bold=True)} {PARTY_POPPER_EMOJI}'
-                    f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
-
-        return enabled_clouds_for_workspace, has_any_enabled_clouds
+        return enabled_clouds_for_workspace
 
     # --- Main check_capabilities logic ---
-    initial_original_active_workspace = skypilot_config.get_active_workspace()
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    any_workspace_had_actionable_enabled_clouds = False
+    available_workspaces = list(skypilot_config.get_workspaces().keys())
+    hide_workspace_str = (available_workspaces == [
+        constants.SKYPILOT_DEFAULT_WORKSPACE
+    ])
 
     if workspace is not None:
         # Check only the specified workspace
-        available_workspaces = skypilot_config.get_workspaces()
         if workspace not in available_workspaces:
-            echo(
-                click.style(
-                    f'Workspace {click.style(workspace, bold=True)} not found in SkyPilot configuration. '
-                    f'Available workspaces: {", ".join(available_workspaces.keys())}',
-                    fg='red'))
-            raise SystemExit(1)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Workspace {workspace!r} not found in SkyPilot '
+                    'configuration. '
+                    f'Available workspaces: {", ".join(available_workspaces)}')
 
-        hide_per_cloud_details_flag = False  # Always show details for single specified check (if verbose)
+        # Always show details for single specified check (if verbose)
+        hide_per_cloud_details_flag = False
         with skypilot_config.with_active_workspace(workspace):
-            skypilot_config.safe_reload_config()
-            enabled_ws_clouds, has_any = _execute_check_logic_for_workspace(
-                workspace, hide_per_cloud_details_flag, True,
-                initial_original_active_workspace)
+            enabled_ws_clouds = _execute_check_logic_for_workspace(
+                workspace, hide_per_cloud_details_flag, hide_workspace_str)
             all_workspaces_results[workspace] = enabled_ws_clouds
-            if has_any:
-                any_workspace_had_actionable_enabled_clouds = True
-            else:
-                # SystemExit is raised here because it's a specific request that failed
-                raise SystemExit()
-        # Restore original active workspace context, critical if sky.check is called as a library
-        with skypilot_config.with_active_workspace(
-                initial_original_active_workspace):
-            skypilot_config.safe_reload_config()
     else:
         # Check all workspaces
-        workspaces_to_check = list(skypilot_config.get_workspaces().keys())
-        if not workspaces_to_check:
-            echo(click.style('No workspaces found in config.', fg='yellow'))
-            # No return here, global hint and SystemExit for original_active_workspace still apply
+        workspaces_to_check = available_workspaces
 
-        num_workspaces_being_checked_in_run = len(workspaces_to_check)
+        if len(workspaces_to_check) > 1:
+            echo(f'Checking enabled infra for all workspaces: '
+                 f'{", ".join(workspaces_to_check)}')
+
         hide_per_cloud_details_flag = (not verbose and
-                                       num_workspaces_being_checked_in_run > 1)
-
-        original_active_workspace_processed = False
-        original_active_workspace_had_clouds = False
+                                       len(workspaces_to_check) > 1)
 
         for ws_name in workspaces_to_check:
             with skypilot_config.with_active_workspace(ws_name):
-                skypilot_config.safe_reload_config()
-                enabled_ws_clouds, has_any = _execute_check_logic_for_workspace(
-                    ws_name, hide_per_cloud_details_flag, False,
-                    initial_original_active_workspace)
+                enabled_ws_clouds = _execute_check_logic_for_workspace(
+                    ws_name, hide_per_cloud_details_flag, hide_workspace_str)
                 all_workspaces_results[ws_name] = enabled_ws_clouds
-                if has_any:
-                    any_workspace_had_actionable_enabled_clouds = True
-                if ws_name == initial_original_active_workspace:
-                    original_active_workspace_processed = True
-                    if has_any:
-                        original_active_workspace_had_clouds = True
-
-        # Restore original active workspace context
-        with skypilot_config.with_active_workspace(
-                initial_original_active_workspace):
-            skypilot_config.safe_reload_config()
-
-        # SystemExit logic for multi-workspace check, focusing on the initial_original_active_workspace
-        if not workspaces_to_check and not original_active_workspace_processed:  # No workspaces configured at all
-            echo(
-                click.style(
-                    f'No workspaces configured. The default workspace '
-                    f'{click.style(initial_original_active_workspace, bold=True)} implicitly has no enabled clouds. '
-                    'SkyPilot may not function correctly.',
-                    fg='red',
-                    bold=True))
-            raise SystemExit()
-        elif initial_original_active_workspace not in workspaces_to_check and not original_active_workspace_processed:
-            echo(
-                click.style(
-                    f'The originally active workspace '
-                    f'{click.style(initial_original_active_workspace, bold=True)} '
-                    f'was not found in the configuration to check and thus has no enabled clouds. '
-                    'SkyPilot may not function correctly.',
-                    fg='red',
-                    bold=True))
-            raise SystemExit()
-        elif original_active_workspace_processed and not original_active_workspace_had_clouds:
-            # The specific error for this workspace (in red) was already printed by the helper.
-            # This is a more generic final message about the consequence.
-            echo(
-                click.style(
-                    f'The originally active workspace '
-                    f'{click.style(initial_original_active_workspace, bold=True)} has no enabled clouds. '
-                    'SkyPilot may not function correctly.',
-                    fg='red',
-                    bold=True))
-            raise SystemExit()
 
     # Global "To enable a cloud..." message, printed once if relevant
-    if any_workspace_had_actionable_enabled_clouds and not quiet:
+    if not quiet:
         echo(
             click.style(
                 '\nTo enable a cloud, follow the hints above and rerun: ',
@@ -332,7 +247,7 @@ def check_capabilities(
             click.style('sky check', bold=True) +  # Generic command
             '\n' + click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html',
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
     return all_workspaces_results
@@ -367,13 +282,19 @@ def check(
                                              sky_cloud.ALL_CAPABILITIES,
                                              workspace)
     for ws_name, enabled_clouds_with_caps in capabilities_result.items():
-        # For each workspace, get a list of cloud names that have any capabilities enabled.
-        # The inner dict enabled_clouds_with_caps maps cloud_name to List[CloudCapability].
-        # If the list of capabilities is non-empty, the cloud is considered enabled.
-        # We are interested in the keys (cloud names) of this dict if their value (list of caps) is not empty.
-        # However, check_capabilities already ensures that only clouds with *some* enabled capabilities
-        # (from the ones being checked, i.e. ALL_CAPABILITIES here) are included in its return value.
-        # So, the keys of enabled_clouds_with_caps are the enabled cloud names for that workspace.
+        # For each workspace, get a list of cloud names that have any
+        # capabilities enabled.
+        # The inner dict enabled_clouds_with_caps maps cloud_name to
+        # List[CloudCapability].
+        # If the list of capabilities is non-empty, the cloud is considered
+        # enabled.
+        # We are interested in the keys (cloud names) of this dict if their
+        # value (list of caps) is not empty.
+        # However, check_capabilities already ensures that only clouds with
+        # *some* enabled capabilities (from the ones being checked, i.e.
+        # ALL_CAPABILITIES here) are included in its return value.
+        # So, the keys of enabled_clouds_with_caps are the enabled cloud
+        # names for that workspace.
         enabled_clouds_by_workspace[ws_name] = list(
             enabled_clouds_with_caps.keys())
     return enabled_clouds_by_workspace
@@ -547,3 +468,26 @@ def _format_enabled_cloud(cloud_name: str,
                 f'  {colorama.Style.DIM}{context_info}'
                 f'{colorama.Style.RESET_ALL}')
     return _green_color(cloud_and_capabilities)
+
+
+def _summary_message(
+    enabled_clouds_for_workspace: Dict[str, List[sky_cloud.CloudCapability]],
+    current_workspace_name: str,
+    hide_workspace_str: bool,
+) -> str:
+    if not enabled_clouds_for_workspace:
+        enabled_clouds_str = '\n  No infra to check/enabled.'
+    else:
+        enabled_clouds_str = '\n  ' + '\n  '.join([
+            _format_enabled_cloud(cloud_name_str, caps)
+            for cloud_name_str, caps in sorted(
+                enabled_clouds_for_workspace.items(), key=lambda item: item[0])
+        ])
+
+    workspace_str = f' for workspace: {current_workspace_name!r}'
+    if hide_workspace_str:
+        workspace_str = ''
+    return (f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
+            f'Enabled infra{workspace_str} '
+            f'{PARTY_POPPER_EMOJI}'
+            f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
