@@ -71,22 +71,40 @@ def _load_config(context: Optional[str] = None):
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             context_name = '(current-context)' if context is None else context
+            if context_name.startswith('ssh-'):
+                context_name = context_name.lstrip('ssh-')
+                is_ssh_node_pool = True
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
-                err_str = ('Failed to load Kubernetes configuration for '
-                           f'{context_name!r}. '
-                           'Kubeconfig does not contain any valid context(s).'
-                           f'\n{suffix}\n'
-                           '    If you were running a local Kubernetes '
-                           'cluster, run `sky local up` to start the cluster.')
+                if is_ssh_node_pool:
+                    context_name = context_name.lstrip('ssh-')
+                    err_str = ('Failed to load SSH Node Pool configuration for '
+                            f'{context_name!r}. '
+                            f'\n{suffix}\n'
+                            '    Run `sky ssh up --infra {context_name}` to '
+                            'set up or repair the cluster.')
+                else:
+                    err_str = ('Failed to load Kubernetes configuration for '
+                            f'{context_name!r}. '
+                            'Kubeconfig does not contain any valid context(s).'
+                            f'\n{suffix}\n'
+                            '    If you were running a local Kubernetes '
+                            'cluster, run `sky local up` to start the cluster.')
             else:
                 kubeconfig_path = os.environ.get('KUBECONFIG', '~/.kube/config')
-                err_str = (
-                    f'Failed to load Kubernetes configuration for '
-                    f'{context_name!r}. Please check if your kubeconfig file '
-                    f'exists at {kubeconfig_path} and is valid.\n{suffix}')
-            err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
-            if context is None:  # kubernetes defaults to current-context.
+                if is_ssh_node_pool:
+                    err_str = (
+                        f'Failed to load SSH Node Pool configuration for '
+                        f'{context_name!r}. Run `sky ssh up --infra {context_name}` to '
+                        f'set up or repair the cluster. \n{suffix}\n')
+                else:
+                    err_str = (
+                        f'Failed to load Kubernetes configuration for '
+                        f'{context_name!r}. Please check if your kubeconfig file '
+                        f'exists at {kubeconfig_path} and is valid.\n{suffix}\n')
+            if is_ssh_node_pool:
+                err_str += f'\nTo disable SSH Node Pool {context_name!r}: run `sky check`.'
+            else:
                 err_str += (
                     '\nHint: Kubernetes attempted to query the current-context '
                     'set in kubeconfig. Check if the current-context is valid.')
