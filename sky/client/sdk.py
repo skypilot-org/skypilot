@@ -42,6 +42,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -87,12 +88,12 @@ def stream_response(request_id: Optional[str],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def check(clouds: Optional[Tuple[str]],
+def check(infra_list: Optional[Tuple[str, ...]],
           verbose: bool) -> server_common.RequestId:
     """Checks the credentials to enable clouds.
 
     Args:
-        clouds: The clouds to check.
+        infra: The infra to check.
         verbose: Whether to show verbose output.
 
     Returns:
@@ -101,6 +102,22 @@ def check(clouds: Optional[Tuple[str]],
     Request Returns:
         None
     """
+    if infra_list is None:
+        clouds = None
+    else:
+        specified_clouds = []
+        for infra_str in infra_list:
+            infra = infra_utils.InfraInfo.from_str(infra_str)
+            if infra.cloud is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid infra to check: {infra_str}')
+            if infra.region is not None or infra.zone is not None:
+                region_zone = infra_str.partition('/')[-1]
+                logger.warning(f'Infra {infra_str} is specified, but `check` '
+                               f'only supports checking {infra.cloud}, '
+                               f'ignoring {region_zone}')
+            specified_clouds.append(infra.cloud)
+        clouds = tuple(specified_clouds)
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.post(f'{server_common.get_server_url()}/check',
                              json=json.loads(body.model_dump_json()),
@@ -344,7 +361,7 @@ def launch(
             import sky
             task = sky.Task(run='echo hello SkyPilot')
             task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+                sky.Resources(infra='aws', accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
 
