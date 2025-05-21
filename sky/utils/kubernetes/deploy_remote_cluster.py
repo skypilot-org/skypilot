@@ -23,6 +23,7 @@ NC = '\033[0m'  # No color
 DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
+NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
 
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +31,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
     """Custom YAML loader that raises an error if there are duplicate keys."""
+
     def construct_mapping(self, node, deep=False):
         mapping = collections.OrderedDict()
         for key_node, value_node in node.value:
@@ -125,7 +127,7 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     except yaml.constructor.ConstructorError as e:
         print(f'{RED}{e.note}{NC}', file=sys.stderr)
         sys.exit(1)
-    except Exception as e:  # pylint: disable=broad-except
+    except (yaml.YAMLError, IOError, OSError) as e:
         print(f'{RED}Error loading SSH targets file: {e}{NC}', file=sys.stderr)
         sys.exit(1)
 
@@ -138,10 +140,11 @@ def check_host_in_ssh_config(hostname: str) -> bool:
     try:
         result = subprocess.run(['ssh', '-G', hostname],
                                 capture_output=True,
-                                text=True)
+                                text=True,
+                                check=False)
         # If successful, the host is in the SSH config
         return result.returncode == 0 and 'hostname' in result.stdout
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
         return False
 
 
@@ -223,7 +226,11 @@ def prepare_hosts_info(cluster_config: Dict[str, Any]) -> List[Dict[str, str]]:
 
 def run_command(cmd, shell=False):
     """Run a local command and return the output."""
-    process = subprocess.run(cmd, shell=shell, capture_output=True, text=True)
+    process = subprocess.run(cmd,
+                             shell=shell,
+                             capture_output=True,
+                             text=True,
+                             check=False)
     if process.returncode != 0:
         print(f'{RED}Error executing command: {cmd}{NC}')
         print(f'STDOUT: {process.stdout}')
@@ -237,7 +244,8 @@ def get_effective_host_ip(hostname: str) -> str:
     try:
         result = subprocess.run(['ssh', '-G', hostname],
                                 capture_output=True,
-                                text=True)
+                                text=True,
+                                check=False)
         if result.returncode == 0:
             for line in result.stdout.splitlines():
                 if line.startswith('hostname '):
@@ -271,7 +279,10 @@ def run_remote(node,
         ssh_cmd.append(f'{user}@{node}')
         ssh_cmd.append(cmd)
 
-    process = subprocess.run(ssh_cmd, capture_output=True, text=True)
+    process = subprocess.run(ssh_cmd,
+                             capture_output=True,
+                             text=True,
+                             check=False)
     if process.returncode != 0:
         print(f'{RED}Error executing command {cmd} on {node}:{NC}')
         print(f'STDERR: {process.stderr}')
@@ -389,12 +400,14 @@ def get_used_localhost_ports() -> Set[int]:
             # macOS
             result = subprocess.run(['netstat', '-an', '-p', 'tcp'],
                                     capture_output=True,
-                                    text=True)
+                                    text=True,
+                                    check=False)
         else:
             # Linux and other Unix-like systems
             result = subprocess.run(['netstat', '-tln'],
                                     capture_output=True,
-                                    text=True)
+                                    text=True,
+                                    check=False)
 
         if result.returncode == 0:
             # Look for lines with 'localhost:<port>' or '127.0.0.1:<port>'
@@ -416,7 +429,8 @@ def get_used_localhost_ports() -> Set[int]:
             'jsonpath=\'{.clusters[*].cluster.server}\''
         ],
                                 capture_output=True,
-                                text=True)
+                                text=True,
+                                check=False)
 
         if result.returncode == 0:
             # Look for localhost URLs with ports
@@ -472,10 +486,9 @@ def setup_kubectl_ssh_tunnel(head_node,
     os.chmod(tunnel_script, 0o755)
 
     # Certificate files
-    node_pools_info_dir = os.path.expanduser('~/.sky/ssh_node_pools_info')
-    client_cert_file = os.path.join(node_pools_info_dir,
+    client_cert_file = os.path.join(NODE_POOLS_INFO_DIR,
                                     f'{context_name}-cert.pem')
-    client_key_file = os.path.join(node_pools_info_dir,
+    client_key_file = os.path.join(NODE_POOLS_INFO_DIR,
                                    f'{context_name}-key.pem')
 
     # Update kubeconfig to use localhost with the selected port
@@ -551,7 +564,8 @@ def cleanup_kubectl_ssh_tunnel(context_name):
         # Run the cleanup script
         subprocess.run([cleanup_script, context_name],
                        stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+                       stderr=subprocess.DEVNULL,
+                       check=False)
 
         success_message(f'SSH tunnel for context {context_name} cleaned up')
     else:
@@ -639,10 +653,8 @@ def main():
                 context_name = 'ssh-' + cluster_name
 
             # Check cluster history
-            node_pools_info_dir = os.path.expanduser(
-                f'~/.sky/ssh_node_pools_info')
-            os.makedirs(node_pools_info_dir, exist_ok=True)
-            history_yaml_file = os.path.join(node_pools_info_dir,
+            os.makedirs(NODE_POOLS_INFO_DIR, exist_ok=True)
+            history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
                                              f'{context_name}-history.yaml')
 
             history = None
@@ -738,13 +750,12 @@ def deploy_cluster(head_node,
     if ssh_key:
         ssh_key = os.path.expanduser(ssh_key)
 
-    node_pools_info_dir = os.path.expanduser(f'~/.sky/ssh_node_pools_info')
-    history_yaml_file = os.path.join(node_pools_info_dir,
+    history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
                                      f'{context_name}-history.yaml')
-    cert_file_path = os.path.join(node_pools_info_dir,
+    cert_file_path = os.path.join(NODE_POOLS_INFO_DIR,
                                   f'{context_name}-cert.pem')
-    key_file_path = os.path.join(node_pools_info_dir, f'{context_name}-key.pem')
-    tunnel_log_file_path = os.path.join(node_pools_info_dir,
+    key_file_path = os.path.join(NODE_POOLS_INFO_DIR, f'{context_name}-key.pem')
+    tunnel_log_file_path = os.path.join(NODE_POOLS_INFO_DIR,
                                         f'{context_name}-tunnel.log')
 
     # Generate the askpass block if password is provided
@@ -998,7 +1009,7 @@ def deploy_cluster(head_node,
 
         # Create empty kubeconfig if it doesn't exist
         if not os.path.isfile(kubeconfig_path):
-            open(kubeconfig_path, 'a').close()
+            open(kubeconfig_path, 'a', encoding='utf-8').close()
 
         # Modify the temporary kubeconfig to update server address and context name
         modified_config = os.path.join(temp_dir, 'modified_config')
@@ -1036,7 +1047,7 @@ def deploy_cluster(head_node,
                         # (will be changed to localhost by setup_kubectl_ssh_tunnel later)
                         f_out.write(
                             f'    server: https://{effective_master_ip}:6443\n')
-                        f_out.write(f'    insecure-skip-tls-verify: true\n')
+                        f_out.write('    insecure-skip-tls-verify: true\n')
                         continue
 
                     # Replace default context names with user-provided context name
@@ -1076,7 +1087,8 @@ def deploy_cluster(head_node,
                                 cert_pem = f'{cert_pem}\n-----END CERTIFICATE-----'
 
                         # Write the certificate
-                        with open(cert_file_path, 'w', encoding='utf-8') as cert_file:
+                        with open(cert_file_path, 'w',
+                                  encoding='utf-8') as cert_file:
                             cert_file.write(cert_pem)
 
                         # Verify the file was written correctly
@@ -1086,7 +1098,8 @@ def deploy_cluster(head_node,
                             )
 
                             # Quick validation of PEM format
-                            with open(cert_file_path, 'r', encoding='utf-8') as f:
+                            with open(cert_file_path, 'r',
+                                      encoding='utf-8') as f:
                                 content = f.readlines()
                                 first_line = content[0].strip(
                                 ) if content else ''
@@ -1101,7 +1114,7 @@ def deploy_cluster(head_node,
                                 )
                         else:
                             print(f'{RED}Error: Certificate file is empty{NC}')
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
                         print(
                             f'{RED}Error processing certificate data: {e}{NC}')
 
@@ -1158,7 +1171,8 @@ def deploy_cluster(head_node,
                                         key_pem)
 
                         # Write the key
-                        with open(key_file_path, 'w', encoding='utf-8') as key_file:
+                        with open(key_file_path, 'w',
+                                  encoding='utf-8') as key_file:
                             key_file.write(key_pem)
 
                         # Verify the file was written correctly
@@ -1168,7 +1182,8 @@ def deploy_cluster(head_node,
                             )
 
                             # Quick validation of PEM format
-                            with open(key_file_path, 'r', encoding='utf-8') as f:
+                            with open(key_file_path, 'r',
+                                      encoding='utf-8') as f:
                                 content = f.readlines()
                                 first_line = content[0].strip(
                                 ) if content else ''
@@ -1183,7 +1198,7 @@ def deploy_cluster(head_node,
                                 )
                         else:
                             print(f'{RED}Error: Key file is empty{NC}')
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
                         print(f'{RED}Error processing key data: {e}{NC}')
 
         # First check if context name exists and delete it if it does
