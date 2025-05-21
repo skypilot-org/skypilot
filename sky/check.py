@@ -382,8 +382,8 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
 
-    def _red_color(str_to_format: str) -> str:
-        return (f'{colorama.Fore.LIGHTRED_EX}'
+    def _dim_color(str_to_format: str) -> str:
+        return (f'{colorama.Style.DIM}'
                 f'{str_to_format}'
                 f'{colorama.Style.RESET_ALL}')
 
@@ -416,11 +416,10 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if ctx2text is not None:
                 text_suffix = (
                     f': {ctx2text[context]}' if context in ctx2text else ': ' +
-                    _red_color(
-                        'disabled. Reason: Not set up. '
-                        f'Use `sky ssh up --infra {context.lstrip("ssh-")}` to set up.'))
+                    f'disabled. Reason: Not set up. ' 
+                        f'Use `sky ssh up --infra {context.lstrip("ssh-")}` to set up.')
         contexts_formatted.append(
-            f'\n    {symbol}{cleaned_context}{text_suffix}')
+            f'\n    {symbol}{_dim_color(cleaned_context)}{_dim_color(text_suffix)}')
     identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
                     else 'Allowed contexts')
     context_info = f'  {identity_str}:{"".join(contexts_formatted)}'
