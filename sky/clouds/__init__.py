@@ -2,6 +2,7 @@
 
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import cloud_in_iterable
+from sky.clouds.cloud import CloudCapability
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import OpenPortsVersion
 from sky.clouds.cloud import ProvisionerVersion
