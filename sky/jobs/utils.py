@@ -1094,7 +1094,8 @@ def format_job_table(
     for job_hash, job_tasks in jobs.items():
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
-        workspace = job_tasks[0].get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        workspace = job_tasks[0].get('workspace',
+                                     constants.SKYPILOT_DEFAULT_WORKSPACE)
 
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.

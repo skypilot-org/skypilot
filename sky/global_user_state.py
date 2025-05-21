@@ -826,7 +826,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
-
+    # The table contains the cached enabled clouds for each workspace.
     rows = _DB.cursor.execute(
         'SELECT value FROM config WHERE key = ?',
         (_get_enabled_clouds_key(cloud_capability, workspace),))

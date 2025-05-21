@@ -3322,9 +3322,16 @@ def _down_or_stop_clusters(
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
+@click.option(
+    '--workspace',
+    '-w',
+    type=str,
+    help='The workspace to check. If None, all workspaces will be checked.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
-def check(infra_list: Tuple[str], verbose: bool):
+def check(infra_list: Tuple[str],
+          verbose: bool,
+          workspace: Optional[str] = None):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3347,7 +3354,9 @@ def check(infra_list: Tuple[str], verbose: bool):
       sky check aws gcp
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
-    request_id = sdk.check(infra_list=infra_arg, verbose=verbose)
+    request_id = sdk.check(infra_list=infra_arg,
+                           verbose=verbose,
+                           workspace=workspace)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()
