@@ -767,8 +767,11 @@ def deploy_cluster(head_node,
                    worker_hosts=None,
                    history_worker_nodes=None,
                    history_workers_info=None,
-                   history_use_ssh_config=None):
-    """Deploy or clean up a single Kubernetes cluster."""
+                   history_use_ssh_config=None) -> List[str]:
+    """Deploy or clean up a single Kubernetes cluster.
+
+    Returns: List of unsuccessful worker nodes.
+    """
     # Ensure SSH key is expanded for paths with ~ (home directory)
     if ssh_key:
         ssh_key = os.path.expanduser(ssh_key)
@@ -919,7 +922,7 @@ def deploy_cluster(head_node,
         # Print completion marker for current cluster
         print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
-        return
+        return []
 
     # Get effective IP for master node if using SSH config - needed for workers to connect
     if head_use_ssh_config:
