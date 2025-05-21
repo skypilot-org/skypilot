@@ -9,7 +9,10 @@ import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
 import { useClusterDetails } from '@/data/connectors/clusters';
 import { RotateCwIcon } from 'lucide-react';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+} from '@/components/utils';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -178,7 +181,31 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
               <div>
                 <div className="text-gray-600 font-medium text-base">Infra</div>
                 <div className="text-base mt-1">
-                  {clusterData.full_infra || clusterData.infra || 'N/A'}
+                  {clusterData.infra ? (
+                    <NonCapitalizedTooltip
+                      content={clusterData.full_infra || clusterData.infra}
+                      className="text-sm text-muted-foreground"
+                    >
+                      <span>
+                        <Link
+                          href="/infra"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {clusterData.cloud || clusterData.infra.split('(')[0].trim()}
+                        </Link>
+                        {clusterData.infra.includes('(') && (
+                          <span>
+                            {' ' +
+                              clusterData.infra.substring(
+                                clusterData.infra.indexOf('(')
+                              )}
+                          </span>
+                        )}
+                      </span>
+                    </NonCapitalizedTooltip>
+                  ) : (
+                    'N/A'
+                  )}
                 </div>
               </div>
               <div>

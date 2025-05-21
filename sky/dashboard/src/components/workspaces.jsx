@@ -33,6 +33,7 @@ import {
 } from '@/components/elements/icons';
 import { RotateCwIcon, DollarSign } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import { statusGroups } from './jobs'; // Import statusGroups
 
 // Helper function to format cost
 const formatCost = (cost) => {
@@ -165,18 +166,29 @@ export function Workspaces() {
       setGlobalHourlyCost(totalGlobalHourlyCost);
 
       const jobs = managedJobsResponse.jobs || [];
+      const activeJobStatuses = new Set(statusGroups.active);
+
+      let activeGlobalManagedJobs = 0;
+
       jobs.forEach((job) => {
         const jobClusterName =
           job.cluster_name || (job.resources && job.resources.cluster_name);
         if (jobClusterName) {
           const wsName = clusterNameToWorkspace[jobClusterName];
           if (wsName && workspaceStatsAggregator[wsName]) {
-            workspaceStatsAggregator[wsName].managedJobsCount++;
+            // Only count active jobs for the workspace
+            if (activeJobStatuses.has(job.status)) {
+              workspaceStatsAggregator[wsName].managedJobsCount++;
+            }
           }
+        }
+        // Count all active jobs for the global count
+        if (activeJobStatuses.has(job.status)) {
+          activeGlobalManagedJobs++;
         }
       });
 
-      setGlobalManagedJobs(jobs.length);
+      setGlobalManagedJobs(activeGlobalManagedJobs);
 
       let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
         (ws) => {
@@ -279,33 +291,30 @@ export function Workspaces() {
       );
     }
 
-    const descriptions = [];
+    const enabledDescriptions = [];
+    const disabledClouds = [];
+
     for (const cloud in config) {
       const cloudConfig = config[cloud];
       const cloudNameUpper = cloud.toUpperCase();
 
       if (cloudConfig && cloudConfig.disabled === true) {
-        descriptions.push(
-          <span key={`${cloud}-disabled`} className="block">
-            {cloudNameUpper} is explicitly disabled.
-          </span>
-        );
+        disabledClouds.push(cloudNameUpper);
       } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
         let detail = '';
         if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
           detail = ` (Project ID: ${cloudConfig.project_id})`;
         } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
-          // Example, can be expanded
           detail = ` (Region: ${cloudConfig.region})`;
         }
-        descriptions.push(
+        enabledDescriptions.push(
           <span key={`${cloud}-enabled`} className="block">
             {cloudNameUpper}
             {detail} is enabled.
           </span>
         );
       } else if (cloudConfig && Object.keys(cloudConfig).length === 0) {
-        descriptions.push(
+        enabledDescriptions.push(
           <span key={`${cloud}-default-enabled`} className="block">
             {cloudNameUpper} is enabled (using default settings).
           </span>
@@ -313,10 +322,21 @@ export function Workspaces() {
       }
     }
 
-    if (descriptions.length > 0) {
+    const finalDescriptions = [];
+    if (disabledClouds.length > 0) {
+      const disabledString = disabledClouds.join(' and ');
+      finalDescriptions.push(
+        <span key="disabled-clouds" className="block">
+          {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'} explicitly disabled.
+        </span>
+      );
+    }
+    finalDescriptions.push(...enabledDescriptions);
+
+    if (finalDescriptions.length > 0) {
       return (
         <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
-          {descriptions}
+          {finalDescriptions}
           <p className="mt-2 text-gray-500">
             Other accessible infrastructure are enabled. See{' '}
             <code className="text-sky-blue">Enabled Infra</code>.
