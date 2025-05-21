@@ -112,8 +112,8 @@ ingress:
     client-id: ""
     # Client Secret from OIDC provider (Okta) (required when enabled=true)
     client-secret: ""
-    # Use HTTP endpoint instead of HTTPS
-    use-http: false
+    # Use HTTPS (set to true for production environments)
+    use-https: false
     # Email domains to allow (use "*" for all domains)
     email-domain: "*"
 

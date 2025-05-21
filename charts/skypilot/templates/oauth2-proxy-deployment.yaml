@@ -40,7 +40,7 @@ spec:
         - --http-address=0.0.0.0:4180
         - --skip-provider-button=true
         - --reverse-proxy=true
-        {{- if (index .Values.ingress "oauth2-proxy" "use-http") }}
+        {{- if not (index .Values.ingress "oauth2-proxy" "use-https" | default false) }}
         - --cookie-secure=false
         {{- end }}
         env:
