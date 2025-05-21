@@ -1473,31 +1473,6 @@ class Resources:
                 if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
                     return False
 
-        if self.volumes:
-            if not other.volumes:
-                return False
-            # Create a mapping of paths to volumes for easier lookup
-            other_volumes_map = {vol['path']: vol for vol in other.volumes}
-            for volume in self.volumes:
-                if volume['path'] not in other_volumes_map:
-                    logger.info(f'Volume {volume["path"]} not in other volumes')
-                    return False
-                other_volume = other_volumes_map[volume['path']]
-                if 'name' in volume:
-                    if volume['name'] != other_volume['name']:
-                        return False
-                    continue
-                if volume['storage_type'] != other_volume['storage_type']:
-                    return False
-                if (volume['storage_type'] ==
-                        resources_utils.StorageType.NETWORK):
-                    if volume['disk_size'] > other_volume['disk_size']:
-                        return False
-                    if volume['disk_tier'] != resources_utils.DiskTier.BEST:
-                        if not (volume['disk_tier'] <=
-                                other_volume['disk_tier']):
-                            return False
-
         if check_ports:
             if self.ports is not None:
                 if other.ports is None:
