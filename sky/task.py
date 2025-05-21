@@ -165,7 +165,8 @@ def _with_docker_login_config(
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
         # Already checked in extract_docker_image
-        assert len(resources.image_id) == 1, resources.image_id
+        assert resources.image_id is not None and len(
+            resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
@@ -306,7 +307,7 @@ class Task:
         self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
-        self.best_resources = None
+        self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
         self.file_mounts_mapping = file_mounts_mapping
@@ -315,12 +316,20 @@ class Task:
         if dag is not None:
             dag.add(self)
 
-    def validate(self, workdir_only: bool = False):
-        """Validate all fields of the task."""
+    def validate(self,
+                 skip_file_mounts: bool = False,
+                 skip_workdir: bool = False):
+        """Validate all fields of the task.
+
+        Args:
+            skip_file_mounts: Whether to skip validating file mounts.
+            skip_workdir: Whether to skip validating workdir.
+        """
         self.validate_name()
         self.validate_run()
-        self.expand_and_validate_workdir()
-        if not workdir_only:
+        if not skip_workdir:
+            self.expand_and_validate_workdir()
+        if not skip_file_mounts:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()
@@ -552,15 +561,35 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         # Experimental configs.
-        experimnetal_configs = config.pop('experimental', None)
-        cluster_config_override = None
-        if experimnetal_configs is not None:
-            cluster_config_override = experimnetal_configs.pop(
+        experimental_configs = config.pop('experimental', None)
+
+        # Handle the top-level config field
+        config_override = config.pop('config', None)
+
+        # Handle backward compatibility with experimental.config_overrides
+        # TODO: Remove experimental.config_overrides in 0.11.0.
+        if experimental_configs is not None:
+            exp_config_override = experimental_configs.pop(
                 'config_overrides', None)
+            if exp_config_override is not None:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}`experimental.config_overrides` '
+                    'field is deprecated in the task YAML. Use the `config` '
+                    f'field to set config overrides.{colorama.Style.RESET_ALL}')
+                if config_override is not None:
+                    logger.warning(
+                        f'{colorama.Fore.YELLOW}Both top-level `config` and '
+                        f'`experimental.config_overrides` are specified. '
+                        f'Using top-level `config`.{colorama.Style.RESET_ALL}')
+                else:
+                    config_override = exp_config_override
             logger.debug('Overriding skypilot config with task-level config: '
-                         f'{cluster_config_override}')
-        assert not experimnetal_configs, ('Invalid task args: '
-                                          f'{experimnetal_configs.keys()}')
+                         f'{config_override}')
+            assert not experimental_configs, ('Invalid task args: '
+                                              f'{experimental_configs.keys()}')
+
+        # Store the final config override for use in resource setup
+        cluster_config_override = config_override
 
         # Parse resources field.
         resources_config = config.pop('resources', {})
@@ -745,9 +774,9 @@ class Task:
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 for r in self.resources:
-                    r.requires_fuse = True
+                    r.set_requires_fuse(True)
                 break
 
         return self
@@ -903,7 +932,7 @@ class Task:
             self.storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
             for r in self.resources:
-                r.requires_fuse = False
+                r.set_requires_fuse(False)
             return self
         for target, storage_obj in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
@@ -924,11 +953,11 @@ class Task:
                         'Storage mount destination path cannot be cloud storage'
                     )
 
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:
-                    r.requires_fuse = True
+                    r.set_requires_fuse(True)
         # Storage source validation is done in Storage object
         self.storage_mounts = storage_mounts
         return self
@@ -1128,7 +1157,7 @@ class Task:
                         assert storage.name is not None, storage
                         # extract region from rclone.conf
                         cos_region = data_utils.Rclone.get_region_from_rclone(
-                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                            storage.name, data_utils.Rclone.RcloneStores.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({mnt_path: blob_path})
@@ -1206,13 +1235,14 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config = {}
+        tmp_resource_config: Union[Dict[str, Union[str, int]],
+                                   Dict[str, List[Dict[str, Union[str, int]]]]]
         if len(self.resources) > 1:
             resource_list = []
             for r in self.resources:
                 resource_list.append(r.to_yaml_config())
             key = 'ordered' if isinstance(self.resources, list) else 'any_of'
-            tmp_resource_config[key] = resource_list
+            tmp_resource_config = {key: resource_list}
         else:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 
@@ -1268,7 +1298,7 @@ class Task:
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT:
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 required_features.add(
                     clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
                 break

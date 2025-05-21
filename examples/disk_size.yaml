@@ -9,7 +9,7 @@
 name: minimal
 
 resources:
-  cloud: azure
+  infra: azure
   disk_size: 512
 
 setup: |

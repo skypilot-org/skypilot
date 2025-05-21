@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.provision.gcp import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -112,6 +113,10 @@ _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
 # For GPU-related package version, see sky/clouds/service_catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
+# Use COS image with GPU Direct support.
+# Need to contact GCP support to build our own image for GPUDirect-TCPX support.
+# Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
+_DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 
 
 def _run_output(cmd):
@@ -174,7 +179,10 @@ class GCP(clouds.Cloud):
         # Install the Google Cloud SDK:
         f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
         f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
-        'google-cloud-sdk -y')
+        'google-cloud-sdk -y\n'
+        f'{_INDENT_PREFIX} If gcloud was recently installed with wget, API server'
+        ' may need to be restarted with following commands:\n'
+        f'{_INDENT_PREFIX}  $ sky api stop; sky api start')
 
     _CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -229,6 +237,13 @@ class GCP(clouds.Cloud):
             unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
                 'Managed Instance Group with DWS does not support '
                 'spot instances.')
+
+        unsupported[
+            clouds.CloudImplementationFeatures.
+            HIGH_AVAILABILITY_CONTROLLERS] = (
+                f'High availability controllers are not supported on {cls._REPR}.'
+            )
+
         return unsupported
 
     @classmethod
@@ -476,8 +491,13 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
-            **GCP._get_disk_specs(_failover_disk_tier()),
+            **GCP._get_disk_specs(r.instance_type, _failover_disk_tier()),
         }
+        enable_gpu_direct = skypilot_config.get_nested(
+            ('gcp', 'enable_gpu_direct'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+        resources_vars['enable_gpu_direct'] = enable_gpu_direct
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
@@ -501,23 +521,28 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc in ('A100-80GB', 'L4'):
+                if acc in ('A100-80GB', 'L4', 'B200'):
                     # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}'
                 elif acc in ('H100', 'H100-MEGA'):
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
+                elif acc in ('H200',):
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}-141gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if acc == 'K80':
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = _DEFAULT_GPU_K80_IMAGE_ID
+                if enable_gpu_direct:
+                    image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
-                    # CUDA driver version 535.86.10, CUDA Library 12.2
-                    image_id = _DEFAULT_GPU_IMAGE_ID
+                    if acc == 'K80':
+                        # Though the image is called cu113, it actually has later
+                        # versions of CUDA as noted below.
+                        # CUDA driver version 470.57.02, CUDA Library 11.4
+                        image_id = _DEFAULT_GPU_K80_IMAGE_ID
+                    else:
+                        # CUDA driver version 535.86.10, CUDA Library 12.2
+                        image_id = _DEFAULT_GPU_IMAGE_ID
 
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
@@ -570,7 +595,21 @@ class GCP(clouds.Cloud):
 
         # Add gVNIC from config
         resources_vars['enable_gvnic'] = skypilot_config.get_nested(
-            ('gcp', 'enable_gvnic'), False)
+            ('gcp', 'enable_gvnic'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+        placement_policy = skypilot_config.get_nested(
+            ('gcp', 'placement_policy'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+        resources_vars['user_data'] = None
+        if enable_gpu_direct:
+            resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
+            resources_vars[
+                'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+            if placement_policy is None:
+                placement_policy = constants.COMPACT_GROUP_PLACEMENT_POLICY
+        resources_vars['placement_policy'] = placement_policy
 
         return resources_vars
 
@@ -688,9 +727,11 @@ class GCP(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        # GCP handles accelerators separately from regular instance types,
-        # hence return none here.
-        return None
+        # GCP handles accelerators separately from regular instance types.
+        # This method supports automatically inferring the GPU type for
+        # the instance type that come with GPUs pre-attached.
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='gcp')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -774,7 +815,7 @@ class GCP(clouds.Cloud):
                         raise FileNotFoundError(file)
             except FileNotFoundError as e:
                 return False, (
-                    f'Credentails are not set. '
+                    f'Credentials are not set. '
                     f'{cls._CREDENTIAL_HINT}\n'
                     f'{cls._INDENT_PREFIX}Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -998,32 +1039,18 @@ class GCP(clouds.Cloud):
     @staticmethod
     def _check_instance_type_accelerators_combination(
             resources: 'resources.Resources') -> None:
-        assert resources.is_launchable(), resources
+        resources = resources.assert_launchable()
         service_catalog.check_accelerator_attachable_to_host(
             resources.instance_type, resources.accelerators, resources.zone,
             'gcp')
 
     @classmethod
     def check_disk_tier(
-            cls, instance_type: Optional[str],
-            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
-        if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
-            return True, ''
-        # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
-        # instance types, so we failover to lower tiers for other instance
-        # types. Reference:
-        # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
-        series = instance_type.split('-')[0]
-        if series in ['m2', 'm3', 'n2']:
-            if series == 'n2':
-                num_cpus = int(instance_type.split('-')[2])
-                if num_cpus < 64:
-                    return False, ('n2 series with less than 64 vCPUs are '
-                                   'not supported with pd-extreme.')
-            return True, ''
-        return False, (f'{series} series is not supported with pd-extreme. '
-                       'Only m2, m3 series and n2 series with 64 or more vCPUs '
-                       'are supported.')
+        cls,
+        instance_type: Optional[str],  # pylint: disable=unused-argument
+        disk_tier: Optional[resources_utils.DiskTier]  # pylint: disable=unused-argument
+    ) -> Tuple[bool, str]:
+        return True, ''
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
@@ -1034,23 +1061,76 @@ class GCP(clouds.Cloud):
                 raise exceptions.NotSupportedError(msg)
 
     @classmethod
-    def _get_disk_type(cls,
-                       disk_tier: Optional[resources_utils.DiskTier]) -> str:
+    def _get_disk_type(
+        cls,
+        instance_type: Optional[str],
+        disk_tier: Optional[resources_utils.DiskTier],
+    ) -> str:
+
+        def _propagate_disk_type(
+            lowest: Optional[str] = None,
+            highest: Optional[str] = None,
+            # pylint: disable=redefined-builtin
+            all: Optional[str] = None) -> None:
+            if lowest is not None:
+                tier2name[resources_utils.DiskTier.LOW] = lowest
+            if highest is not None:
+                tier2name[resources_utils.DiskTier.ULTRA] = highest
+            if all is not None:
+                for tier in tier2name:
+                    tier2name[tier] = all
+
         tier = cls._translate_disk_tier(disk_tier)
+
+        # Define the default mapping from disk tiers to disk types.
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
+
+        # Remap series-specific disk types.
+        # Reference: https://github.com/skypilot-org/skypilot/issues/4705
+        assert instance_type is not None, (instance_type, disk_tier)
+        series = instance_type.split('-')[0]
+
+        # General handling of unsupported disk types
+        if series in ['n1', 'a2', 'g2']:
+            # These series don't support pd-extreme, use pd-ssd for ULTRA.
+            _propagate_disk_type(
+                highest=tier2name[resources_utils.DiskTier.HIGH])
+        if series in ['a3', 'g2']:
+            # These series don't support pd-standard, use pd-balanced for LOW.
+            _propagate_disk_type(
+                lowest=tier2name[resources_utils.DiskTier.MEDIUM])
+        if instance_type.startswith('a3-ultragpu'):
+            # a3-ultragpu instances only support hyperdisk-balanced.
+            _propagate_disk_type(all='hyperdisk-balanced')
+
+        # Series specific handling
+        if series == 'n2':
+            num_cpus = int(instance_type.split('-')[2])  # type: ignore
+            if num_cpus < 64:
+                # n2 series with less than 64 vCPUs doesn't support pd-extreme, use pd-ssd for ULTRA.
+                _propagate_disk_type(
+                    highest=tier2name[resources_utils.DiskTier.HIGH])
+        elif series == 'a3':
+            # LOW disk tier is already handled in general case, so in this branch
+            # only the hyperdisk tier is addressed.
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+
         return tier2name[tier]
 
     @classmethod
     def _get_disk_specs(
-            cls,
+            cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
-        specs: Dict[str, Any] = {'disk_tier': cls._get_disk_type(disk_tier)}
-        if disk_tier == resources_utils.DiskTier.ULTRA:
+        specs: Dict[str, Any] = {
+            'disk_tier': cls._get_disk_type(instance_type, disk_tier)
+        }
+        if (disk_tier == resources_utils.DiskTier.ULTRA and
+                specs['disk_tier'] == 'pd-extreme'):
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
             specs['disk_iops'] = 20000

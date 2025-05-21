@@ -227,13 +227,13 @@ class JobsController:
                 self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = managed_job_utils.try_to_get_job_end_time(
+                success_end_time = managed_job_utils.try_to_get_job_end_time(
                     self._backend, cluster_name)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
                                                 task_id,
-                                                end_time=end_time,
+                                                end_time=success_end_time,
                                                 callback_func=callback_func)
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
@@ -299,23 +299,40 @@ class JobsController:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
-                elif job_status in job_lib.JobStatus.user_code_failure_states():
+                elif (job_status
+                      in job_lib.JobStatus.user_code_failure_states() or
+                      job_status == job_lib.JobStatus.FAILED_DRIVER):
                     # The user code has probably crashed, fail immediately.
                     end_time = managed_job_utils.try_to_get_job_end_time(
                         self._backend, cluster_name)
                     logger.info(
-                        'The user job failed. Please check the logs below.\n'
+                        f'The user job failed ({job_status}). Please check the '
+                        'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
                     self._download_log_and_stream(task_id, handle)
+
+                    failure_reason = (
+                        'To see the details, run: '
+                        f'sky jobs logs --controller {self._job_id}')
+
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         managed_job_status = (
                             managed_job_state.ManagedJobStatus.FAILED_SETUP)
-                    failure_reason = (
-                        'To see the details, run: '
-                        f'sky jobs logs --controller {self._job_id}')
+                    elif job_status == job_lib.JobStatus.FAILED_DRIVER:
+                        # FAILED_DRIVER is kind of an internal error, so we mark
+                        # this as FAILED_CONTROLLER, even though the failure is
+                        # not strictly within the controller.
+                        managed_job_status = (
+                            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER
+                        )
+                        failure_reason = (
+                            'The job driver on the remote cluster failed. This '
+                            'can be caused by the job taking too much memory '
+                            'or other resources. Try adding more memory, CPU, '
+                            f'or disk in your job definition. {failure_reason}')
                     should_restart_on_failure = (
                         self._strategy_executor.should_restart_on_failure())
                     if should_restart_on_failure:
@@ -337,6 +354,21 @@ class JobsController:
                             end_time=end_time,
                             callback_func=callback_func)
                         return False
+                elif job_status is not None:
+                    # Either the job is cancelled (should not happen) or in some
+                    # unknown new state that we do not handle.
+                    logger.error(f'Unknown job status: {job_status}')
+                    failure_reason = (
+                        f'Unknown job status {job_status}. To see the details, '
+                        f'run: sky jobs logs --controller {self._job_id}')
+                    managed_job_state.set_failed(
+                        self._job_id,
+                        task_id,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=failure_reason,
+                        callback_func=callback_func)
+                    return False
                 else:
                     # Although the cluster is healthy, we fail to access the
                     # job status. Try to recover the job (will not restart the

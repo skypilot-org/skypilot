@@ -41,7 +41,7 @@ repos:
             # From tests/mypy_files.txt
             - "sky"
             - "--exclude"
-            - "sky/benchmark|sky/callbacks|sky/skylet/providers/azure|sky/resources.py|sky/backends/monkey_patches"
+            - "sky/benchmark|sky/callbacks|sky/backends/monkey_patches"
         pass_filenames: false
         additional_dependencies:
             - types-aiofiles

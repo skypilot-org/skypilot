@@ -1,0 +1,24 @@
+file_mounts:
+  # Mounting private buckets in RCLONE mode
+  /mount_private_rclone:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    store: {{store_type}}
+    mode: RCLONE
+
+run: |
+  set -ex
+
+  # Check private bucket contents
+  ls -ltr /mount_private_rclone/foo
+  ls -ltr /mount_private_rclone/tmp\ file
+  
+  # Symlinks are not copied to buckets
+  ! ls /mount_private_rclone/circle-link
+  
+  # Write to private bucket in MOUNT mode should pass
+  echo "hello" > /mount_private_rclone/hello.txt
+
+  # Ensure that write is reflected in bucket
+  rclone ls {{ rclone_profile_name }}:{{ storage_name }}/hello.txt
+

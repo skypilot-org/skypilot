@@ -50,6 +50,8 @@ class IBM(clouds.Cloud):
                 ),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on IBM.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -173,7 +175,7 @@ class IBM(clouds.Cloud):
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -202,30 +204,32 @@ class IBM(clouds.Cloud):
         # clouds implementing 'zones_provision_loop()'
         zone_names = [zone.name for zone in zones]  # type: ignore[union-attr]
 
-        r = resources
-        assert not r.use_spot, \
+        resources = resources.assert_launchable()
+        assert not resources.use_spot, \
             'IBM does not currently support spot instances in this framework'
 
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        instance_resources = _get_profile_resources(r.instance_type)
+        instance_resources = _get_profile_resources(resources.instance_type)
 
         worker_instance_type = get_cred_file_field('worker_instance_type',
-                                                   r.instance_type)
+                                                   resources.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
         # r.image_id: {clouds.Region:image_id} - property of Resources class
-        image_id = r.image_id[
-            region.name] if r.image_id else self.get_default_image(region_name)
+        image_id = resources.image_id[
+            region.name] if resources.image_id else self.get_default_image(
+                region_name)
 
         return {
-            'instance_type': r.instance_type,
+            'instance_type': resources.instance_type,
             'instance_resources': instance_resources,
             'worker_instance_type': worker_instance_type,
             'worker_instance_resources': worker_instance_resources,
             'custom_resources': custom_resources,
-            'use_spot': r.use_spot,
+            'use_spot': resources.use_spot,
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,

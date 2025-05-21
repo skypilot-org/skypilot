@@ -8,7 +8,6 @@ import os
 import pathlib
 import re
 import shlex
-import shutil
 import signal
 import subprocess
 import sys
@@ -35,6 +34,7 @@ from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
@@ -60,7 +60,9 @@ from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import registry
@@ -272,6 +274,7 @@ class RayCodeGen:
         ray_address = 'auto'
         self._code = [
             textwrap.dedent(f"""\
+            import functools
             import getpass
             import hashlib
             import io
@@ -361,6 +364,7 @@ class RayCodeGen:
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
             inspect.getsource(log_lib._ProcessingArgs),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._get_context),  # pylint: disable=protected-access
             inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
@@ -438,18 +442,7 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
-
-                # We have this `INFO: Tip:` message only for backward
-                # compatibility, because if a cluster has the old SkyPilot version,
-                # it relies on this message to start log streaming.
-                # This message will be skipped for new clusters, because we use
-                # start_streaming_at for the `Waiting for task resources on`
-                # message.
-                # TODO: Remove this message in v0.9.0.
-                message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}INFO: '
-                           'Tip: use Ctrl-C to exit log streaming, not kill '
-                           'the job.{colorama.Style.RESET_ALL}\\n')
-                message += ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
+                message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
                             'Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
@@ -607,9 +600,6 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}
             sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
             sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = len(job_ip_rank_list)
             """)
         ]
@@ -622,19 +612,42 @@ class RayCodeGen:
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
+        # Script to block completion of a job until all storage mounted with
+        # CACHED_MOUNT mode is uploaded to remote.
+        rclone_flush_script = textwrap.dedent(f"""\
+
+        if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ]; then
+            flushed=0
+            # extra second on top of --vfs-cache-poll-interval to
+            # avoid race condition between rclone log line creation and this check.
+            sleep 1
+            while [ $flushed -eq 0 ]; do
+                # sleep for the same interval as --vfs-cache-poll-interval
+                sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
+                flushed=1
+                for file in {constants.RCLONE_LOG_DIR}/*; do
+                    exitcode=0
+                    tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
+                    if [ $exitcode -ne 0 ]; then
+                        echo "skypilot: cached mount is still uploading to remote"
+                        flushed=0
+                        break
+                    fi
+                done
+            done
+            echo "skypilot: cached mount uploaded complete"
+        fi""")
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
         script = {bash_script!r}
+        rclone_flush_script = {rclone_flush_script!r}
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
-
         if script is not None:
+            script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
             rank = job_ip_rank_map[ip]
@@ -651,14 +664,8 @@ class RayCodeGen:
                 name_str = f'{{node_name}}, rank={{rank}},'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{rank}}-{{node_name}}.log'))
             sky_env_vars_dict['{constants.SKYPILOT_NODE_RANK}'] = rank
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_NODE_RANK'] = rank
 
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
                     .options(name=name_str, {options_str}) \\
@@ -1090,6 +1097,21 @@ class FailoverCloudErrorHandlerV2:
                 blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
+    def _aws_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'AWS handler error: {error}')
+        # Block AWS if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
                          launchable_resources: 'resources_lib.Resources',
                          region: 'clouds.Region',
@@ -1335,6 +1357,8 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
 
+        to_provision = to_provision.assert_launchable()
+
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
@@ -1419,6 +1443,17 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
+            except exceptions.InvalidCloudCredentials as e:
+                # Failed due to invalid cloud credentials.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud for invalid cloud credentials
+                _add_to_blocked_resources(
+                    self._blocked_resources,
+                    to_provision.copy(region=None, zone=None))
+                raise exceptions.ResourcesUnavailableError(
+                    f'Failed to provision on cloud {to_provision.cloud} due to '
+                    f'invalid cloud credentials: '
+                    f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
                 # Failed due to invalid user configs in ~/.sky/config.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
@@ -1550,6 +1585,10 @@ class RetryingVmProvisioner(object):
                     config_dict['handle'] = handle
                     return config_dict
                 except provision_common.StopFailoverError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise
+                except exceptions.InconsistentHighAvailabilityError:
+                    # No teardown happens for this error.
                     with ux_utils.print_exception_no_traceback():
                         raise
                 except Exception as e:  # pylint: disable=broad-except
@@ -1995,12 +2034,14 @@ class RetryingVmProvisioner(object):
                             f' that never expire or a service account.\033[0m')
                 logger.warning(warnings)
 
+        to_provision = to_provision.assert_launchable()
         # Retrying launchable resources.
         while True:
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
                 common_utils.check_cluster_name_is_valid(cluster_name)
+
                 if dryrun:
                     cloud_user = None
                 else:
@@ -2012,10 +2053,10 @@ class RetryingVmProvisioner(object):
                                (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
-                    assert (clouds.CloudImplementationFeatures.STOP
-                            in requested_features), requested_features
-                    requested_features.remove(
-                        clouds.CloudImplementationFeatures.STOP)
+                    # If autostop is disabled in config, the feature may not be
+                    # requested, so use discard() instead of remove().
+                    requested_features.discard(
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -2115,17 +2156,25 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                table = log_utils.create_table(['Resource', 'Reason'])
+                table = log_utils.create_table(['INFRA', 'RESOURCES', 'REASON'])
                 for (resource, exception) in resource_exceptions.items():
-                    table.add_row(
-                        [resources_utils.format_resource(resource), exception])
-                table.max_table_width = shutil.get_terminal_size().columns
+                    table.add_row([
+                        resource.infra.formatted_str(),
+                        resources_utils.format_resource(resource,
+                                                        simplify=True),
+                        exception
+                    ])
+                # Set the max width of REASON column to 80 to avoid the table
+                # being wrapped in a unreadable way.
+                # pylint: disable=protected-access
+                table._max_width = {'REASON': 80}
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
-            to_provision = task.best_resources
+            best_resources = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
-            assert to_provision is not None, task
+            assert best_resources is not None, task
+            to_provision = best_resources
         return config_dict
 
 
@@ -2379,6 +2428,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
+    @context_utils.cancellation_guard
     @annotations.lru_cache(scope='global')
     @timeline.event
     def get_command_runners(self,
@@ -2390,19 +2440,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+
+        launched_resources = self.launched_resources.assert_launchable()
         updated_to_skypilot_provisioner_after_provisioned = (
-            self.launched_resources.cloud.PROVISIONER_VERSION >=
+            launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
             self.cached_external_ips is not None and
             self.cached_cluster_info is None)
         if updated_to_skypilot_provisioner_after_provisioned:
             logger.debug(
-                f'{self.launched_resources.cloud} has been updated to the new '
+                f'{launched_resources.cloud} has been updated to the new '
                 f'provisioner after cluster {self.cluster_name} was '
                 f'provisioned. Cached IPs are used for connecting to the '
                 'cluster.')
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                self.launched_resources.cloud.PROVISIONER_VERSION or
+                launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
@@ -2428,6 +2480,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
+
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
@@ -2658,6 +2711,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or common.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
+        self._dump_final_script = kwargs.pop('dump_final_script', False)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -2776,7 +2830,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[CloudVmRayResourceHandle]:
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
         Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
@@ -2916,7 +2970,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
-                return record['handle'] if record is not None else None
+                return record['handle'] if record is not None else None, False
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -2927,7 +2981,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 assert record is not None and record['handle'] is not None, (
                     cluster_name, record)
-                return record['handle']
+                return record['handle'], True
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -2969,7 +3023,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, lock_path, config_hash)
-                return handle
+                return handle, False
 
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
@@ -3041,7 +3095,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, lock_path, config_hash)
-            return handle
+            return handle, False
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
@@ -3104,8 +3158,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
-            cloud = handle.launched_resources.cloud
-            if not (cloud.OPEN_PORTS_VERSION <=
+            launched_resources = handle.launched_resources.assert_launchable()
+            if not (launched_resources.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
@@ -3209,9 +3263,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
+        launched_resources = handle.launched_resources.assert_launchable()
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
-                handle.launched_resources.cloud, all_file_mounts)
+                launched_resources.cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
             self._execute_storage_mounts(handle, storage_mounts)
             self._set_storage_mounts_metadata(handle.cluster_name,
@@ -3241,18 +3296,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
 
-            def _dump_setup_script(setup_script: str) -> None:
+            def _dump_final_script(
+                    setup_script: str,
+                    target_dir: str = remote_setup_file_name) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
                     setup_sh_path = f.name
                     runner.rsync(source=setup_sh_path,
-                                 target=remote_setup_file_name,
+                                 target=target_dir,
                                  up=True,
                                  stream_logs=False)
 
+            # Always dump the full setup script to the persistent path first
+            # In high availability mode, we need to dump the full setup script
+            # to a persistent path BEFORE any other operations. This ensures
+            # that if the pod restarts, it can find and execute the complete
+            # setup script, rather than a reference to a temporary file that
+            # would no longer exist after restart.
+            if self._dump_final_script:
+                _dump_final_script(setup_script,
+                                   constants.PERSISTENT_SETUP_SCRIPT_PATH)
+
             if detach_setup or _is_command_length_over_limit(encoded_script):
-                _dump_setup_script(setup_script)
+                _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
@@ -3279,33 +3346,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return returncode
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
-            if returncode == 255:
-                is_message_too_long = False
+
+            def _load_setup_log_and_match(match_str: str) -> bool:
                 try:
                     with open(os.path.expanduser(setup_log_path),
                               'r',
                               encoding='utf-8') as f:
-                        if 'too long' in f.read():
-                            is_message_too_long = True
+                        return match_str.lower() in f.read().lower()
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't crash the setup if we cannot read the log file.
                     # Instead, we should retry the setup with dumping the script
                     # to a file to be safe.
-                    logger.debug('Failed to read setup log file '
-                                 f'{setup_log_path}: {e}')
-                    is_message_too_long = True
-
-                if is_message_too_long:
-                    # If the setup script is too long, we retry it with dumping
-                    # the script to a file and running it with SSH. We use a
-                    # general length limit check before but it could be
-                    # inaccurate on some systems.
                     logger.debug(
-                        'Failed to run setup command inline due to '
-                        'command length limit. Dumping setup script to '
-                        'file and running it with SSH.')
-                    _dump_setup_script(setup_script)
-                    returncode = _run_setup(setup_cmd)
+                        f'Failed to read setup log file {setup_log_path}: {e}')
+                    return True
+
+            if ((returncode == 255 and _load_setup_log_and_match('too long')) or
+                (returncode == 1 and
+                 _load_setup_log_and_match('request-uri too large'))):
+                # If the setup script is too long, we retry it with dumping
+                # the script to a file and running it with SSH. We use a
+                # general length limit check before but it could be
+                # inaccurate on some systems.
+                # When there is a cloudflare proxy in front of the remote, it
+                # could cause `414 Request-URI Too Large` error.
+                logger.debug('Failed to run setup command inline due to '
+                             'command length limit. Dumping setup script to '
+                             'file and running it with SSH.')
+                _dump_final_script(setup_script)
+                returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case
@@ -3382,7 +3451,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
             # with pid is the same driver process.
@@ -3395,14 +3464,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        def _dump_code_to_file(codegen: str) -> None:
+        def _dump_code_to_file(codegen: str,
+                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(SKY_REMOTE_APP_DIR,
-                                           f'sky_job_{job_id}')
+                script_path = os.path.join(target_dir, f'sky_job_{job_id}')
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
                 # execute the script. Happens for AWS.
@@ -3411,22 +3480,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   up=True,
                                   stream_logs=False)
 
+        # Should also be ealier than _is_command_length_over_limit
+        # Same reason as in _setup
+        if self._dump_final_script:
+            _dump_code_to_file(job_submit_cmd,
+                               constants.PERSISTENT_RUN_SCRIPT_DIR)
+
         if _is_command_length_over_limit(job_submit_cmd):
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
-        if managed_job_dag is not None:
-            # Add the managed job to job queue database.
-            managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-            managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
-            # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, even if it needs to
-            # wait to be submitted.
-            # We cannot set the managed job to PENDING state in the job template
-            # (jobs-controller.yaml.j2), as it may need to wait for the run
-            # commands to be scheduled on the job controller in high-load cases.
-            job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
+        def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
+            if managed_job_dag is not None:
+                # Add the managed job to job queue database.
+                managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                managed_job_code = managed_job_codegen.set_pending(
+                    job_id, managed_job_dag)
+                # Set the managed job to PENDING state to make sure that this
+                # managed job appears in the `sky jobs queue`, even if it needs
+                # to wait to be submitted.
+                # We cannot set the managed job to PENDING state in the job
+                # template (jobs-controller.yaml.j2), as it may need to wait for
+                # the run commands to be scheduled on the job controller in
+                # high-load cases.
+                job_submit_cmd += ' && ' + managed_job_code
+            return job_submit_cmd
+
+        job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3436,15 +3516,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # running a job. Necessitating calling `sky launch`.
         backend_utils.check_stale_runtime_on_remote(returncode, stderr,
                                                     handle.cluster_name)
-        if returncode == 255 and 'too long' in stdout + stderr:
+        output = stdout + stderr
+        if ((returncode == 255 and 'too long' in output.lower()) or
+            (returncode == 1 and 'request-uri too large' in output.lower())):
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
             # length limit check before but it could be inaccurate on some
             # systems.
+            # When there is a cloudflare proxy in front of the remote, it could
+            # cause `414 Request-URI Too Large` error.
             logger.debug('Failed to submit job due to command length limit. '
-                         'Dumping job to file and running it with SSH.')
+                         'Dumping job to file and running it with SSH. '
+                         f'Output: {output}')
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
+            job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
@@ -3786,6 +3872,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         return dict(zip(job_ids, local_log_dirs))
 
+    @context_utils.cancellation_guard
     def tail_logs(self,
                   handle: CloudVmRayResourceHandle,
                   job_id: Optional[int],
@@ -4092,7 +4179,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
-        cloud = handle.launched_resources.cloud
+        launched_resources = handle.launched_resources.assert_launchable()
+        cloud = launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
@@ -4278,7 +4366,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         cloud = handle.launched_resources.cloud
 
-        if (terminate and handle.launched_resources.is_image_managed is True):
+        if terminate and handle.launched_resources.is_image_managed is True:
             # Delete the image when terminating a "cloned" cluster, i.e.,
             # whose image is created by SkyPilot (--clone-disk-from)
             logger.debug(f'Deleting image {handle.launched_resources.image_id}')
@@ -4304,10 +4392,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the right resource to provision the cluster.
             if handle.cluster_yaml is not None:
                 try:
-                    cloud = handle.launched_resources.cloud
+                    launched_resources = (
+                        handle.launched_resources.assert_launchable())
+                    cloud = launched_resources.cloud
                     config = common_utils.read_yaml(handle.cluster_yaml)
                     cloud.check_features_are_supported(
-                        handle.launched_resources,
+                        launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
                     provision_lib.cleanup_ports(repr(cloud),
                                                 cluster_name_on_cloud,
@@ -4417,7 +4507,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            (clouds.Kubernetes, clouds.RunPod)) and not down and
                     idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
-                # Kubernetes and RunPod clusters.
+                # Kubernetes and RunPod clusters, because autostop() will
+                # skip the supported feature check. Non-controller k8s/runpod
+                # clusters will have already errored out.
                 controller = controller_utils.Controllers.from_name(
                     handle.cluster_name)
                 assert (controller is not None), handle.cluster_name
@@ -4428,6 +4520,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # For SkyServe controllers on Kubernetes: override autostop
                     # behavior to force autodown (instead of no-op)
                     # to avoid dangling controllers.
+
+                    # down = False is the default, but warn the user in case
+                    # they have explicitly specified it.
+                    # TODO(cooperc): Fix for new autostop stuff.
+                    config_override_down = skypilot_config.get_nested(
+                        (controller.value.controller_type, 'controller',
+                         'autostop', 'down'), None)
+                    if config_override_down is False:  # will not match None
+                        logger.warning(
+                            'SkyServe controller autodown is disabled in the '
+                            '~/.sky/config.yaml configuration file '
+                            '(serve.controller.autostop.down_when_idle), but '
+                            'it is force enabled for Kubernetes clusters.')
+
                     down = True
                 else:
                     logger.info('Auto-stop is not supported for Kubernetes '
@@ -4488,6 +4594,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     @timeline.event
+    @context_utils.cancellation_guard
     def run_on_head(
         self,
         handle: CloudVmRayResourceHandle,
@@ -4586,6 +4693,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle_before_refresh = record['handle']
             status_before_refresh = record['status']
 
+        handle: Optional[CloudVmRayResourceHandle]
         prev_cluster_status, handle = (status_before_refresh,
                                        handle_before_refresh)
 
@@ -4606,7 +4714,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status = None
                 handle = None
         # We should check the cluster_ever_up after refresh, because if the
-        # cluster is terminated (through console or auto-dwon), the record will
+        # cluster is terminated (through console or auto-down), the record will
         # become None and the cluster_ever_up should be considered as False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
         prev_config_hash = record['config_hash'] if record is not None else None
@@ -4619,16 +4727,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
+            # Take a random resource in order to get resource info that applies
+            # to all resources.
+            one_task_resource = list(task.resources)[0]
             # Assume resources share the same ports.
             for resource in task.resources:
-                assert resource.ports == list(task.resources)[0].ports
+                assert resource.ports == one_task_resource.ports
             requested_ports_set = resources_utils.port_ranges_to_set(
-                list(task.resources)[0].ports)
+                one_task_resource.ports)
             current_ports_set = resources_utils.port_ranges_to_set(
                 handle.launched_resources.ports)
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
                                                            requested_ports_set)
             to_provision = handle.launched_resources
+            assert to_provision is not None
+            to_provision = to_provision.assert_launchable()
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
@@ -4642,6 +4755,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'a new cluster with the desired ports open.')
             if all_ports:
                 to_provision = to_provision.copy(ports=all_ports)
+            # Docker login should always be the same for all resources, since
+            # it's set from envs.
+            for resource in task.resources:
+                assert (resource.docker_login_config ==
+                        one_task_resource.docker_login_config), (
+                            resource.docker_login_config,
+                            one_task_resource.docker_login_config)
+            # If we have docker login config in the new task, override the
+            # existing resources to pick up new credentials. This allows the
+            # user to specify new or fixed credentials if the existing
+            # credentials are not working. If we don't do this, the credentials
+            # from the existing resources will always be reused.
+            if one_task_resource.docker_login_config is not None:
+                to_provision = to_provision.copy(
+                    _docker_login_config=one_task_resource.docker_login_config)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
@@ -4843,7 +4971,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4852,10 +4980,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES
         }
 
-        # Handle cases when there aren't any Storages with MOUNT mode.
+        # Handle cases when there aren't any Storages with either MOUNT or
+        # MOUNT_CACHED mode.
         if not storage_mounts:
             return
         start = time.time()
@@ -4885,7 +5014,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
             assert store is not None, storage_obj
-            mount_cmd = store.mount_command(dst)
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+                action_message = 'Mounting'
+            else:
+                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
+                mount_cmd = store.mount_cached_command(dst)
+                action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4897,7 +5032,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=dst,
                     cmd=mount_cmd,
                     run_rsync=False,
-                    action_message='Mounting',
+                    action_message=action_message,
                     log_path=log_path,
                     # Need to source bashrc, as the cloud specific CLI or SDK
                     # may require PATH in bashrc.
@@ -4916,12 +5051,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
                 else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode,
-                        command='to mount',
-                        error_msg=e.error_msg,
-                        detailed_reason=e.detailed_reason) from None
+                    # By default, raising an error caused from mounting_utils
+                    # shows a big heredoc as part of it. Here, we want to
+                    # conditionally show the heredoc only if SKYPILOT_DEBUG
+                    # is set
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason)
+                    else:
+                        # Strip the command (a big heredoc) from the exception
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
@@ -4939,7 +5085,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            if storage_obj.mode != storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode not in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # Skip non-mount storage objects, as there is no need to
                 # reconstruct them during cluster restart.
                 continue

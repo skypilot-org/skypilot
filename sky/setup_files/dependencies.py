@@ -9,10 +9,13 @@ import sys
 from typing import Dict, List
 
 install_requires = [
-    'wheel',
+    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
     'cachetools',
     # NOTE: ray requires click>=7.0.
-    'click >= 7.0',
+    # click 8.2.0 has a bug in parsing the command line arguments:
+    # https://github.com/pallets/click/issues/2894
+    # TODO(aylei): remove this once the bug is fixed in click.
+    'click >= 7.0, < 8.2.0',
     'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
@@ -79,11 +82,6 @@ remote = [
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, according to
-    # https://github.com/boto/botocore/issues/2926
-    # We have to explicitly pin the version to optimize the time for
-    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
-    'urllib3<2',
     # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
     # should instead use CLI V2 which is not pip-installable. See
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
@@ -131,7 +129,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0'],
+    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1

@@ -33,8 +33,10 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -421,10 +423,9 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 'managed_job_event',
                                 f'jobs-callback-{job_id}-{task_id}.log')
-        result = log_lib.run_bash_command_with_log(
-            bash_command=event_callback,
-            log_path=log_path,
-            env_vars=dict(
+        env_vars = task.envs.copy() if task.envs else {}
+        env_vars.update(
+            dict(
                 SKYPILOT_TASK_ID=str(
                     task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
                 SKYPILOT_TASK_IDS=str(
@@ -436,6 +437,9 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                 TASK_NAME=task.name or '',
                 # TODO(MaoZiming): Future event type Job or Spot.
                 EVENT_TYPE='Spot'))
+        result = log_lib.run_bash_command_with_log(bash_command=event_callback,
+                                                   log_path=log_path,
+                                                   env_vars=env_vars)
         logger.info(
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
@@ -909,15 +913,23 @@ def dump_managed_job_queue() -> str:
         cluster_name = generate_managed_job_cluster_name(
             job['task_name'], job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        if handle is not None:
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            job['cluster_resources'] = (
-                f'{handle.launched_nodes}x {handle.launched_resources}')
+        if isinstance(handle, backends.CloudVmRayResourceHandle):
+            resources_str = resources_utils.get_readable_resources_repr(
+                handle, simplify=True)
+            resources_str_full = resources_utils.get_readable_resources_repr(
+                handle, simplify=False)
+            job['cluster_resources'] = resources_str
+            job['cluster_resources_full'] = resources_str_full
+            job['cloud'] = str(handle.launched_resources.cloud)
             job['region'] = handle.launched_resources.region
+            job['zone'] = handle.launched_resources.zone
         else:
             # FIXME(zongheng): display the last cached values for these.
             job['cluster_resources'] = '-'
+            job['cluster_resources_full'] = '-'
+            job['cloud'] = '-'
             job['region'] = '-'
+            job['zone'] = '-'
 
     return message_utils.encode_payload(jobs)
 
@@ -1024,7 +1036,7 @@ def format_job_table(
         'TASK',
         'NAME',
         *user_cols,
-        'RESOURCES',
+        'REQUESTED',
         'SUBMITTED',
         'TOT. DURATION',
         'JOB DURATION',
@@ -1033,7 +1045,7 @@ def format_job_table(
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'SCHED. STATE', 'DETAILS']
+        columns += ['STARTED', 'INFRA', 'RESOURCES', 'SCHED. STATE', 'DETAILS']
     if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -1172,11 +1184,32 @@ def format_job_table(
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
                                   if len(job_tasks) == 1 else '-')
+                cloud = task.get('cloud')
+                if cloud is None:
+                    # Backward compatibility for old jobs controller without
+                    # cloud info returned, we parse it from the cluster
+                    # resources
+                    # TODO(zhwu): remove this after 0.12.0
+                    cloud = task['cluster_resources'].split('(')[0].split(
+                        'x')[-1]
+                    task['cluster_resources'] = task[
+                        'cluster_resources'].replace(f'{cloud}(',
+                                                     '(').replace('x ', 'x')
+                region = task['region']
+                zone = task.get('zone')
+                if cloud == '-':
+                    cloud = None
+                if region == '-':
+                    region = None
+                if zone == '-':
+                    zone = None
+
+                infra = infra_utils.InfraInfo(cloud, region, zone)
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
+                    infra.formatted_str(),
                     task['cluster_resources'],
-                    task['region'],
                     schedule_state,
                     generate_details(task['failure_reason']),
                 ])

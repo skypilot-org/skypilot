@@ -90,6 +90,9 @@ class Azure(clouds.Cloud):
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
+                f'High availability controllers are not supported on {cls._REPR}.'
+            ),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -322,9 +325,10 @@ class Azure(clouds.Cloud):
 
         region_name = region.name
 
-        r = resources
-        # r.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        # resources.accelerators is cleared but .instance_type encodes the info.
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         acc_count = None
         if acc_dict is not None:
             acc_count = str(sum(acc_dict.values()))
@@ -336,8 +340,9 @@ class Azure(clouds.Cloud):
             # pylint: disable=import-outside-toplevel
             from sky.clouds.service_catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
-                r.instance_type)
-            image_id = self._get_default_image_tag(gen_version, r.instance_type)
+                resources.instance_type)
+            image_id = self._get_default_image_tag(gen_version,
+                                                   resources.instance_type)
         else:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
@@ -404,18 +409,19 @@ class Azure(clouds.Cloud):
             """).split('\n')
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
-            if (r.disk_tier is not None and
-                    r.disk_tier != resources_utils.DiskTier.BEST):
-                return r.disk_tier
+            if (resources.disk_tier is not None and
+                    resources.disk_tier != resources_utils.DiskTier.BEST):
+                return resources.disk_tier
             # Failover disk tier from high to low. Default disk tier
             # (Premium_LRS, medium) only support s-series instance types,
             # so we failover to lower tiers for non-s-series.
             all_tiers = list(reversed(resources_utils.DiskTier))
             start_index = all_tiers.index(
-                Azure._translate_disk_tier(r.disk_tier))
+                Azure._translate_disk_tier(resources.disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
-                ok, _ = Azure.check_disk_tier(r.instance_type, disk_tier)
+                ok, _ = Azure.check_disk_tier(resources.instance_type,
+                                              disk_tier)
                 if ok:
                     return disk_tier
                 start_index += 1
@@ -423,11 +429,11 @@ class Azure(clouds.Cloud):
 
         disk_tier = _failover_disk_tier()
 
-        resources_vars = {
-            'instance_type': r.instance_type,
+        resources_vars: Dict[str, Any] = {
+            'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'num_gpus': acc_count,
-            'use_spot': r.use_spot,
+            'use_spot': resources.use_spot,
             'region': region_name,
             # Azure does not support specific zones.
             'zones': None,

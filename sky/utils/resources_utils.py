@@ -4,11 +4,11 @@ import enum
 import itertools
 import json
 import math
-import re
 import typing
 from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
 
@@ -139,32 +139,54 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
+    resource = resource.assert_launchable()
+    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+        resource.instance_type)
+
+    components = []
+
+    if resource.accelerators is not None:
+        acc, count = list(resource.accelerators.items())[0]
+        components.append(f'gpus={acc}:{count}')
+
+    is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    if (resource.accelerators is None or is_k8s or not simplify):
+        if vcpu is not None:
+            components.append(f'cpus={int(vcpu)}')
+        if mem is not None:
+            components.append(f'mem={int(mem)}')
+
+    instance_type = resource.instance_type
     if simplify:
-        cloud = resource.cloud
-        if resource.accelerators is None:
-            vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-                resource.instance_type)
-            hardware = f'vCPU={int(vcpu)}'
-        else:
-            hardware = f'{resource.accelerators}'
-        spot = '[Spot]' if resource.use_spot else ''
-        return f'{cloud}({spot}{hardware})'
+        instance_type = common_utils.truncate_long_string(instance_type, 15)
+    if not is_k8s:
+        components.append(instance_type)
+    if simplify:
+        components.append('...')
     else:
-        # accelerator_args is way too long.
-        # Convert from:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-        # to:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-        pattern = ', accelerator_args={.*}'
-        launched_resource_str = re.sub(pattern, '...', str(resource))
-        return launched_resource_str
+        image_id = resource.image_id
+        if image_id is not None:
+            if None in image_id:
+                components.append(f'image_id={image_id[None]}')
+            else:
+                components.append(f'image_id={image_id}')
+        components.append(f'disk={resource.disk_size}')
+        disk_tier = resource.disk_tier
+        if disk_tier is not None:
+            components.append(f'disk_tier={disk_tier.value}')
+        ports = resource.ports
+        if ports is not None:
+            components.append(f'ports={ports}')
+
+    spot = '[spot]' if resource.use_spot else ''
+    return f'{spot}({"" if not components else ", ".join(components)})'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                 simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x '
+        return (f'{handle.launched_nodes}x'
                 f'{format_resource(handle.launched_resources, simplify)}')
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
 
@@ -216,3 +238,54 @@ def need_to_query_reservations() -> bool:
                 cloud_prioritize_reservations):
             return True
     return False
+
+
+def make_launchables_for_valid_region_zones(
+    launchable_resources: 'resources_lib.Resources',
+    override_optimize_by_zone: bool = False,
+) -> List['resources_lib.Resources']:
+    assert launchable_resources.is_launchable()
+    # In principle, all provisioning requests should be made at the granularity
+    # of a single zone. However, for on-demand instances, we batch the requests
+    # to the zones in the same region in order to leverage the region-level
+    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
+    # API calls, and thus the overall failover time. Note that this optimization
+    # does not affect the user cost since the clouds charge the same prices for
+    # on-demand instances in the same region regardless of the zones. On the
+    # other hand, for spot instances, we do not batch the requests because the
+    # "AWS" spot prices may vary across zones.
+    # For GCP, we do not batch the requests because GCP reservation system is
+    # zone based. Therefore, price estimation is potentially different across
+    # zones.
+
+    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
+    # while we return per-region resources here, the provisioner will still
+    # issue the request for one zone at a time.
+    # NOTE(woosuk): If we support Azure spot instances, we should batch the
+    # requests since Azure spot prices are region-level.
+    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
+    # in the same region and have the same price.
+    # TODO(woosuk): A better design is to implement batching at a higher level
+    # (e.g., in provisioner or optimizer), not here.
+    launchables = []
+    regions = launchable_resources.get_valid_regions_for_launchable()
+    for region in regions:
+        assert launchable_resources.cloud is not None, 'Cloud must be specified'
+        optimize_by_zone = (override_optimize_by_zone or
+                            launchable_resources.cloud.optimize_by_zone())
+        # It is possible that we force the optimize_by_zone but some clouds
+        # do not support zone-level provisioning (i.e. Azure). So we check
+        # if there is zone-level information in the region first.
+        if (region.zones is not None and
+            (launchable_resources.use_spot or optimize_by_zone)):
+            # Spot instances.
+            # Do not batch the per-zone requests.
+            for zone in region.zones:
+                launchables.append(
+                    launchable_resources.copy(region=region.name,
+                                              zone=zone.name))
+        else:
+            # On-demand instances.
+            # Batch the requests at the granularity of a single region.
+            launchables.append(launchable_resources.copy(region=region.name))
+    return launchables

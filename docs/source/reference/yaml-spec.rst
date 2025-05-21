@@ -26,10 +26,8 @@ Below is the configuration syntax and some example values.  See details under ea
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
   :ref:`resources <yaml-spec-resources>`:
-    # Location.
-    :ref:`cloud <yaml-spec-resources-cloud>`: aws
-    :ref:`region <yaml-spec-resources-region>`: us-east-1
-    :ref:`zone <yaml-spec-resources-zone>`: us-east-1a
+    # Infra to use. Click to see schema and example values.
+    :ref:`infra <yaml-spec-resources-infra>`: aws
 
     # Hardware.
     :ref:`accelerators <yaml-spec-resources-accelerators>`: H100:8
@@ -49,11 +47,14 @@ Below is the configuration syntax and some example values.  See details under ea
       my-label: my-value
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
-      - cloud: aws
-        region: us-west-2
+      - infra: aws/us-west-2
         accelerators: H100
-      - cloud: gcp
+      - infra: gcp/us-central1
         accelerators: H100
+
+    :ref:`ordered <yaml-spec-resources-ordered>`:
+      - infra: aws/us-east-1
+      - infra: aws/us-west-2
 
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
@@ -78,6 +79,10 @@ Below is the configuration syntax and some example values.  See details under ea
     echo "Begin run."
     python train.py
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
+  :ref:`config <yaml-spec-config>`:
+    kubernetes:
+      provision_timeout: 600
 
 Fields
 ----------
@@ -141,58 +146,55 @@ Per-node resource requirements (optional).
 .. code-block:: yaml
 
   resources:
-    cloud: aws
+    infra: aws
     instance_type: p3.8xlarge
 
 
-.. _yaml-spec-resources-cloud:
+.. _yaml-spec-resources-infra:
 
-``resources.cloud``
+``resources.infra``
 ~~~~~~~~~~~~~~~~~~~
 
-The cloud to use (optional).
+
+Infrastructure to use (optional).
+
+Schema: ``<cloud>/<region>/<zone>`` (region
+and zone are optional), or ``k8s/<context-name>`` (context-name is optional).
+Wildcards are supported in any component.
+
+Example values: ``aws``, ``aws/us-east-1``, ``aws/us-east-1/us-east-1a``,
+``aws/*/us-east-1a``, ``k8s``, ``k8s/my-cluster-context``.
 
 .. code-block:: yaml
 
   resources:
-    cloud: aws
+    infra: aws  # Use any available AWS region/zone.
 
-OR
 
 .. code-block:: yaml
 
   resources:
-    cloud: gcp
+    infra: k8s  # Use any available Kubernetes context.
 
-
-.. _yaml-spec-resources-region:
-
-``resources.region``
-~~~~~~~~~~~~~~~~~~~~
-
-The region to use (optional).
-
-Auto-failover will be disabled if this is specified.
+You can also specify a specific region, zone, or Kubernetes context.
 
 .. code-block:: yaml
 
   resources:
-    region: us-east-1
+    infra: aws/us-east-1
 
-
-.. _yaml-spec-resources-zone:
-
-``resources.zone``
-~~~~~~~~~~~~~~~~~~
-
-The zone to use (optional).
-
-Auto-failover will be disabled if this is specified.
 
 .. code-block:: yaml
 
   resources:
-    zone: us-east-1a
+    infra: aws/us-east-1/us-east-1a
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s/my-h100-cluster-context
+
 
 
 .. _yaml-spec-resources-accelerators:
@@ -639,36 +641,40 @@ Candidate resources (optional).
 
 If specified, SkyPilot will only use these candidate resources to launch the cluster.
 
-The fields specified outside of ``any_of``, ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of``, ``ordered`` will override the default values.
+The fields specified outside of ``any_of`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of`` will override the default values.
 
-- ``any_of``: means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
-- ``ordered``: means that SkyPilot will failover through the candidate resources with the specified order.
-
-Note: accelerators under ``any_of`` and ``ordered`` cannot be a list or set.
+``any_of`` means that SkyPilot will try to find a resource that matches any of the candidate resources, i.e. the failover order will be decided by the optimizer.
 
 Example:
 
 .. code-block:: yaml
 
   resources:
+    accelerators: H100
     any_of:
-      - cloud: aws
-        region: us-west-2
-        accelerators: H100
-      - cloud: gcp
-        accelerators: H100
+      - infra: aws/us-west-2
+      - infra: gcp/us-central1
 
-OR
+.. _yaml-spec-resources-ordered:
+
+``resources.ordered``
+~~~~~~~~~~~~~~~~~~~~~~
+Ordered candidate resources (optional).
+
+If specified, SkyPilot will failover through the candidate resources with the specified order.
+
+The fields specified outside of ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``ordered`` will override the default values.
+
+``ordered`` means that SkyPilot will failover through the candidate resources with the specified order.
+
+Example:
 
 .. code-block:: yaml
 
   resources:
     ordered:
-      - cloud: aws
-        region: us-east-1
-      - cloud: aws
-        region: us-west-2
-
+      - infra: aws/us-east-1
+      - infra: aws/us-west-2
 
 .. _yaml-spec-resources-job-recovery:
 
@@ -776,7 +782,7 @@ Example:
       source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
       store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'oci', or 'ibm'; default: None. Optional.
       persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
-      mode: MOUNT  # Either MOUNT or COPY. Defaults to MOUNT. Optional.
+      mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
@@ -862,35 +868,28 @@ OR
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
+.. _yaml-spec-config:
 .. _task-yaml-experimental:
 
-Global config overrides
----------------------------
+``config``
+~~~~~~~~~~
 
-To override the :ref:`global configs <config-yaml>` in ``~/.sky/config.yaml`` at a task level:
+:ref:`Advanced configuration options <config-client-job-task-yaml>` to apply to the task.
+
+Example:
 
 .. code-block:: yaml
 
-  experimental:
-    # Override the configs in ~/.sky/config.yaml from a task level.
-    #
-    # The following fields can be overridden. Please refer to docs of Advanced
-    # Configuration for more details of those fields:
-    # https://docs.skypilot.co/en/latest/reference/config.html
-    config_overrides:
-      docker:
-        run_options: ...
-      kubernetes:
-        pod_config: ...
-        provision_timeout: ...
-      gcp:
-        managed_instance_group: ...
-      nvidia_gpus:
-        disable_ecc: ...
-
-.. note::
-
-  Experimental features and APIs may be changed or removed in the future.
+  config:
+    docker:
+      run_options: ...
+    kubernetes:
+      pod_config: ...
+      provision_timeout: ...
+    gcp:
+      managed_instance_group: ...
+    nvidia_gpus:
+      disable_ecc: ...
 
 .. _service-yaml-spec:
 

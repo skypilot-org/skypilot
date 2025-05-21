@@ -1,9 +1,13 @@
 import base64
+import collections
 import os
 import pickle
 import tempfile
 import time
+import unittest
+import uuid
 
+import boto3
 import fastapi
 from fastapi import testclient
 import pandas as pd
@@ -11,11 +15,12 @@ import pytest
 import requests
 
 import sky
-from sky import cli
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.clouds.service_catalog import vsphere_catalog
+from sky.provision import common as provision_common
+from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
@@ -128,6 +133,59 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
     monkeypatch.setattr(requests, "get", mock_get)
 
 
+# Define helper functions at module level for pickleability
+def get_cached_enabled_clouds_mock(enabled_clouds, *_, **__):
+    return enabled_clouds
+
+
+def dummy_function(*_, **__):
+    return None
+
+
+def get_az_mappings(*_, **__):
+    return pd.read_csv('tests/default_aws_az_mappings.csv')
+
+
+def list_empty_reservations(*_, **__):
+    return []
+
+
+def get_kubernetes_label_formatter(*_, **__):
+    return [kubernetes_utils.SkyPilotLabelFormatter, {}]
+
+
+def detect_accelerator_resource_mock(*_, **__):
+    return [True, []]
+
+
+def check_instance_fits_mock(*_, **__):
+    return [True, '']
+
+
+def get_spot_label_mock(*_, **__):
+    return [None, None]
+
+
+def is_kubeconfig_exec_auth_mock(*_, **__):
+    return [False, None]
+
+
+def regions_with_offering_mock(*_, **__):
+    return [sky.clouds.Region('my-k8s-cluster-context')]
+
+
+def check_quota_available_mock(*_, **__):
+    return True
+
+
+def mock_redirect_output(*_, **__):
+    return (None, None)
+
+
+def mock_restore_output(*_, **__):
+    return None
+
+
 @pytest.fixture
 def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
@@ -138,40 +196,43 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     config_file = tempfile.NamedTemporaryFile(prefix='tmp_config_default',
                                               delete=False).name
 
+    # Use a function that takes enabled_clouds as an argument
+    def get_clouds_factory(*args, **kwargs):
+        return get_cached_enabled_clouds_mock(enabled_clouds, *args, **kwargs)
+
     # Mock all the functions
     monkeypatch.setattr('sky.check.get_cached_enabled_clouds_or_refresh',
-                        lambda *_, **__: enabled_clouds)
-    monkeypatch.setattr('sky.check.check_capability', lambda *_, **__: None)
+                        get_clouds_factory)
+    monkeypatch.setattr('sky.check.check_capability', dummy_function)
     monkeypatch.setattr(
         'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
-        lambda *_, **__: pd.read_csv('tests/default_aws_az_mappings.csv'))
+        get_az_mappings)
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
-                        lambda *_, **__: None)
+                        dummy_function)
     monkeypatch.setattr(
         'sky.clouds.utils.gcp_utils.list_reservations_for_instance_type_in_zone',
-        lambda *_, **__: [])
+        list_empty_reservations)
 
     # Kubernetes mocks
-    monkeypatch.setattr('sky.adaptors.kubernetes._load_config',
-                        lambda *_, **__: None)
+    monkeypatch.setattr('sky.adaptors.kubernetes._load_config', dummy_function)
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
-        lambda *_, **__: [kubernetes_utils.SkyPilotLabelFormatter, {}])
+        get_kubernetes_label_formatter)
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.detect_accelerator_resource',
-        lambda *_, **__: [True, []])
+        detect_accelerator_resource_mock)
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_instance_fits',
-                        lambda *_, **__: [True, ''])
+                        check_instance_fits_mock)
     monkeypatch.setattr('sky.provision.kubernetes.utils.get_spot_label',
-                        lambda *_, **__: [None, None])
+                        get_spot_label_mock)
     monkeypatch.setattr('sky.clouds.kubernetes.kubernetes_utils.get_spot_label',
-                        lambda *_, **__: [None, None])
+                        get_spot_label_mock)
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
-        lambda *_, **__: [False, None])
+        is_kubeconfig_exec_auth_mock)
     monkeypatch.setattr(
         'sky.clouds.kubernetes.Kubernetes.regions_with_offering',
-        lambda *_, **__: [sky.clouds.Region('my-k8s-cluster-context')])
+        regions_with_offering_mock)
 
     # VSphere catalog mock
     monkeypatch.setattr(vsphere_catalog, '_LOCAL_CATALOG',
@@ -181,7 +242,7 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     for cloud in enabled_clouds:
         if hasattr(cloud, 'check_quota_available'):
             monkeypatch.setattr(cloud, 'check_quota_available',
-                                lambda *_, **__: True)
+                                check_quota_available_mock)
 
     # Environment variables
     monkeypatch.setattr(
@@ -321,9 +382,9 @@ def mock_queue(monkeypatch):
 @pytest.fixture
 def mock_redirect_log_file(monkeypatch):
     monkeypatch.setattr('sky.server.requests.executor._redirect_output',
-                        lambda *_, **__: (None, None))
+                        mock_redirect_output)
     monkeypatch.setattr('sky.server.requests.executor._restore_output',
-                        lambda *_, **__: None)
+                        mock_restore_output)
 
 
 @pytest.fixture
@@ -345,6 +406,109 @@ def mock_stream_utils(monkeypatch):
 
     monkeypatch.setattr("sky.server.stream_utils.stream_response",
                         _mock_stream_response)
+
+
+@pytest.fixture
+def mock_aws_backend(monkeypatch):
+    """Mock AWS backend for basic AWS testing operations."""
+    # Create a Subnet class to match what SkyPilot expects
+    Subnet = collections.namedtuple(
+        'Subnet',
+        ['subnet_id', 'vpc_id', 'availability_zone', 'map_public_ip_on_launch'])
+
+    # Mock subnet and VPC discovery
+    def mock_get_subnet_and_vpc_id(*args, **kwargs):
+        # Get the region from kwargs
+        region = kwargs.get('region', 'us-east-1')
+
+        # Create a subnet in the requested region
+        ec2 = boto3.resource('ec2', region_name=region)
+
+        # Create VPC and subnet in the requested region
+        vpc = ec2.create_vpc(CidrBlock='10.0.0.0/16')
+        subnet = ec2.create_subnet(VpcId=vpc.id,
+                                   CidrBlock='10.0.0.0/24',
+                                   AvailabilityZone=f"{region}a")
+
+        # Configure subnet to map public IPs
+        ec2.meta.client.modify_subnet_attribute(
+            SubnetId=subnet.id, MapPublicIpOnLaunch={'Value': True})
+
+        # Store subnet object
+        subnet_obj = Subnet(subnet_id=subnet.id,
+                            vpc_id=vpc.id,
+                            availability_zone=f"{region}a",
+                            map_public_ip_on_launch=True)
+
+        return ([subnet_obj], vpc.id)
+
+    # Mock security groups
+    def mock_get_or_create_vpc_security_group(*args, **kwargs):
+        # Return a mock security group
+        return unittest.mock.Mock(id="sg-12345678", group_name="test-sg")
+
+    # Mock IAM role
+    def mock_configure_iam_role(*args, **kwargs):
+        return {'Name': 'skypilot-test-role'}
+
+    def mock_wait_instances(region, cluster_name_on_cloud, state):
+        # Always return successfully without waiting
+        return
+
+    def mock_post_provision_runtime_setup(cloud_name, cluster_name,
+                                          cluster_yaml, provision_record,
+                                          custom_resource, log_dir):
+        # Get region from the provision record
+        region = provision_record.region
+
+        # Create a head instance
+        head_instance_id = f'i-{uuid.uuid4().hex[:8]}'
+
+        # Create instance info for the head
+        head_instance = provision_common.InstanceInfo(
+            instance_id=head_instance_id,
+            internal_ip='10.0.0.1',
+            external_ip='192.168.1.1',
+            tags={
+                'Name': cluster_name.name_on_cloud,
+                'ray-cluster-name': cluster_name.name_on_cloud,
+                'ray-node-type': 'head'
+            })
+
+        # Create ClusterInfo
+        instances = {head_instance_id: [head_instance]}
+        cluster_info = provision_common.ClusterInfo(
+            instances=instances,
+            head_instance_id=head_instance_id,
+            provider_name='aws',
+            provider_config={
+                'region': region,
+                'use_internal_ips': False
+            },
+            ssh_user='ubuntu')
+
+        return cluster_info
+
+    def mock_execute(self, handle, task, detach_run, dryrun=False):
+        # Return a fake job ID without attempting to SSH
+        return 1234
+
+    # Apply our mocks to the monkeypatch
+    monkeypatch.setattr(aws_config, '_get_subnet_and_vpc_id',
+                        mock_get_subnet_and_vpc_id)
+    monkeypatch.setattr(aws_config, '_get_or_create_vpc_security_group',
+                        mock_get_or_create_vpc_security_group)
+    monkeypatch.setattr(aws_config, '_configure_iam_role',
+                        mock_configure_iam_role)
+    monkeypatch.setattr(sky.provision.aws, 'wait_instances',
+                        mock_wait_instances)
+    # Add mock for post_provision_runtime_setup
+    monkeypatch.setattr(sky.provision.provisioner,
+                        'post_provision_runtime_setup',
+                        mock_post_provision_runtime_setup)
+    # Add mock for _execute
+    monkeypatch.setattr(sky.backends.cloud_vm_ray_backend.CloudVmRayBackend,
+                        '_execute', mock_execute)
 
 
 @pytest.fixture

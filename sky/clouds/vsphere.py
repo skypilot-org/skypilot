@@ -54,6 +54,8 @@ class Vsphere(clouds.Cloud):
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            (f'High availability controllers are not supported on {_REPR}.'),
     }
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 80  # The name can't exceeds 80 characters
@@ -184,8 +186,10 @@ class Vsphere(clouds.Cloud):
         del cluster_name, dryrun  # unused
         assert zones is not None, (region, zones)
         zone_names = [zone.name for zone in zones]
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 

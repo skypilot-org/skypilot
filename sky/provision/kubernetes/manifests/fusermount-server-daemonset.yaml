@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fusermount-server
+  labels:
+    app: fusermount-server
+    role: agent
+    parent: skypilot
+spec:
+  selector:
+    matchLabels:
+      app: fusermount-server
+  template:
+    metadata:
+      labels:
+        app: fusermount-server
+    spec:
+      # Add tolerations to run on all nodes
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
+      containers:
+      - name: server
+        # TODO(aylei): version strategy of our addon images
+        image: berkeleyskypilot/fusermount-server:latest
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: shared-dir
+          mountPath: /var/run/fusermount
+        env:
+        - name: FUSERMOUNT_SHARED_DIR
+          value: /var/run/fusermount
+        resources:
+          requests:
+            cpu: 50m
+            memory: 50Mi
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "test -S /var/run/fusermount/server.sock"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 10
+      volumes:
+      - name: shared-dir
+        hostPath:
+          path: /var/run/fusermount
+          type: DirectoryOrCreate

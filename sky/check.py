@@ -1,4 +1,6 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import collections
+import itertools
 import os
 import traceback
 from types import ModuleType
@@ -16,6 +18,7 @@ from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
 from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
@@ -31,39 +34,26 @@ def check_capabilities(
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
-    echo('Checking credentials to enable clouds for SkyPilot.')
+    echo('Checking credentials to enable infra for SkyPilot.')
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
     enabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
     disabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
 
-    def check_one_cloud(
-            cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
-                                          ModuleType]]) -> None:
-        cloud_repr, cloud = cloud_tuple
-        assert capabilities is not None
-        # cloud_capabilities is a list of (capability, ok, reason)
-        # where ok is True if the cloud credentials are valid for the capability
-        cloud_capabilities: List[Tuple[sky_cloud.CloudCapability, bool,
-                                       Optional[str]]] = []
-        for capability in capabilities:
-            with rich_utils.safe_status(f'Checking {cloud_repr}...'):
-                try:
-                    ok, reason = cloud.check_credentials(capability)
-                except exceptions.NotSupportedError:
-                    continue
-                except Exception:  # pylint: disable=broad-except
-                    # Catch all exceptions to prevent a single cloud
-                    # from blocking the check for other clouds.
-                    ok, reason = False, traceback.format_exc()
-            cloud_capabilities.append(
-                (capability, ok, reason.strip() if reason else None))
-            if ok:
-                enabled_clouds.setdefault(cloud_repr, []).append(capability)
-            else:
-                disabled_clouds.setdefault(cloud_repr, []).append(capability)
-        _print_checked_cloud(echo, verbose, cloud_tuple, cloud_capabilities)
+    def check_one_cloud_one_capability(
+        payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
+                       sky_cloud.CloudCapability]
+    ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[str]]]:
+        cloud_tuple, capability = payload
+        _, cloud = cloud_tuple
+        try:
+            ok, reason = cloud.check_credentials(capability)
+        except exceptions.NotSupportedError:
+            return None
+        except Exception:  # pylint: disable=broad-except
+            ok, reason = False, traceback.format_exc()
+        return capability, ok, reason.strip() if reason else None
 
     def get_cloud_tuple(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
@@ -88,10 +78,10 @@ def check_capabilities(
 
     # Use allowed_clouds from config if it exists, otherwise check all clouds.
     # Also validate names with get_cloud_tuple.
-    config_allowed_cloud_names = [
+    config_allowed_cloud_names = sorted([
         get_cloud_tuple(c)[0] for c in skypilot_config.get_nested((
             'allowed_clouds',), get_all_clouds())
-    ]
+    ])
     # Use disallowed_cloud_names for logging the clouds that will be disabled
     # because they are not included in allowed_clouds in config.yaml.
     disallowed_cloud_names = [
@@ -102,8 +92,30 @@ def check_capabilities(
         c for c in clouds_to_check if c[0] in config_allowed_cloud_names
     ]
 
-    for cloud_tuple in sorted(clouds_to_check):
-        check_one_cloud(cloud_tuple)
+    combinations = list(itertools.product(clouds_to_check, capabilities))
+    with rich_utils.safe_status('Checking infra choices...'):
+        check_results = subprocess_utils.run_in_parallel(
+            check_one_cloud_one_capability, combinations)
+
+    check_results_dict: Dict[
+        Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
+        List[Tuple[sky_cloud.CloudCapability, bool,
+                   Optional[str]]]] = collections.defaultdict(list)
+    for combination, check_result in zip(combinations, check_results):
+        if check_result is None:
+            continue
+        capability, ok, _ = check_result
+        cloud_tuple, _ = combination
+        cloud_repr = cloud_tuple[0]
+        if ok:
+            enabled_clouds.setdefault(cloud_repr, []).append(capability)
+        else:
+            disabled_clouds.setdefault(cloud_repr, []).append(capability)
+        check_results_dict[cloud_tuple].append(check_result)
+
+    for cloud_tuple, check_result_list in sorted(check_results_dict.items(),
+                                                 key=lambda item: item[0][0]):
+        _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list)
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
@@ -173,10 +185,11 @@ def check_capabilities(
         if not quiet:
             enabled_clouds_str = '\n  ' + '\n  '.join([
                 _format_enabled_cloud(cloud, capabilities)
-                for cloud, capabilities in enabled_clouds.items()
+                for cloud, capabilities in sorted(enabled_clouds.items(),
+                                                  key=lambda item: item[0])
             ])
             echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
-                 f'Enabled clouds {PARTY_POPPER_EMOJI}'
+                 f'Enabled infra {PARTY_POPPER_EMOJI}'
                  f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
     return enabled_clouds
 
@@ -289,6 +302,12 @@ def _print_checked_cloud(
         cloud_tuple: The cloud to print the capabilities for.
         cloud_capabilities: The capabilities for the cloud.
     """
+
+    def _yellow_color(str_to_format: str) -> str:
+        return (f'{colorama.Fore.LIGHTYELLOW_EX}'
+                f'{str_to_format}'
+                f'{colorama.Style.RESET_ALL}')
+
     cloud_repr, cloud = cloud_tuple
     # Print the capabilities for the cloud.
     # consider cloud enabled if any capability is enabled.
@@ -319,7 +338,7 @@ def _print_checked_cloud(
     if activated_account is not None:
         echo(f'    Activated account: {activated_account}')
     for reason, caps in hints_to_capabilities.items():
-        echo(f'    Hint [{", ".join(caps)}]: {reason}')
+        echo(f'    Hint [{", ".join(caps)}]: {_yellow_color(reason)}')
     for reason, caps in reasons_to_capabilities.items():
         echo(f'    Reason [{", ".join(caps)}]: {reason}')
 
@@ -359,9 +378,9 @@ def _format_enabled_cloud(cloud_name: str,
                           if i == len(existing_contexts) -
                           1 else ux_utils.INDENT_SYMBOL)
                 contexts_formatted.append(f'\n    {symbol}{context}')
-            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+            context_info = f'  Allowed contexts:{"".join(contexts_formatted)}'
         else:
-            context_info = f'Active context: {existing_contexts[0]}'
+            context_info = f'  Active context: {existing_contexts[0]}'
 
         return (f'{_green_color(cloud_and_capabilities)}\n'
                 f'  {colorama.Style.DIM}{context_info}'

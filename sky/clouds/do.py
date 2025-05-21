@@ -1,6 +1,7 @@
 """ Digital Ocean Cloud. """
 
 import json
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -32,6 +33,9 @@ class DO(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported in '
+             f'{_REPR}.'),
     }
     # DO maximum node name length defined as <= 255
     # https://docs.digitalocean.com/reference/api/api-reference/#operation/droplets_create
@@ -177,8 +181,9 @@ class DO(clouds.Cloud):
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
@@ -279,13 +284,12 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        try:
-            do_utils.client()
-            return {
-                f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
-            }
-        except do_utils.DigitalOceanError:
+        credential_path = do_utils.get_credentials_path()
+        if credential_path is None:
             return {}
+        if not os.path.exists(os.path.expanduser(credential_path)):
+            return {}
+        return {f'~/.config/doctl/{_CREDENTIAL_FILE}': credential_path}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

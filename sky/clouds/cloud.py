@@ -11,7 +11,8 @@ import collections
 import enum
 import math
 import typing
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
+                    Union)
 
 from typing_extensions import assert_never
 
@@ -37,7 +38,7 @@ class CloudImplementationFeatures(enum.Enum):
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'  # Includes both stop and autostop.
+    STOP = 'stop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     IMAGE_ID = 'image_id'
@@ -47,7 +48,11 @@ class CloudImplementationFeatures(enum.Enum):
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
+    HIGH_AVAILABILITY_CONTROLLERS = ('high_availability_controllers'
+                                    )  # Controller can auto-restart
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
+    AUTOSTOP = 'autostop'  # Pod/VM can stop itself
+    AUTODOWN = 'autodown'  # Pod/VM can down itself
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
@@ -298,7 +303,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -414,13 +419,16 @@ class Cloud:
         try:
             self.check_features_are_supported(resources,
                                               resources_required_features)
-        except exceptions.NotSupportedError:
+        except exceptions.NotSupportedError as e:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
             # are not considered.
+            # UPDATE(kyuds): passing in NotSupportedError reason string
+            # to hint for issue #5344. Did not remove above comment as
+            # reason is not displayed when other resources are valid.
             return resources_utils.FeasibleResources(resources_list=[],
                                                      fuzzy_candidate_list=[],
-                                                     hint=None)
+                                                     hint=str(e))
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(
@@ -714,7 +722,7 @@ class Cloud:
         Raises:
             ResourcesMismatchError: If the accelerator is not supported.
         """
-        assert resources.is_launchable(), resources
+        resources = resources.assert_launchable()
 
         def _equal_accelerators(
             acc_requested: Optional[Dict[str, Union[int, float]]],

@@ -38,10 +38,10 @@ For example, when a user runs ``sky launch -c my-cluster``, the following output
     $ sky launch -c my-cluster --cpus 2
     Considered resources (1 node):
     ---------------------------------------------------------------------------------------------
-    CLOUD        INSTANCE    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+    INFRA                   INSTANCE      vCPUs   Mem(GB)   GPUS      COST ($)   CHOSEN
     ---------------------------------------------------------------------------------------------
-    Kubernetes   2CPU--2GB   2       2         -              in-cluster    0.00          ✔
-    AWS          m6i.large   2       8         -              us-east-1     0.10
+    Kubernetes (my-cluster) 2CPU--2GB     2       2         -         0.00       ✔
+    AWS (us-east-1)         m6i.large     2       8         -         0.098     
     ---------------------------------------------------------------------------------------------
     Launching a new cluster 'my-cluster'. Proceed? [Y/n]:
     ⚙︎ Launching on Kubernetes.
@@ -121,7 +121,7 @@ Note that the following log functions are synchronous:
   older than 0.8.0 to any newer version,
   your program using SkyPilot SDKs needs to be updated to use the new
   |sky.stream_and_get|_ function to retrieve the result of a SDK function call.
-  See the :ref:`migration guide <migration-0.8.0>` for more details.
+  See the :ref:`migration guide <migration-0.8.1>` for more details.
 
 .. https://stackoverflow.com/a/4836544
 .. |sky.stream_and_get| replace:: :code:`sky.stream_and_get`

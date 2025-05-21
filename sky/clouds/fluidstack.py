@@ -56,6 +56,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
             'Host controllers'
             f' are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported in '
+             f'{_REPR}.'),
     }
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -185,9 +188,9 @@ class Fluidstack(clouds.Cloud):
     ) -> Dict[str, Optional[str]]:
 
         assert zones is None, 'FluidStack does not support zones.'
-
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 

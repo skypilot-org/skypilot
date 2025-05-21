@@ -30,7 +30,6 @@ from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -39,8 +38,8 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import boto3  # type: ignore
     from google.cloud import storage  # type: ignore
+    import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -203,7 +202,7 @@ class StoreType(enum.Enum):
             return 'oci://'
         # Nebius storages use 's3://' as a prefix for various aws cli commands
         elif self == StoreType.NEBIUS:
-            return 's3://'
+            return 'nebius://'
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
@@ -266,6 +265,15 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    MOUNT_CACHED = 'MOUNT_CACHED'
+
+
+MOUNTABLE_STORAGE_MODES = [
+    StorageMode.MOUNT,
+    StorageMode.MOUNT_CACHED,
+]
+
+DEFAULT_STORAGE_MODE = StorageMode.MOUNT
 
 
 class AbstractStore:
@@ -451,12 +459,26 @@ class AbstractStore:
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the Store to the specified mount_path.
 
-        Includes the setup commands to install mounting tools.
+        This command is used for MOUNT mode. Includes the setup commands to
+        install mounting tools.
 
         Args:
           mount_path: str; Mount path on remote server
         """
         raise NotImplementedError
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """Returns the command to mount the Store to the specified mount_path.
+
+        This command is used for MOUNT_CACHED mode. Includes the setup commands
+        to install mounting tools.
+
+        Args:
+          mount_path: str; Mount path on remote server
+        """
+        raise exceptions.NotSupportedError(
+            f'{StorageMode.MOUNT_CACHED.value} is '
+            f'not supported for {self.name}.')
 
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
@@ -571,7 +593,7 @@ class Storage(object):
         source: Optional[SourceType] = None,
         stores: Optional[List[StoreType]] = None,
         persistent: Optional[bool] = True,
-        mode: StorageMode = StorageMode.MOUNT,
+        mode: StorageMode = DEFAULT_STORAGE_MODE,
         sync_on_reconstruction: bool = True,
         # pylint: disable=invalid-name
         _is_sky_managed: Optional[bool] = None,
@@ -835,7 +857,7 @@ class Storage(object):
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
-                if mode == StorageMode.MOUNT:
+                if mode in MOUNTABLE_STORAGE_MODES:
                     if (split_path.scheme != 'https' and
                         ((split_path.scheme != 'cos' and
                           split_path.path.strip('/') != '') or
@@ -1264,8 +1286,7 @@ class Storage(object):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            # Make sure this keeps the same as the default mode in __init__
-            mode = StorageMode.MOUNT
+            mode = DEFAULT_STORAGE_MODE
         persistent = config.pop('persistent', None)
         if persistent is None:
             persistent = True
@@ -1342,7 +1363,7 @@ class S3Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'boto3.client.Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         # TODO(romilb): This is purely a stopgap fix for
         #  https://github.com/skypilot-org/skypilot/issues/3405
@@ -1595,9 +1616,25 @@ class S3Store(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
+
+            # Process exclusion patterns to make them work correctly with aws
+            # s3 sync
+            processed_excludes = []
+            for excluded_path in excluded_list:
+                # Check if the path is a directory exclusion pattern
+                # For AWS S3 sync, directory patterns need to end with "/**" to
+                # exclude all contents
+                if (excluded_path.endswith('/') or os.path.isdir(
+                        os.path.join(src_dir_path, excluded_path.rstrip('/')))):
+                    # Remove any trailing slash and add '/*' to exclude all
+                    # contents
+                    processed_excludes.append(f'{excluded_path.rstrip("/")}/*')
+                else:
+                    processed_excludes.append(excluded_path)
+
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
-                for file_name in excluded_list
+                for file_name in processed_excludes
             ])
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -1724,6 +1761,17 @@ class S3Store(AbstractStore):
                                                     self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -2251,6 +2299,17 @@ class GcsStore(AbstractStore):
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.GCS.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.GCS.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -3126,6 +3185,19 @@ class AzureBlobStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.AZURE.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.AZURE.get_config(
+            rclone_profile_name=rclone_profile_name,
+            storage_account_name=self.storage_account_name,
+            storage_account_key=self.storage_account_key)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.container_name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
     def _create_az_bucket(self, container_name: str) -> StorageHandle:
         """Creates AZ Container.
 
@@ -3223,7 +3295,7 @@ class R2Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'boto3.client.Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
@@ -3400,13 +3472,18 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.R2_CREDENTIALS_PATH} '
-                            'aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {base_dir_path} '
-                            f's3://{self.name}{sub_path} '
-                            f'--endpoint {endpoint_url} '
-                            f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                'aws s3 sync --no-follow-symlinks --exclude="*" '
+                f'{includes} {base_dir_path} '
+                f's3://{self.name}{sub_path} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -3419,13 +3496,18 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.R2_CREDENTIALS_PATH} '
-                            f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
-                            f's3://{self.name}{sub_path}/{dest_dir_name} '
-                            f'--endpoint {endpoint_url} '
-                            f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                f'aws s3 sync --no-follow-symlinks {excludes} '
+                f'{src_dir_path} '
+                f's3://{self.name}{sub_path}/{dest_dir_name} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
@@ -3562,6 +3644,17 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.R2.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
     def _create_r2_bucket(self,
                           bucket_name: str,
                           region='auto') -> StorageHandle:
@@ -3681,11 +3774,10 @@ class IBMCosStore(AbstractStore):
                  _bucket_sub_path: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: 'StorageHandle'
+        self.rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.IBM.get_profile_name(self.name))
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
-        self.bucket_rclone_profile = \
-          Rclone.generate_rclone_bucket_profile_name(
-            self.name, Rclone.RcloneClouds.IBM)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3897,11 +3989,10 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = (
-                'rclone copy --exclude ".git/*" '
-                f'{src_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}{sub_path}'
-                f'/{dest_dir_name}')
+            sync_command = ('rclone copy --exclude ".git/*" '
+                            f'{src_dir_path} '
+                            f'{self.rclone_profile_name}:{self.name}{sub_path}'
+                            f'/{dest_dir_name}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -3927,10 +4018,9 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = (
-                'rclone copy '
-                f'{includes} {base_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}{sub_path}')
+            sync_command = ('rclone copy '
+                            f'{includes} {base_dir_path} '
+                            f'{self.rclone_profile_name}:{self.name}{sub_path}')
             return sync_command
 
         # Generate message for upload
@@ -3976,7 +4066,8 @@ class IBMCosStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
 
-        bucket_profile_name = Rclone.RcloneClouds.IBM.value + self.name
+        bucket_profile_name = (data_utils.Rclone.RcloneStores.IBM.value +
+                               self.name)
         try:
             bucket_region = data_utils.get_ibm_cos_bucket_region(self.name)
         except exceptions.StorageBucketGetError as e:
@@ -4011,9 +4102,9 @@ class IBMCosStore(AbstractStore):
                     '`rclone lsd <remote>` on relevant remotes returned '
                     'via `rclone listremotes` to debug.')
 
-        Rclone.store_rclone_config(
+        data_utils.Rclone.store_rclone_config(
             self.name,
-            Rclone.RcloneClouds.IBM,
+            data_utils.Rclone.RcloneStores.IBM,
             self.region,  # type: ignore
         )
 
@@ -4053,18 +4144,18 @@ class IBMCosStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         # install rclone if not installed.
-        install_cmd = mounting_utils.get_cos_mount_install_cmd()
-        rclone_config_data = Rclone.get_rclone_config(
-            self.bucket.name,
-            Rclone.RcloneClouds.IBM,
-            self.region,  # type: ignore
-        )
-        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config_data,
-                                                     Rclone.RCLONE_CONFIG_PATH,
-                                                     self.bucket_rclone_profile,
-                                                     self.bucket.name,
-                                                     mount_path,
-                                                     self._bucket_sub_path)
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
+            rclone_profile_name=self.rclone_profile_name,
+            region=self.region)  # type: ignore
+        mount_cmd = (
+            mounting_utils.get_cos_mount_cmd(
+                rclone_config,
+                self.rclone_profile_name,
+                self.bucket.name,
+                mount_path,
+                self._bucket_sub_path,  # type: ignore
+            ))
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -4128,7 +4219,8 @@ class IBMCosStore(AbstractStore):
         except ibm.ibm_botocore.exceptions.ClientError as e:
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
-        Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
+        data_utils.Rclone.delete_rclone_bucket_profile(
+            self.name, data_utils.Rclone.RcloneStores.IBM)
 
 
 class OciStore(AbstractStore):
@@ -4608,9 +4700,8 @@ class NebiusStore(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
-        self.client: 'boto3.client.Client'
+        self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
-        self.region = region if region is not None else nebius.DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
 
@@ -4683,7 +4774,7 @@ class NebiusStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.client = data_utils.create_nebius_client(self.region)
+        self.client = data_utils.create_nebius_client()
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -4780,12 +4871,10 @@ class NebiusStore(AbstractStore):
                 f'--include {shlex.quote(file_name)}'
                 for file_name in file_names
             ])
-            endpoint_url = nebius.create_endpoint(self.region)
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}{sub_path} '
-                            f'--endpoint={endpoint_url} '
                             f'--profile={nebius.NEBIUS_PROFILE_NAME}')
             return sync_command
 
@@ -4797,12 +4886,10 @@ class NebiusStore(AbstractStore):
                 f'--exclude {shlex.quote(file_name)}'
                 for file_name in excluded_list
             ])
-            endpoint_url = nebius.create_endpoint(self.region)
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
                             f's3://{self.name}{sub_path}/{dest_dir_name} '
-                            f'--endpoint={endpoint_url} '
                             f'--profile={nebius.NEBIUS_PROFILE_NAME}')
             return sync_command
 
@@ -4861,7 +4948,6 @@ class NebiusStore(AbstractStore):
         """
         nebius_s = nebius.resource('s3')
         bucket = nebius_s.Bucket(self.name)
-        endpoint_url = nebius.create_endpoint(self.region)
         try:
             # Try Public bucket case.
             # This line does not error out if the bucket is an external public
@@ -4876,7 +4962,6 @@ class NebiusStore(AbstractStore):
             # user.
             if error_code == '403':
                 command = (f'aws s3 ls s3://{self.name} '
-                           f'--endpoint={endpoint_url} '
                            f'--profile={nebius.NEBIUS_PROFILE_NAME}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
@@ -4888,15 +4973,15 @@ class NebiusStore(AbstractStore):
                 raise exceptions.StorageBucketGetError(
                     'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using `aws s3 ls '
-                    f'{self.source} --endpoint={endpoint_url}`'
-                    f'--profile={nebius.NEBIUS_PROFILE_NAME} to debug.')
+                    f's3://{self.name} '
+                    f'--profile={nebius.NEBIUS_PROFILE_NAME}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
         # Store object is being reconstructed for deletion or re-mount with
         # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
-            bucket = self._create_nebius_bucket(self.name, self.region)
+            bucket = self._create_nebius_bucket(self.name)
             return bucket, True
         else:
             # Raised when Storage object is reconstructed for sky storage
@@ -4925,38 +5010,27 @@ class NebiusStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
-        endpoint_url = nebius.create_endpoint(self.region)
         nebius_profile_name = nebius.NEBIUS_PROFILE_NAME
+        endpoint_url = self.client.meta.endpoint_url
         mount_cmd = mounting_utils.get_nebius_mount_cmd(nebius_profile_name,
-                                                        endpoint_url,
                                                         self.bucket.name,
+                                                        endpoint_url,
                                                         mount_path,
                                                         self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def _create_nebius_bucket(self,
-                              bucket_name: str,
-                              region='auto') -> StorageHandle:
-        """Creates S3 bucket with specific name in specific region
+    def _create_nebius_bucket(self, bucket_name: str) -> StorageHandle:
+        """Creates S3 bucket with specific name
 
         Args:
           bucket_name: str; Name of bucket
-          region: str; Region name, e.g. us-west-1, us-east-2
         Raises:
           StorageBucketCreateError: If bucket creation fails.
         """
         nebius_client = self.client
         try:
-            if region is None:
-                nebius_client.create_bucket(Bucket=bucket_name)
-            else:
-                location = {'LocationConstraint': region}
-                nebius_client.create_bucket(Bucket=bucket_name,
-                                            CreateBucketConfiguration=location)
-                logger.info(f'  {colorama.Style.DIM}Created Nebius bucket '
-                            f'{bucket_name!r} in {region}'
-                            f'{colorama.Style.RESET_ALL}')
+            nebius_client.create_bucket(Bucket=bucket_name)
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -5004,9 +5078,7 @@ class NebiusStore(AbstractStore):
         # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
-        endpoint_url = nebius.create_endpoint(self.region)
         remove_command = (f'aws s3 rb s3://{bucket_name} --force '
-                          f'--endpoint {endpoint_url} '
                           f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
         success = self._execute_nebius_remove_command(
@@ -5028,10 +5100,8 @@ class NebiusStore(AbstractStore):
     def _delete_nebius_bucket_sub_path(self, bucket_name: str,
                                        sub_path: str) -> bool:
         """Deletes the sub path from the bucket."""
-        endpoint_url = nebius.create_endpoint(self.region)
         remove_command = (
             f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive '
-            f'--endpoint {endpoint_url} '
             f'--profile={nebius.NEBIUS_PROFILE_NAME}')
         return self._execute_nebius_remove_command(
             remove_command, bucket_name, f'Removing objects from '

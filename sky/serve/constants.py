@@ -66,6 +66,12 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
+# Autostop config for the jobs controller. These are the default values for
+# serve.controller.autostop in ~/.sky/config.yaml.
+CONTROLLER_AUTOSTOP = {
+    'idle_minutes': 10,
+    'down': False,
+}
 
 # Due to the CPU/memory usage of the controller process launched with a job on
 # controller VM (use ray job under the hood), we need to reserve some CPU/memory

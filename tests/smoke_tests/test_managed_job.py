@@ -32,6 +32,7 @@ from smoke_tests import test_mount_and_storage
 
 import sky
 from sky import jobs
+from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -44,15 +45,14 @@ from sky.utils import controller_utils
 # when the controller being on Azure, which takes a long time for launching
 # step.
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'managed-jobs',
         [
-            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/managed_job.yaml -y -d',
-            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-1 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/managed_job.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
@@ -67,7 +67,7 @@ def test_managed_jobs_basic(generic_cloud: str):
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=360
-                if generic_cloud in ['azure', 'kubernetes'] else 120),
+                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -90,7 +90,6 @@ def test_managed_jobs_basic(generic_cloud: str):
 
 
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_cli_exit_codes(generic_cloud: str):
     """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
     name = smoke_tests_utils.get_cluster_name()
@@ -98,7 +97,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
         'managed_jobs_exit_codes',
         [
             # Test jobs launch with successful job
-            f'sky jobs launch -y -n jobs-{name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo jobs success" && echo "Jobs launch exit code: $?"',
+            f'sky jobs launch -y -n jobs-{name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo jobs success" && echo "Jobs launch exit code: $?"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'jobs-{name}',
@@ -113,7 +112,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
             f'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
 
             # Test jobs launch with failing job
-            f'sky jobs launch -y -n jobs-fail-{name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
+            f'sky jobs launch -y -n jobs-fail-{name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'jobs-fail-{name}',
@@ -150,7 +149,7 @@ def test_job_pipeline(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'job_pipeline',
         [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/pipeline.yaml --cloud {generic_cloud} -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/pipeline.yaml -y -d',
             # Need to wait for setup and job initialization.
             'sleep 30',
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
@@ -195,7 +194,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed_jobs_failed_setup',
         [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             # Make sure the job failed quickly.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -226,7 +225,7 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed_jobs_pipeline_failed_setup',
         [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -266,7 +265,7 @@ def test_managed_jobs_recovery_aws(aws_config_region):
         'managed_jobs_recovery_aws',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            rf'sky jobs launch --cloud aws --region {region} --use-spot -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra aws/{region} --use-spot -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -317,7 +316,7 @@ def test_managed_jobs_recovery_gcp():
         'managed_jobs_recovery_gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra gcp/*/{zone} -n {name} --use-spot {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -469,7 +468,7 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed-spot-recovery-default-resources',
         [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -498,7 +497,7 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
         'managed_jobs_recovery_multi_node_aws',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            rf'sky jobs launch --cloud aws --region {region} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra aws/{region} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -550,7 +549,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
         'managed_jobs_recovery_multi_node_gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            rf'sky jobs launch --infra gcp/*/{zone} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -592,7 +591,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
             # Test cancellation during spot cluster being launched.
-            f'sky jobs launch --cloud aws --region {region} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra aws/{region} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -615,7 +614,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                  '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
                 )),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky jobs launch --cloud aws --region {region} -n {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
+            f'sky jobs launch --infra aws/{region} -n {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -637,7 +636,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                  '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
                 )),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud aws --region {region} -n {name}-3 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra aws/{region} -n {name}-3 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             # The job is running in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -702,7 +701,7 @@ def test_managed_jobs_cancellation_gcp():
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             # Test cancellation during spot cluster being launched.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra gcp/*/{zone} -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -715,7 +714,7 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
+            f'sky jobs launch --infra gcp/*/{zone} -n {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -729,7 +728,7 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name_3} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --infra gcp/*/{zone} -n {name_3} {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name_3,
@@ -761,7 +760,6 @@ def test_managed_jobs_cancellation_gcp():
 
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
     timeout = 7 * 60  # 7 mins
@@ -823,16 +821,20 @@ def test_managed_jobs_storage(generic_cloud: str):
     storage_name = f'sky-test-{timestamp}'
     output_storage_name = f'sky-test-output-{timestamp}'
 
+    # First, add an initialization for region
+    region = None
+    region_flag = ''
+    region_validation_cmd = 'true'
+    use_spot = ' --use-spot'
+    output_check_cmd = None
+
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
     # However, we inject this testing only for AWS and GCP since they are the
     # supported object storage providers in SkyPilot.
-    region_flag = ''
-    region_validation_cmd = 'true'
-    use_spot = ' --use-spot'
     if generic_cloud == 'aws':
         region = 'eu-central-1'
-        region_flag = f' --region {region}'
+        region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=output_storage_name)
         region_validation_cmd = f's=$({region_cmd}) && echo "$s" && echo; echo "$s" | grep {region}'
@@ -849,7 +851,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
     elif generic_cloud == 'gcp':
         region = 'us-west2'
-        region_flag = f' --region {region}'
+        region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, bucket_name=output_storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
@@ -865,12 +867,12 @@ def test_managed_jobs_storage(generic_cloud: str):
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
     elif generic_cloud == 'azure':
-        region = 'centralus'
-        # Region centralus seems don't have the quota for low resource.
+        # Azure instances with smaller than 7G memory can have flaky performance,
         # so we keep the default resource to avoid flakiness.
         low_resource_arg = ""
-        region_flag = f' --region {region}'
-        storage_account_name = test_mount_and_storage.TestStorageWithCredentials. \
+        region = 'centralus'
+        region_flag = f'/{region}'
+        storage_account_name = test_mount_and_storage.TestStorageWithCredentials.\
             get_az_storage_account_name(region)
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
@@ -934,7 +936,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_az_cmd} && exit 1; }} || true'))
-        timeout *= 2
+        timeout *= 4
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
@@ -950,7 +952,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                     generic_cloud, name),
                 # Override CPU/memory requirements to relax resource constraints
                 # and reduce the chance of out-of-stock
-                f'sky jobs launch -n {name}{use_spot} {low_resource_arg} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
+                f'sky jobs launch -n {name}{use_spot} {low_resource_arg} --infra {generic_cloud}{region_flag} {file_path} -y -d',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -1012,7 +1014,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                     *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
                     # Verify command fails with correct error - run only once
                     # In API server, we don't error out if the bucket does not exist, instead we create it.
-                    # f'err=$(sky jobs launch -n {name} --cloud {generic_cloud} {file_path} -y 2>&1); '
+                    # f'err=$(sky jobs launch -n {name} --infra {generic_cloud} {file_path} -y 2>&1); '
                     # f'ret=$?; if [ $ret -ne 0 ] && echo "$err" | grep -q "StorageBucketCreateError: '
                     # f'Jobs bucket \'{intermediate_storage_name}\' does not exist."; then exit 0; '
                     # f'else exit 1; fi',
@@ -1021,7 +1023,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                         cmd=
                         f'aws s3api create-bucket --bucket {intermediate_storage_name}'
                     ),
-                    f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} {file_path} -y',
+                    f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {file_path} -y',
                     # fail because the bucket does not exist
                     smoke_tests_utils.
                     get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -1040,7 +1042,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                  f'sky storage delete {output_storage_name} -y || true; '
                  f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
                 env={
-                    'SKYPILOT_CONFIG': user_config_path,
+                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: user_config_path,
                     constants.SKY_API_SERVER_URL_ENV_VAR:
                         sky.server.common.get_server_url()
                 },
@@ -1086,14 +1088,13 @@ def test_managed_jobs_tpu():
 # ---------- Testing env for managed jobs ----------
 @pytest.mark.no_vast  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-managed-jobs-inline-env',
         [
-            rf'sky jobs launch -n {name} -y --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
+            rf'sky jobs launch -n {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -1118,13 +1119,12 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.managed_jobs
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-managed-jobs-logs-sync-down',
         [
-            f'sky jobs launch -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
+            f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',

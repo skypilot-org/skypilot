@@ -33,11 +33,75 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
+_AUTOSTOP_SCHEMA = {
+    'anyOf': [
+        {
+            # Use boolean to disable autostop completely, e.g.
+            #   autostop: false
+            'type': 'boolean',
+        },
+        {
+            # Shorthand to set idle_minutes by directly specifying, e.g.
+            #   autostop: 5
+            'type': 'integer',
+            'minimum': 0,
+        },
+        {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'idle_minutes': {
+                    'type': 'integer',
+                    'minimum': 0,
+                },
+                'down': {
+                    'type': 'boolean',
+                },
+            },
+        },
+    ],
+}
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
+
+    # Building the regex pattern for the infra field
+    # Format: cloud[/region[/zone]] or wildcards or kubernetes context
+    # Match any cloud name (case insensitive)
+    all_clouds = list(service_catalog.ALL_CLOUDS)
+    all_clouds.remove('kubernetes')
+    cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
+
+    # Optional /region followed by optional /zone
+    # /[^/]+ matches a slash followed by any characters except slash (region or
+    # zone name)
+    # The outer (?:...)? makes the entire region/zone part optional
+    region_zone_pattern = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Wildcard patterns:
+    # 1. * - any cloud
+    # 2. */region - any cloud with specific region
+    # 3. */*/zone - any cloud, any region, specific zone
+    wildcard_cloud = '\\*'  # Wildcard for cloud
+    wildcard_with_region = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Kubernetes specific pattern - matches:
+    # 1. Just the word "kubernetes" or "k8s" by itself
+    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain
+    # slashes)
+    kubernetes_pattern = '(?i:kubernetes|k8s)(?:/.+)?'
+
+    # Combine all patterns with alternation (|)
+    # ^ marks start of string, $ marks end of string
+    infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
+                     f'{wildcard_cloud}{wildcard_with_region}|'
+                     f'{kubernetes_pattern})$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -53,6 +117,21 @@ def _get_single_resources_schema():
             },
             'zone': {
                 'type': 'string',
+            },
+            'infra': {
+                'type': 'string',
+                'description':
+                    ('Infrastructure specification in format: '
+                     'cloud[/region[/zone]]. Use "*" as a wildcard.'),
+                # Pattern validates:
+                # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
+                #    "aws/us-east-1/us-east-1a"
+                # 2. Wildcard patterns - e.g. "*", "*/us-east-1",
+                #    "*/*/us-east-1a", "aws/*/us-east-1a"
+                # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
+                #    "k8s/context-name",
+                #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
+                'pattern': infra_pattern,
             },
             'cpus': {
                 'anyOf': [{
@@ -165,6 +244,7 @@ def _get_single_resources_schema():
                     'type': 'null',
                 }]
             },
+            'autostop': _AUTOSTOP_SCHEMA,
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -310,6 +390,7 @@ def get_service_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.serve import load_balancing_policies
+    from sky.serve import spot_placer
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -362,6 +443,10 @@ def get_service_schema():
                         'type': 'integer',
                         'minimum': 0,
                     },
+                    'num_overprovision': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
                     'target_qps_per_replica': {
                         'type': 'number',
                         'minimum': 0,
@@ -372,6 +457,11 @@ def get_service_schema():
                     'base_ondemand_fallback_replicas': {
                         'type': 'integer',
                         'minimum': 0,
+                    },
+                    'spot_placer': {
+                        'type': 'string',
+                        'case_insensitive_enum': list(
+                            spot_placer.SPOT_PLACERS.keys())
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
@@ -463,6 +553,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
+    # TODO: experimental.config_overrides has been deprecated in favor of the
+    # top-level `config` field. Remove in v0.11.0.
     config_override_schema = _filter_schema(
         get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
@@ -545,6 +637,9 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
+            'config': _filter_schema(
+                get_config_schema(),
+                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
             **_experimental_task_schema(),
         }
     }
@@ -594,13 +689,6 @@ def get_cluster_schema():
 
 
 _NETWORK_CONFIG_SCHEMA = {
-    'vpc_name': {
-        'oneOf': [{
-            'type': 'string',
-        }, {
-            'type': 'null',
-        }],
-    },
     'use_internal_ips': {
         'type': 'boolean',
     },
@@ -636,7 +724,7 @@ _LABELS_SCHEMA = {
     }
 }
 
-_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
             'type': 'string'
@@ -728,6 +816,10 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                    },
+                    'autostop': _AUTOSTOP_SCHEMA,
                 }
             },
             'bucket': {
@@ -756,7 +848,14 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'security_group_name':
-                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }],
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -794,6 +893,25 @@ def get_config_schema():
                 },
                 'enable_gvnic': {
                     'type': 'boolean'
+                },
+                'enable_gpu_direct': {
+                    'type': 'boolean'
+                },
+                'placement_policy': {
+                    'type': 'string',
+                },
+                'vpc_name': {
+                    'oneOf': [
+                        {
+                            'type': 'string',
+                            # vpc-name or project-id/vpc-name
+                            # VPC name and Project ID have -, a-z, and 0-9.
+                            'pattern': '^(?:[-a-z0-9]+/)?[-a-z0-9]+$'
+                        },
+                        {
+                            'type': 'null',
+                        }
+                    ],
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
@@ -868,6 +986,16 @@ def get_config_schema():
                         for type in kubernetes_enums.KubernetesAutoscalerType
                     ]
                 },
+                'high_availability': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'storage_class_name': {
+                            'type': 'string',
+                        }
+                    }
+                },
             }
         },
         'oci': {
@@ -898,6 +1026,26 @@ def get_config_schema():
                 }
             },
         },
+        'nebius': {
+            'type': 'object',
+            'required': [],
+            'properties': {
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            'additionalProperties': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'project_id': {
+                        'type': 'string',
+                    },
+                    'fabric': {
+                        'type': 'string',
+                    },
+                }
+            },
+        }
     }
 
     admin_policy_schema = {
@@ -958,11 +1106,22 @@ def get_config_schema():
         }
     }
 
+    provision_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'ssh_timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update({
-                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
-            })
+            config['properties'].update(
+                {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
@@ -980,6 +1139,7 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'provision': provision_configs,
             **cloud_configs,
         },
     }

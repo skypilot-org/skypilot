@@ -58,6 +58,8 @@ class SCP(clouds.Cloud):
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            (f'High availability controllers are not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
@@ -187,12 +189,14 @@ class SCP(clouds.Cloud):
         del cluster_name, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        image_id = self._get_image_id(r.image_id, region.name, r.instance_type)
+        image_id = self._get_image_id(resources.image_id, region.name,
+                                      resources.instance_type)
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
