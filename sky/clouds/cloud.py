@@ -491,6 +491,15 @@ class Cloud:
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
 
+    @classmethod
+    def get_infras(cls) -> List[str]:
+        """Returns a list of enabled infrastructures for this cloud.
+
+        For Kubernetes and SSH, return a list of resource pools.
+        For all other clouds, return self.
+        """
+        return [cls._REPR.lower()]
+
     # TODO(zhwu): Make the return type immutable.
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
