@@ -153,7 +153,8 @@ class SSH(kubernetes.Kubernetes):
 
         if not existing_allowed_contexts:
             return (False,
-                    'No SSH clusters found. Run "sky ssh up" to create one.')
+                    'No SSH Node Pools are up. Run `sky ssh up` to set up '
+                    f'Node Pools from {SSH_NODE_POOLS_PATH}.')
 
         # Check credentials for each context
         ctx2text = {}
