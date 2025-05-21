@@ -377,6 +377,10 @@ class Optimizer:
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
                     elif all(
+                            isinstance(orig_resources.cloud, clouds.SSH)
+                            for orig_resources in node.resources):
+                        source_hint = 'node pool'
+                    elif all(
                             isinstance(orig_resources.cloud, clouds.Kubernetes)
                             for orig_resources in node.resources):
                         source_hint = 'kubernetes cluster'

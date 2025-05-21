@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import registry
@@ -72,6 +73,28 @@ class SSH(kubernetes.Kubernetes):
                 pass
 
         return contexts
+
+
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        if region == kubernetes_adaptor.in_cluster_context_name():
+            # If running incluster, we set region to IN_CLUSTER_REGION
+            # since there is no context name available.
+            return region, zone
+
+        all_contexts = self.existing_allowed_contexts()
+
+        if region not in all_contexts:
+            region_name = region.lstrip('ssh-')
+            available_contexts = [c.lstrip('ssh-') for c in all_contexts]
+            err_str = (
+                f'SSH Node Pool {region_name!r} is not set up. '
+                'Run `sky check` for more details. ')
+            if available_contexts:
+                err_str += f'Available node pools: {available_contexts}'
+            raise ValueError(err_str)
+        if zone is not None:
+            raise ValueError('SSH Node Pools do not support setting zone.')
+        return region, zone
 
     @classmethod
     def existing_allowed_contexts(cls) -> List[str]:

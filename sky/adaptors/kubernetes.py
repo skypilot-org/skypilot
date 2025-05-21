@@ -3,8 +3,8 @@ import logging
 import os
 from typing import Any, Callable, Optional, Set
 
+from sky import sky_logging
 from sky.adaptors import common
-from sky.sky_logging import set_logging_level
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -25,6 +25,8 @@ DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
 # context when running with in-cluster auth. If not set, the context name is
 # set to DEFAULT_IN_CLUSTER_REGION.
 IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
+
+logger = sky_logging.init_logger(__name__)
 
 
 def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
@@ -54,7 +56,7 @@ def _api_logging_decorator(logger: str, level: int):
 
         def wrapped(*args, **kwargs):
             obj = api(*args, **kwargs)
-            _decorate_methods(obj, set_logging_level(logger, level), 'api_log')
+            _decorate_methods(obj, sky_logging.set_logging_level(logger, level), 'api_log')
             return obj
 
         return wrapped
@@ -71,6 +73,7 @@ def _load_config(context: Optional[str] = None):
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             context_name = '(current-context)' if context is None else context
+            is_ssh_node_pool = False
             if context_name.startswith('ssh-'):
                 context_name = context_name.lstrip('ssh-')
                 is_ssh_node_pool = True
@@ -79,10 +82,10 @@ def _load_config(context: Optional[str] = None):
                 if is_ssh_node_pool:
                     context_name = context_name.lstrip('ssh-')
                     err_str = ('Failed to load SSH Node Pool configuration for '
-                            f'{context_name!r}. '
-                            f'\n{suffix}\n'
+                            f'{context_name!r}.\n'
                             '    Run `sky ssh up --infra {context_name}` to '
-                            'set up or repair the cluster.')
+                            'set up or repair the cluster.'
+                            )
                 else:
                     err_str = ('Failed to load Kubernetes configuration for '
                             f'{context_name!r}. '
@@ -96,7 +99,7 @@ def _load_config(context: Optional[str] = None):
                     err_str = (
                         f'Failed to load SSH Node Pool configuration for '
                         f'{context_name!r}. Run `sky ssh up --infra {context_name}` to '
-                        f'set up or repair the cluster. \n{suffix}\n')
+                        f'set up or repair the cluster.')
                 else:
                     err_str = (
                         f'Failed to load Kubernetes configuration for '
@@ -109,7 +112,12 @@ def _load_config(context: Optional[str] = None):
                     '\nHint: Kubernetes attempted to query the current-context '
                     'set in kubeconfig. Check if the current-context is valid.')
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(err_str) from None
+                if is_ssh_node_pool:
+                    # For SSH Node Pool, we don't want to surface k8s errors 
+                    # (e.g., missing context) unless debug flag is set. 
+                    logging.debug(f'Kubernetes error: {suffix}')
+                else:
+                    raise ValueError(err_str) from None
 
     if context == in_cluster_context_name() or context is None:
         try:

@@ -865,6 +865,10 @@ def deploy_cluster(head_node,
             if contexts:
                 run_command(['kubectl', 'config', 'use-context', contexts],
                             shell=False)
+            else:
+                # If no context is available, simply unset the current context
+                run_command(['kubectl', 'config', 'unset', 'current-context'],
+                            shell=False)
 
             success_message(
                 f'Context {context_name!r} removed from local kubeconfig.')
