@@ -3571,8 +3571,7 @@ def show_gpus(
         hints = []
 
         for context, nodes_info in contexts_info:
-            context_name = (context if context else
-                            constants.SKYPILOT_DEFAULT_WORKSPACE)
+            context_name = context if context else 'default'
             if nodes_info.hint:
                 hints.append(f'{context_name}: {nodes_info.hint}')
 
