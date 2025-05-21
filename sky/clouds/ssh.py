@@ -95,7 +95,7 @@ class SSH(kubernetes.Kubernetes):
         return region, zone
 
     @classmethod
-    def existing_allowed_contexts(cls) -> List[str]:
+    def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts that start with 'ssh-'.
 
         Override the Kubernetes implementation to only return contexts that
@@ -127,7 +127,8 @@ class SSH(kubernetes.Kubernetes):
                     existing_contexts.append(context)
                 else:
                     skipped_contexts.append(context)
-            cls._log_skipped_contexts_once(tuple(skipped_contexts))
+            if not silent:
+                cls._log_skipped_contexts_once(tuple(skipped_contexts))
             return existing_contexts
 
         # If no allowed_contexts found, return all SSH contexts
@@ -164,3 +165,10 @@ class SSH(kubernetes.Kubernetes):
             ctx2text[context] = text
 
         return success, ctx2text
+
+    @classmethod
+    def get_infras(cls) -> List[str]:
+        return [
+            f'{cls._REPR.lower()}/{c.lstrip("ssh-")}'
+            for c in cls.existing_allowed_contexts(silent=True)
+        ]

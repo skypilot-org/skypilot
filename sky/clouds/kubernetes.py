@@ -151,7 +151,7 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def existing_allowed_contexts(cls) -> List[str]:
+    def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts.
 
         If None is returned in the list, it means that we are running in a pod
@@ -195,7 +195,8 @@ class Kubernetes(clouds.Cloud):
                 if context.startswith('ssh-'):
                     continue
                 skipped_contexts.append(context)
-        cls._log_skipped_contexts_once(tuple(skipped_contexts))
+        if not silent:
+            cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
 
     @classmethod
@@ -890,3 +891,10 @@ class Kubernetes(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def get_infras(cls) -> List[str]:
+        return [
+            f'{cls._REPR.lower()}/{c}'
+            for c in cls.existing_allowed_contexts(silent=True)
+        ]
