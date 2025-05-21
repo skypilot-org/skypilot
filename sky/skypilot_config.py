@@ -231,14 +231,14 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
-def get_workspace_cloud(cloud: str) -> config_utils.Config:
+def get_workspace_cloud(cloud: str,
+                        workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace config."""
-    current_workspace = get_active_workspace()
-    if current_workspace is None:
-        return config_utils.Config()
+    if workspace is None:
+        workspace = get_active_workspace()
     clouds = _dict.get_nested(keys=(
         'workspaces',
-        current_workspace,
+        workspace,
     ),
                               default_value=None)
     if clouds is None:

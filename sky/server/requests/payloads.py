@@ -126,6 +126,7 @@ class CheckBody(RequestBody):
     """The request body for the check endpoint."""
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
+    workspace: Optional[str] = None
 
 
 class DagRequestBody(RequestBody):
