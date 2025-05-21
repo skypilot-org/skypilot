@@ -417,8 +417,8 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                 text_suffix = (
                     f': {ctx2text[context]}' if context in ctx2text else ': ' +
                     _red_color(
-                        'disabled. Reason: Not configured yet. '
-                        f'Please use `sky ssh up {context}` to configure.'))
+                        'disabled. Reason: Not set up. '
+                        f'Use `sky ssh up --infra {context.lstrip("ssh-")}` to set up.'))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
     identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)

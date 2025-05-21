@@ -108,7 +108,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
             logger.info(
                 ux_utils.finishing_message(
                     '🎉 SSH Node Pools set up successfully. '
-                    'Run `sky check` to verify access.',
+                    'Run `sky check ssh` to verify access.\n Hint: Try `sky launch --infra ssh` to launch a cluster. ',
                     log_path=log_path,
                     is_local=True))
 
