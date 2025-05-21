@@ -106,7 +106,7 @@ def check_capabilities(
     ]
 
     combinations = list(itertools.product(clouds_to_check, capabilities))
-    with rich_utils.safe_status('Checking Cloud(s)...'):
+    with rich_utils.safe_status('Checking infra choices...'):
         check_results = subprocess_utils.run_in_parallel(
             check_one_cloud_one_capability, combinations)
 

@@ -23,6 +23,50 @@ searching for regions (or clouds) that can provide the requested resources.
   If specific :code:`cloud`, ``region``, or ``zone`` are requested for a
   task, auto-failover retries only within the specified location.
 
+Specifying infra choices
+------------------------
+
+The :code:`resources.infra` field in the SkyPilot YAML can be used to specify
+the infrastructure choice(s) to use when provisioning any compute.
+
+Schema:
+
+- ``<cloud>/<region>/<zone>`` (region and zone are optional)
+- ``k8s/<context-name>`` (context-name is optional)
+- Wildcards are supported in any component.
+
+Example values:
+
+.. code-block:: yaml
+
+  resources:
+    infra: aws  # Use any available AWS region/zone.
+    infra: aws/us-east-1  # Use a particular region.
+    infra: aws/us-east-1/us-east-1a  # Use a particular zone.
+    infra: aws/*/us-east-1a  # Same as above.
+
+    infra: k8s  # Use any available Kubernetes context.
+    infra: k8s/*  # Same as above.
+    infra: k8s/my-cluster-context  # Use a particular Kubernetes context.
+
+See :ref:`yaml-spec-resources-infra` for more details.
+
+If you are using CLI commands, the ``--infra`` argument accepts the same schema:
+
+.. code-block:: console
+
+  sky launch --infra aws
+  sky launch --infra aws/us-east-1
+  sky launch --infra aws/us-east-1/us-east-1a
+  sky launch --infra 'aws/*/us-east-1a'
+  sky launch --infra k8s
+  sky launch --infra 'k8s/*'
+  sky launch --infra k8s/my-cluster-context
+
+See :ref:`cli` for all the commands that accept ``--infra``.
+
+
+
 Provisioning GPUs
 ----------------------
 
