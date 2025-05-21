@@ -364,7 +364,7 @@ def start_agent_node(node,
     Returns: if the node has a GPU."""
     cmd = f"""
             {askpass_block}
-            curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
+            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
     run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
@@ -900,7 +900,7 @@ def deploy_cluster(head_node,
     progress_message(f'Deploying Kubernetes on head node ({head_node})...')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&

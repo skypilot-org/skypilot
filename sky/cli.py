@@ -3632,13 +3632,14 @@ def show_gpus(
             for ctx, realtime_info in k8s_realtime_infos
             if ctx and ctx.startswith('ssh-')
         ]
-        ssh_node_pool_all_nodes_info = [(ctx, node_info)
+
+        ssh_node_pool_all_nodes_info = [(ctx.lstrip('ssh-'), node_info)
                                         for ctx, node_info in all_nodes_info
                                         if ctx and ctx.startswith('ssh-')]
-        k8s_realtime_infos = [(ctx, realtime_info)
+        k8s_realtime_infos = [(ctx.lstrip('ssh-'), realtime_info)
                               for ctx, realtime_info in k8s_realtime_infos
                               if ctx and not ctx.startswith('ssh-')]
-        k8s_all_nodes_info = [(ctx, node_info)
+        k8s_all_nodes_info = [(ctx.lstrip('ssh-'), node_info)
                               for ctx, node_info in all_nodes_info
                               if ctx and not ctx.startswith('ssh-')]
 
@@ -3690,6 +3691,10 @@ def show_gpus(
                 yield '\n'
                 # Print context header separately
                 if ctx:
+                    # Remove `ssh-` prefix from context name
+                    # TODO(romilb): Remove when SSH Node Pools use a separate
+                    #  kubeconfig.
+                    ctx = ctx.lstrip('ssh-')
                     context_str = f'SSH Node Pool: {ctx}'
                 else:
                     context_str = 'Default Node Pool'
