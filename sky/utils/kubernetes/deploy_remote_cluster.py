@@ -13,10 +13,13 @@ from typing import Any, Dict, List, Optional, Set
 
 import yaml
 
+from sky.utils import ux_utils
+
 # Colors for nicer UX
 RED = '\033[0;31m'
 GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
+WARNING_YELLOW = '\x1b[33m'
 NC = '\033[0m'  # No color
 
 DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
@@ -259,7 +262,8 @@ def run_remote(node,
                user='',
                ssh_key='',
                connect_timeout=30,
-               use_ssh_config=False):
+               use_ssh_config=False,
+               print_output=False):
     """Run a command on a remote machine via SSH."""
     if use_ssh_config:
         # Use SSH config for connection parameters
@@ -286,6 +290,8 @@ def run_remote(node,
         print(f'{RED}Error executing command {cmd} on {node}:{NC}')
         print(f'STDERR: {process.stderr}')
         return None
+    if print_output:
+        print(process.stdout)
     return process.stdout.strip()
 
 
@@ -331,8 +337,11 @@ def cleanup_server_node(node,
         sudo -A /usr/local/bin/k3s-uninstall.sh || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
-    run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    success_message(f'Node {node} cleaned up successfully.')
+    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    if result is None:
+        print(f'{RED}Failed to clean up head node ({node}).{NC}')
+    else:
+        success_message(f'Node {node} cleaned up successfully.')
 
 
 def cleanup_agent_node(node,
@@ -348,8 +357,11 @@ def cleanup_agent_node(node,
         sudo -A /usr/local/bin/k3s-agent-uninstall.sh || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
-    run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    success_message(f'Node {node} cleaned up successfully.')
+    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    if result is None:
+        print(f'{RED}Failed to clean up worker node ({node}).{NC}')
+    else:
+        success_message(f'Node {node} cleaned up successfully.')
 
 
 def start_agent_node(node,
@@ -360,19 +372,22 @@ def start_agent_node(node,
                      askpass_block,
                      use_ssh_config=False):
     """Start a k3s agent node.
-    Returns: if the node has a GPU."""
+    Returns: if the start is successful, and if the node has a GPU."""
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
-    run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    if result is None:
+        print(f'{RED}Failed to deploy K3s on worker node ({node}).{NC}')
+        return node, False, False
     success_message(f'Kubernetes deployed on worker node ({node}).')
     # Check if worker node has a GPU
     if check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
         print(f'{YELLOW}GPU detected on worker node ({node}).{NC}')
-        return True
-    return False
+        return node, True, True
+    return node, True, False
 
 
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
@@ -705,20 +720,31 @@ def main():
             password = head_host['password']
 
             # Deploy this cluster
-            deploy_cluster(head_node,
-                           worker_nodes,
-                           ssh_user,
-                           ssh_key,
-                           context_name,
-                           password,
-                           head_use_ssh_config,
-                           worker_use_ssh_config,
-                           kubeconfig_path,
-                           args.cleanup,
-                           worker_hosts=worker_hosts,
-                           history_worker_nodes=history_worker_nodes,
-                           history_workers_info=history_workers_info,
-                           history_use_ssh_config=history_use_ssh_config)
+            unsuccessful_workers = deploy_cluster(
+                head_node,
+                worker_nodes,
+                ssh_user,
+                ssh_key,
+                context_name,
+                password,
+                head_use_ssh_config,
+                worker_use_ssh_config,
+                kubeconfig_path,
+                args.cleanup,
+                worker_hosts=worker_hosts,
+                history_worker_nodes=history_worker_nodes,
+                history_workers_info=history_workers_info,
+                history_use_ssh_config=history_use_ssh_config)
+
+            successful_hosts = []
+            for host in cluster_config['hosts']:
+                if isinstance(host, str):
+                    host_node = host
+                else:
+                    host_node = host['ip']
+                if host_node not in unsuccessful_workers:
+                    successful_hosts.append(host)
+            cluster_config['hosts'] = successful_hosts
 
             if not args.cleanup:
                 with open(history_yaml_file, 'w', encoding='utf-8') as f:
@@ -765,11 +791,18 @@ def deploy_cluster(head_node,
 
     # Pre-flight checks
     print(f'{YELLOW}Checking SSH connection to head node...{NC}')
-    run_remote(head_node,
-               'echo \'SSH connection successful\'',
-               ssh_user,
-               ssh_key,
-               use_ssh_config=head_use_ssh_config)
+    result = run_remote(
+        head_node,
+        f'echo \'SSH connection successful ({head_node})\'',
+        ssh_user,
+        ssh_key,
+        use_ssh_config=head_use_ssh_config,
+        # For SkySSHUpLineProcessor
+        print_output=True)
+    if result is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to connect to head node. '
+                               'Please check the SSH configuration.')
 
     # Checking history
     history_exists = (history_worker_nodes is not None and
@@ -920,12 +953,15 @@ def deploy_cluster(head_node,
             exit 1
         fi
     """
-    run_remote(head_node,
-               cmd,
-               ssh_user,
-               ssh_key,
-               use_ssh_config=head_use_ssh_config)
-    success_message('K3s deployed on head node.')
+    result = run_remote(head_node,
+                        cmd,
+                        ssh_user,
+                        ssh_key,
+                        use_ssh_config=head_use_ssh_config)
+    if result is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to deploy K3s on head node.')
+    success_message(f'K3s deployed on head node ({head_node}).')
 
     # Check if head node has a GPU
     install_gpu = False
@@ -942,6 +978,9 @@ def deploy_cluster(head_node,
                              ssh_user,
                              ssh_key,
                              use_ssh_config=head_use_ssh_config)
+    if master_addr is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to get master node internal IP.')
     print(f'{GREEN}Master node internal IP: {master_addr}{NC}')
 
     # Step 2: Install k3s on worker nodes and join them to the master node
@@ -954,9 +993,10 @@ def deploy_cluster(head_node,
         if worker_hosts and i < len(worker_hosts):
             if history_workers_info is not None and worker_hosts[
                     i] in history_workers_info:
-                print(f'{YELLOW}Worker node {node} already exists in history. '
-                      f'Skipping...{NC}')
-                return False
+                print(
+                    f'{YELLOW}Worker node ({node}) already exists in history. '
+                    f'Skipping...{NC}')
+                return node, True, False
             worker_user = worker_hosts[i]['user']
             worker_key = worker_hosts[i]['identity_file']
             worker_password = worker_hosts[i]['password']
@@ -976,6 +1016,8 @@ def deploy_cluster(head_node,
                                 worker_askpass,
                                 use_ssh_config=worker_config)
 
+    unsuccessful_workers = []
+
     # Deploy workers in parallel using thread pool
     with cf.ThreadPoolExecutor() as executor:
         futures = []
@@ -987,7 +1029,10 @@ def deploy_cluster(head_node,
 
         # Check if worker node has a GPU
         for future in cf.as_completed(futures):
-            install_gpu = install_gpu or future.result()
+            node, suc, has_gpu = future.result()
+            install_gpu = install_gpu or has_gpu
+            if not suc:
+                unsuccessful_workers.append(node)
 
     # Step 3: Configure local kubectl to connect to the cluster
     progress_message('Configuring local kubectl to connect to the cluster...')
@@ -1269,12 +1314,15 @@ def deploy_cluster(head_node,
             done
             echo 'GPU operator installed successfully.'
         """
-        run_remote(head_node,
-                   cmd,
-                   ssh_user,
-                   ssh_key,
-                   use_ssh_config=head_use_ssh_config)
-        success_message('GPU Operator installed.')
+        result = run_remote(head_node,
+                            cmd,
+                            ssh_user,
+                            ssh_key,
+                            use_ssh_config=head_use_ssh_config)
+        if result is None:
+            print(f'{RED}Failed to install GPU Operator.{NC}')
+        else:
+            success_message('GPU Operator installed.')
     else:
         print(
             f'{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}'
@@ -1302,6 +1350,18 @@ def deploy_cluster(head_node,
     print('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
     # Print completion marker for current cluster
     print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
+
+    if unsuccessful_workers:
+        quoted_unsuccessful_workers = [
+            f'"{worker}"' for worker in unsuccessful_workers
+        ]
+
+        print(
+            f'{WARNING_YELLOW}Failed to deploy Kubernetes on the following nodes: '
+            f'{", ".join(quoted_unsuccessful_workers)}. Please check '
+            f'the logs for more details.{NC}')
+
+    return unsuccessful_workers
 
 
 if __name__ == '__main__':

@@ -368,10 +368,11 @@ class SkySSHUpLineProcessor(LineProcessor):
                         'Checking SSH connection to head node...'
                         f'{colorama.Style.RESET_ALL}')
 
-        if 'SSH connection successful' in log_line:
-            logger.info(
-                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
-                f'SSH connection established.{colorama.Style.RESET_ALL}')
+        if log_line.startswith('SSH connection successful'):
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        '✔ SSH connection established to head node'
+                        f'{node_name}.{colorama.Style.RESET_ALL}')
 
         # Kubernetes installation steps
         if 'Deploying Kubernetes on head node' in log_line:
@@ -384,10 +385,12 @@ class SkySSHUpLineProcessor(LineProcessor):
                     log_path=self.log_path,
                     is_local=self.is_local))
 
-        if 'K3s deployed on head node.' in log_line:
-            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
-                        '✔ SkyPilot runtime successfully deployed on head node.'
-                        f'{colorama.Style.RESET_ALL}')
+        if 'K3s deployed on head node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                f'✔ SkyPilot runtime successfully deployed on head node '
+                f'{node_name}.{colorama.Style.RESET_ALL}')
 
         # Worker nodes
         if 'Deploying Kubernetes on worker node' in log_line:
@@ -405,6 +408,12 @@ class SkySSHUpLineProcessor(LineProcessor):
                 f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
                 '✔ SkyPilot runtime successfully deployed on worker node '
                 f'{node_name}.{colorama.Style.RESET_ALL}')
+
+        if 'Failed to deploy K3s on worker node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                        '✗ Failed to deploy K3s on worker node '
+                        f'{node_name}.{colorama.Style.RESET_ALL}')
 
         # Cluster configuration
         if 'Configuring local kubectl to connect to the cluster...' in log_line:
@@ -456,11 +465,29 @@ class SkySSHUpLineProcessor(LineProcessor):
             logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
                         f'{log_line.strip()}{colorama.Style.RESET_ALL}')
 
+        if 'Node' in log_line and 'Failed to clean up' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
+        if 'Failed to clean up worker node' in log_line:
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
         # Final status for the cluster deployment
         if 'Cluster deployment completed.' in log_line:
             logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
                         '✔ SkyPilot runtime is up.'
                         f'{colorama.Style.RESET_ALL}')
+
+        if 'Failed to deploy Kubernetes on the following nodes:' in log_line:
+            logger.info(log_line.strip())
+
+        if 'already exists in history. ' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}'
+                '✔ K3s already deployed on worker node '
+                f'{node_name}. Skipping deployment.{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
