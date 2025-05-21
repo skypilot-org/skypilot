@@ -2152,6 +2152,8 @@ def refresh_cluster_record(
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
+    # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
+    # using the correct cloud credentials.
     check_owner_identity(cluster_name)
 
     if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
