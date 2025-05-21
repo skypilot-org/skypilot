@@ -8,7 +8,7 @@ envs:
   MODEL_SIZE: 13b
 
 resources:
-  cloud: gcp
+  infra: gcp
 
 # You can use env vars in
 #   - the destination: source paths

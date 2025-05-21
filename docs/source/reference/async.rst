@@ -38,10 +38,10 @@ For example, when a user runs ``sky launch -c my-cluster``, the following output
     $ sky launch -c my-cluster --cpus 2
     Considered resources (1 node):
     ---------------------------------------------------------------------------------------------
-    CLOUD        INSTANCE    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+    INFRA                   INSTANCE      vCPUs   Mem(GB)   GPUS      COST ($)   CHOSEN
     ---------------------------------------------------------------------------------------------
-    Kubernetes   2CPU--2GB   2       2         -              in-cluster    0.00          ✔
-    AWS          m6i.large   2       8         -              us-east-1     0.10
+    Kubernetes (my-cluster) 2CPU--2GB     2       2         -         0.00       ✔
+    AWS (us-east-1)         m6i.large     2       8         -         0.098     
     ---------------------------------------------------------------------------------------------
     Launching a new cluster 'my-cluster'. Proceed? [Y/n]:
     ⚙︎ Launching on Kubernetes.

@@ -142,14 +142,19 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     del app  # unused
     # Startup: Run background tasks
     for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
-        executor.schedule_request(
-            request_id=event.id,
-            request_name=event.name,
-            request_body=payloads.RequestBody(),
-            func=event.event_fn,
-            schedule_type=requests_lib.ScheduleType.SHORT,
-            is_skypilot_system=True,
-        )
+        try:
+            executor.schedule_request(
+                request_id=event.id,
+                request_name=event.name,
+                request_body=payloads.RequestBody(),
+                func=event.event_fn,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                is_skypilot_system=True,
+            )
+        except exceptions.RequestAlreadyExistsError:
+            # Lifespan will be executed in each uvicorn worker process, we
+            # can safely ignore the error if the task is already scheduled.
+            logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
     yield
     # Shutdown: Add any cleanup code here if needed

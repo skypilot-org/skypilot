@@ -86,16 +86,16 @@ def _test_resources_launch(*resources_args,
 
 
 def test_resources_aws(enable_all_clouds):
-    _test_resources_launch(sky.AWS(), 'p3.2xlarge')
+    _test_resources_launch(infra='aws', instance_type='p3.2xlarge')
 
 
 def test_resources_azure(enable_all_clouds):
-    _test_resources_launch(sky.Azure(), 'Standard_NC24s_v3')
+    _test_resources_launch(infra='azure', instance_type='Standard_NC24s_v3')
 
 
 def test_resources_gcp(enable_all_clouds):
-    _test_resources_launch(sky.GCP(), 'n1-standard-16')
-    _test_resources_launch(sky.GCP(), 'a3-highgpu-8g')
+    _test_resources_launch(infra='gcp', instance_type='n1-standard-16')
+    _test_resources_launch(infra='gcp', instance_type='a3-highgpu-8g')
 
 
 def test_partial_cpus(enable_all_clouds):
@@ -419,20 +419,15 @@ def test_invalid_image(enable_all_clouds):
 
 
 def test_valid_image(enable_all_clouds):
-    _test_resources(cloud=sky.AWS(),
-                    region='us-east-1',
-                    image_id='ami-0868a20f5a3bf9702')
+    _test_resources(infra='aws/us-east-1', image_id='ami-0868a20f5a3bf9702')
     _test_resources(
-        cloud=sky.GCP(),
-        region='us-central1',
+        infra='gcp/us-central1',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
     _test_resources(
-        cloud=sky.GCP(),
+        infra='gcp',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
 
 
 def test_parse_cpus_from_yaml():
@@ -566,9 +561,8 @@ def test_invalid_accelerators_regions(enable_all_clouds):
     task = sky.Task(run='echo hi')
     task.set_resources(
         sky.Resources(
-            sky.AWS(),
+            infra='aws/us-west-1',
             accelerators='A100:8',
-            region='us-west-1',
         ))
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
         sky.stream_and_get(
@@ -591,7 +585,7 @@ def _test_optimize_speed(resources: sky.Resources):
 def test_optimize_speed(enable_all_clouds):
     _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in registry.CLOUD_REGISTRY.values():
-        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
+        _test_optimize_speed(sky.Resources(infra=str(cloud), cpus='4+'))
     _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
         sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
