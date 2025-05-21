@@ -71,16 +71,18 @@ Below is the configuration syntax and some example values.  See details under ea
       source: s3://existing-bucket
       mode: MOUNT
     /datasets-s3: s3://my-awesome-dataset
-    # Mount a volume to a remote directory
+    # Mount an existing volume to a remote directory
     /mnt/path1:
       name: volume-name
       source: /local/path1
       store: volume
+    # Create a new network volume and mount it to a remote directory
     /mnt/path2:
       store: volume
       config:
         size: 10
         disk_tier: high
+    # Create a new instance volume and mount it to a remote directory
     /mnt/path3:
       store: volume
       config:
@@ -821,13 +823,19 @@ OR
       store: gcs
       mode: MOUNT
 
-SkyPilot also supports volumes mount.
+SkyPilot also supports mounting network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
 
-You can mount network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
+To mount an existing volume:
 
-This is supported for GCP only for now.
+* Ensure the volume exists
+* Specify the volume name using ``name: volume-name``
+* You must specify the ``region`` or ``zone`` in the ``resources`` section to match the volume's location
 
-Note: When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
+To create and mount a new volume:
+
+* Omit the ``name`` field
+* Specify the desired volume configuration (size, storage_type, etc.)
+* SkyPilot will automatically create and mount the volume to the specified path
 
 .. code-block:: yaml
 
@@ -871,6 +879,10 @@ Note: When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enab
       store: volume
       config:
         storage_type: instance
+
+.. note::
+
+  When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
 
 .. _yaml-spec-setup:
 

@@ -774,6 +774,11 @@ class Resources:
         if not volumes:
             self._volumes = None
             return
+        if self.cloud is not None and not self.cloud.is_same_cloud(
+                clouds.GCP()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Volumes are only supported for GCP'
+                                 f' not for {self.cloud}.')
         valid_volumes = []
         supported_tiers = [tier.value for tier in resources_utils.DiskTier]
         supported_storage_types = [
