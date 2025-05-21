@@ -112,11 +112,6 @@ ingress:
     client-id: ""
     # Client Secret from OIDC provider (Okta) (required when enabled=true)
     client-secret: ""
-    # Optional override for cookie secret
-    # If not provided, a random one will be generated on first deployment and stored in secrets
-    # IMPORTANT: Do not leave empty if using in production, as helm upgrades will generate
-    # a new cookie secret each time, invalidating existing sessions
-    cookie-secret: ""
     # Use HTTP endpoint instead of HTTPS
     use-http: false
     # Email domains to allow (use "*" for all domains)

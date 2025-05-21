@@ -49,12 +49,22 @@ spec:
         - name: OAUTH2_PROXY_CLIENT_SECRET
           value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
         - name: OAUTH2_PROXY_COOKIE_SECRET
-          {{- if index .Values.ingress "oauth2-proxy" "cookie-secret" }}
-          value: {{ index .Values.ingress "oauth2-proxy" "cookie-secret" | quote }}
+          {{- /* Look up existing deployment to get the current cookie secret if available */}}
+          {{- $deploymentName := printf "%s-oauth2-proxy" .Release.Name }}
+          {{- $existingDeployment := lookup "apps/v1" "Deployment" .Release.Namespace $deploymentName }}
+          {{- if and $existingDeployment $existingDeployment.spec.template.spec.containers }}
+            {{- range $container := $existingDeployment.spec.template.spec.containers }}
+              {{- if eq $container.name "oauth2-proxy" }}
+                {{- range $env := $container.env }}
+                  {{- if eq $env.name "OAUTH2_PROXY_COOKIE_SECRET" }}
+          value: {{ $env.value }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
           {{- else }}
-          # Generate a stable random cookie secret if not provided
-          # This uses a deterministic hash of the release name and namespace to ensure consistency across upgrades
-          value: {{ printf "%s-%s-oauth2-proxy-cookie-secret" .Release.Name .Release.Namespace | sha256sum | trunc 32 | b64enc | quote }}
+          # Generate a random cookie secret if no existing one is found
+          value: {{ randAlphaNum 32 | b64enc | quote }}
           {{- end }}
         ports:
         - containerPort: 4180
