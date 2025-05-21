@@ -200,3 +200,6 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
             ('kubernetes', 'allowed_contexts'),
             None) == ['kind-skypilot', 'kind-skypilot2'
                      ], 'Global skypilot config should be updated'
+    assert skypilot_config.get_nested(
+        ('kubernetes', 'allowed_contexts'),
+        None) is None, 'Global skypilot config should be restored after request'
