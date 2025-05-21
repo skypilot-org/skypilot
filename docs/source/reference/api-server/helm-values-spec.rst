@@ -71,11 +71,18 @@ Below is the available helm value keys and the default value of each key:
     :ref:`path <helm-values-ingress-path>`: '/'
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
       :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
-      :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: "https://your-okta-domain.okta.com"
+      # Required when enabled:
+      :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: null
       :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
       :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
-      :ref:`use-http <helm-values-ingress-oauth2-proxy-use-http>`: false
+      # Optional settings:
+      :ref:`image <helm-values-ingress-oauth2-proxy-image>`: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+      :ref:`use-https <helm-values-ingress-oauth2-proxy-use-https>`: false
       :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
+      :ref:`session-store-type <helm-values-ingress-oauth2-proxy-session-store-type>`: "redis"
+      :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
+      :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
+      :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -444,11 +451,18 @@ Default: see the yaml below.
   ingress:
     oauth2-proxy:
       enabled: false
-      oidc-issuer-url: "https://your-okta-domain.okta.com"
+      # Required when enabled:
+      oidc-issuer-url: null
       client-id: ""
       client-secret: ""
-      use-http: false
+      # Optional settings:
+      image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+      use-https: false
       email-domain: "*"
+      session-store-type: "redis"
+      redis-url: null
+      cookie-refresh: null
+      cookie-expire: null
 
 .. _helm-values-ingress-oauth2-proxy-enabled:
 
@@ -470,9 +484,9 @@ Default: ``false``
 ``ingress.oauth2-proxy.oidc-issuer-url``
 ''''''''''''''''''''''''''''''''''''''''
 
-The URL of the OIDC issuer (e.g., your Okta domain).
+The URL of the OIDC issuer (e.g., your Okta domain). Required when oauth2-proxy is enabled.
 
-Default: ``"https://your-okta-domain.okta.com"``
+Default: ``null``
 
 .. code-block:: yaml
 
@@ -485,7 +499,7 @@ Default: ``"https://your-okta-domain.okta.com"``
 ``ingress.oauth2-proxy.client-id``
 ''''''''''''''''''''''''''''''''''
 
-The OAuth client ID from your OIDC provider (e.g., Okta).
+The OAuth client ID from your OIDC provider (e.g., Okta). Required when oauth2-proxy is enabled.
 
 Default: ``""``
 
@@ -500,7 +514,7 @@ Default: ``""``
 ``ingress.oauth2-proxy.client-secret``
 '''''''''''''''''''''''''''''''''''''''''
 
-The OAuth client secret from your OIDC provider (e.g., Okta).
+The OAuth client secret from your OIDC provider (e.g., Okta). Required when oauth2-proxy is enabled.
 
 Default: ``""``
 
@@ -510,12 +524,27 @@ Default: ``""``
     oauth2-proxy:
       client-secret: "abcdef123456"
 
-.. _helm-values-ingress-oauth2-proxy-use-http:
+.. _helm-values-ingress-oauth2-proxy-image:
 
-``ingress.oauth2-proxy.use-http``
+``ingress.oauth2-proxy.image``
+''''''''''''''''''''''''''''''
+
+Docker image for the OAuth2 Proxy component.
+
+Default: ``"quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+
+.. _helm-values-ingress-oauth2-proxy-use-https:
+
+``ingress.oauth2-proxy.use-https``
 '''''''''''''''''''''''''''''''''
 
-Set to ``true`` when using HTTP (not HTTPS) for the API server endpoint. This disables secure cookies, which is required for HTTP endpoints.
+Set to ``true`` when using HTTPS for the API server endpoint. When set to ``false``, secure cookies are disabled, which is required for HTTP endpoints.
 
 Default: ``false``
 
@@ -523,7 +552,7 @@ Default: ``false``
 
   ingress:
     oauth2-proxy:
-      use-http: true
+      use-https: true
 
 .. _helm-values-ingress-oauth2-proxy-email-domain:
 
@@ -539,6 +568,66 @@ Default: ``"*"``
   ingress:
     oauth2-proxy:
       email-domain: "mycompany.com"
+
+.. _helm-values-ingress-oauth2-proxy-session-store-type:
+
+``ingress.oauth2-proxy.session-store-type``
+'''''''''''''''''''''''''''''''''''''''''''
+
+Session storage type for OAuth2 Proxy. Can be set to ``"cookie"`` or ``"redis"``. Using Redis as a session store results in smaller cookies and better performance for large-scale deployments.
+
+Default: ``"redis"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      session-store-type: "redis"
+
+.. _helm-values-ingress-oauth2-proxy-redis-url:
+
+``ingress.oauth2-proxy.redis-url``
+''''''''''''''''''''''''''''''''''
+
+URL to connect to an external Redis instance for session storage. If set to ``null`` and ``session-store-type`` is ``"redis"``, a Redis instance will be automatically deployed. Format: ``redis://host[:port][/db-number]``
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      redis-url: "redis://redis-host:6379/0"
+
+.. _helm-values-ingress-oauth2-proxy-cookie-refresh:
+
+``ingress.oauth2-proxy.cookie-refresh``
+'''''''''''''''''''''''''''''''''''''''
+
+Duration in seconds after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      cookie-refresh: 3540  # 59 minutes (for a 60-minute access token)
+
+.. _helm-values-ingress-oauth2-proxy-cookie-expire:
+
+``ingress.oauth2-proxy.cookie-expire``
+''''''''''''''''''''''''''''''''''''''
+
+Expiration time for cookies in seconds. Should match the refresh token lifespan from your OIDC provider.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      cookie-expire: 86400  # 24 hours
 
 .. _helm-values-ingress-nginx:
 
