@@ -47,11 +47,9 @@ available_node_types:
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
       UserData: |
-        {%- if docker_image is not none %}
         runcmd:
           - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
           - systemctl restart sshd
-        {%- endif %}
 
         {# Two available OS images:
                1. ubuntu22.04-driverless - requires Docker installation
