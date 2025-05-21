@@ -135,6 +135,11 @@ class SSH(kubernetes.Kubernetes):
                     f'{str_to_format}'
                     f'{colorama.Style.RESET_ALL}')
 
+        def _bright_green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.GREEN}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
         # Get SSH contexts
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
@@ -156,9 +161,11 @@ class SSH(kubernetes.Kubernetes):
                     success = True
                     if check_result[1] is not None:
                         ctx2text[context] = _green_color(check_result[1])
+                    else:
+                        ctx2text[context] = _bright_green_color('Active')
                 else:
-                    if check_result[1] is not None:
-                        ctx2text[context] = _red_color(check_result[1])
+                    assert check_result[1] is not None
+                    ctx2text[context] = _red_color(check_result[1])
             except Exception as e:  # pylint: disable=broad-except
                 ctx2text[context] = _red_color(str(e))
 

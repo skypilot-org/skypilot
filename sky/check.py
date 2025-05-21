@@ -123,7 +123,8 @@ def check_capabilities(
 
     for cloud_tuple, check_result_list in sorted(check_results_dict.items(),
                                                  key=lambda item: item[0][0]):
-        _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list, cloud2ctx2text.get(cloud_repr, {}))
+        _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list,
+                             cloud2ctx2text.get(cloud_repr, {}))
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
@@ -336,20 +337,25 @@ def _print_checked_cloud(
                 hints_to_capabilities.setdefault(reason, []).append(capability)
         elif reason is not None:
             reasons_to_capabilities.setdefault(reason, []).append(capability)
-    status_msg: str = f'{colorama.Style.DIM}disabled{colorama.Style.RESET_ALL}'
+    style_str = f'{colorama.Style.DIM}'
+    status_msg: str = 'disabled'
     capability_string: str = ''
     detail_string: str = ''
     activated_account: Optional[str] = None
     if enabled_capabilities:
-        status_msg = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}enabled{colorama.Style.RESET_ALL}'
+        style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
+        status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
         if verbose and cloud is not cloudflare:
             activated_account = cloud.get_active_user_identity_str()
     # TODO(tian): Add k8s here
     if isinstance(cloud_tuple[1], sky_clouds.SSH):
-        detail_string = '\n' + _format_ssh_target_details(ctx2text, include_details=True)
+        detail_string = '\n' + _format_ssh_target_details(ctx2text,
+                                                          include_details=True)
     echo(
-        click.style(f'  {cloud_repr}: {status_msg} {capability_string}{detail_string}'))
+        click.style(
+            f'{style_str}  {cloud_repr}: {status_msg} {capability_string}'
+            f'{colorama.Style.RESET_ALL}{detail_string}'))
     if activated_account is not None:
         echo(f'    Activated account: {activated_account}')
     for reason, caps in hints_to_capabilities.items():
@@ -357,12 +363,13 @@ def _print_checked_cloud(
     for reason, caps in reasons_to_capabilities.items():
         echo(f'    Reason [{", ".join(caps)}]: {reason}')
 
+
 def _green_color(str_to_format: str) -> str:
-    return (
-        f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}')
+    return (f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}')
 
 
-def _format_ssh_target_details(ctx2text: Dict[str, str], include_details: bool = False) -> str:
+def _format_ssh_target_details(ctx2text: Dict[str, str],
+                               include_details: bool = False) -> str:
     # Get the cluster names by reading from the node pools file
     ssh_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
 
@@ -375,15 +382,15 @@ def _format_ssh_target_details(ctx2text: Dict[str, str], include_details: bool =
         # this will not be required.
         cleaned_context = context.lstrip('ssh-')
         symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(ssh_contexts) -
-                    1 else ux_utils.INDENT_SYMBOL)
-        text_suffix = f': {ctx2text[context]}' if context in ctx2text and include_details else ''
+                  1 else ux_utils.INDENT_SYMBOL)
+        text_suffix = (f': {ctx2text[context]}'
+                       if context in ctx2text and include_details else '')
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
     context_info = f'  SSH Node Pools:{"".join(contexts_formatted)}'
 
     return (f'  {colorama.Style.DIM}{context_info}'
             f'{colorama.Style.RESET_ALL}')
-    
 
 
 def _format_enabled_cloud(cloud_name: str,
