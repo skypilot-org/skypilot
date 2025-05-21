@@ -111,8 +111,6 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
       --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
       --set ingress.oauth2-proxy.client-secret=<CLIENT SECRET>
 
-If your API server endpoint only has HTTP, not HTTPS, add ``--set ingress.oauth2-proxy.use-http=true``. To see all the possible helm values, see the :ref:`helm chart reference page <helm-values-ingress-oauth2-proxy>`.
-
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to Okta to sign in.
 
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
