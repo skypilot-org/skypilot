@@ -52,10 +52,8 @@ def check_capabilities(
     ) -> Dict[str, List[sky_cloud.CloudCapability]]:
         nonlocal echo, verbose, clouds, quiet
 
-        enabled_clouds: Dict[
-            str, List[sky_cloud.CloudCapability]] = {}
-        disabled_clouds: Dict[
-            str, List[sky_cloud.CloudCapability]] = {}
+        enabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
+        disabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
 
         def check_one_cloud_one_capability(
             payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
@@ -72,7 +70,8 @@ def check_capabilities(
             return capability, ok, reason.strip() if reason else None
 
         def get_cloud_tuple(
-            cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
+                cloud_name: str
+        ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
             # the cloud object. Includes special handling for Cloudflare.
             if cloud_name.lower().startswith('cloudflare'):
@@ -89,8 +88,8 @@ def check_capabilities(
 
         clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
 
-        # Use allowed_clouds from config if it exists, otherwise check all clouds.
-        # Also validate names with get_cloud_tuple.
+        # Use allowed_clouds from config if it exists, otherwise check all
+        # clouds. Also validate names with get_cloud_tuple.
         config_allowed_cloud_names = sorted([
             get_cloud_tuple(c)[0] for c in skypilot_config.get_nested((
                 'allowed_clouds',), get_all_clouds())
@@ -110,25 +109,23 @@ def check_capabilities(
             if c not in workspace_disabled_clouds
         ]
 
-        # Use disallowed_cloud_names for logging the clouds that will be disabled
-        # because they are not included in allowed_clouds in config.yaml.
+        # Use disallowed_cloud_names for logging the clouds that will be
+        # disabled because they are not included in allowed_clouds in
+        # config.yaml.
         disallowed_cloud_names = [
             c for c in get_all_clouds() if c not in config_allowed_cloud_names
         ]
         # Check only the clouds which are allowed in the config.
         clouds_to_check = [
-            c for c in clouds_to_check
-            if c[0] in config_allowed_cloud_names
+            c for c in clouds_to_check if c[0] in config_allowed_cloud_names
         ]
-
-
 
         combinations = list(itertools.product(clouds_to_check, capabilities))
 
         if not combinations:
             echo(
-                _summary_message(enabled_clouds,
-                                 current_workspace_name, hide_workspace_str, disallowed_cloud_names))
+                _summary_message(enabled_clouds, current_workspace_name,
+                                 hide_workspace_str, disallowed_cloud_names))
 
             return {}
 
@@ -160,25 +157,29 @@ def check_capabilities(
         if not hide_per_cloud_details:
             for cloud_tuple, check_result_list in sorted(
                     check_results_dict.items(), key=lambda item: item[0][0]):
-                _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list)
+                _print_checked_cloud(echo, verbose, cloud_tuple,
+                                     check_result_list)
 
-        # Determine the set of enabled clouds: (previously enabled clouds + newly
-        # enabled clouds - newly disabled clouds) intersected with
+        # Determine the set of enabled clouds: (previously enabled clouds +
+        # newly enabled clouds - newly disabled clouds) intersected with
         # config_allowed_clouds, if specified in config.yaml.
         # This means that if a cloud is already enabled and is not included in
         # allowed_clouds in config.yaml, it will be disabled.
         all_enabled_clouds: Set[str] = set()
         for capability in capabilities:
-            # Cloudflare is not a real cloud in registry.CLOUD_REGISTRY, and should
-            # not be inserted into the DB (otherwise `sky launch` and other code
-            # would error out when it's trying to look it up in the registry).
+            # Cloudflare is not a real cloud in registry.CLOUD_REGISTRY, and
+            # should not be inserted into the DB (otherwise `sky launch` and
+            # other code would error out when it's trying to look it up in the
+            # registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and not cloud.startswith('Cloudflare')
+                if capability in capabilities and
+                not cloud.startswith('Cloudflare')
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and not cloud.startswith('Cloudflare')
+                if capability in capabilities and
+                not cloud.startswith('Cloudflare')
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
@@ -197,11 +198,11 @@ def check_capabilities(
                 list(enabled_clouds_for_capability), capability,
                 current_workspace_name)
             all_enabled_clouds = all_enabled_clouds.union(
-                    enabled_clouds_for_capability)
+                enabled_clouds_for_capability)
 
         echo(
-            _summary_message(enabled_clouds,
-                             current_workspace_name, hide_workspace_str, disallowed_cloud_names))
+            _summary_message(enabled_clouds, current_workspace_name,
+                             hide_workspace_str, disallowed_cloud_names))
 
         return enabled_clouds
 
@@ -251,8 +252,8 @@ def check_capabilities(
         echo(
             click.style(
                 '\nTo enable a cloud, follow the hints above and rerun: ',
-                dim=True) + click.style('sky check', bold=True) +
-            '\n' + click.style(
+                dim=True) + click.style('sky check', bold=True) + '\n' +
+            click.style(
                 'If any problems remain, refer to detailed docs at: '
                 'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
@@ -288,7 +289,8 @@ def check(
     capabilities_result = check_capabilities(quiet, verbose, clouds,
                                              sky_cloud.ALL_CAPABILITIES,
                                              workspace)
-    for ws_name, enabled_clouds_with_capabilities in capabilities_result.items():
+    for ws_name, enabled_clouds_with_capabilities in capabilities_result.items(
+    ):
         # For each workspace, get a list of cloud names that have any
         # capabilities enabled.
         # The inner dict enabled_clouds_with_capabilities maps cloud_name to
@@ -481,15 +483,15 @@ def _summary_message(
     enabled_clouds: Dict[str, List[sky_cloud.CloudCapability]],
     current_workspace_name: str,
     hide_workspace_str: bool,
-    disabled_cloud_names: List[str],
+    disallowed_cloud_names: List[str],
 ) -> str:
     if not enabled_clouds:
         enabled_clouds_str = '\n  No infra to check/enabled.'
     else:
         enabled_clouds_str = '\n  ' + '\n  '.join([
             _format_enabled_cloud(cloud, capabilities)
-            for cloud, capabilities in sorted(
-                enabled_clouds.items(), key=lambda item: item[0])
+            for cloud, capabilities in sorted(enabled_clouds.items(),
+                                              key=lambda item: item[0])
         ])
 
     workspace_str = f' for workspace: {current_workspace_name!r}'
@@ -498,15 +500,18 @@ def _summary_message(
 
     disallowed_clouds_hint = ''
     if disallowed_cloud_names:
-        disable_for_workspace_hint = f' or disabled for this workspace {current_workspace_name!r}'
+        disable_for_workspace_hint = (
+            f' or disabled for this workspace {current_workspace_name!r}')
         if hide_workspace_str:
             disable_for_workspace_hint = ''
         disallowed_clouds_hint = (
             '\nNote: The following clouds were disabled because they were not '
-            'included in allowed_clouds in ~/.sky/config.yaml{disable_for_workspace_hint}: '
+            'included in allowed_clouds in ~/.sky/config.yaml'
+            f'{disable_for_workspace_hint}: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
 
     return (f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
             f'Enabled infra{workspace_str} '
             f'{PARTY_POPPER_EMOJI}'
-            f'{colorama.Style.RESET_ALL}{enabled_clouds_str}{disable_for_workspace_hint}')
+            f'{colorama.Style.RESET_ALL}{enabled_clouds_str}'
+            f'{disallowed_clouds_hint}')
