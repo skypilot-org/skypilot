@@ -703,6 +703,40 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
+    def _check_single_context(cls, context: str) -> Tuple[bool, str]:
+        """Check if the user has access credentials to a single SSH context."""
+
+        def _red_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTRED_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTGREEN_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _bright_green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.GREEN}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        try:
+            check_result = kubernetes_utils.check_credentials(
+                context, run_optional_checks=True)
+            if check_result[0]:
+                if check_result[1] is not None:
+                    return True, (_bright_green_color('enabled. ') +
+                                  _green_color(f'Note: {check_result[1]}'))
+                else:
+                    return True, _bright_green_color('enabled.')
+            else:
+                assert check_result[1] is not None
+                return False, _red_color(f'disabled. Reason: {check_result[1]}')
+        except Exception as e:  # pylint: disable=broad-except
+            return False, _red_color(str(e))
+
+    @classmethod
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
@@ -732,39 +766,13 @@ class Kubernetes(clouds.Cloud):
                     'Check if you have a valid kubeconfig file' +
                     check_skypilot_config_msg)
 
-        def _red_color(str_to_format: str) -> str:
-            return (f'{colorama.Fore.LIGHTRED_EX}'
-                    f'{str_to_format}'
-                    f'{colorama.Style.RESET_ALL}')
-
-        def _green_color(str_to_format: str) -> str:
-            return (f'{colorama.Fore.LIGHTGREEN_EX}'
-                    f'{str_to_format}'
-                    f'{colorama.Style.RESET_ALL}')
-
-        def _bright_green_color(str_to_format: str) -> str:
-            return (f'{colorama.Fore.GREEN}'
-                    f'{str_to_format}'
-                    f'{colorama.Style.RESET_ALL}')
-
         ctx2text = {}
         success = False
         for context in existing_allowed_contexts:
-            try:
-                check_result = kubernetes_utils.check_credentials(
-                    context, run_optional_checks=True)
-                if check_result[0]:
-                    success = True
-                    if check_result[1] is not None:
-                        ctx2text[context] = _green_color(check_result[1])
-                    else:
-                        ctx2text[context] = _bright_green_color('Active')
-                else:
-                    assert check_result[1] is not None
-                    ctx2text[context] = _red_color(check_result[1])
-            except Exception as e:  # pylint: disable=broad-except
-                return (False, f'Credential check failed for {context}: '
-                        f'{common_utils.format_exception(e)}')
+            suc, text = cls._check_single_context(context)
+            success = success or suc
+            ctx2text[context] = text
+
         return success, ctx2text
 
     @classmethod
