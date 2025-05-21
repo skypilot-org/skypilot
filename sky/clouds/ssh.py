@@ -169,4 +169,4 @@ class SSH(kubernetes.Kubernetes):
             except Exception as e:  # pylint: disable=broad-except
                 ctx2text[context] = _red_color(str(e))
 
-        return (success, ctx2text)
+        return success, ctx2text

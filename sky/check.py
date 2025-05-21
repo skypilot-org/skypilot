@@ -347,8 +347,8 @@ def _print_checked_cloud(
         if verbose and cloud is not cloudflare:
             activated_account = cloud.get_active_user_identity_str()
     # TODO(tian): Add k8s here
-    if isinstance(cloud_tuple[1], sky_clouds.SSH):
-        detail_string = '\n' + _format_ssh_target_details(ctx2text)
+    if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
+        detail_string = '\n' + _format_context_details(cloud_tuple[1], ctx2text)
     echo(
         click.style(
             f'{style_str}  {cloud_repr}: {status_msg} {capability_string}'
@@ -365,25 +365,39 @@ def _green_color(str_to_format: str) -> str:
     return f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}'
 
 
-def _format_ssh_target_details(
-        ctx2text: Optional[Dict[str, str]] = None) -> str:
-    # Get the cluster names by reading from the node pools file
-    ssh_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
+                            ctx2text: Optional[Dict[str, str]] = None) -> str:
+    if isinstance(cloud, str):
+        cloud_type = registry.CLOUD_REGISTRY.from_str(cloud)
+        assert cloud_type is not None
+    else:
+        cloud_type = cloud
+    if isinstance(cloud_type, sky_clouds.SSH):
+        # Get the cluster names by reading from the node pools file
+        contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+    else:
+        assert isinstance(cloud_type, sky_clouds.Kubernetes)
+        contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
 
     # Format the context info with consistent styling
     contexts_formatted = []
-    for i, context in enumerate(ssh_contexts):
-        # TODO: This is a hack to remove the 'ssh-' prefix from the
-        # context name. Once we have a separate kubeconfig for SSH,
-        # this will not be required.
-        cleaned_context = context.lstrip('ssh-')
-        symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(ssh_contexts) -
+    for i, context in enumerate(contexts):
+        if isinstance(cloud_type, sky_clouds.SSH):
+            # TODO: This is a hack to remove the 'ssh-' prefix from the
+            # context name. Once we have a separate kubeconfig for SSH,
+            # this will not be required.
+            cleaned_context = context.lstrip('ssh-')
+        else:
+            cleaned_context = context
+        symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(contexts) -
                   1 else ux_utils.INDENT_SYMBOL)
         text_suffix = (f': {ctx2text[context]}'
                        if ctx2text is not None and context in ctx2text else '')
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
-    context_info = f'  SSH Node Pools:{"".join(contexts_formatted)}'
+    identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
+                    else 'Allowed contexts')
+    context_info = f'  {identity_str}:{"".join(contexts_formatted)}'
 
     return (f'  {colorama.Style.DIM}{context_info}'
             f'{colorama.Style.RESET_ALL}')
@@ -401,35 +415,10 @@ def _format_enabled_cloud(cloud_name: str,
         A string of the formatted cloud and capabilities.
     """
     cloud_and_capabilities = f'{cloud_name} [{", ".join(capabilities)}]'
+    title = _green_color(cloud_and_capabilities)
 
-    if cloud_name == repr(sky_clouds.Kubernetes()):
-        # Get enabled contexts for Kubernetes
-        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
-        if not existing_contexts:
-            return _green_color(cloud_and_capabilities)
+    if cloud_name in [repr(sky_clouds.Kubernetes()), repr(sky_clouds.SSH())]:
+        return (f'{title}\n'
+                f'{_format_context_details(cloud_name)}')
 
-        # Check if allowed_contexts is explicitly set in config
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
-
-        # Format the context info with consistent styling
-        if allowed_contexts is not None:
-            contexts_formatted = []
-            for i, context in enumerate(existing_contexts):
-                symbol = (ux_utils.INDENT_LAST_SYMBOL
-                          if i == len(existing_contexts) -
-                          1 else ux_utils.INDENT_SYMBOL)
-                contexts_formatted.append(f'\n    {symbol}{context}')
-            context_info = f'  Allowed contexts:{"".join(contexts_formatted)}'
-        else:
-            context_info = f'  Active context: {existing_contexts[0]}'
-
-        return (f'{_green_color(cloud_and_capabilities)}\n'
-                f'  {colorama.Style.DIM}{context_info}'
-                f'{colorama.Style.RESET_ALL}')
-
-    elif cloud_name == repr(sky_clouds.SSH()):
-        return (f'{_green_color(cloud_and_capabilities)}\n'
-                f'{_format_ssh_target_details()}')
-
-    return _green_color(cloud_and_capabilities)
+    return title

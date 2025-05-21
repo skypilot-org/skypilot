@@ -4,6 +4,8 @@ import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
+import colorama
+
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -729,8 +731,23 @@ class Kubernetes(clouds.Cloud):
             return (False, 'No available context found in kubeconfig. '
                     'Check if you have a valid kubeconfig file' +
                     check_skypilot_config_msg)
-        reasons = []
-        hints = []
+
+        def _red_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTRED_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTGREEN_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _bright_green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.GREEN}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        ctx2text = {}
         success = False
         for context in existing_allowed_contexts:
             try:
@@ -739,16 +756,16 @@ class Kubernetes(clouds.Cloud):
                 if check_result[0]:
                     success = True
                     if check_result[1] is not None:
-                        hints.append(f'Context {context}: {check_result[1]}')
+                        ctx2text[context] = _green_color(check_result[1])
+                    else:
+                        ctx2text[context] = _bright_green_color('Active')
                 else:
-                    reasons.append(f'Context {context}: {check_result[1]}')
+                    assert check_result[1] is not None
+                    ctx2text[context] = _red_color(check_result[1])
             except Exception as e:  # pylint: disable=broad-except
                 return (False, f'Credential check failed for {context}: '
                         f'{common_utils.format_exception(e)}')
-        if success:
-            return (True, cls._format_credential_check_results(hints, reasons))
-        return (False, 'Failed to find available context with working '
-                'credentials. Details:\n' + '\n'.join(reasons))
+        return success, ctx2text
 
     @classmethod
     def _format_credential_check_results(cls, hints: List[str],

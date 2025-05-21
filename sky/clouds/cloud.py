@@ -464,7 +464,7 @@ class Cloud:
         Returns a boolean of whether the user can access this cloud, and:
           - For SSH and Kubernetes, a dictionary that maps context names to
             the status of the context.
-          - For others, a string describing the reason if the user cannot access.
+          - For others, a string describing the reason if cannot access.
 
         Raises NotSupportedError if the capability is
         not supported by this cloud.
