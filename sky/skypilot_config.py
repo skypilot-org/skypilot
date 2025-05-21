@@ -248,14 +248,21 @@ def get_workspace_cloud(cloud: str) -> config_utils.Config:
 
 @contextlib.contextmanager
 def with_active_workspace(workspace: str) -> Iterator[None]:
+    """Temporarily set the active workspace.
+
+    Args:
+        workspace: The workspace to set as active.
+    """
+    original_workspace = get_active_workspace()
     _active_workspace_context.workspace = workspace
     yield
-    _active_workspace_context.workspace = None
+    _active_workspace_context.workspace = original_workspace
 
 
 def get_active_workspace() -> str:
-    if getattr(_active_workspace_context, 'workspace', None) is not None:
-        return _active_workspace_context.workspace
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if context_workspace is not None:
+        return context_workspace
     return _dict.get_nested(keys=('active_workspace',),
                             default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
