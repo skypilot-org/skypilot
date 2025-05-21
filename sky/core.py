@@ -1069,7 +1069,7 @@ def realtime_kubernetes_gpu_availability(
             quantity_filter=quantity_filter), context_list)
 
     cloud_identity = 'ssh' if is_ssh else 'kubernetes'
-    cloud_identity_capitalized = 'SSH' if is_ssh else 'Kubernetes'
+    cloud_identity_capital = 'SSH' if is_ssh else 'Kubernetes'
 
     for ctx, queried in zip(context_list, parallel_queried):
         cumulative_count += len(queried)
@@ -1080,7 +1080,7 @@ def realtime_kubernetes_gpu_availability(
         availability_lists.append((ctx, queried))
 
     if cumulative_count == 0:
-        err_msg = f'No GPUs found in any {cloud_identity_capitalized} clusters. '
+        err_msg = f'No GPUs found in any {cloud_identity_capital} clusters. '
         debug_msg = 'To further debug, run: sky check '
         if name_filter is not None:
             gpu_info_msg = f' {name_filter!r}'
@@ -1088,7 +1088,7 @@ def realtime_kubernetes_gpu_availability(
                 gpu_info_msg += (' with requested quantity'
                                  f' {quantity_filter}')
             err_msg = (f'Resources{gpu_info_msg} not found '
-                       f'in {cloud_identity_capitalized} clusters. ')
+                       f'in {cloud_identity_capital} clusters. ')
             debug_msg = (f'To show available accelerators on {cloud_identity}, '
                          f' run: sky show-gpus --cloud {cloud_identity} ')
         full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +

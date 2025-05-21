@@ -1239,7 +1239,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
                 cloud_obj_one = registry.CLOUD_REGISTRY.from_str(c)
                 if cloud_obj_one is not None:
                     disabled_display_names.append(cloud_obj_one.display_name())
-            cloud_names = ", ".join(disabled_display_names)
+            cloud_names = ', '.join(disabled_display_names)
             msg = (f'Task{task_name} requires {cloud_names} '
                    f'which {is_or_are} not enabled. To enable access, change '
                    f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
