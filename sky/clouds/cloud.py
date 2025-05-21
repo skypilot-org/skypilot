@@ -891,6 +891,11 @@ class Cloud:
     def canonical_name(cls) -> str:
         return cls.__name__.lower()
 
+    @classmethod
+    def display_name(cls) -> str:
+        """Name of the cloud used in messages displayed to the user."""
+        return cls.canonical_name()
+
     def __repr__(self):
         return self._REPR
 

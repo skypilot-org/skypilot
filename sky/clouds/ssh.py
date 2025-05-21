@@ -173,3 +173,7 @@ class SSH(kubernetes.Kubernetes):
             f'{cls._REPR.lower()}/{c.lstrip("ssh-")}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
+
+    @classmethod
+    def display_name(cls) -> str:
+        return 'SSH Node Pools'

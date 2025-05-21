@@ -21,6 +21,7 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -1233,7 +1234,9 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         if disabled_clouds:
             is_or_are = 'is' if len(disabled_clouds) == 1 else 'are'
             task_name = f' {task.name!r}' if task.name is not None else ''
-            msg = (f'Task{task_name} requires {", ".join(disabled_clouds)} '
+            cloud_names = ", ".join([registry.CLOUD_REGISTRY.from_str(c).
+                                    display_name() for c in disabled_clouds])
+            msg = (f'Task{task_name} requires {cloud_names} '
                    f'which {is_or_are} not enabled. To enable access, change '
                    f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
                    f'sky check {" ".join(c.lower() for c in disabled_clouds)}'
