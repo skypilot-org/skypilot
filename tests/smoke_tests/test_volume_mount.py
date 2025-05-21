@@ -36,7 +36,8 @@ def test_volume_mount_tpu():
     disk_name = 'test-volume-mount-region-3'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_cmd = _volume_mounts_commands_generator(f, name, disk_name, region, instance_type, None, False, False, True)
+        test_commands, clean_cmd = _volume_mounts_commands_generator(
+            f, name, disk_name, region, instance_type, None, False, False, True)
         test = smoke_tests_utils.Test(
             'test_volume_mount_tpu',
             test_commands,
@@ -44,6 +45,7 @@ def test_volume_mount_tpu():
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.gcp
 def test_volume_mount_tpu_container():
@@ -54,7 +56,9 @@ def test_volume_mount_tpu_container():
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_cmd = _volume_mounts_commands_generator(f, name, disk_name, region, instance_type, image_id, False, False, True)
+        test_commands, clean_cmd = _volume_mounts_commands_generator(
+            f, name, disk_name, region, instance_type, image_id, False, False,
+            True)
         test = smoke_tests_utils.Test(
             'test_volume_mount_tpu_container',
             test_commands,
@@ -62,6 +66,7 @@ def test_volume_mount_tpu_container():
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.gcp
 def test_volume_mount_compute():
@@ -71,7 +76,9 @@ def test_volume_mount_compute():
     disk_name = 'test-volume-mount-region-1'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_cmd = _volume_mounts_commands_generator(f, name, disk_name, region, instance_type, None, False, False, False)
+        test_commands, clean_cmd = _volume_mounts_commands_generator(
+            f, name, disk_name, region, instance_type, None, False, False,
+            False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_compute',
             test_commands,
@@ -79,6 +86,7 @@ def test_volume_mount_compute():
             timeout=6 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.gcp
 def test_volume_mount_compute_container():
@@ -89,7 +97,9 @@ def test_volume_mount_compute_container():
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_cmd = _volume_mounts_commands_generator(f, name, disk_name, region, instance_type, image_id, False, False, False)
+        test_commands, clean_cmd = _volume_mounts_commands_generator(
+            f, name, disk_name, region, instance_type, image_id, False, False,
+            False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_compute_container',
             test_commands,
@@ -97,6 +107,7 @@ def test_volume_mount_compute_container():
             timeout=6 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.gcp
 def test_volume_mount_mig():
@@ -106,7 +117,8 @@ def test_volume_mount_mig():
     disk_name = 'test-volume-mount-zone-1'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_cmd = _volume_mounts_commands_generator(f, name, disk_name, region, instance_type, None, True, True, False)
+        test_commands, clean_cmd = _volume_mounts_commands_generator(
+            f, name, disk_name, region, instance_type, None, True, True, False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_mig',
             test_commands,
@@ -114,6 +126,7 @@ def test_volume_mount_mig():
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.gcp
 def test_volume_mount_mig_container():
@@ -124,7 +137,9 @@ def test_volume_mount_mig_container():
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_cmd = _volume_mounts_commands_generator(f, name, disk_name, region, instance_type, image_id, True, True, False)
+        test_commands, clean_cmd = _volume_mounts_commands_generator(
+            f, name, disk_name, region, instance_type, image_id, True, True,
+            False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_mig_container',
             test_commands,
@@ -133,12 +148,13 @@ def test_volume_mount_mig_container():
         )
         smoke_tests_utils.run_one_test(test)
 
-def _volume_mounts_commands_generator(f: TextIO, name: str,
-                                       disk_name: str, region: str,
-                                       instance_type: str, image_id: str,
-                                       use_mig: bool,zonal_disk: bool,tpu: bool):
+
+def _volume_mounts_commands_generator(f: TextIO, name: str, disk_name: str,
+                                      region: str, instance_type: str,
+                                      image_id: str, use_mig: bool,
+                                      zonal_disk: bool, tpu: bool):
     template_str = pathlib.Path(
-            'tests/test_yamls/test_volume_mount.yaml.j2').read_text()
+        'tests/test_yamls/test_volume_mount.yaml.j2').read_text()
     template = jinja2.Template(template_str)
 
     content = template.render(
@@ -151,10 +167,14 @@ def _volume_mounts_commands_generator(f: TextIO, name: str,
     file_path = f.name
 
     if zonal_disk:
-        disk_cmd = (f'(gcloud compute disks delete {disk_name} --zone={region}-a --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --zone={region}-a')
+        disk_cmd = (
+            f'(gcloud compute disks delete {disk_name} --zone={region}-a --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --zone={region}-a'
+        )
         clean_cmd = f'sky down -y {name} && gcloud compute disks describe {disk_name} --zone={region}-a && gcloud compute disks delete {disk_name} --zone={region}-a --quiet'
     else:
-        disk_cmd = (f'(gcloud compute disks delete {disk_name} --region={region} --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --region={region} --replica-zones={region}-a,{region}-b')
+        disk_cmd = (
+            f'(gcloud compute disks delete {disk_name} --region={region} --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --region={region} --replica-zones={region}-a,{region}-b'
+        )
         clean_cmd = f'sky down -y {name} && gcloud compute disks describe {disk_name} --region={region} && gcloud compute disks delete {disk_name} --region={region} --quiet'
     if image_id:
         if tpu:
