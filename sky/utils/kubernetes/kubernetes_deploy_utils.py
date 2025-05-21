@@ -107,7 +107,8 @@ def deploy_ssh_cluster(cleanup: bool = False,
         else:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH Node Pools set up successfully.',
+                    '🎉 SSH Node Pools set up successfully. '
+                    'Run `sky check` to verify access.',
                     log_path=log_path,
                     is_local=True))
 
