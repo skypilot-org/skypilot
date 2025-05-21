@@ -1244,7 +1244,7 @@ class Resources:
                 # support for instance_type.
                 # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
                 self.cloud.check_disk_tier_enabled(self.instance_type,
-                                                    volume['disk_tier'])
+                                                   volume['disk_tier'])
         except exceptions.NotSupportedError:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
