@@ -152,6 +152,8 @@ jobs:
           name: "Release v${{ needs.extract-version.outputs.version }}"
           tag_name: "v${{ needs.extract-version.outputs.version }}"
           generate_release_notes: true
+          draft: true
+
 
   cleanup-branches:
     needs: extract-version
