@@ -3484,13 +3484,22 @@ def show_gpus(
 
     # Kubernetes specific bools
     enabled_clouds = sdk.get(sdk.enabled_clouds())
-    cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+    cloud_is_kubernetes = isinstance(
+        cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
+    cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = clouds.cloud_in_iterable(
-        clouds.Kubernetes(),
-        enabled_clouds,
-    )
+    kubernetes_is_enabled = False
+    ssh_is_enabled = False
+    for cloud in enabled_clouds:
+        if isinstance(cloud, clouds.SSH):
+            ssh_is_enabled = True
+        elif isinstance(cloud, clouds.Kubernetes):
+            kubernetes_is_enabled = True
+    query_k8s_realtime_gpu = (kubernetes_is_enabled and
+                              (cloud_name is None or cloud_is_kubernetes))
+    query_ssh_realtime_gpu = (ssh_is_enabled and
+                              (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3500,7 +3509,8 @@ def show_gpus(
     def _get_kubernetes_realtime_gpu_tables(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        is_ssh: bool = False,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable'], List[Tuple[
                    str, 'models.KubernetesNodesInfo']]]:
@@ -3513,10 +3523,11 @@ def show_gpus(
             sdk.realtime_kubernetes_gpu_availability(
                 context=context,
                 name_filter=name_filter,
-                quantity_filter=quantity_filter))
+                quantity_filter=quantity_filter,
+                is_ssh=is_ssh))
         if not realtime_gpu_availability_lists:
             # Customize message based on context
-            if context and context.startswith('ssh-'):
+            if is_ssh:
                 err_msg = 'No GPUs found in SSH Node Pool. '
                 debug_msg = 'To further debug, run: sky check '
                 if name_filter is not None:
@@ -3731,6 +3742,101 @@ def show_gpus(
                     cloud_str='SSH Node Pools',
                     context_title_str='NODE_POOL')
 
+    def _possibly_show_k8s_like_realtime(
+            is_ssh: bool = False
+    ) -> Generator[str, None, Tuple[bool, bool, str]]:
+        # If cloud is kubernetes, we want to show real-time capacity
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or query_k8s_realtime_gpu):
+            context = region
+
+            try:
+                # If --cloud kubernetes is not specified, we want to catch
+                # the case where no GPUs are available on the cluster and
+                # print the warning at the end.
+                k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context, is_ssh=is_ssh)  # pylint: disable=line-too-long
+            except ValueError as e:
+                if not (cloud_is_kubernetes or cloud_is_ssh):
+                    # Make it a note if cloud is not kubernetes
+                    k8s_messages += 'Note: '
+                k8s_messages += str(e)
+            else:
+                print_section_titles = True
+
+                yield from _format_kubernetes_realtime_gpu(
+                    total_table,
+                    k8s_realtime_infos,
+                    all_nodes_info,
+                    show_node_info=True,
+                    cloud_name=cloud_name)
+
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        return False, print_section_titles, k8s_messages
+
+    def _possibly_show_k8s_like_realtime_for_acc(
+            name: Optional[str],
+            quantity: Optional[int],
+            is_ssh: bool = False
+    ) -> Generator[str, None, Tuple[bool, bool, str]]:
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or
+                query_k8s_realtime_gpu) and not show_all:
+            print_section_titles = True
+            # TODO(romilb): Show filtered per node GPU availability here as well
+            try:
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region,
+                     name_filter=name,
+                     quantity_filter=quantity,
+                     is_ssh=is_ssh)
+
+                yield from _format_kubernetes_realtime_gpu(
+                    total_table,
+                    k8s_realtime_infos,
+                    all_nodes_info,
+                    show_node_info=False,
+                    cloud_name=cloud_name)
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources H100 not found ...")
+                yield common_utils.format_exception(e, use_bracket=True)
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            yield k8s_messages
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                return True, print_section_titles, ''
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                return True, print_section_titles, ''
+        return False, print_section_titles, k8s_messages
+
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
@@ -3747,7 +3853,8 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
+                c for c in service_catalog.ALL_CLOUDS
+                if c != 'kubernetes' and c != 'ssh'
             ]
 
         k8s_messages = ''
@@ -3755,39 +3862,53 @@ def show_gpus(
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud_name is None or
-                                          cloud_is_kubernetes):
-                context = region
+            # if query_k8s_like_realtime_gpu:
+            #     context = region
 
-                try:
-                    # If --cloud kubernetes is not specified, we want to catch
-                    # the case where no GPUs are available on the cluster and
-                    # print the warning at the end.
-                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
-                except ValueError as e:
-                    if not cloud_is_kubernetes:
-                        # Make it a note if cloud is not kubernetes
-                        k8s_messages += 'Note: '
-                    k8s_messages += str(e)
-                else:
-                    print_section_titles = True
+            #     try:
+            #         # If --cloud kubernetes is not specified, we want to catch
+            #         # the case where no GPUs are available on the cluster and
+            #         # print the warning at the end.
+            #         k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
+            #     except ValueError as e:
+            #         if not (cloud_is_kubernetes or cloud_is_ssh):
+            #             # Make it a note if cloud is not kubernetes
+            #             k8s_messages += 'Note: '
+            #         k8s_messages += str(e)
+            #     else:
+            #         print_section_titles = True
 
-                    yield from _format_kubernetes_realtime_gpu(
-                        total_table,
-                        k8s_realtime_infos,
-                        all_nodes_info,
-                        show_node_info=True,
-                        cloud_name=cloud_name)
+            #         yield from _format_kubernetes_realtime_gpu(
+            #             total_table,
+            #             k8s_realtime_infos,
+            #             all_nodes_info,
+            #             show_node_info=True,
+            #             cloud_name=cloud_name)
 
-                if kubernetes_autoscaling:
-                    k8s_messages += (
-                        '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            if cloud_is_kubernetes:
-                # Do not show clouds if --cloud kubernetes is specified
-                if not kubernetes_is_enabled:
-                    yield ('Kubernetes is not enabled. To fix, run: '
-                           'sky check kubernetes ')
-                yield k8s_messages
+            #     if kubernetes_autoscaling:
+            #         k8s_messages += (
+            #             '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            # if cloud_is_kubernetes:
+            #     # Do not show clouds if --cloud kubernetes is specified
+            #     if not kubernetes_is_enabled:
+            #         yield ('Kubernetes is not enabled. To fix, run: '
+            #                'sky check kubernetes ')
+            #     yield k8s_messages
+            #     return
+            # if cloud_is_ssh:
+            #     yield ('SSH Node Pools are not enabled. To fix, run: '
+            #            'sky check ssh ')
+            #     yield k8s_messages
+            #     return
+            stop_iter = False
+            k8s_messages = ''
+            for is_ssh in [False, True]:
+                stop_iter_one, print_section_titles_one, k8s_messages_one = (
+                    yield from _possibly_show_k8s_like_realtime(is_ssh))
+                stop_iter = stop_iter or stop_iter_one
+                print_section_titles = print_section_titles or print_section_titles_one
+                k8s_messages += k8s_messages_one
+            if stop_iter:
                 return
 
             # For show_all, show the k8s message at the start since output is
@@ -3862,36 +3983,50 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and
-            (cloud_name is None or cloud_is_kubernetes) and not show_all):
-            # Print section title if not showing all and instead a specific
-            # accelerator is requested
-            print_section_titles = True
-            # TODO(romilb): Show filtered per node GPU availability here as well
-            try:
-                (k8s_realtime_infos, total_table,
-                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
-                     context=region, name_filter=name, quantity_filter=quantity)
+        # if query_k8s_like_realtime_gpu and not show_all:
+        #     # Print section title if not showing all and instead a specific
+        #     # accelerator is requested
+        #     print_section_titles = True
+        #     # TODO(romilb): Show filtered per node GPU availability here as well
+        #     try:
+        #         (k8s_realtime_infos, total_table,
+        #          all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+        #              context=region, name_filter=name, quantity_filter=quantity)
 
-                yield from _format_kubernetes_realtime_gpu(
-                    total_table,
-                    k8s_realtime_infos,
-                    all_nodes_info,
-                    show_node_info=False,
-                    cloud_name=cloud_name)
-            except ValueError as e:
-                # In the case of a specific accelerator, show the error message
-                # immediately (e.g., "Resources H100 not found ...")
-                yield common_utils.format_exception(e, use_bracket=True)
-            if kubernetes_autoscaling:
-                k8s_messages += ('\n' +
-                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            yield k8s_messages
-        if cloud_is_kubernetes:
-            # Do not show clouds if --cloud kubernetes is specified
-            if not kubernetes_is_enabled:
-                yield ('Kubernetes is not enabled. To fix, run: '
-                       'sky check kubernetes ')
+        #         yield from _format_kubernetes_realtime_gpu(
+        #             total_table,
+        #             k8s_realtime_infos,
+        #             all_nodes_info,
+        #             show_node_info=False,
+        #             cloud_name=cloud_name)
+        #     except ValueError as e:
+        #         # In the case of a specific accelerator, show the error message
+        #         # immediately (e.g., "Resources H100 not found ...")
+        #         yield common_utils.format_exception(e, use_bracket=True)
+        #     if kubernetes_autoscaling:
+        #         k8s_messages += ('\n' +
+        #                          kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+        #     yield k8s_messages
+        # if cloud_is_kubernetes:
+        #     # Do not show clouds if --cloud kubernetes is specified
+        #     if not kubernetes_is_enabled:
+        #         yield ('Kubernetes is not enabled. To fix, run: '
+        #                'sky check kubernetes ')
+        #     return
+        # if cloud_is_ssh:
+        #     if not ssh_is_enabled:
+        #         yield ('SSH Node Pools are not enabled. To fix, run: '
+        #                'sky check ssh ')
+        #     return
+        stop_iter = False
+        for is_ssh in [False, True]:
+            stop_iter_one, print_section_titles_one, k8s_messages_one = (
+                yield from _possibly_show_k8s_like_realtime_for_acc(
+                    name, quantity, is_ssh))
+            stop_iter = stop_iter or stop_iter_one
+            print_section_titles = print_section_titles or print_section_titles_one
+            k8s_messages += k8s_messages_one
+        if stop_iter:
             return
 
         # For clouds other than Kubernetes, get the accelerator details

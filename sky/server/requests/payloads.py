@@ -446,6 +446,7 @@ class RealtimeGpuAvailabilityRequestBody(RequestBody):
     context: Optional[str] = None
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
+    is_ssh: bool = False
 
 
 class KubernetesNodeInfoRequestBody(RequestBody):
