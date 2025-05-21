@@ -40,6 +40,8 @@ def deploy_ssh_cluster(cleanup: bool = False,
             If None, the default ~/.kube/config will be used.
     """
     # Prepare command to call deploy_remote_cluster.py script
+    # TODO(romilb): We should move this to a native python method/class call
+    #  instead of invoking a script with subprocess.
     path_to_package = os.path.dirname(__file__)
     up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
     cwd = os.path.dirname(os.path.abspath(up_script_path))
