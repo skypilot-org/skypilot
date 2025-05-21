@@ -74,7 +74,6 @@ class SSH(kubernetes.Kubernetes):
 
         return contexts
 
-
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         if region == kubernetes_adaptor.in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
@@ -83,12 +82,11 @@ class SSH(kubernetes.Kubernetes):
 
         all_contexts = self.existing_allowed_contexts()
 
-        if region not in all_contexts:
+        if region is not None and region not in all_contexts:
             region_name = region.lstrip('ssh-')
             available_contexts = [c.lstrip('ssh-') for c in all_contexts]
-            err_str = (
-                f'SSH Node Pool {region_name!r} is not set up. '
-                'Run `sky check` for more details. ')
+            err_str = (f'SSH Node Pool {region_name!r} is not set up. '
+                       'Run `sky check` for more details. ')
             if available_contexts:
                 err_str += f'Available node pools: {available_contexts}'
             raise ValueError(err_str)

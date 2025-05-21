@@ -45,7 +45,7 @@ def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
     return obj
 
 
-def _api_logging_decorator(logger: str, level: int):
+def _api_logging_decorator(logger_src: str, level: int):
     """Decorator to set logging level for API calls.
 
     This is used to suppress the verbose logging from urllib3 when calls to the
@@ -56,7 +56,9 @@ def _api_logging_decorator(logger: str, level: int):
 
         def wrapped(*args, **kwargs):
             obj = api(*args, **kwargs)
-            _decorate_methods(obj, sky_logging.set_logging_level(logger, level), 'api_log')
+            _decorate_methods(obj,
+                              sky_logging.set_logging_level(logger_src, level),
+                              'api_log')
             return obj
 
         return wrapped
@@ -82,39 +84,41 @@ def _load_config(context: Optional[str] = None):
                 if is_ssh_node_pool:
                     context_name = context_name.lstrip('ssh-')
                     err_str = ('Failed to load SSH Node Pool configuration for '
-                            f'{context_name!r}.\n'
-                            '    Run `sky ssh up --infra {context_name}` to '
-                            'set up or repair the cluster.'
-                            )
+                               f'{context_name!r}.\n'
+                               '    Run `sky ssh up --infra {context_name}` to '
+                               'set up or repair the cluster.')
                 else:
-                    err_str = ('Failed to load Kubernetes configuration for '
-                            f'{context_name!r}. '
-                            'Kubeconfig does not contain any valid context(s).'
-                            f'\n{suffix}\n'
-                            '    If you were running a local Kubernetes '
-                            'cluster, run `sky local up` to start the cluster.')
+                    err_str = (
+                        'Failed to load Kubernetes configuration for '
+                        f'{context_name!r}. '
+                        'Kubeconfig does not contain any valid context(s).'
+                        f'\n{suffix}\n'
+                        '    If you were running a local Kubernetes '
+                        'cluster, run `sky local up` to start the cluster.')
             else:
                 kubeconfig_path = os.environ.get('KUBECONFIG', '~/.kube/config')
                 if is_ssh_node_pool:
                     err_str = (
                         f'Failed to load SSH Node Pool configuration for '
-                        f'{context_name!r}. Run `sky ssh up --infra {context_name}` to '
-                        f'set up or repair the cluster.')
+                        f'{context_name!r}. Run `sky ssh up --infra '
+                        f'{context_name}` to set up or repair the cluster.')
                 else:
                     err_str = (
-                        f'Failed to load Kubernetes configuration for '
-                        f'{context_name!r}. Please check if your kubeconfig file '
-                        f'exists at {kubeconfig_path} and is valid.\n{suffix}\n')
+                        'Failed to load Kubernetes configuration for '
+                        f'{context_name!r}. Please check if your kubeconfig '
+                        f'file exists at {kubeconfig_path} and is valid.'
+                        f'\n{suffix}\n')
             if is_ssh_node_pool:
-                err_str += f'\nTo disable SSH Node Pool {context_name!r}: run `sky check`.'
+                err_str += (f'\nTo disable SSH Node Pool {context_name!r}: '
+                            'run `sky check`.')
             else:
                 err_str += (
                     '\nHint: Kubernetes attempted to query the current-context '
                     'set in kubeconfig. Check if the current-context is valid.')
             with ux_utils.print_exception_no_traceback():
                 if is_ssh_node_pool:
-                    # For SSH Node Pool, we don't want to surface k8s errors 
-                    # (e.g., missing context) unless debug flag is set. 
+                    # For SSH Node Pool, we don't want to surface k8s errors
+                    # (e.g., missing context) unless debug flag is set.
                     logging.debug(f'Kubernetes error: {suffix}')
                 else:
                     raise ValueError(err_str) from None
