@@ -774,11 +774,6 @@ class Resources:
         if not volumes:
             self._volumes = None
             return
-        if self.cloud is not None and not self.cloud.is_same_cloud(
-                clouds.GCP()):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Volumes are only supported for GCP'
-                                 f' not for {self.cloud}.')
         valid_volumes = []
         supported_tiers = [tier.value for tier in resources_utils.DiskTier]
         supported_storage_types = [
@@ -1236,8 +1231,16 @@ class Resources:
             return
         if self.cloud is None:
             return
+        if not self.cloud.is_same_cloud(clouds.GCP()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Volumes are only supported for GCP'
+                                 f' not for {self.cloud}.')
+
+        mount_existing_volumes = False
         try:
             for volume in self.volumes:
+                if 'name' in volume:
+                    mount_existing_volumes = True
                 if 'disk_tier' not in volume:
                     continue
                 # TODO(hailong): check instance local SSD
@@ -1245,6 +1248,11 @@ class Resources:
                 # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
                 self.cloud.check_disk_tier_enabled(self.instance_type,
                                                    volume['disk_tier'])
+            if (mount_existing_volumes and self._region is None and
+                    self._zone is None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('When specifying the volume name, please'
+                                     ' also specify the region or zone.')
         except exceptions.NotSupportedError:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

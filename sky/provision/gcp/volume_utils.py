@@ -30,11 +30,27 @@ def get_data_disk_tier_mapping(
     # Remap series-specific disk types.
     series = instance_type.split('-')[0]
 
-    if series in ['a4', 'c4', 'c4a', 'c4d', 'x4', 'm4']:
+    if series in ['a4', 'x4']:
         tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+    elif series in ['m4']:
+        tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+        tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+        tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
+        tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 112:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+    elif series in ['c4', 'c4a', 'c4d']:
+        tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+        tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+        tier2name[resources_utils.DiskTier.MEDIUM] = 'hyperdisk-balanced'
+        tier2name[resources_utils.DiskTier.LOW] = 'hyperdisk-balanced'
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 64:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
     elif series in ['a3']:
         if (instance_type.startswith('a3-ultragpu') or
                 instance_type.startswith('a3-megagpu') or
@@ -58,11 +74,17 @@ def get_data_disk_tier_mapping(
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
         tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 60:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
     elif series in ['c3']:
-        tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+        tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
         tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 88:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
     elif series in ['n4']:
         tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
@@ -82,12 +104,27 @@ def get_data_disk_tier_mapping(
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
         tier2name[resources_utils.DiskTier.MEDIUM] = 'pd-ssd'
         tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
-    elif series in ['m2', 'm1']:
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 64:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
+    elif series in ['m2']:
         tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
         tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+    elif series in ['m1']:
+        tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
+        tier2name[resources_utils.DiskTier.HIGH] = 'hyperdisk-balanced'
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 80:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-balanced'
     elif series in ['g2']:
         tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'
         tier2name[resources_utils.DiskTier.LOW] = 'pd-balanced'
+    elif series in ['n2']:
+        num_cpus = int(instance_type.split('-')[2])  # type: ignore
+        if num_cpus < 64:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'pd-ssd'
+        elif num_cpus >= 80:
+            tier2name[resources_utils.DiskTier.ULTRA] = 'hyperdisk-extreme'
 
     return tier2name
 
