@@ -324,64 +324,66 @@ class SkySSHUpLineProcessor(LineProcessor):
             clusters_part = log_line.split('SKYPILOT_CLUSTER_INFO:',
                                            1)[1].strip()
             if clusters_part.startswith('Found'):
-                logger.info(
-                    f'{colorama.Fore.CYAN}{clusters_part}{colorama.Style.RESET_ALL}'
-                )
+                logger.info(f'{colorama.Fore.CYAN}{clusters_part}'
+                            f'{colorama.Style.RESET_ALL}')
 
         # Current cluster being operated on
         if 'SKYPILOT_CURRENT_CLUSTER:' in log_line:
             self.current_cluster = log_line.split('SKYPILOT_CURRENT_CLUSTER:',
                                                   1)[1].strip()
-            
+
             if self.is_cleanup_mode:
                 self.status_display.update(
                     ux_utils.spinner_message(
                         f'Cleaning up Node Pool: {self.current_cluster}',
                         log_path=self.log_path,
                         is_local=self.is_local))
-                logger.info(
-                    f'{colorama.Fore.CYAN}\nCleaning up Node Pool: {self.current_cluster}{colorama.Style.RESET_ALL}'
-                )
+                logger.info(f'{colorama.Fore.CYAN}\nCleaning up Node Pool: '
+                            f'{self.current_cluster}{colorama.Style.RESET_ALL}')
             else:
                 self.status_display.update(
                     ux_utils.spinner_message(
                         f'Deploying SkyPilot \\[{self.current_cluster}]',
                         log_path=self.log_path,
                         is_local=self.is_local))
-                logger.info(
-                    f'{colorama.Fore.CYAN}\nSetting up Node Pool: {self.current_cluster}{colorama.Style.RESET_ALL}'
-                )
+                logger.info(f'{colorama.Fore.CYAN}\nSetting up Node Pool: '
+                            f'{self.current_cluster}{colorama.Style.RESET_ALL}')
 
         # Handle cluster completion marker
         if 'SKYPILOT_CLUSTER_COMPLETED:' in log_line:
             if self.is_cleanup_mode:
                 logger.info(
-                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}✔ Node Pool {self.current_cluster} cleaned up successfully.{colorama.Style.RESET_ALL}'
-                )
+                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                    f'✔ Node Pool {self.current_cluster} cleaned up '
+                    f'successfully.{colorama.Style.RESET_ALL}')
             else:
                 logger.info(
-                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}✔ Node Pool {self.current_cluster} deployed successfully.{colorama.Style.RESET_ALL}'
-                )
+                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                    f'✔ Node Pool {self.current_cluster} deployed successfully.'
+                    f'{colorama.Style.RESET_ALL}')
 
         # Pre-flight checks
         if 'Checking SSH connection to head node' in log_line:
-            logger.info(
-                f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
-                f'Checking SSH connection to head node...{colorama.Style.RESET_ALL}'
-            )
-            
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
+                        'Checking SSH connection to head node...'
+                        f'{colorama.Style.RESET_ALL}')
+
         if 'SSH connection successful' in log_line:
-            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}SSH connection established.{colorama.Style.RESET_ALL}')
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                f'SSH connection established.{colorama.Style.RESET_ALL}')
 
         # Kubernetes installation steps
         if 'Deploying Kubernetes on head node' in log_line:
-            current_cluster_str = f' \\[{self.current_cluster}]' if self.current_cluster else ''
+            current_cluster_str = f' \\[{self.current_cluster}]' if (
+                self.current_cluster) else ''
             self.status_display.update(
                 ux_utils.spinner_message(
-                    f'Deploying SkyPilot runtime on head node{current_cluster_str}',
+                    'Deploying SkyPilot runtime on head node'
+                    f'{current_cluster_str}',
                     log_path=self.log_path,
                     is_local=self.is_local))
-                    
+
         if 'K3s deployed on head node.' in log_line:
             logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
                         '✔ SkyPilot runtime successfully deployed on head node.'
@@ -390,12 +392,13 @@ class SkySSHUpLineProcessor(LineProcessor):
         # Worker nodes
         if 'Deploying Kubernetes on worker node' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Deploying SkyPilot runtime on worker nodes' +
-                                         (f' \\[{self.current_cluster}]'
-                                          if self.current_cluster else ''),
-                                         log_path=self.log_path,
-                                         is_local=self.is_local))
-                    
+                ux_utils.spinner_message(
+                    'Deploying SkyPilot runtime on worker nodes' +
+                    (f' \\[{self.current_cluster}]'
+                     if self.current_cluster else ''),
+                    log_path=self.log_path,
+                    is_local=self.is_local))
+
         if 'Kubernetes deployed on worker node' in log_line:
             node_name = log_line.split('(')[-1].split(')')[0]
             logger.info(
@@ -406,12 +409,12 @@ class SkySSHUpLineProcessor(LineProcessor):
         # Cluster configuration
         if 'Configuring local kubectl to connect to the cluster...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Setting up SkyPilot configuration' +
+                ux_utils.spinner_message('Setting up SkyPilot configuration' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
                                          is_local=self.is_local))
-                    
+
         if 'kubectl configured to connect to the cluster.' in log_line:
             logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
                         '✔ SkyPilot configuration complete.'
@@ -420,12 +423,12 @@ class SkySSHUpLineProcessor(LineProcessor):
         # GPU operator installation
         if 'Installing Nvidia GPU Operator...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Configuring Nvidia GPUs' +
+                ux_utils.spinner_message('Configuring Nvidia GPUs' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
                                          is_local=self.is_local))
-                    
+
         if 'GPU Operator installed.' in log_line:
             logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
                         '✔ Nvidia GPUs configured successfully.'
@@ -434,15 +437,15 @@ class SkySSHUpLineProcessor(LineProcessor):
         # Cleanup steps
         if 'Cleaning up head node' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Cleaning up head node' +
+                ux_utils.spinner_message('Cleaning up head node' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
                                          is_local=self.is_local))
-                    
+
         if 'Cleaning up worker node' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message(f'Cleaning up worker nodes' +
+                ux_utils.spinner_message('Cleaning up worker nodes' +
                                          (f' \\[{self.current_cluster}]'
                                           if self.current_cluster else ''),
                                          log_path=self.log_path,
@@ -450,15 +453,14 @@ class SkySSHUpLineProcessor(LineProcessor):
 
         # Handle node cleanup success messages
         if 'Node' in log_line and 'cleaned up successfully' in log_line:
-            logger.info(
-                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}{log_line.strip()}{colorama.Style.RESET_ALL}'
-            )
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
 
         # Final status for the cluster deployment
         if 'Cluster deployment completed.' in log_line:
-            logger.info(
-                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}✔ SkyPilot runtime is up.{colorama.Style.RESET_ALL}'
-            )
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
+                        '✔ SkyPilot runtime is up.'
+                        f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],

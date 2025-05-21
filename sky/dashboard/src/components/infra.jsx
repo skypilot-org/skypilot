@@ -18,14 +18,14 @@ const GPU_REFRESH_INTERVAL = 60000;
 const NAME_TRUNCATE_LENGTH = 30;
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
-export function InfrastructureSection({ 
-  title, 
-  isLoading, 
-  isDataLoaded, 
-  contexts, 
-  gpus, 
-  groupedPerContextGPUs, 
-  groupedPerNodeGPUs, 
+export function InfrastructureSection({
+  title,
+  isLoading,
+  isDataLoaded,
+  contexts,
+  gpus,
+  groupedPerContextGPUs,
+  groupedPerNodeGPUs,
   handleContextClick,
   isSSH = false, // To differentiate between SSH and Kubernetes
 }) {
@@ -64,7 +64,13 @@ export function InfrastructureSection({
             <h3 className="text-lg font-semibold">{title}</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
               {contexts.length}{' '}
-              {contexts.length === 1 ? (isSSH ? 'pool' : 'context') : (isSSH ? 'pools' : 'contexts')}
+              {contexts.length === 1
+                ? isSSH
+                  ? 'pool'
+                  : 'context'
+                : isSSH
+                  ? 'pools'
+                  : 'contexts'}
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -97,7 +103,7 @@ export function InfrastructureSection({
                         (sum, gpu) => sum + (gpu.gpu_total || 0),
                         0
                       );
-                      
+
                       // Format GPU types based on context type
                       const gpuTypes = (() => {
                         const typeCounts = gpus.reduce((acc, gpu) => {
@@ -105,13 +111,15 @@ export function InfrastructureSection({
                             (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
                           return acc;
                         }, {});
-                        
+
                         return Object.keys(typeCounts).join(', ');
                       })();
-                      
+
                       // Format display name for SSH contexts
-                      const displayName = isSSH ? context.replace(/^ssh-/, '') : context;
-                      
+                      const displayName = isSSH
+                        ? context.replace(/^ssh-/, '')
+                        : context;
+
                       return (
                         <tr key={context} className="hover:bg-gray-50">
                           <td className="p-3">
@@ -148,15 +156,9 @@ export function InfrastructureSection({
                         <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
                           GPU
                           <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
-                            {gpus.reduce(
-                              (sum, gpu) => sum + gpu.gpu_free,
-                              0
-                            )}{' '}
+                            {gpus.reduce((sum, gpu) => sum + gpu.gpu_free, 0)}{' '}
                             of{' '}
-                            {gpus.reduce(
-                              (sum, gpu) => sum + gpu.gpu_total,
-                              0
-                            )}{' '}
+                            {gpus.reduce((sum, gpu) => sum + gpu.gpu_total, 0)}{' '}
                             free
                           </span>
                         </th>
@@ -185,17 +187,19 @@ export function InfrastructureSection({
                             : 0;
 
                         // Find the requestable quantities from contexts
-                        const requestableQtys = groupedPerContextGPUs ? 
-                          Object.values(groupedPerContextGPUs)
-                            .flat()
-                            .filter(
-                              (g) =>
-                                g.gpu_name === gpu.gpu_name &&
-                                (isSSH ? g.context.startsWith('ssh-') : !g.context.startsWith('ssh-'))
-                            )
-                            .map((g) => g.gpu_requestable_qty_per_node)
-                            .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
-                            .join(', ') 
+                        const requestableQtys = groupedPerContextGPUs
+                          ? Object.values(groupedPerContextGPUs)
+                              .flat()
+                              .filter(
+                                (g) =>
+                                  g.gpu_name === gpu.gpu_name &&
+                                  (isSSH
+                                    ? g.context.startsWith('ssh-')
+                                    : !g.context.startsWith('ssh-'))
+                              )
+                              .map((g) => g.gpu_requestable_qty_per_node)
+                              .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
+                              .join(', ')
                           : '-';
 
                         return (
@@ -275,8 +279,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                     <div className="font-medium text-gray-800 text-sm">
                       {gpu.gpu_name}
                       <span className="text-xs text-gray-500 ml-2">
-                        (Requestable: {gpu.gpu_requestable_qty_per_node} /
-                        node)
+                        (Requestable: {gpu.gpu_requestable_qty_per_node} / node)
                       </span>
                     </div>
                     <span className="text-xs font-medium">

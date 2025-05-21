@@ -1,9 +1,4 @@
-"""SSH Cloud for SkyPilot.
-
-This cloud is a wrapper around Kubernetes that only uses SSH-specific contexts.
-It allows users to manage SSH-based Kubernetes clusters defined in ~/.sky/ssh_node_pools.yaml
-directly, without having to interact with Kubernetes-specific commands.
-"""
+"""SSH Node Pools"""
 
 import os
 import typing
@@ -11,8 +6,6 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
-from sky import exceptions
-from sky import skypilot_config
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import registry
@@ -27,9 +20,12 @@ SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 @registry.CLOUD_REGISTRY.register()
 class SSH(kubernetes.Kubernetes):
     """SSH cloud implementation.
-    
-    This cloud is a wrapper around Kubernetes that only uses contexts starting
-    with 'ssh-', which are managed through SkyPilot's SSH deployment mechanism.
+
+    This is used by SSH Node Pools in SkyPilot, which use Kubernetes to manage
+    the SSH clusters.
+
+    This cloud is a thin wrapper around Kubernetes that only uses contexts
+    starting with 'ssh-', which are managed through `sky ssh up` command.
     """
 
     _REPR = 'SSH'
@@ -48,29 +44,30 @@ class SSH(kubernetes.Kubernetes):
         return super()._unsupported_features_for_resources(resources)
 
     @classmethod
-    def _get_ssh_node_pool_contexts(cls) -> List[str]:
+    def get_ssh_node_pool_contexts(cls) -> List[str]:
         """Get context names from ssh_node_pools.yaml file.
-        
-        Reads the SSH node pools configuration file and returns a list of context names
-        by prepending 'ssh-' to each cluster name.
-        
+
+        Reads the SSH node pools configuration file and returns
+        a list of context names by prepending 'ssh-' to each Node Pool name.
+
         Returns:
-            A list of SSH Kubernetes context names derived from the cluster names
+            A list of SSH Kubernetes context names derived from the Node Pools
             in the SSH node pools file.
         """
         contexts = []
 
         if os.path.exists(SSH_NODE_POOLS_PATH):
             try:
-                with open(SSH_NODE_POOLS_PATH, 'r') as f:
+                with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
                     ssh_config = yaml.safe_load(f)
                     if ssh_config:
-                        # Get cluster names and prepend 'ssh-' to match context naming convention
+                        # Get cluster names and prepend 'ssh-' to match
+                        # context naming convention
                         contexts = [
                             f'ssh-{cluster_name}'
                             for cluster_name in ssh_config.keys()
                         ]
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 # If there's an error reading the file, return empty list
                 pass
 
@@ -79,11 +76,11 @@ class SSH(kubernetes.Kubernetes):
     @classmethod
     def existing_allowed_contexts(cls) -> List[str]:
         """Get existing allowed contexts that start with 'ssh-'.
-        
+
         Override the Kubernetes implementation to only return contexts that
-        start with 'ssh-', which are created by the SSH deployment mechanism.
-        
-        Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml.
+        start with 'ssh-', which are created by `sky ssh up`.
+
+        Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml
         """
         # Get all contexts from the Kubernetes implementation
         all_contexts = kubernetes_utils.get_all_kube_context_names()
@@ -98,7 +95,7 @@ class SSH(kubernetes.Kubernetes):
         ]
 
         # Get contexts from SSH node pools file
-        allowed_contexts = cls._get_ssh_node_pool_contexts()
+        allowed_contexts = cls.get_ssh_node_pool_contexts()
 
         if allowed_contexts:
             # Only include allowed contexts that exist
@@ -129,7 +126,7 @@ class SSH(kubernetes.Kubernetes):
         # Get SSH contexts
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
         if not existing_allowed_contexts:
@@ -151,7 +148,7 @@ class SSH(kubernetes.Kubernetes):
                             f'SSH cluster {context}: {check_result[1]}')
                 else:
                     reasons.append(f'SSH cluster {context}: {check_result[1]}')
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 reasons.append(f'SSH cluster {context}: {str(e)}')
 
         if success:

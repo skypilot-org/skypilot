@@ -1189,7 +1189,7 @@ def local_down() -> None:
 @usage_lib.entrypoint
 def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     """Deploys or tears down a Kubernetes cluster on SSH targets.
-    
+
     Args:
         infra: Name of the cluster configuration in ssh_node_pools.yaml.
             If None, the first cluster in the file is used.
