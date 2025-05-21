@@ -1,7 +1,7 @@
 name: nccl-gpu-direct-tcpx
 
 resources:
-  cloud: gcp
+  infra: gcp
   instance_type: a3-highgpu-8g
   image_id: docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx
 

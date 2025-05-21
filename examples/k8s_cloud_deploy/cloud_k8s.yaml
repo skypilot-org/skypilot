@@ -1,5 +1,5 @@
 resources:
-  cloud: lambda
+  infra: lambda
   accelerators: A10:1
 #  Uncomment the following line to expose ports on a different cloud
 #  ports: 6443

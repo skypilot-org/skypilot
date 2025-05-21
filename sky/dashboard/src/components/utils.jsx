@@ -9,6 +9,9 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 
+// Refresh interval in milliseconds
+export const REFRESH_INTERVAL = 30000;
+
 function capitalizeFirstWord(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -78,6 +81,24 @@ export const CustomTooltip = ({ children, ...props }) => {
       {...props}
       content={
         <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm capitalize rounded">
+          {content}
+        </span>
+      }
+    >
+      {children}
+    </Tooltip>
+  );
+};
+
+export const NonCapitalizedTooltip = ({ children, ...props }) => {
+  const content = props.content;
+  props.content = undefined;
+  return (
+    <Tooltip
+      {...DEFAULT_TOOLTIP_PROPS}
+      {...props}
+      content={
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded">
           {content}
         </span>
       }

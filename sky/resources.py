@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
+import sky
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
@@ -20,6 +21,7 @@ from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -106,6 +108,7 @@ class Resources:
         memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
+        infra: Optional[str] = None,
         use_spot: Optional[bool] = None,
         job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
                                      str]] = None,
@@ -134,9 +137,9 @@ class Resources:
           .. code-block:: python
 
             # Fully specified cloud and instance type (is_launchable() is True).
-            sky.Resources(clouds.AWS(), 'p3.2xlarge')
-            sky.Resources(clouds.GCP(), 'n1-standard-16')
-            sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+            sky.Resources(infra='aws', instance_type='p3.2xlarge')
+            sky.Resources(infra='k8s/my-cluster-ctx', accelerators='V100')
+            sky.Resources(infra='gcp/us-central1', accelerators='V100')
 
             # Specifying required resources; the system decides the
             # cloud/instance type. The below are equivalent:
@@ -145,8 +148,9 @@ class Resources:
             sky.Resources(accelerators={'V100': 1})
             sky.Resources(cpus='2+', memory='16+', accelerators='V100')
 
+
         Args:
-          cloud: the cloud to use.
+          cloud: the cloud to use. Deprecated. Use `infra` instead.
           instance_type: the instance type to use.
           cpus: the number of CPUs required for the task.
             If a str, must be a string of the form ``'2'`` or ``'2+'``, where
@@ -160,6 +164,11 @@ class Resources:
             dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
           accelerator_args: accelerator-specific arguments. For example,
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+          infra: a string specifying the infrastructure to use, in the format
+            of "cloud/region" or "cloud/region/zone". For example,
+            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
+            specifying cloud, region, and zone separately. If provided, it
+            takes precedence over cloud, region, and zone parameters.
           use_spot: whether to use spot instances. If None, defaults to
             False.
           job_recovery: the job recovery strategy to use for the managed
@@ -172,8 +181,8 @@ class Resources:
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
 
-          region: the region to use.
-          zone: the zone to use.
+          region: the region to use. Deprecated. Use `infra` instead.
+          zone: the zone to use. Deprecated. Use `infra` instead.
           image_id: the image ID to use. If a str, must be a string
             of the image id from the cloud, such as AWS:
             ``'ami-1234567890abcdef0'``, GCP:
@@ -218,6 +227,25 @@ class Resources:
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
         self._version = self._VERSION
+
+        if infra is not None and (cloud is not None or region is not None or
+                                  zone is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both `infra` and `cloud`, '
+                                 '`region`, or `zone` parameters. '
+                                 f'Got: infra={infra}, cloud={cloud}, '
+                                 f'region={region}, zone={zone}')
+
+        # Infra is user facing, and cloud, region, zone in parameters are for
+        # backward compatibility. Internally, we keep using cloud, region, zone
+        # for simplicity.
+        if infra is not None:
+            infra_info = infra_utils.InfraInfo.from_str(infra)
+            # Infra takes precedence over individually specified parameters
+            cloud = sky.CLOUD_REGISTRY.from_str(infra_info.cloud)
+            region = infra_info.region
+            zone = infra_info.zone
+
         self._cloud = cloud
         self._region: Optional[str] = region
         self._zone: Optional[str] = zone
@@ -432,6 +460,11 @@ class Resources:
         return repr_str
 
     @property
+    def infra(self) -> infra_utils.InfraInfo:
+        cloud = str(self.cloud) if self.cloud is not None else None
+        return infra_utils.InfraInfo(cloud, self.region, self.zone)
+
+    @property
     def cloud(self) -> Optional[clouds.Cloud]:
         return self._cloud
 
@@ -486,9 +519,9 @@ class Resources:
     def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
-        For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
-        set to None, but this function will infer {'V100': 1} from the instance
-        type.
+        For example, Resources(infra='aws', instance_type='p3.2xlarge') has its
+        accelerators field set to None, but this function will infer {'V100': 1}
+        from the instance type.
         """
         if self._accelerators is not None:
             return self._accelerators
@@ -1450,6 +1483,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -1621,9 +1655,21 @@ class Resources:
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
-        resources_fields = {}
+        resources_fields: Dict[str, Any] = {}
+
+        # Extract infra field if present
+        infra = config.pop('infra', None)
+        resources_fields['infra'] = infra
+
+        # Keep backward compatibility with cloud, region, zone
+        # Note: if both `infra` and any of `cloud`, `region`, `zone` are
+        # specified, it will raise an error during the Resources.__init__
+        # validation.
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
+        resources_fields['region'] = config.pop('region', None)
+        resources_fields['zone'] = config.pop('zone', None)
+
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
@@ -1641,8 +1687,6 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
-        resources_fields['region'] = config.pop('region', None)
-        resources_fields['zone'] = config.pop('zone', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
@@ -1679,7 +1723,10 @@ class Resources:
             if value is not None and value != 'None':
                 config[key] = value
 
-        add_if_not_none('cloud', str(self.cloud))
+        # Construct infra field if cloud is set
+        infra = self.infra.to_str()
+        add_if_not_none('infra', infra)
+
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
@@ -1690,8 +1737,6 @@ class Resources:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
-        add_if_not_none('region', self.region)
-        add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
