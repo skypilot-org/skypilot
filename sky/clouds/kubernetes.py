@@ -711,8 +711,8 @@ class Kubernetes(clouds.Cloud):
                     f'{str_to_format}'
                     f'{colorama.Style.RESET_ALL}')
 
-        def _green_color(str_to_format: str) -> str:
-            return (f'{colorama.Fore.LIGHTGREEN_EX}'
+        def _dim_color(str_to_format: str) -> str:
+            return (f'{colorama.Style.DIM}'
                     f'{str_to_format}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -727,7 +727,7 @@ class Kubernetes(clouds.Cloud):
             if check_result[0]:
                 if check_result[1] is not None:
                     return True, (_bright_green_color('enabled. ') +
-                                  _green_color(f'Note: {check_result[1]}'))
+                                  _dim_color(f'Note: {check_result[1]}'))
                 else:
                     return True, _bright_green_color('enabled.')
             else:
