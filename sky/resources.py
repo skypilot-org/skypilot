@@ -1234,22 +1234,23 @@ class Resources:
         """
         if self.volumes is None:
             return
-        if self.cloud is not None:
-            try:
-                for volume in self.volumes:
-                    if 'disk_tier' not in volume:
-                        continue
-                    # TODO(hailong): check instance local SSD
-                    # support for instance_type.
-                    # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
-                    self.cloud.check_disk_tier_enabled(self.instance_type,
-                                                       volume['disk_tier'])
-            except exceptions.NotSupportedError:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Disk tier {volume["disk_tier"].value} is not '
-                        f'supported for instance type {self.instance_type}.'
-                    ) from None
+        if self.cloud is None:
+            return
+        try:
+            for volume in self.volumes:
+                if 'disk_tier' not in volume:
+                    continue
+                # TODO(hailong): check instance local SSD
+                # support for instance_type.
+                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
+                self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                    volume['disk_tier'])
+        except exceptions.NotSupportedError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Disk tier {volume["disk_tier"].value} is not '
+                    f'supported for instance type {self.instance_type}.'
+                ) from None
 
     def _try_validate_ports(self) -> None:
         """Try to validate the ports attribute.

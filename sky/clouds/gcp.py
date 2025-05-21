@@ -1114,8 +1114,6 @@ class GCP(clouds.Cloud):
         tier = cls._translate_disk_tier(disk_tier)
 
         # Define the default mapping from disk tiers to disk types.
-        # TODO(hailong): add `hyperdisk` support for data disks.
-        # Refer to https://cloud.google.com/compute/docs/disks/hyperdisks
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
