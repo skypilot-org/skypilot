@@ -116,6 +116,15 @@ ingress:
     use-https: false
     # Email domains to allow (use "*" for all domains)
     email-domain: "*"
+    # Session storage settings ("cookie" or "redis")
+    session-store-type: "redis"
+    # Redis connection URL (redis://host[:port][/db-number])
+    # If left as null and session-store-type is redis, a Redis instance will be deployed automatically
+    # If set, this external Redis instance will be used
+    redis-url: null
+    # Cookie timing settings (in seconds)
+    cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
+    cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
 
 ingress-nginx:
   enabled: true

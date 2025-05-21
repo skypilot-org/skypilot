@@ -40,14 +40,30 @@ spec:
         - --http-address=0.0.0.0:4180
         - --skip-provider-button=true
         - --reverse-proxy=true
+        - --session-store-type={{ index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis" }}
         {{- if not (index .Values.ingress "oauth2-proxy" "use-https" | default false) }}
         - --cookie-secure=false
+        {{- end }}
+        {{- if (index .Values.ingress "oauth2-proxy" "cookie-refresh") }}
+        - --cookie-refresh={{ index .Values.ingress "oauth2-proxy" "cookie-refresh" }}
+        {{- end }}
+        {{- if (index .Values.ingress "oauth2-proxy" "cookie-expire") }}
+        - --cookie-expire={{ index .Values.ingress "oauth2-proxy" "cookie-expire" }}
+        {{- end }}
+        {{- if eq (index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis") "redis" }}
+        {{- if (index .Values.ingress "oauth2-proxy" "redis-url") }}
+        - --redis-connection-url={{ index .Values.ingress "oauth2-proxy" "redis-url" }}
+        {{- else }}
+        - --redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0
+        {{- end }}
         {{- end }}
         env:
         - name: OAUTH2_PROXY_CLIENT_ID
           value: {{ index .Values.ingress "oauth2-proxy" "client-id" | quote }}
         - name: OAUTH2_PROXY_CLIENT_SECRET
           value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
+        - name: SERVICE_NAME
+          value: {{ .Release.Name }}
         - name: OAUTH2_PROXY_COOKIE_SECRET
           {{- /* Look up existing deployment to get the current cookie secret if available */}}
           {{- $deploymentName := printf "%s-oauth2-proxy" .Release.Name }}
