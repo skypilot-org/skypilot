@@ -10,8 +10,8 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
-from sky.utils import resources_utils
 from sky.skylet import constants
+from sky.utils import resources_utils
 
 GLOBAL_VALID_LABELS = {
     'plaintext': 'plainvalue',
