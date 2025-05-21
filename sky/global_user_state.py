@@ -18,6 +18,7 @@ import uuid
 
 from sky import models
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import db_utils
@@ -166,12 +167,13 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'user_hash',
                                  'TEXT DEFAULT null')
 
-    db_utils.add_column_to_table(cursor,
-                                 conn,
-                                 'clusters',
-                                 'workspace',
-                                 'TEXT DEFAULT \'default\'',
-                                 value_to_replace_existing_entries='default')
+    db_utils.add_column_to_table(
+        cursor,
+        conn,
+        'clusters',
+        'workspace',
+        'TEXT DEFAULT \'default\'',
+        value_to_replace_existing_entries=constants.SKYPILOT_DEFAULT_WORKSPACE)
     conn.commit()
 
 

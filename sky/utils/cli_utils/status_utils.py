@@ -57,7 +57,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     """
     # TODO(zhwu): Update the information for autostop clusters.
     workspaces = set(record['workspace'] for record in cluster_records)
-    show_workspaces = len(workspaces) > 1
+    show_workspaces = len(workspaces) > 1 or show_all
 
     status_columns = [
         StatusColumn('NAME', _get_name),
@@ -247,6 +247,7 @@ def _get_status(cluster_record: _ClusterRecord,
                 truncate: bool = True) -> status_lib.ClusterStatus:
     del truncate
     return cluster_record['status']
+
 
 def _get_workspace(cluster_record: _ClusterRecord,
                    truncate: bool = True) -> str:

@@ -111,6 +111,8 @@ _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
 _reload_config_lock = threading.Lock()
 
+_active_workspace_context = threading.local()
+
 
 def get_user_config_path() -> str:
     """Returns the path to the user config file."""
@@ -244,8 +246,18 @@ def get_workspace_cloud(cloud: str) -> config_utils.Config:
     return clouds.get(cloud.lower(), config_utils.Config())
 
 
+@contextlib.contextmanager
+def with_active_workspace(workspace: str) -> Iterator[None]:
+    _active_workspace_context.workspace = workspace
+    yield
+    _active_workspace_context.workspace = None
+
+
 def get_active_workspace() -> str:
-    return _dict.get_nested(keys=('active_workspace',), default_value='default')
+    if getattr(_active_workspace_context, 'workspace', None) is not None:
+        return _active_workspace_context.workspace
+    return _dict.get_nested(keys=('active_workspace',),
+                            default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -477,10 +489,11 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    workspace = config.get_nested(keys=('active_workspace',),
-                                  default_value='default')
-    if workspace != 'default' and workspace not in get_nested(
-            keys=('workspaces',), default_value={}):
+    workspace = config.get_nested(
+        keys=('active_workspace',),
+        default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and workspace
+            not in get_nested(keys=('workspaces',), default_value={})):
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Please check your config and try again.')
     try:
@@ -564,6 +577,6 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     workspaces = get_nested(('workspaces',), default_value={})
-    if 'default' not in workspaces:
-        workspaces['default'] = {}
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
+        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
     return workspaces

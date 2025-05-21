@@ -17,6 +17,7 @@ from sky import execution
 from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -213,12 +214,15 @@ def launch(
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
         with common.with_server_user_hash():
-            return execution.launch(task=controller_task,
-                                    cluster_name=controller_name,
-                                    stream_logs=stream_logs,
-                                    retry_until_up=True,
-                                    fast=True,
-                                    _disable_controller_check=True)
+            # Always launch the controller in the default workspace.
+            with skypilot_config.with_active_workspace(
+                    skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+                return execution.launch(task=controller_task,
+                                        cluster_name=controller_name,
+                                        stream_logs=stream_logs,
+                                        retry_until_up=True,
+                                        fast=True,
+                                        _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -323,7 +327,10 @@ def _maybe_restart_controller(
     rich_utils.force_update_status(
         ux_utils.spinner_message(f'{spinner_message} - restarting '
                                  'controller'))
-    handle = core.start(cluster_name=jobs_controller_type.value.cluster_name)
+    with skypilot_config.with_active_workspace(
+            skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+        handle = core.start(
+            cluster_name=jobs_controller_type.value.cluster_name)
     # Make sure the dashboard is running when the controller is restarted.
     # We should not directly use execution.launch() and have the dashboard cmd
     # in the task setup because since we are using detached_setup, it will

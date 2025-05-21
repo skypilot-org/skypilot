@@ -1108,7 +1108,8 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(service_catalog.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_cloud_names = list(
+        service_catalog.ALL_CLOUDS) + ['cloudflare']
     allowed_workspace_cloud_regex = '|'.join(allowed_workspace_cloud_names)
     workspaces_schema = {
         'type': 'object',
@@ -1154,8 +1155,6 @@ def get_config_schema():
             },
         }
     }
-
-    
 
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':

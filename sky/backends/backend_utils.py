@@ -1556,6 +1556,15 @@ def check_owner_identity(cluster_name: str) -> None:
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
+    active_workspace = skypilot_config.get_active_workspace()
+    cluster_workspace = record.get('workspace',
+                                   constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if active_workspace != cluster_workspace:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'The cluster {cluster_name} is in workspace '
+                f'{cluster_workspace}, but the active workspace is '
+                f'{active_workspace}.')
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
@@ -2154,57 +2163,62 @@ def refresh_cluster_record(
         return None
     # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
     # using the correct cloud credentials.
-    check_owner_identity(cluster_name)
+    workspace = record.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+    with skypilot_config.with_active_workspace(workspace):
+        check_owner_identity(cluster_name)
 
-    if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
-        return record
-
-    # The loop logic allows us to notice if the status was updated in the
-    # global_user_state by another process and stop trying to get the lock.
-    # The core loop logic is adapted from FileLock's implementation.
-    lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
-    start_time = time.perf_counter()
-
-    # Loop until we have an up-to-date status or until we acquire the lock.
-    while True:
-        # Check to see if we can return the cached status.
-        if not _must_refresh_cluster_status(record, force_refresh_statuses):
+        if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
             return record
 
-        if not acquire_per_cluster_status_lock:
-            return _update_cluster_status(cluster_name)
+        # The loop logic allows us to notice if the status was updated in the
+        # global_user_state by another process and stop trying to get the lock.
+        # The core loop logic is adapted from FileLock's implementation.
+        lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+        start_time = time.perf_counter()
 
-        # Try to acquire the lock so we can fetch the status.
-        try:
-            with lock.acquire(blocking=False):
-                # Check the cluster status again, since it could have been
-                # updated between our last check and acquiring the lock.
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                if record is None or not _must_refresh_cluster_status(
-                        record, force_refresh_statuses):
-                    return record
-                # Update and return the cluster status.
+        # Loop until we have an up-to-date status or until we acquire the lock.
+        while True:
+            # Check to see if we can return the cached status.
+            if not _must_refresh_cluster_status(record, force_refresh_statuses):
+                return record
+
+            if not acquire_per_cluster_status_lock:
                 return _update_cluster_status(cluster_name)
-        except filelock.Timeout:
-            # lock.acquire() will throw a Timeout exception if the lock is not
-            # available and we have blocking=False.
-            pass
 
-        # Logic adapted from FileLock.acquire().
-        # If cluster_status_lock_time is <0, we will never hit this. No timeout.
-        # Otherwise, if we have timed out, return the cached status. This has
-        # the potential to cause correctness issues, but if so it is the
-        # caller's responsibility to set the timeout to -1.
-        if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
-            logger.debug('Refreshing status: Failed get the lock for cluster '
-                         f'{cluster_name!r}. Using the cached status.')
-            return record
-        time.sleep(0.05)
+            # Try to acquire the lock so we can fetch the status.
+            try:
+                with lock.acquire(blocking=False):
+                    # Check the cluster status again, since it could have been
+                    # updated between our last check and acquiring the lock.
+                    record = global_user_state.get_cluster_from_name(
+                        cluster_name)
+                    if record is None or not _must_refresh_cluster_status(
+                            record, force_refresh_statuses):
+                        return record
+                    # Update and return the cluster status.
+                    return _update_cluster_status(cluster_name)
+            except filelock.Timeout:
+                # lock.acquire() will throw a Timeout exception if the lock is not
+                # available and we have blocking=False.
+                pass
 
-        # Refresh for next loop iteration.
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is None:
-            return None
+            # Logic adapted from FileLock.acquire().
+            # If cluster_status_lock_time is <0, we will never hit this. No timeout.
+            # Otherwise, if we have timed out, return the cached status. This has
+            # the potential to cause correctness issues, but if so it is the
+            # caller's responsibility to set the timeout to -1.
+            if 0 <= cluster_status_lock_timeout < time.perf_counter(
+            ) - start_time:
+                logger.debug(
+                    'Refreshing status: Failed get the lock for cluster '
+                    f'{cluster_name!r}. Using the cached status.')
+                return record
+            time.sleep(0.05)
+
+            # Refresh for next loop iteration.
+            record = global_user_state.get_cluster_from_name(cluster_name)
+            if record is None:
+                return None
 
 
 @timeline.event
