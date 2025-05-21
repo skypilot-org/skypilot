@@ -13,6 +13,8 @@ from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.kubernetes.utils import is_tpu_on_gke
+from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -427,8 +429,12 @@ class Kubernetes(clouds.Cloud):
         cpus = k.cpus
         mem = k.memory
         # Optionally populate accelerator information.
-        acc_count = k.accelerator_count if k.accelerator_count else 0
-        acc_type = k.accelerator_type if k.accelerator_type else None
+        acc_type = k.accelerator_type
+        acc_count = k.accelerator_count
+        if acc_type is not None and is_tpu_on_gke(acc_type):
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+        else:
+            acc_count = acc_count or 0
 
         def _get_image_id(resources: 'resources_lib.Resources') -> str:
             image_id_dict = resources.image_id
