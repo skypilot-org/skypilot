@@ -4,8 +4,7 @@ import itertools
 import os
 import traceback
 from types import ModuleType
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import click
 import colorama
@@ -193,8 +192,7 @@ def check_capabilities(
         # Pretty print for UX.
         if not quiet:
             enabled_clouds_str = '\n  ' + '\n  '.join([
-                _format_enabled_cloud(cloud, capabilities,
-                                      cloud2ctx2text.get(cloud, None))
+                _format_enabled_cloud(cloud, capabilities)
                 for cloud, capabilities in sorted(enabled_clouds.items(),
                                                   key=lambda item: item[0])
             ])
@@ -350,8 +348,7 @@ def _print_checked_cloud(
             activated_account = cloud.get_active_user_identity_str()
     # TODO(tian): Add k8s here
     if isinstance(cloud_tuple[1], sky_clouds.SSH):
-        detail_string = '\n' + _format_ssh_target_details(ctx2text,
-                                                          include_details=True)
+        detail_string = '\n' + _format_ssh_target_details(ctx2text)
     echo(
         click.style(
             f'{style_str}  {cloud_repr}: {status_msg} {capability_string}'
@@ -365,15 +362,14 @@ def _print_checked_cloud(
 
 
 def _green_color(str_to_format: str) -> str:
-    return (f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}')
+    return f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}'
 
 
-def _format_ssh_target_details(ctx2text: Dict[str, str],
-                               include_details: bool = False) -> str:
+def _format_ssh_target_details(
+        ctx2text: Optional[Dict[str, str]] = None) -> str:
     # Get the cluster names by reading from the node pools file
     ssh_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
 
-    assert ctx2text is not None, 'ctx2text should not be None for SSH cloud'
     # Format the context info with consistent styling
     contexts_formatted = []
     for i, context in enumerate(ssh_contexts):
@@ -384,7 +380,7 @@ def _format_ssh_target_details(ctx2text: Dict[str, str],
         symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(ssh_contexts) -
                   1 else ux_utils.INDENT_SYMBOL)
         text_suffix = (f': {ctx2text[context]}'
-                       if context in ctx2text and include_details else '')
+                       if ctx2text is not None and context in ctx2text else '')
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
     context_info = f'  SSH Node Pools:{"".join(contexts_formatted)}'
@@ -394,8 +390,7 @@ def _format_ssh_target_details(ctx2text: Dict[str, str],
 
 
 def _format_enabled_cloud(cloud_name: str,
-                          capabilities: List[sky_cloud.CloudCapability],
-                          ctx2text: Optional[Dict[str, str]] = None) -> str:
+                          capabilities: List[sky_cloud.CloudCapability]) -> str:
     """Format the summary of enabled cloud and its enabled capabilities.
 
     Args:
@@ -435,6 +430,6 @@ def _format_enabled_cloud(cloud_name: str,
 
     elif cloud_name == repr(sky_clouds.SSH()):
         return (f'{_green_color(cloud_and_capabilities)}\n'
-                f'{_format_ssh_target_details(ctx2text)}')
+                f'{_format_ssh_target_details()}')
 
     return _green_color(cloud_and_capabilities)
