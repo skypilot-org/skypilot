@@ -332,7 +332,7 @@ def cleanup_server_node(node,
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
     run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    print(f'{GREEN}Node {node} cleaned up successfully.{NC}')
+    success_message(f'Node {node} cleaned up successfully.')
 
 
 def cleanup_agent_node(node,
