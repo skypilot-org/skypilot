@@ -1,4 +1,14 @@
 {{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+{{- $oauth2 := index .Values.ingress "oauth2-proxy" }}
+{{- if not (index $oauth2 "oidc-issuer-url") -}}
+{{- fail "ingress.oauth2-proxy.oidc-issuer-url is required when OAuth2 proxy is enabled" -}}
+{{- end -}}
+{{- if eq (index $oauth2 "client-id") "" -}}
+{{- fail "ingress.oauth2-proxy.client-id is required when OAuth2 proxy is enabled" -}}
+{{- end -}}
+{{- if eq (index $oauth2 "client-secret") "" -}}
+{{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,8 +30,8 @@ spec:
     spec:
       containers:
       - name: oauth2-proxy
-        image: quay.io/oauth2-proxy/oauth2-proxy:latest
-        imagePullPolicy: Always
+        image: {{ index .Values.ingress "oauth2-proxy" "image" | default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" }}
+        imagePullPolicy: IfNotPresent
         args:
         - --provider=oidc
         - --oidc-issuer-url={{ index .Values.ingress "oauth2-proxy" "oidc-issuer-url" }}
@@ -42,8 +52,9 @@ spec:
           {{- if index .Values.ingress "oauth2-proxy" "cookie-secret" }}
           value: {{ index .Values.ingress "oauth2-proxy" "cookie-secret" | quote }}
           {{- else }}
-          # Generate a random cookie secret if not provided
-          value: {{ randAlphaNum 16 | b64enc | quote }}
+          # Generate a stable random cookie secret if not provided
+          # This uses a deterministic hash of the release name and namespace to ensure consistency across upgrades
+          value: {{ printf "%s-%s-oauth2-proxy-cookie-secret" .Release.Name .Release.Namespace | sha256sum | trunc 32 | b64enc | quote }}
           {{- end }}
         ports:
         - containerPort: 4180
