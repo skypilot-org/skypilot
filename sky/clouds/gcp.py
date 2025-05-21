@@ -968,6 +968,8 @@ class GCP(clouds.Cloud):
     #                        maxsize=1)  # Cache since getting identity is slow.
     # We should not use cache GCP identity as the workspace may be able to
     # switch between different projects.
+    # TODO(zhwu): figure out a better way to handle this, instead of getting rid
+    # of the cache.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:

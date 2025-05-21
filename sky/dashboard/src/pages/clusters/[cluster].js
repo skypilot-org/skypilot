@@ -191,7 +191,8 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                           href="/infra"
                           className="text-blue-600 hover:underline"
                         >
-                          {clusterData.cloud || clusterData.infra.split('(')[0].trim()}
+                          {clusterData.cloud ||
+                            clusterData.infra.split('(')[0].trim()}
                         </Link>
                         {clusterData.infra.includes('(') && (
                           <span>

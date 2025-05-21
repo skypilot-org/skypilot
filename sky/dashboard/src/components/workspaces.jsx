@@ -312,7 +312,8 @@ export function Workspaces() {
       const disabledString = disabledClouds.join(' and ');
       finalDescriptions.push(
         <span key="disabled-clouds" className="block">
-          {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'} explicitly disabled.
+          {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'}{' '}
+          explicitly disabled.
         </span>
       );
     }

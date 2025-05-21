@@ -76,7 +76,7 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
   if (!workspaceFilter || workspaceFilter === ALL_WORKSPACES_VALUE) {
     return jobs;
   }
-  
+
   // Filter jobs by the selected workspace
   return jobs.filter((job) => {
     const jobWorkspace = job.workspace || 'default'; // Treat missing/empty workspace as 'default'
@@ -87,19 +87,27 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
 // Helper function to format submitted time with abbreviated units
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
-  
+
   let timeString = relativeTime(timestamp);
 
   // If relativeTime returns a React element, extract the string from its props
-  if (React.isValidElement(timeString) && timeString.props && timeString.props.children) {
+  if (
+    React.isValidElement(timeString) &&
+    timeString.props &&
+    timeString.props.children
+  ) {
     // The actual string is nested within the Tooltip
-    if (React.isValidElement(timeString.props.children) && timeString.props.children.props && timeString.props.children.props.children) {
-        timeString = timeString.props.children.props.children;
+    if (
+      React.isValidElement(timeString.props.children) &&
+      timeString.props.children.props &&
+      timeString.props.children.props.children
+    ) {
+      timeString = timeString.props.children.props.children;
     } else {
-        timeString = timeString.props.children;
+      timeString = timeString.props.children;
     }
   }
-  
+
   // Ensure we have a string before proceeding
   if (typeof timeString !== 'string') {
     return timeString; // Return as is if not a string after extraction
@@ -116,18 +124,18 @@ const formatSubmittedTime = (timestamp) => {
     const num = aboutMatch[1];
     const unit = aboutMatch[2];
     const unitMap = {
-      'second': 'sec',
-      'seconds': 'secs',
-      'minute': 'min',
-      'minutes': 'mins',
-      'hour': 'hr',
-      'hours': 'hrs',
-      'day': 'd',
-      'days': 'd',
-      'month': 'mo',
-      'months': 'mos',
-      'year': 'yr',
-      'years': 'yrs'
+      second: 'sec',
+      seconds: 'secs',
+      minute: 'min',
+      minutes: 'mins',
+      hour: 'hr',
+      hours: 'hrs',
+      day: 'd',
+      days: 'd',
+      month: 'mo',
+      months: 'mos',
+      year: 'yr',
+      years: 'yrs',
     };
     if (unitMap[unit]) {
       return `~ ${num} ${unitMap[unit]} ago`;
@@ -139,36 +147,36 @@ const formatSubmittedTime = (timestamp) => {
   if (singleUnitMatch) {
     const unit = singleUnitMatch[1];
     const unitMap = {
-      'second': 'sec',
-      'minute': 'min',
-      'hour': 'hr',
-      'day': 'd',
-      'month': 'mo',
-      'year': 'yr'
+      second: 'sec',
+      minute: 'min',
+      hour: 'hr',
+      day: 'd',
+      month: 'mo',
+      year: 'yr',
     };
     if (unitMap[unit]) {
       return `1 ${unitMap[unit]} ago`;
     }
   }
-  
+
   // Handle "X units ago"
   const multiUnitMatch = timeString.match(/^(\d+)\s+(\w+)\s+ago$/);
   if (multiUnitMatch) {
     const num = multiUnitMatch[1];
     const unit = multiUnitMatch[2];
     const unitMap = {
-      'seconds': 'secs',
-      'minutes': 'mins',
-      'hours': 'hrs',
-      'days': 'd',
-      'months': 'mo',
-      'years': 'yr'
+      seconds: 'secs',
+      minutes: 'mins',
+      hours: 'hrs',
+      days: 'd',
+      months: 'mo',
+      years: 'yr',
     };
     if (unitMap[unit]) {
       return `${num} ${unitMap[unit]} ago`;
     }
   }
-  
+
   // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
   return timeString;
 };
@@ -199,17 +207,13 @@ export function ManagedJobs() {
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(
-            allJobs
-              .map((job) => job.workspace || 'default')
-              .filter((ws) => ws)
+            allJobs.map((job) => job.workspace || 'default').filter((ws) => ws)
           ),
         ];
 
         // Combine configured workspaces with any actively used workspaces
         const finalWorkspaces = new Set(configuredWorkspaceNames);
-        uniqueJobWorkspaces.forEach((wsName) =>
-          finalWorkspaces.add(wsName)
-        );
+        uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
 
         setWorkspaces(Array.from(finalWorkspaces).sort());
       } catch (error) {
@@ -461,12 +465,12 @@ export function ManagedJobsTable({
     // If no statuses are selected, highlight all statuses in the active tab
     return statusGroups[activeTab].includes(status);
   };
-  
+
   // Filter data based on selected statuses and active tab
   const filteredData = React.useMemo(() => {
     // First apply workspace filter
     let filtered = filterJobsByWorkspace(data, workspaceFilter);
-    
+
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
       return filtered.filter((item) => selectedStatuses.includes(item.status));
@@ -481,7 +485,14 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, activeTab, selectedStatuses, showAllMode, statusGroups, workspaceFilter]);
+  }, [
+    data,
+    activeTab,
+    selectedStatuses,
+    showAllMode,
+    statusGroups,
+    workspaceFilter,
+  ]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -575,9 +586,9 @@ export function ManagedJobsTable({
                 }`}
               >
                 <span>{status}</span>
-                                  <span
+                <span
                   className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
+                >
                   {count}
                 </span>
               </button>
@@ -741,7 +752,9 @@ export function ManagedJobsTable({
                           {item.workspace || 'default'}
                         </Link>
                       </TableCell>
-                      <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+                      <TableCell>
+                        {formatSubmittedTime(item.submitted_at)}
+                      </TableCell>
                       <TableCell>{formatDuration(item.job_duration)}</TableCell>
                       <TableCell>
                         <StatusBadge status={item.status} />
@@ -763,7 +776,9 @@ export function ManagedJobsTable({
                               {item.infra.includes('(') && (
                                 <span>
                                   {' ' +
-                                    item.infra.substring(item.infra.indexOf('('))}
+                                    item.infra.substring(
+                                      item.infra.indexOf('(')
+                                    )}
                                 </span>
                               )}
                             </span>
@@ -1208,16 +1223,18 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                         />
                       </Link>
                     </TableCell>
-                                         <TableCell>{item.user}</TableCell>
-                     <TableCell>
-                       <Link
-                         href="/workspaces"
-                         className="text-blue-600 hover:underline"
-                       >
-                         {item.workspace || 'default'}
-                       </Link>
-                     </TableCell>
-                    <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <Link
+                        href="/workspaces"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.workspace || 'default'}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      {formatSubmittedTime(item.submitted_at)}
+                    </TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
                       <StatusBadge status={item.status} />

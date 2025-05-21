@@ -493,18 +493,12 @@ function JobDetailsContent({
               className="text-sm text-muted-foreground"
             >
               <span>
-                <Link
-                  href="/infra"
-                  className="text-blue-600 hover:underline"
-                >
+                <Link href="/infra" className="text-blue-600 hover:underline">
                   {jobData.cloud || jobData.infra.split('(')[0].trim()}
                 </Link>
                 {jobData.infra.includes('(') && (
                   <span>
-                    {' ' +
-                      jobData.infra.substring(
-                        jobData.infra.indexOf('(')
-                      )}
+                    {' ' + jobData.infra.substring(jobData.infra.indexOf('('))}
                   </span>
                 )}
               </span>
