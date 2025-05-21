@@ -259,9 +259,9 @@ def with_active_workspace(workspace: str) -> Iterator[None]:
     _active_workspace_context.workspace = original_workspace
 
 
-def get_active_workspace() -> str:
+def get_active_workspace(force_user_workspace: bool = False) -> str:
     context_workspace = getattr(_active_workspace_context, 'workspace', None)
-    if context_workspace is not None:
+    if not force_user_workspace and context_workspace is not None:
         return context_workspace
     return _dict.get_nested(keys=('active_workspace',),
                             default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)

@@ -3496,7 +3496,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 managed_job_codegen = managed_jobs.ManagedJobCodeGen()
                 managed_job_code = managed_job_codegen.set_pending(
                     job_id, managed_job_dag,
-                    skypilot_config.get_active_workspace())
+                    skypilot_config.get_active_workspace(
+                        force_user_workspace=True))
                 # Set the managed job to PENDING state to make sure that this
                 # managed job appears in the `sky jobs queue`, even if it needs
                 # to wait to be submitted.
