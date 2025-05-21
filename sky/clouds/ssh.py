@@ -2,8 +2,9 @@
 
 import os
 import typing
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
+import colorama
 import yaml
 
 from sky.clouds import kubernetes
@@ -113,7 +114,8 @@ class SSH(kubernetes.Kubernetes):
         return ssh_contexts
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Check if the user has access credentials to SSH contexts."""
         # Check for port forward dependencies - reuse Kubernetes implementation
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
@@ -122,6 +124,16 @@ class SSH(kubernetes.Kubernetes):
                 [reasons[0]] +
                 [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
             return (False, formatted)
+
+        def _red_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTRED_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTGREEN_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
 
         # Get SSH contexts
         try:
@@ -134,8 +146,7 @@ class SSH(kubernetes.Kubernetes):
                     'No SSH clusters found. Run "sky ssh up" to create one.')
 
         # Check credentials for each context
-        reasons = []
-        hints = []
+        ctx2text = {}
         success = False
         for context in existing_allowed_contexts:
             try:
@@ -144,17 +155,11 @@ class SSH(kubernetes.Kubernetes):
                 if check_result[0]:
                     success = True
                     if check_result[1] is not None:
-                        hints.append(
-                            f'SSH cluster {context}: {check_result[1]}')
+                        ctx2text[context] = _green_color(check_result[1])
                 else:
-                    reasons.append(f'SSH cluster {context}: {check_result[1]}')
+                    if check_result[1] is not None:
+                        ctx2text[context] = _red_color(check_result[1])
             except Exception as e:  # pylint: disable=broad-except
-                reasons.append(f'SSH cluster {context}: {str(e)}')
+                ctx2text[context] = _red_color(str(e))
 
-        if success:
-            return (True, cls._format_credential_check_results(hints, reasons))
-
-        return (
-            False, 'Failed to find available SSH clusters with working '
-            'credentials. Run "sky ssh up" to create one, or check details:\n' +
-            '\n'.join(reasons))
+        return (success, ctx2text)

@@ -457,8 +457,8 @@ class Cloud:
 
     @classmethod
     def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        cls, cloud_capability: CloudCapability
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
@@ -474,14 +474,16 @@ class Cloud:
         assert_never(cloud_capability)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's compute service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's storage service."""
         raise exceptions.NotSupportedError(
