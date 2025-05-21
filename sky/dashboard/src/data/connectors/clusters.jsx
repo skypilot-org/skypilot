@@ -43,59 +43,18 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
-export async function getClusterCosts() {
+export async function getClusters({ clusterNames = null } = {}) {
   try {
-    const response = await fetch(`${ENDPOINT}/cost_report`, {
-      method: 'GET',
+    const response = await fetch(`${ENDPOINT}/status`, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-    });
-    // TODO(syang): remove X-Request-ID when v0.10.0 is released.
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('X-Request-ID');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-    const data = await fetchedData.json();
-    const costs = data.return_value ? JSON.parse(data.return_value) : [];
-    return costs.reduce((acc, cost) => {
-      // Calculate cost per hour based on resources and duration
-      const duration = cost.duration || 0;
-      const costPerHour =
-        duration > 0 ? cost.total_cost / (duration / 3600) : 0;
-
-      // Use cluster_hash as the unique key, assuming it exists in the cost report items.
-      const key = cost.cluster_hash;
-      if (key) {
-        // Only add if the hash exists
-        acc[key] = {
-          total_cost: cost.total_cost || 0,
-          cost_per_hour: costPerHour,
-        };
-      }
-      return acc;
-    }, {});
-  } catch (error) {
-    console.error('Error fetching cluster costs:', error);
-    return {};
-  }
-}
-
-export async function getClusters({ clusterNames = null } = {}) {
-  try {
-    const [response, costs] = await Promise.all([
-      fetch(`${ENDPOINT}/status`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          cluster_names: clusterNames,
-          all_users: true,
-        }),
+      body: JSON.stringify({
+        cluster_names: clusterNames,
+        all_users: true,
       }),
-      getClusterCosts(),
-    ]);
+    });
     // TODO(syang): remove X-Request-ID when v0.10.0 is released.
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
@@ -105,10 +64,6 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
       // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
-      const costKey = cluster.cluster_hash;
-      const cost = costKey
-        ? costs[costKey] || { total_cost: 0, cost_per_hour: 0 }
-        : { total_cost: 0, cost_per_hour: 0 };
       let region_or_zone = '';
       if (cluster.zone) {
         region_or_zone = cluster.zone;
@@ -140,8 +95,6 @@ export async function getClusters({ clusterNames = null } = {}) {
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
-        total_cost: cost.total_cost,
-        cost_per_hour: cost.cost_per_hour,
         jobs: [],
         events: [
           {

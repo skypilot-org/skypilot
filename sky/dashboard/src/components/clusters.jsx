@@ -44,13 +44,13 @@ import {
 } from '@/components/ui/select';
 
 // Helper function to format cost (copied from workspaces.jsx)
-const formatCost = (cost) => {
-  if (cost >= 10) {
-    // Use the user-updated threshold of 10
-    return cost.toFixed(1);
-  }
-  return cost.toFixed(2);
-};
+// const formatCost = (cost) => { // Cost function removed
+//   if (cost >= 10) {
+//     // Use the user-updated threshold of 10
+//     return cost.toFixed(1);
+//   }
+//   return cost.toFixed(2);
+// };
 
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
 
@@ -344,7 +344,6 @@ export function ClusterTable({
               >
                 Started{getSortDirection('time')}
               </TableHead>
-              <TableHead>Cost</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -353,7 +352,7 @@ export function ClusterTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -416,14 +415,6 @@ export function ClusterTable({
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span>${formatCost(item.total_cost)}</span>
-                        <span className="text-xs text-gray-500">
-                          ${formatCost(item.cost_per_hour)}/hr
-                        </span>
-                      </div>
-                    </TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
@@ -438,7 +429,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters
