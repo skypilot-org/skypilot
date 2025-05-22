@@ -394,6 +394,16 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     if not filtered_contexts:
         return ''
 
+    def _red_color(str_to_format: str) -> str:
+        return (f'{colorama.Fore.LIGHTRED_EX}'
+                f'{str_to_format}'
+                f'{colorama.Style.RESET_ALL}')
+
+    def _dim_color(str_to_format: str) -> str:
+        return (f'{colorama.Style.DIM}'
+                f'{str_to_format}'
+                f'{colorama.Style.RESET_ALL}')
+
     # Format the context info with consistent styling
     contexts_formatted = []
     for i, context in enumerate(filtered_contexts):
@@ -410,10 +420,10 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
         if show_details:
             if ctx2text is not None:
                 text_suffix = (
-                    f': {ctx2text[context]}' if context in ctx2text else ': ' +
-                    'disabled. Reason: Not set up. '
-                    f'Use `sky ssh up --infra {context.lstrip("ssh-")}` to '
-                    'set up.')
+                    f': {ctx2text[context]}' if context in ctx2text else
+                    (': ' + _red_color('disabled. ') +
+                     _dim_color('Reason: Not set up. Use `sky ssh up --infra '
+                                f'{context.lstrip("ssh-")}` to set up.')))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
     identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)

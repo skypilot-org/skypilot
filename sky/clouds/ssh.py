@@ -6,14 +6,18 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import yaml
 
+from sky import sky_logging
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import annotations
 from sky.utils import registry
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 
@@ -80,7 +84,7 @@ class SSH(kubernetes.Kubernetes):
             # since there is no context name available.
             return region, zone
 
-        all_contexts = self.existing_allowed_contexts()
+        all_contexts = self.existing_allowed_contexts(silent=True)
 
         if region is not None and region not in all_contexts:
             region_name = region.lstrip('ssh-')
@@ -93,6 +97,21 @@ class SSH(kubernetes.Kubernetes):
         if zone is not None:
             raise ValueError('SSH Node Pools do not support setting zone.')
         return region, zone
+
+    @classmethod
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def _ssh_log_skipped_contexts_once(
+            cls, skipped_contexts: Tuple[str, ...]) -> None:
+        """Log skipped contexts for only once.
+
+        We don't directly cache the result of _filter_existing_allowed_contexts
+        as the admin policy may update the allowed contexts.
+        """
+        if skipped_contexts:
+            logger.warning(
+                f'SSH Node Pools {set(skipped_contexts)!r} specified in '
+                '~/.sky/ssh_node_pools.yaml has not been set up. '
+                'Skipping those pools. Run `sky ssh up` to set up.')
 
     @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
@@ -128,7 +147,7 @@ class SSH(kubernetes.Kubernetes):
                 else:
                     skipped_contexts.append(context)
             if not silent:
-                cls._log_skipped_contexts_once(tuple(skipped_contexts))
+                cls._ssh_log_skipped_contexts_once(tuple(skipped_contexts))
             return existing_contexts
 
         # If no allowed_contexts found, return all SSH contexts
@@ -148,7 +167,8 @@ class SSH(kubernetes.Kubernetes):
 
         # Get SSH contexts
         try:
-            existing_allowed_contexts = cls.existing_allowed_contexts()
+            existing_allowed_contexts = cls.existing_allowed_contexts(
+                silent=True)
         except Exception as e:  # pylint: disable=broad-except
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
