@@ -727,13 +727,14 @@ class Kubernetes(clouds.Cloud):
                 context, run_optional_checks=True)
             if check_result[0]:
                 if check_result[1] is not None:
-                    return True, (_bright_green_color('enabled. ') +
-                                  _dim_color(f'Note: {check_result[1]}'))
+                    return True, (_bright_green_color('enabled.') +
+                                  _dim_color(f' Note: {check_result[1]}'))
                 else:
                     return True, _bright_green_color('enabled.')
             else:
                 assert check_result[1] is not None
-                return False, _red_color(f'disabled. Reason: {check_result[1]}')
+                return False, (_red_color('disabled.') +
+                               _dim_color(f' Reason: {check_result[1]}'))
         except Exception as e:  # pylint: disable=broad-except
             return False, _red_color(str(e))
 
