@@ -488,9 +488,9 @@ class ServeStatusBody(RequestBody):
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
     """The request body for the realtime GPU availability endpoint."""
-    context: Optional[str]
-    name_filter: Optional[str]
-    quantity_filter: Optional[int]
+    context: Optional[str] = None
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
 
 
 class KubernetesNodeInfoRequestBody(RequestBody):

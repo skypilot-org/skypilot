@@ -111,15 +111,15 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
         Considered resources (1 node):
         ---------------------------------------------------------------------------------------------------
-         CLOUD        INSTANCE          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+         INFRA                        INSTANCE          vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
         ---------------------------------------------------------------------------------------------------
-         Kubernetes   2CPU--2GB         2       2         -              kubernetes    0.00          ✔
-         AWS          m6i.large         2       8         -              us-east-1     0.10
-         Azure        Standard_D2s_v5   2       8         -              eastus        0.10
-         GCP          n2-standard-2     2       8         -              us-central1   0.10
-         IBM          bx2-8x32          8       32        -              us-east       0.38
-         Lambda       gpu_1x_a10        30      200       A10:1          us-east-1     0.60
-        ---------------------------------------------------------------------------------------------------.
+         Kubernetes (kind-skypilot)   -                 2       2         -        0.00          ✔
+         AWS (us-east-1)              m6i.large         2       8         -        0.10
+         Azure (eastus)               Standard_D2s_v5   2       8         -        0.10
+         GCP (us-central1-a)          n2-standard-2     2       8         -        0.10
+         IBM (us-east)                bx2-8x32          8       32        -        0.38
+         Lambda (us-east-1)           gpu_1x_a10        30      200       A10:1    0.60
+        ----------------------------------------------------------------------------------------------------
 
 
 .. note::
@@ -152,28 +152,28 @@ Unlike :code:`sky status` which lists only the SkyPilot resources launched by th
     $ sky status --k8s
     Kubernetes cluster state (context: mycluster)
     SkyPilot clusters
-    USER     NAME                           LAUNCHED    RESOURCES                                  STATUS
-    alice    infer-svc-1                    23 hrs ago  1x Kubernetes(cpus=1, mem=1, {'L4': 1})    UP
-    alice    sky-jobs-controller-80b50983   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
-    alice    sky-serve-controller-80b50983  23 hrs ago  1x Kubernetes(cpus=4, mem=4)               UP
-    bob      dev                            1 day ago   1x Kubernetes(cpus=2, mem=8, {'H100': 1})  UP
-    bob      multinode-dev                  1 day ago   2x Kubernetes(cpus=2, mem=2)               UP
-    bob      sky-jobs-controller-2ea485ea   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
+    USER     NAME                           LAUNCHED    INFRA      RESOURCES                 STATUS
+    alice    infer-svc-1                    23 hrs ago  Kubernetes 1x(gpus=L4:1, ...)        UP
+    alice    sky-jobs-controller-80b50983   2 days ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
+    alice    sky-serve-controller-80b50983  23 hrs ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
+    bob      dev                            1 day ago   Kubernetes 1x(gpus=H100:1, ...)      UP
+    bob      multinode-dev                  1 day ago   Kubernetes 2x(cpus=2, mem=2, ...)    UP
+    bob      sky-jobs-controller-2ea485ea   2 days ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
 
     Managed jobs
     In progress tasks: 1 STARTING
-    USER     ID  TASK  NAME      RESOURCES   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+    USER     ID  TASK  NAME      REQUESTED   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
     alice    1   -     eval      1x[CPU:1+]  2 days ago  49s            8s            0            SUCCEEDED
     bob      4   -     pretrain  1x[H100:4]  1 day ago   1h 1m 11s      1h 14s        0            SUCCEEDED
     bob      3   -     bigjob    1x[CPU:16]  1 day ago   1d 21h 11m 4s  -             0            STARTING
     bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
     bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
 
-You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --cloud k8s`.
+You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --infra k8s`.
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud k8s
+    $ sky show-gpus --infra k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     L4    1, 2, 4                   12 of 12 free

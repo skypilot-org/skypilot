@@ -15,7 +15,7 @@ envs:
 
 resources:
   ports: 8087
-  cloud: gcp
+  infra: gcp
   accelerators: T4
   cpus: 7+
   memory: 20+
