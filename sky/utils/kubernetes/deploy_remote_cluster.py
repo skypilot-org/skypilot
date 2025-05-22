@@ -135,19 +135,45 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
 
 
 def check_host_in_ssh_config(hostname: str) -> bool:
-    """Check if a hostname is defined in SSH config file."""
-    if not os.path.exists(SSH_CONFIG_PATH):
-        return False
+    """Return True iff *hostname* matches at least one `Host`/`Match` stanza
+    in the user's OpenSSH client configuration (including anything pulled in
+    via Include).
 
-    try:
-        result = subprocess.run(['ssh', '-G', hostname],
-                                capture_output=True,
-                                text=True,
-                                check=False)
-        # If successful, the host is in the SSH config
-        return result.returncode == 0 and 'hostname' in result.stdout
-    except Exception:  # pylint: disable=broad-except
-        return False
+    It calls:  ssh -vvG <hostname> -o ConnectTimeout=0
+    which:
+      • -G  expands the effective config without connecting
+      • -vv prints debug lines that show which stanzas are applied
+      • ConnectTimeout=0 avoids a DNS lookup if <hostname> is a FQDN/IP
+
+    No config files are opened or parsed manually.
+
+    Parameters
+    ----------
+    hostname : str
+        The alias/IP/FQDN you want to test.
+
+    Returns
+    -------
+    bool
+        True  – a specific stanza matched the host
+        False – nothing but the global defaults (`Host *`) applied
+    """
+    # We direct stderr→stdout because debug output goes to stderr.
+    proc = subprocess.run(
+        ['ssh', '-vvG', hostname, '-o', 'ConnectTimeout=0'],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,  # we only want the text, not to raise
+    )
+
+    # Look for lines like:
+    #   debug1: ~/.ssh/config line 42: Applying options for <hostname>
+    # Anything other than "*"
+    pattern = re.compile(r'^debug\d+: .*Applying options for ([^*].*)$',
+                         re.MULTILINE)
+
+    return bool(pattern.search(proc.stdout))
 
 
 def get_cluster_config(targets: Dict[str, Any],
