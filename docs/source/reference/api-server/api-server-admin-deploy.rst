@@ -66,6 +66,8 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
+The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`.
+
 .. tip::
 
     The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for more clouds and Kubernetes clusters.
@@ -130,7 +132,8 @@ Our default of using a NodePort service is the recommended way to expose the API
 
             $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np --namespace $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
-            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
+            $ HOST=${NODE_IP}:${NODE_PORT}
+            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
             $ echo $ENDPOINT
             http://skypilot:yourpassword@1.1.1.1:30050
 
@@ -369,6 +372,43 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set lambdaCredentials.enabled=true \
                     --set lambdaCredentials.lambdaSecretName=your_secret_name
 
+    .. tab-item:: Nebius
+        :sync: nebius-creds-tab
+
+        We use service accounts to authenticate with Nebius. Refer to :ref:`Nebius service account <nebius-service-account>` guide on how to set up a service account.
+
+        Once you have the JSON credentials for your service account, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic nebius-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials.json=$HOME/.nebius/credentials.json
+
+        When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
+
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              # keep the Helm chart values set in the previous step
+              --reuse-values \
+              --set nebiusCredentials.enabled=true \
+              --set nebiusCredentials.tenantId=YOUR_TENANT_ID
+
+        .. dropdown:: Use existing Nebius credentials
+
+            You can also set the following values to use a secret that already contains your Nebius credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set nebiusCredentials.enabled=true \
+                    --set nebiusCredentials.nebiusSecretName=your_secret_name
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
@@ -599,6 +639,66 @@ If you are upgrading from an early 0.8.0 nightly with a previously deployed Node
 
     Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
+.. _sky-api-server-helm-multiple-deploy:
+
+Reusing ingress controller for API server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, the ingress-nginx controller has some cluster-scope resources that will cause conflicts between multiple installations by default. It is recommended to reuse an existing ingress controller if you want to deploy multiple API servers in the same Kubernetes cluster.
+
+To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled <helm-values-ingress-nginx-enabled>` to ``false`` and set :ref:`ingress.path <helm-values-ingress-path>` to a unique path for the deploying API server. For example:
+
+.. code-block:: bash
+
+    # The first API server, with niginx-ingress controller deployed
+    # It is assumed that the first API server is already deployed. If it is not deployed yet,
+    # add neccessary values instead of specifying --reuse-values
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set ingress.path=/first-server
+    
+    # The second API server, reusing the existing ingress controller and using a different path
+    ANOTHER_RELEASE_NAME=skypilot2
+    ANOTHER_NAMESPACE=skypilot2
+    # Replace with your username and password to configure the basic auth credentials for the second API server
+    ANOTHER_WEB_USERNAME=skypilot
+    ANOTHER_WEB_PASSWORD=yourpassword2
+    ANOTHER_AUTH_STRING=$(htpasswd -nb $ANOTHER_WEB_USERNAME $ANOTHER_WEB_PASSWORD)
+    # Deploy the API server, either in the same namespace or a different namespace
+    helm upgrade --install $ANOTHER_RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $ANOTHER_NAMESPACE \
+        --set ingress-nginx.enabled=false \
+        --set ingress.path=/second-server \
+        --set ingress.authCredentials=$ANOTHER_AUTH_STRING
+
+With the above commands, these two API servers will share the same ingress controller and serves under different paths of the same host. To get the endpoints, follow :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` to get the host from the helm release that has the ingress-nginx controller deployed, and then append the basic auth and path to the host:
+
+.. code-block:: bash
+
+    # HOST was the ingress host we got from Step 2
+    $ FIRST_PATH=$(kubectl get ingress ${RELEASE_NAME}-ingress --namespace $NAMESPACE -o jsonpath='{.metadata.annotations.skypilot\.co\/ingress-path}')
+    $ FIRST_ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}${FIRST_PATH}
+    $ SECOND_PATH=$(kubectl get ingress ${ANOTHER_RELEASE_NAME}-ingress --namespace $ANOTHER_NAMESPACE -o jsonpath='{.metadata.annotations.skypilot\.co\/ingress-path}')
+    $ SECOND_ENDPOINT=http://${ANOTHER_WEB_USERNAME}:${ANOTHER_WEB_PASSWORD}@${HOST}${SECOND_PATH}
+    $ echo $FIRST_ENDPOINT
+    http://skypilot:yourpassword@1.1.1.1/first-server
+    $ echo $SECOND_ENDPOINT
+    http://skypilot:yourpassword2@1.1.1.1/second-server
+
+The same approach also applies when you have a ingress-nginx controller deployed before installing the SkyPilot API server:
+
+.. code-block:: bash
+
+    # The first API server, disabling the ingress-nginx controller to reuse the existing one
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --set ingress-nginx.enabled=false \
+        --set ingress.path=/skypilot
+
+It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingress-path>` too in this case, to avoid conflicts with other backends hosted on the same ingress controller.
+
+
 .. _sky-api-server-cloud-deploy:
 
 Alternative: Deploy on cloud VMs
@@ -661,3 +761,10 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. tip::
 
     If you are installing SkyPilot API client in the same environment, we recommend using a different python environment (venv, conda, etc.) to avoid conflicts with the SkyPilot installation used to deploy the API server.
+
+
+.. toctree::
+   :hidden:
+
+    Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
+    Advanced: Use OAuth/Okta Proxy <examples/api-server-auth-proxy>

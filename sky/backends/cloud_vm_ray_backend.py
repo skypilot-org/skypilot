@@ -8,7 +8,6 @@ import os
 import pathlib
 import re
 import shlex
-import shutil
 import signal
 import subprocess
 import sys
@@ -193,6 +192,7 @@ def _get_cluster_config_template(cloud):
         clouds.DO: 'do-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.SSH: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
@@ -1548,11 +1548,13 @@ class RetryingVmProvisioner(object):
                     controller_str = ('' if controller is None else
                                       f' {controller.value.name}')
                     if isinstance(to_provision.cloud, clouds.Kubernetes):
-                        # Omit the region name for Kubernetes.
+                        suffix = '.'
+                        if region.name.startswith('ssh-'):
+                            suffix = f' ({region.name.lstrip("ssh-")})'
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on '
-                                f'{to_provision.cloud}.'))
+                                f'{to_provision.cloud}{suffix}'))
                     else:
                         logger.info(
                             ux_utils.starting_message(
@@ -1725,8 +1727,17 @@ class RetryingVmProvisioner(object):
                 f'{requested_resources}. ')
         elif to_provision.region is not None:
             # For public clouds, provision.region is always set.
-            message = ('Failed to acquire resources in all zones in '
-                       f'{to_provision.region} for {requested_resources}. ')
+            if to_provision.cloud.is_same_cloud(clouds.SSH()):
+                message = ('Failed to acquire resources in SSH Node Pool '
+                           f'({to_provision.region.lstrip("ssh-")}) for '
+                           f'{requested_resources}. The SSH Node Pool may not '
+                           'have enough resources.')
+            elif to_provision.cloud.is_same_cloud(clouds.Kubernetes()):
+                message = ('Failed to acquire resources in context '
+                           f'{to_provision.region} for {requested_resources}. ')
+            else:
+                message = ('Failed to acquire resources in all zones in '
+                           f'{to_provision.region} for {requested_resources}. ')
         else:
             message = (f'Failed to acquire resources in {to_provision.cloud} '
                        f'for {requested_resources}. ')
@@ -2157,11 +2168,18 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                table = log_utils.create_table(['Resource', 'Reason'])
+                table = log_utils.create_table(['INFRA', 'RESOURCES', 'REASON'])
                 for (resource, exception) in resource_exceptions.items():
-                    table.add_row(
-                        [resources_utils.format_resource(resource), exception])
-                table.max_table_width = shutil.get_terminal_size().columns
+                    table.add_row([
+                        resource.infra.formatted_str(),
+                        resources_utils.format_resource(resource,
+                                                        simplify=True),
+                        exception
+                    ])
+                # Set the max width of REASON column to 80 to avoid the table
+                # being wrapped in a unreadable way.
+                # pylint: disable=protected-access
+                table._max_width = {'REASON': 80}
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
@@ -3340,33 +3358,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return returncode
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
-            if returncode == 255:
-                is_message_too_long = False
+
+            def _load_setup_log_and_match(match_str: str) -> bool:
                 try:
                     with open(os.path.expanduser(setup_log_path),
                               'r',
                               encoding='utf-8') as f:
-                        if 'too long' in f.read():
-                            is_message_too_long = True
+                        return match_str.lower() in f.read().lower()
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't crash the setup if we cannot read the log file.
                     # Instead, we should retry the setup with dumping the script
                     # to a file to be safe.
-                    logger.debug('Failed to read setup log file '
-                                 f'{setup_log_path}: {e}')
-                    is_message_too_long = True
-
-                if is_message_too_long:
-                    # If the setup script is too long, we retry it with dumping
-                    # the script to a file and running it with SSH. We use a
-                    # general length limit check before but it could be
-                    # inaccurate on some systems.
                     logger.debug(
-                        'Failed to run setup command inline due to '
-                        'command length limit. Dumping setup script to '
-                        'file and running it with SSH.')
-                    _dump_final_script(setup_script)
-                    returncode = _run_setup(setup_cmd)
+                        f'Failed to read setup log file {setup_log_path}: {e}')
+                    return True
+
+            if ((returncode == 255 and _load_setup_log_and_match('too long')) or
+                (returncode == 1 and
+                 _load_setup_log_and_match('request-uri too large'))):
+                # If the setup script is too long, we retry it with dumping
+                # the script to a file and running it with SSH. We use a
+                # general length limit check before but it could be
+                # inaccurate on some systems.
+                # When there is a cloudflare proxy in front of the remote, it
+                # could cause `414 Request-URI Too Large` error.
+                logger.debug('Failed to run setup command inline due to '
+                             'command length limit. Dumping setup script to '
+                             'file and running it with SSH.')
+                _dump_final_script(setup_script)
+                returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case
@@ -3482,18 +3502,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
-        if managed_job_dag is not None:
-            # Add the managed job to job queue database.
-            managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-            managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
-            # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, even if it needs to
-            # wait to be submitted.
-            # We cannot set the managed job to PENDING state in the job template
-            # (jobs-controller.yaml.j2), as it may need to wait for the run
-            # commands to be scheduled on the job controller in high-load cases.
-            job_submit_cmd += ' && ' + managed_job_code
+        def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
+            if managed_job_dag is not None:
+                # Add the managed job to job queue database.
+                managed_job_codegen = managed_jobs.ManagedJobCodeGen()
+                managed_job_code = managed_job_codegen.set_pending(
+                    job_id, managed_job_dag)
+                # Set the managed job to PENDING state to make sure that this
+                # managed job appears in the `sky jobs queue`, even if it needs
+                # to wait to be submitted.
+                # We cannot set the managed job to PENDING state in the job
+                # template (jobs-controller.yaml.j2), as it may need to wait for
+                # the run commands to be scheduled on the job controller in
+                # high-load cases.
+                job_submit_cmd += ' && ' + managed_job_code
+            return job_submit_cmd
+
+        job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3503,15 +3528,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # running a job. Necessitating calling `sky launch`.
         backend_utils.check_stale_runtime_on_remote(returncode, stderr,
                                                     handle.cluster_name)
-        if returncode == 255 and 'too long' in stdout + stderr:
+        output = stdout + stderr
+        if ((returncode == 255 and 'too long' in output.lower()) or
+            (returncode == 1 and 'request-uri too large' in output.lower())):
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
             # length limit check before but it could be inaccurate on some
             # systems.
+            # When there is a cloudflare proxy in front of the remote, it could
+            # cause `414 Request-URI Too Large` error.
             logger.debug('Failed to submit job due to command length limit. '
-                         'Dumping job to file and running it with SSH.')
+                         'Dumping job to file and running it with SSH. '
+                         f'Output: {output}')
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
+            job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,

@@ -9,8 +9,8 @@ from sky.resources import Resources
 
 
 # Set env var to test config file.
-@mock.patch.object(skypilot_config, '_dict', None)
-@mock.patch.object(skypilot_config, '_loaded_config_path', None)
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
 @mock.patch('sky.clouds.service_catalog.instance_type_exists',
             return_value=True)
 @mock.patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',

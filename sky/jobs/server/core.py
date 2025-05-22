@@ -81,8 +81,7 @@ def launch(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(
-        dag, use_mutated_config_in_current_request=False)
+    dag, mutated_user_config = admin_policy_utils.apply(dag)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -189,6 +188,9 @@ def launch(
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
                 remote_user_config_path=remote_user_config_path,
+                # TODO(aylei): the mutated config will not be updated
+                # afterwards without recreate the controller. Need to
+                # revisit this.
                 local_user_config=mutated_user_config,
             ),
         }
@@ -395,7 +397,7 @@ def queue(refresh: bool,
     if returncode != 0:
         logger.error(job_table_payload + stderr)
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
-                           f'{returncode}')
+                           f'{returncode}.\n{job_table_payload + stderr}')
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
 

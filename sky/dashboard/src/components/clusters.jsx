@@ -7,7 +7,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+  REFRESH_INTERVAL,
+} from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -75,7 +79,7 @@ export function Clusters() {
         </div>
       </div>
       <ClusterTable
-        refreshInterval={10000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         onOpenSSHModal={(cluster) => {
@@ -228,15 +232,15 @@ export function ClusterTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
+                onClick={() => requestSort('infra')}
               >
-                Resources{getSortDirection('resources_str')}
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
+                onClick={() => requestSort('resources_str')}
               >
-                Region{getSortDirection('region')}
+                Resources{getSortDirection('resources_str')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -277,8 +281,35 @@ export function ClusterTable({
                       </Link>
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
-                    <TableCell>{item.resources_str}</TableCell>
-                    <TableCell>{item.region}</TableCell>
+                    <TableCell>
+                      <NonCapitalizedTooltip
+                        content={item.full_infra || item.infra}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {item.cloud}
+                          </Link>
+                          {item.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                item.infra.substring(item.infra.indexOf('('))}
+                            </span>
+                          )}
+                        </span>
+                      </NonCapitalizedTooltip>
+                    </TableCell>
+                    <TableCell>
+                      <NonCapitalizedTooltip
+                        content={item.resources_str_full || item.resources_str}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>{item.resources_str}</span>
+                      </NonCapitalizedTooltip>
+                    </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
@@ -294,7 +325,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={7}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters
