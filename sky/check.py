@@ -69,7 +69,7 @@ def check_capabilities(
             payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
                            sky_cloud.CloudCapability]
         ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
-            str, Dict[str, str]]]]]:
+                str, Dict[str, str]]]]]:
             cloud_tuple, capability = payload
             _, cloud = cloud_tuple
             try:
@@ -138,8 +138,9 @@ def check_capabilities(
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
         if not combinations:
             echo(
-                _summary_message(enabled_clouds, cloud2ctx2text, current_workspace_name,
-                                 hide_workspace_str, disallowed_cloud_names))
+                _summary_message(enabled_clouds, cloud2ctx2text,
+                                 current_workspace_name, hide_workspace_str,
+                                 disallowed_cloud_names))
 
             return {}
 
@@ -152,13 +153,11 @@ def check_capabilities(
             check_results = subprocess_utils.run_in_parallel(
                 check_one_cloud_one_capability, combinations)
 
-        check_results_dict: Dict[Tuple[str, Union[sky_clouds.Cloud,
-                                                  ModuleType]],
-                                 List[Tuple[sky_cloud.CloudCapability, bool,
-                                            Optional[Union[str,
-                                                Dict[str,
-                                                    str]]]]]] = (
-                                                collections.defaultdict(list))
+        check_results_dict: Dict[
+            Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
+            List[Tuple[sky_cloud.CloudCapability, bool,
+                       Optional[Union[str, Dict[str, str]]]]]] = (
+                           collections.defaultdict(list))
         for combination, check_result in zip(combinations, check_results):
             if check_result is None:
                 continue
@@ -177,7 +176,8 @@ def check_capabilities(
             for cloud_tuple, check_result_list in sorted(
                     check_results_dict.items(), key=lambda item: item[0][0]):
                 _print_checked_cloud(echo, verbose, cloud_tuple,
-                                     check_result_list, cloud2ctx2text.get(cloud_tuple[0], {}))
+                                     check_result_list,
+                                     cloud2ctx2text.get(cloud_tuple[0], {}))
 
         # Determine the set of enabled clouds: (previously enabled clouds +
         # newly enabled clouds - newly disabled clouds) intersected with
@@ -220,8 +220,9 @@ def check_capabilities(
                 enabled_clouds_for_capability)
 
         echo(
-            _summary_message(enabled_clouds, cloud2ctx2text, current_workspace_name,
-                             hide_workspace_str, disallowed_cloud_names))
+            _summary_message(enabled_clouds, cloud2ctx2text,
+                             current_workspace_name, hide_workspace_str,
+                             disallowed_cloud_names))
 
         return enabled_clouds
 
@@ -571,7 +572,8 @@ def _summary_message(
         enabled_clouds_str = '\n  No infra to check/enabled.'
     else:
         enabled_clouds_str = '\n  ' + '\n  '.join([
-            _format_enabled_cloud(cloud, capabilities, cloud2ctx2text.get(cloud, None))
+            _format_enabled_cloud(cloud, capabilities,
+                                  cloud2ctx2text.get(cloud, None))
             for cloud, capabilities in sorted(enabled_clouds.items(),
                                               key=lambda item: item[0])
         ])

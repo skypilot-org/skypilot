@@ -1780,12 +1780,17 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra():
+def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     """Show the enabled infrastructure."""
-    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
+    workspace_str = ''
+    if show_workspace:
+        workspace_str = f' (workspace: {active_workspace!r})'
+    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
+             f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
+
     enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        clouds.CloudCapability.COMPUTE)
+        clouds.CloudCapability.COMPUTE, workspace=active_workspace)
     enabled_ssh_infras = []
     enabled_k8s_infras = []
     enabled_cloud_infras = []
@@ -1798,6 +1803,7 @@ def _show_enabled_infra():
         else:
             enabled_cloud_infras.extend(cloud_infra)
     all_infras = enabled_ssh_infras + enabled_k8s_infras + enabled_cloud_infras
+
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -1986,10 +1992,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         flag='ip' if ip else
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
-    else:
-        _show_enabled_infra()
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
+
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
     if refresh:
@@ -2012,9 +2015,20 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         else:
             normal_clusters.append(cluster_record)
 
+    all_workspaces = {
+        c.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        for c in cluster_records
+    }
+    active_workspace = skypilot_config.get_active_workspace()
+    all_workspaces.add(active_workspace)
+    show_workspace = len(all_workspaces) > 1
+    _show_enabled_infra(active_workspace, show_workspace)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+               f'{colorama.Style.RESET_ALL}')
+
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users, query_clusters)
+        normal_clusters + controllers, verbose, all_users, query_clusters, show_workspace)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:

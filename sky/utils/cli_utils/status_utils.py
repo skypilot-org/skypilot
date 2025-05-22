@@ -48,7 +48,8 @@ class StatusColumn:
 def show_status_table(cluster_records: List[_ClusterRecord],
                       show_all: bool,
                       show_user: bool,
-                      query_clusters: Optional[List[str]] = None) -> int:
+                      query_clusters: Optional[List[str]] = None,
+                      show_workspaces: bool = False) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -57,7 +58,6 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     """
     # TODO(zhwu): Update the information for autostop clusters.
     workspaces = set(record['workspace'] for record in cluster_records)
-    show_workspaces = len(workspaces) > 1 or show_all
 
     status_columns = [
         StatusColumn('NAME', _get_name),

@@ -532,7 +532,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     return msg
 
 
-def cancel_job_by_name(job_name: str, current_workspace: Optional[str] = None) -> str:
+def cancel_job_by_name(job_name: str,
+                       current_workspace: Optional[str] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
