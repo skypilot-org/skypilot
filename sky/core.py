@@ -472,8 +472,10 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
         message = ('Stopping spot instances is currently not supported on '
                    f'{resources.cloud}')
     else:
+        cloud_name = resources.cloud.display_name(
+        ) if resources.cloud else resources.cloud
         message = ('Stopping is currently not supported for '
-                   f'{resources.cloud.display_name()}')
+                   f'{cloud_name}')
     return message
 
 
@@ -1209,6 +1211,7 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup=cleanup,
         infra=infra,
     )
+
 
 def get_all_contexts() -> List[str]:
     """Get all available contexts from Kubernetes and SSH clouds.

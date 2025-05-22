@@ -1137,10 +1137,10 @@ def get_accelerator_label_key_values(
     #  support pollingthe clusters for autoscaling information, such as the
     #  node pools configured etc.
 
-    is_ssh_node_pool = context.startswith('ssh-')
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
     cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
     context_display_name = context.lstrip('ssh-') if (
-        is_ssh_node_pool) else context
+        context and is_ssh_node_pool) else context
 
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
@@ -1185,10 +1185,11 @@ def get_accelerator_label_key_values(
                 if not is_ssh_node_pool:
                     msg += (' Run `sky check ssh` to debug.')
                 else:
-                    msg += (' If this cluster has GPUs, please ensure GPU nodes have '
-                            'node labels of either of these formats: '
-                            f'{supported_formats}. Please refer to '
-                            'the documentation on how to set up node labels.')
+                    msg += (
+                        ' If this cluster has GPUs, please ensure GPU nodes have '
+                        'node labels of either of these formats: '
+                        f'{supported_formats}. Please refer to '
+                        'the documentation on how to set up node labels.')
                 msg += f'{suffix}'
                 raise exceptions.ResourcesUnavailableError(msg)
         else:

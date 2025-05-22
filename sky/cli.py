@@ -3809,7 +3809,8 @@ def show_gpus(
                 print_section_titles = (print_section_titles or
                                         print_section_titles_one)
                 k8s_messages += k8s_messages_one
-                yield '\n\n'
+                if print_section_titles_one:
+                    yield '\n\n'
             if stop_iter:
                 return
 
@@ -3893,7 +3894,8 @@ def show_gpus(
             stop_iter = stop_iter or stop_iter_one
             print_section_titles = (print_section_titles or
                                     print_section_titles_one)
-            yield '\n\n'
+            if print_section_titles_one:
+                yield '\n\n'
         if stop_iter:
             return
 

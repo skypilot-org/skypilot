@@ -167,7 +167,8 @@ async function getKubernetesContextGPUs() {
             console.error(
               '[infra.jsx] getKubernetesContextGPUs: Error parsing server error JSON:',
               jsonError,
-              'Original error text:', errorData.detail.error
+              'Original error text:',
+              errorData.detail.error
             );
           }
         }
@@ -175,7 +176,8 @@ async function getKubernetesContextGPUs() {
         console.error(
           '[infra.jsx] getKubernetesContextGPUs: Error parsing 500 error response JSON:',
           parseError,
-          'Raw text was:', rawText
+          'Raw text was:',
+          rawText
         );
       }
       return [];
@@ -290,7 +292,7 @@ async function getKubernetesGPUs() {
     const contextGPUAvailability = await getKubernetesContextGPUs();
     const gpuAvailabilityMap = new Map();
     if (contextGPUAvailability) {
-      contextGPUAvailability.forEach(cg => {
+      contextGPUAvailability.forEach((cg) => {
         gpuAvailabilityMap.set(cg[0], cg[1]); // cg[0] is context, cg[1] is gpusInCtx
       });
     }
@@ -342,9 +344,11 @@ async function getKubernetesGPUs() {
           const nodeData = nodeInfoForContext[nodeName];
           // Ensure accelerator_type, total, and free fields exist or provide defaults
           const acceleratorType = nodeData['accelerator_type'] || '-';
-          const totalAccelerators = nodeData['total']?.['accelerator_count'] ?? 0;
-          const freeAccelerators = nodeData['free']?.['accelerators_available'] ?? 0;
-          
+          const totalAccelerators =
+            nodeData['total']?.['accelerator_count'] ?? 0;
+          const freeAccelerators =
+            nodeData['free']?.['accelerators_available'] ?? 0;
+
           perNodeGPUs_dict[`${context}/${nodeName}`] = {
             node_name: nodeData['name'],
             gpu_name: acceleratorType,
@@ -356,36 +360,45 @@ async function getKubernetesGPUs() {
           // If this node provides a GPU type not found via GPU availability,
           // add it to perContextGPUsData with 0/0 counts if it's not already there.
           // This helps list CPU-only nodes or nodes with GPUs not picked by availability check.
-          if (acceleratorType !== '-' && !perContextGPUsData[context].some(gpu => gpu.gpu_name === acceleratorType)) {
-             if (!(acceleratorType in allGPUsSummary)) {
-                allGPUsSummary[acceleratorType] = {
-                    gpu_total: 0, // Initialize with 0, will be summed up if multiple nodes have this
-                    gpu_free: 0,
-                    gpu_name: acceleratorType,
-                };
+          if (
+            acceleratorType !== '-' &&
+            !perContextGPUsData[context].some(
+              (gpu) => gpu.gpu_name === acceleratorType
+            )
+          ) {
+            if (!(acceleratorType in allGPUsSummary)) {
+              allGPUsSummary[acceleratorType] = {
+                gpu_total: 0, // Initialize with 0, will be summed up if multiple nodes have this
+                gpu_free: 0,
+                gpu_name: acceleratorType,
+              };
             }
             // This ensures the GPU type is listed under the context, even if availability check missed it.
             // We can't reliably sum total/free here from nodeInfo alone for per-context summary
             // if the GPU availability check is the source of truth for those numbers.
             // However, we must ensure the accelerator type is listed.
-             const existingGpuEntry = perContextGPUsData[context].find(
-                (gpu) => gpu.gpu_name === acceleratorType
-             );
-             if (!existingGpuEntry) {
-                perContextGPUsData[context].push({
-                    gpu_name: acceleratorType,
-                    gpu_requestable_qty_per_node: '-', // Or derive if possible
-                    gpu_total: 0, // Placeholder, actual totals come from availability
-                    gpu_free: 0,  // Placeholder
-                    context: context,
-                });
-             }
+            const existingGpuEntry = perContextGPUsData[context].find(
+              (gpu) => gpu.gpu_name === acceleratorType
+            );
+            if (!existingGpuEntry) {
+              perContextGPUsData[context].push({
+                gpu_name: acceleratorType,
+                gpu_requestable_qty_per_node: '-', // Or derive if possible
+                gpu_total: 0, // Placeholder, actual totals come from availability
+                gpu_free: 0, // Placeholder
+                context: context,
+              });
+            }
           }
         }
       }
-       // If after processing nodes and GPU availability, a context has no GPUs listed
+      // If after processing nodes and GPU availability, a context has no GPUs listed
       // but nodes were found, ensure it appears in perContext data (e.g. for CPU only nodes)
-      if (perContextGPUsData[context].length === 0 && nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+      if (
+        perContextGPUsData[context].length === 0 &&
+        nodeInfoForContext &&
+        Object.keys(nodeInfoForContext).length > 0
+      ) {
         // This indicates a CPU-only context or one where GPU detection failed in availability check
         // but nodes are present. It's already handled by allAvailableContextNames.
         // We might add a placeholder if needed for UI consistency, but `allContextNames` should list it.
