@@ -291,11 +291,10 @@ def get_workspace_cloud(cloud: str,
     """Returns the workspace config."""
     if workspace is None:
         workspace = get_active_workspace()
-    clouds = _dict.get_nested(keys=(
+    clouds = get_nested(keys=(
         'workspaces',
         workspace,
-    ),
-                              default_value=None)
+    ), default_value=None)
     if clouds is None:
         return config_utils.Config()
     return clouds.get(cloud.lower(), config_utils.Config())
@@ -318,8 +317,8 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
     context_workspace = getattr(_active_workspace_context, 'workspace', None)
     if not force_user_workspace and context_workspace is not None:
         return context_workspace
-    return _dict.get_nested(keys=('active_workspace',),
-                            default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    return get_nested(keys=('active_workspace',),
+                      default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -448,7 +447,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _set_loaded_config(parse_config_file(config_path))
+    _set_loaded_config(parse_and_validate_config_file(config_path))
     _set_loaded_config_path(config_path)
 
 
