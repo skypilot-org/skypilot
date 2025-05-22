@@ -120,6 +120,8 @@ def up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+        config: a config to replace the current skypilot config for current
+            request, if any.
 
     Returns:
         service_name: str; The name of the service.  Same if passed in as an
@@ -343,10 +345,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(
-        task: 'sky.Task',
-        service_name: str,
-        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
+def update(task: 'sky.Task',
+           service_name: str,
+           mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+           config: Optional[config_utils.Config] = None) -> None:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -355,17 +357,16 @@ def update(
         task: sky.Task to update.
         service_name: Name of the service.
         mode: Update mode.
+        config: a config to replace the current skypilot config for current
+            request, if any.
     """
+    # TODO(cblmemo,zhwu,aylei): If a user sets a new skypilot_config or the
+    # AdminPolicy updates the skypilot_config, the update will not apply
+    # the config.
+    del config
+
     task.validate()
     serve_utils.validate_service_task(task)
-
-    # Always apply the policy again here, even though it might have been applied
-    # in the CLI. This is to ensure that we apply the policy to the final DAG
-    # and get the mutated config.
-    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
-    # will not apply the config.
-    dag, _ = admin_policy_utils.apply(task)
-    task = dag.tasks[0]
 
     assert task.service is not None
     if task.service.tls_credential is not None:
