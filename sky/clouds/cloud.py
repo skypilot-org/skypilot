@@ -906,6 +906,12 @@ class Cloud:
         return state
 
 
+class DummyCloud(Cloud):
+    """A dummy Cloud that has zero egress cost from/to for optimization
+    purpose."""
+    pass
+
+
 # === Helper functions ===
 def cloud_in_iterable(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
     """Returns whether the cloud is in the given cloud list."""

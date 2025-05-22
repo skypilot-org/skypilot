@@ -41,6 +41,7 @@ ALLOWED_TERMS = {
     'Samsung',
     'Google',
     'Amazon',
+    'Okta',
     # Framework names
     'vLLM',
     'TGI',
@@ -71,6 +72,7 @@ MULTI_WORD_TERMS = {
     'Samsung Cloud Platform',
     'Node Pool',
     'Node Pools',
+    'OAuth2 Proxy'
 }
 
 

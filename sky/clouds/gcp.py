@@ -18,6 +18,7 @@ from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.provision.gcp import constants
+from sky.provision.gcp import volume_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -443,6 +444,25 @@ class GCP(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='gcp')
 
+    @classmethod
+    def failover_disk_tier(
+        cls, instance_type: Optional[str],
+        disk_tier: Optional[resources_utils.DiskTier]
+    ) -> Optional[resources_utils.DiskTier]:
+        if (disk_tier is not None and
+                disk_tier != resources_utils.DiskTier.BEST):
+            return disk_tier
+        # Failover disk tier from ultra to low.
+        all_tiers = list(reversed(resources_utils.DiskTier))
+        start_index = all_tiers.index(GCP._translate_disk_tier(disk_tier))
+        while start_index < len(all_tiers):
+            disk_tier = all_tiers[start_index]
+            ok, _ = GCP.check_disk_tier(instance_type, disk_tier)
+            if ok:
+                return disk_tier
+            start_index += 1
+        assert False, 'Low disk tier should always be supported on GCP.'
+
     def make_deploy_resources_variables(
             self,
             resources: 'resources.Resources',
@@ -463,21 +483,6 @@ class GCP(clouds.Cloud):
         # issue when first booted.
         image_id = _DEFAULT_CPU_IMAGE_ID
 
-        def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
-            if (r.disk_tier is not None and
-                    r.disk_tier != resources_utils.DiskTier.BEST):
-                return r.disk_tier
-            # Failover disk tier from ultra to low.
-            all_tiers = list(reversed(resources_utils.DiskTier))
-            start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
-            while start_index < len(all_tiers):
-                disk_tier = all_tiers[start_index]
-                ok, _ = GCP.check_disk_tier(r.instance_type, disk_tier)
-                if ok:
-                    return disk_tier
-                start_index += 1
-            assert False, 'Low disk tier should always be supported on GCP.'
-
         r = resources
         # Find GPU spec, if any.
         resources_vars = {
@@ -491,7 +496,9 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
-            **GCP._get_disk_specs(r.instance_type, _failover_disk_tier()),
+            **GCP._get_disk_specs(
+                r.instance_type,
+                GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
         }
         enable_gpu_direct = skypilot_config.get_nested(
             ('gcp', 'enable_gpu_direct'),
@@ -593,6 +600,27 @@ class GCP(clouds.Cloud):
             'force_enable_external_ips'] = skypilot_config.get_nested(
                 ('gcp', 'force_enable_external_ips'), False)
 
+        volumes, device_mount_points = GCP._get_volumes_specs(
+            region, zones, r.instance_type, r.volumes, use_mig,
+            resources_vars['tpu_vm'])
+        resources_vars['volumes'] = volumes
+
+        resources_vars['user_data'] = None
+        user_data = ''
+        docker_run_options = []
+        if device_mount_points:
+            # Build the device_mounts array
+            device_mounts_array = []
+            for device_name, mount_point in device_mount_points.items():
+                device_mounts_array.append(f'["{device_name}"]="{mount_point}"')
+                docker_run_options.append(
+                    f'--volume={mount_point}:{mount_point}')
+            device_mounts_str = '\n        '.join(device_mounts_array)
+
+            # Format the template with the device_mounts array
+            user_data += constants.DISK_MOUNT_USER_DATA_TEMPLATE.format(
+                device_mounts=device_mounts_str)
+
         # Add gVNIC from config
         resources_vars['enable_gvnic'] = skypilot_config.get_nested(
             ('gcp', 'enable_gvnic'),
@@ -602,13 +630,16 @@ class GCP(clouds.Cloud):
             ('gcp', 'placement_policy'),
             None,
             override_configs=resources.cluster_config_overrides)
-        resources_vars['user_data'] = None
         if enable_gpu_direct:
-            resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
-            resources_vars[
-                'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+            user_data += constants.GPU_DIRECT_TCPX_USER_DATA
+            docker_run_options += constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
             if placement_policy is None:
                 placement_policy = constants.COMPACT_GROUP_PLACEMENT_POLICY
+        if user_data:
+            resources_vars[
+                'user_data'] = constants.BASH_SCRIPT_START + user_data
+        if docker_run_options:
+            resources_vars['docker_run_options'] = docker_run_options
         resources_vars['placement_policy'] = placement_policy
 
         return resources_vars
@@ -1125,6 +1156,17 @@ class GCP(clouds.Cloud):
         return tier2name[tier]
 
     @classmethod
+    def _get_data_disk_type(
+        cls,
+        instance_type: Optional[str],
+        disk_tier: Optional[resources_utils.DiskTier],
+    ) -> str:
+
+        tier = cls._translate_disk_tier(disk_tier)
+        tier2name = volume_utils.get_data_disk_tier_mapping(instance_type)
+        return tier2name[tier]
+
+    @classmethod
     def _get_disk_specs(
             cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
@@ -1135,8 +1177,101 @@ class GCP(clouds.Cloud):
                 specs['disk_tier'] == 'pd-extreme'):
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
-            specs['disk_iops'] = 20000
+            specs['disk_iops'] = constants.PD_EXTREME_IOPS
         return specs
+
+    @classmethod
+    def _get_volumes_specs(
+        cls,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        instance_type: Optional[str],
+        volumes: Optional[List[Dict[str, Any]]],
+        use_mig: bool,
+        tpu_vm: bool,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+        if volumes is None:
+            return [], {}
+
+        project_id = cls.get_project_id()
+
+        volume_utils.validate_instance_volumes(instance_type, volumes)
+
+        volumes_specs: List[Dict[str, Any]] = []
+        device_mount_points: Dict[str, str] = {}
+        ssd_index = 0
+        # TPU data disk index starts from 1, 0 is the boot disk
+        tpu_disk_index = 1
+        for i, volume in enumerate(volumes):
+            volume_spec = {
+                'device_name': f'sky-disk-{i}',
+                'auto_delete': volume['auto_delete'],
+            }
+            if ('name' in volume and volume['storage_type']
+                    == resources_utils.StorageType.NETWORK):
+                volume_info = volume_utils.check_volume_name_exist_in_region(
+                    project_id, region, use_mig, volume['name'])
+                if volume_info is not None:
+                    volume_utils.check_volume_zone_match(
+                        volume['name'], zones, volume_info['available_zones'])
+                    volume_spec['source'] = volume_info['selfLink']
+                    volume_spec[
+                        'attach_mode'] = volume_utils.translate_attach_mode(
+                            volume['attach_mode'])
+                    volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
+                    volumes_specs.append(volume_spec)
+                    device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
+                    if tpu_vm:
+                        # TPU VM does not support specifying the device name,
+                        # so we use the default device name.
+                        device_name = f'{constants.DEVICE_NAME_PREFIX}persistent-disk-{tpu_disk_index}'
+                        tpu_disk_index += 1
+                    device_mount_points[device_name] = volume['path']
+                    continue
+            if tpu_vm:
+                # TODO(hailong): support creating block storage for TPU VM
+                continue
+            if volume['storage_type'] == resources_utils.StorageType.INSTANCE:
+                device_name = f'{constants.INSTANCE_STORAGE_DEVICE_NAME_PREFIX}{ssd_index}'
+                ssd_index += 1
+                device_mount_points[device_name] = volume['path']
+
+                if instance_type is not None and instance_type in constants.SSD_AUTO_ATTACH_MACHINE_TYPES:
+                    # The instance storage will be attached automatically,
+                    # so we skip the following steps.
+                    continue
+
+                volume_spec['disk_tier'] = constants.INSTANCE_STORAGE_DISK_TYPE
+                volume_spec[
+                    'interface_type'] = constants.INSTANCE_STORAGE_INTERFACE_TYPE
+                volume_spec['storage_type'] = constants.INSTANCE_STORAGE_TYPE
+                # Disk size of instance storage is fixed to 375GB
+                volume_spec['disk_size'] = None
+                volume_spec['auto_delete'] = True
+            else:
+                # TODO(hailong): this should be fixed when move the
+                # disk creation out of the instance creation phase
+                if not use_mig:
+                    volume_spec['disk_name'] = volume['name']
+                device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
+                device_mount_points[device_name] = volume['path']
+
+                volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
+                if 'disk_size' in volume:
+                    volume_spec['disk_size'] = volume['disk_size']
+                else:
+                    volume_spec['disk_size'] = constants.DEFAULT_DISK_SIZE
+                disk_tier = cls.failover_disk_tier(instance_type,
+                                                   volume['disk_tier'])
+                volume_spec['disk_tier'] = cls._get_data_disk_type(
+                    instance_type, disk_tier)
+                if volume_spec['disk_tier'] == 'pd-extreme':
+                    # Only pd-extreme supports custom iops.
+                    # see https://cloud.google.com/compute/docs/disks#disk-types
+                    volume_spec['disk_iops'] = constants.PD_EXTREME_IOPS
+            volumes_specs.append(volume_spec)
+
+        return volumes_specs, device_mount_points
 
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:

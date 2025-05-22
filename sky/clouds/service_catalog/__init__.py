@@ -9,6 +9,8 @@ from sky.clouds.service_catalog.constants import ALL_CLOUDS
 from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
+from sky.clouds.service_catalog.constants import (
+    HOSTED_CATALOG_DIR_URL_S3_MIRROR)
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
@@ -383,6 +385,7 @@ __all__ = [
     # Constants
     'ALL_CLOUDS',
     'HOSTED_CATALOG_DIR_URL',
+    'HOSTED_CATALOG_DIR_URL_S3_MIRROR',
     'CATALOG_SCHEMA_VERSION',
     'CATALOG_DIR',
 ]

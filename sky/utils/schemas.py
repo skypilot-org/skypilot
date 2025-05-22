@@ -188,6 +188,35 @@ def _get_single_resources_schema():
                     }
                 }],
             },
+            'volumes': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'disk_size': {
+                            'type': 'integer',
+                        },
+                        'disk_tier': {
+                            'type': 'string',
+                        },
+                        'path': {
+                            'type': 'string',
+                        },
+                        'auto_delete': {
+                            'type': 'boolean',
+                        },
+                        'storage_type': {
+                            'type': 'string',
+                        },
+                        'name': {
+                            'type': 'string',
+                        },
+                        'attach_mode': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
             'disk_size': {
                 'type': 'integer',
             },
@@ -371,6 +400,23 @@ def get_storage_schema():
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
+            },
+            'config': {
+                'type': 'object',
+                'properties': {
+                    'disk_size': {
+                        'type': 'integer',
+                    },
+                    'disk_tier': {
+                        'type': 'string',
+                    },
+                    'storage_type': {
+                        'type': 'string',
+                    },
+                    'attach_mode': {
+                        'type': 'string',
+                    },
+                },
             },
             '_is_sky_managed': {
                 'type': 'boolean',
@@ -724,7 +770,7 @@ _LABELS_SCHEMA = {
     }
 }
 
-_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
             'type': 'string'
@@ -848,7 +894,7 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'security_group_name':
-                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -1106,11 +1152,22 @@ def get_config_schema():
         }
     }
 
+    provision_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'ssh_timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update({
-                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
-            })
+            config['properties'].update(
+                {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
@@ -1128,6 +1185,7 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'provision': provision_configs,
             **cloud_configs,
         },
     }

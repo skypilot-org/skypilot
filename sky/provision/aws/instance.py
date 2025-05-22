@@ -836,7 +836,23 @@ def open_ports(
 
     # For the case when every new ports is already opened.
     if ip_permissions:
-        sg.authorize_ingress(IpPermissions=ip_permissions)
+        # Filter out any permissions that already exist in the security group
+        existing_permissions = set()
+        for rule in sg.ip_permissions:
+            if rule['IpProtocol'] == 'tcp':
+                for ip_range in rule.get('IpRanges', []):
+                    if ip_range.get('CidrIp') == '0.0.0.0/0':
+                        existing_permissions.add(
+                            (rule['FromPort'], rule['ToPort']))
+
+        # Remove any permissions that already exist
+        filtered_permissions = []
+        for perm in ip_permissions:
+            if (perm['FromPort'], perm['ToPort']) not in existing_permissions:
+                filtered_permissions.append(perm)
+
+        if filtered_permissions:
+            sg.authorize_ingress(IpPermissions=filtered_permissions)
 
 
 def cleanup_ports(
