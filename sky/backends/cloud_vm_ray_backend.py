@@ -4378,7 +4378,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle.launched_resources.assert_launchable())
                 cloud = launched_resources.cloud
                 config = common_utils.read_yaml(handle.cluster_yaml)
-                resource_cleaned_up = True
+                ports_cleaned_up = False
+                custom_multi_network_cleaned_up = False
                 try:
                     cloud.check_features_are_supported(
                         launched_resources,
@@ -4387,12 +4388,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 cluster_name_on_cloud,
                                                 handle.launched_resources.ports,
                                                 config['provider'])
+                    ports_cleaned_up = True
                 except exceptions.NotSupportedError:
                     pass
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
                 except Exception as e:  # pylint: disable=broad-except
-                    resource_cleaned_up = False
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
                         logger.warning(
@@ -4412,10 +4413,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_lib.cleanup_custom_multi_network(
                         repr(cloud), cluster_name_on_cloud, config['provider'],
                         failover)
+                    custom_multi_network_cleaned_up = True
                 except exceptions.NotSupportedError:
                     pass
                 except Exception as e:  # pylint: disable=broad-except
-                    resource_cleaned_up = False
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
                         logger.warning(
@@ -4424,7 +4425,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     else:
                         raise
 
-                if resource_cleaned_up:
+                if ports_cleaned_up and custom_multi_network_cleaned_up:
                     try:
                         self.remove_cluster_config(handle)
                     except Exception as e:  # pylint: disable=broad-except
