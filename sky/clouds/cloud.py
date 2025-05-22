@@ -889,7 +889,8 @@ class Cloud:
 
 
 class DummyCloud(Cloud):
-    """A dummy Cloud that has zero egress cost from/to."""
+    """A dummy Cloud that has zero egress cost from/to for optimization
+    purpose."""
     pass
 
 

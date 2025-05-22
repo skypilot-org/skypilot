@@ -1298,8 +1298,10 @@ class Resources:
                 '', '', None, specific_reservations)
 
         assert (self.cloud is not None and self.instance_type is not None and
-                self.region
-                is not None), ('Cloud, instance type, region must be specified')
+                self.region is not None), (
+                    f'Cloud, instance type, region must be specified. '
+                    f'Resources={self}, cloud={self.cloud}, '
+                    f'instance_type={self.instance_type}, region={self.region}')
         return self.cloud.get_reservations_available_resources(
             self.instance_type, self.region, self.zone, specific_reservations)
 
