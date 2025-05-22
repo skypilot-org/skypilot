@@ -531,3 +531,10 @@ class UploadZipFileResponse(pydantic.BaseModel):
 class EnabledCloudsRequestBody(RequestBody):
     """The request body for the enabled clouds endpoint."""
     workspace: Optional[str] = None
+
+
+class UpdateWorkspaceBody(RequestBody):
+    """The request body for the update workspace endpoint."""
+    workspace_config: Optional[Dict[str, Any]] = None
+
+
