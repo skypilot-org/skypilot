@@ -50,11 +50,6 @@ ALLOWED_TERMS = {
     'Qwen',
     # Area
     'Europe',
-    # SSH Node Pools components
-    'SSH',
-    'Node',
-    'Pools',
-    'Dashboard',
 }
 
 # Add multi-word terms that should be treated as a single entity
