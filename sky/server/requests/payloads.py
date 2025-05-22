@@ -447,6 +447,7 @@ class RealtimeGpuAvailabilityRequestBody(RequestBody):
     context: Optional[str] = None
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
+    is_ssh: Optional[bool] = None
 
 
 class KubernetesNodeInfoRequestBody(RequestBody):
@@ -484,6 +485,12 @@ class LocalUpBody(RequestBody):
     cleanup: bool = False
     context_name: Optional[str] = None
     password: Optional[str] = None
+
+
+class SSHUpBody(RequestBody):
+    """The request body for the SSH up/down endpoints."""
+    infra: Optional[str] = None
+    cleanup: bool = False
 
 
 class ServeTerminateReplicaBody(RequestBody):

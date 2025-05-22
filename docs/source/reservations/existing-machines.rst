@@ -3,15 +3,11 @@
 Deploy SkyPilot on existing machines
 ====================================
 
-This guide will help you deploy SkyPilot on your existing machines — whether they are on-premises or reserved instances on a cloud provider.
+SkyPilot supports bringing your existing machines, whether they are on-premises or reserved instances on a cloud provider.
 
-
-.. tip::
-
-    To run SkyPilot on your local machine, use ``sky local up`` to :ref:`deploy a kubernetes cluster <kubernetes-setup-kind>` with `kind <https://kind.sigs.k8s.io/>`_.
-
-**Given a list of IP addresses and SSH credentials,**
-SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
+Given **a list of IPs and SSH credentials,** use ``sky ssh up`` to turn
+them into a **SSH Node Pool**. It becomes an infra choice on which you can
+launch clusters, jobs, or services, just like a regular cloud provider.
 
 ..
    Figure v1 (for deploy.sh): https://docs.google.com/drawings/d/1Jp1tTu1kxF-bIrS6LRMqoJ1dnxlFvn-iobVsXElXfAg/edit?usp=sharing
@@ -24,7 +20,7 @@ SkyPilot will install necessary dependencies on the remote machines and configur
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-light
 
-   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
+   Given a list of IP addresses and SSH keys, ``sky ssh up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
 
 .. figure:: ../images/sky-existing-infra-workflow-dark.png
    :width: 85%
@@ -32,189 +28,188 @@ SkyPilot will install necessary dependencies on the remote machines and configur
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-dark
 
-   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
+   Given a list of IP addresses and SSH keys, ``sky ssh up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
 
-
-.. note::
-
-    Behind the scenes, SkyPilot deploys a lightweight Kubernetes cluster on the remote machines using `k3s <https://k3s.io/>`_.
-
-    **Note that no Kubernetes knowledge is required for running this guide.** SkyPilot abstracts away the complexity of Kubernetes and provides a simple interface to run your jobs and services.
-
-Prerequisites
+Quickstart
 -------------
 
-**Local machine (typically your laptop):**
-
-* `kubectl <https://kubernetes.io/docs/tasks/tools/install-kubectl/>`_
-* `SkyPilot <https://docs.skypilot.co/en/latest/getting-started/installation.html>`_
-
-**Remote machines (your cluster, optionally with GPUs):**
-
-* Debian-based OS (tested on Debian 11)
-* SSH access from local machine to all remote machines with key-based authentication
-* It's recommended to use passwordless sudo for all remote machines. If passwordless sudo cannot be used, all machines must use the same password for the SSH username to use sudo.
-* All machines must use the same SSH key and username
-* All machines must have network access to each other
-* Port 6443 must be accessible on at least one node from your local machine
-
-Deploying SkyPilot
-------------------
-
-1. Create a file ``ips.txt`` with the IP addresses of your machines with one IP per line.
-   The first node will be used as the head node — this node must have port 6443 accessible from your local machine.
-
-   Here is an example ``ips.txt`` file:
-
-   .. code-block:: text
-
-      192.168.1.1
-      192.168.1.2
-      192.168.1.3
-
-   In this example, the first node (``192.168.1.1``) has port 6443 open and will be used as the head node.
-
-2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH key as arguments:
-
-   .. code-block:: bash
-
-      IP_FILE=ips.txt
-      SSH_USER=username
-      SSH_KEY=path/to/ssh/key
-      CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
-      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
-
-   .. tip::
-      If your cluster does not have passwordless sudo, specify the sudo password with the ``--password`` option:
-
-      .. code-block:: bash
-
-         PASSWORD=password
-         sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME --password $PASSWORD
-
-   SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
-
-   Example output of ``sky local up``:
-
-   .. code-block:: console
-
-      $ sky local up --ips ips.txt --ssh-user gcpuser --ssh-key-path ~/.ssh/id_rsa --context-name mycluster
-      To view detailed progress: tail -n100 -f ~/sky_logs/sky-2024-09-23-18-53-14-165534/local_up.log
-      ✔ K3s successfully deployed on head node.
-      ✔ K3s successfully deployed on worker node.
-      ✔ kubectl configured for the remote cluster.
-      ✔ Remote k3s is running.
-      ✔ Nvidia GPU Operator installed successfully.
-      Cluster deployment done. You can now run tasks on this cluster.
-      E.g., run a task with: sky launch --infra kubernetes -- echo hello world.
-      🎉 Remote cluster deployed successfully.
-
-
-4. To verify that the cluster is running, run:
-
-   .. code-block:: bash
-
-      sky check kubernetes
-
-   You can now use SkyPilot to launch your :ref:`development clusters <dev-cluster>` and :ref:`training jobs <ai-training>` on your own infrastructure.
-
-   .. code-block:: console
-
-      $ sky show-gpus --infra k8s
-      Kubernetes GPUs
-      GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
-      L4    1, 2, 4                   12 of 12
-      H100  1, 2, 4, 8                16 of 16
-
-      Kubernetes per node GPU availability
-      NODE                       GPU       UTILIZATION
-      my-cluster-0               L4        4 of 4
-      my-cluster-1               L4        4 of 4
-      my-cluster-2               L4        2 of 2
-      my-cluster-3               L4        2 of 2
-      my-cluster-4               H100      8 of 8
-      my-cluster-5               H100      8 of 8
-
-      $ sky launch --infra k8s --gpus H100:1 -- nvidia-smi
-
-   .. tip::
-
-      To enable shared access to a Kubernetes cluster, you can deploy a :ref:`SkyPilot API server <sky-api-server>`.
-
-What happens behind the scenes?
--------------------------------
-
-When you run ``sky local up``, SkyPilot runs the following operations:
-
-1. Install and run `k3s <https://k3s.io/>`_ Kubernetes distribution as a systemd service on the remote machines.
-2. [If GPUs are present] Install `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/index.html>`_ on the newly provisioned k3s cluster. Note that this step does not modify your local nvidia driver/cuda installation, and only runs inside the cluster.
-3. Expose the Kubernetes API server on the head node over port 6443. API calls are on this port are secured with a key pair generated by the cluster.
-4. Configure ``kubectl`` on your local machine to connect to the remote cluster.
-
-
-Cleanup
--------
-
-To clean up all state created by SkyPilot on your machines, use the ``--cleanup`` flag:
-
-.. code-block:: bash
-
-    IP_FILE=ips.txt
-    SSH_USER=username
-    SSH_KEY=path/to/ssh/key
-    sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --cleanup
-
-.. tip::
-   If your cluster does not have passwordless sudo, specify the sudo password with the ``--password`` option:
-
-   .. code-block:: bash
-
-      PASSWORD=password
-      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --password $PASSWORD --cleanup
-
-This will stop all Kubernetes services on the remote machines.
-
-
-Setting up multiple clusters
-----------------------------
-
-You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster:
-
-.. code-block:: bash
-
-    # Set up first cluster and save the kubeconfig
-    sky local up --ips cluster1-ips.txt --ssh-user user1 --ssh-key-path key1.pem --context-name cluster1
-    # Set up second cluster
-    sky local up --ips cluster2-ips.txt --ssh-user user2 --ssh-key-path key2.pem --context-name cluster2
-
-
-You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi-kubernetes>` by adding them to ``allowed_contexts`` in your ``~/.sky/config.yaml`` file:
+Write to ``~/.sky/ssh_node_pools.yaml`` on the host of your API server (local or remote):
 
 .. code-block:: yaml
 
-   # ~/.sky/config.yaml
-    allowed_contexts:
-      - cluster1-ctx
-      - cluster2-ctx
+   # ~/.sky/ssh_node_pools.yaml
 
+   my-cluster:  # Give the pool a name.
+      hosts:
+        - 1.2.3.4  # Ensure `ssh 1.2.3.4` works.
+        - 1.2.3.5
+
+   my-box:
+     hosts:
+       - hostname_in_ssh_config  # Ensure `ssh hostname_in_ssh_config` works.
+
+Run ``sky ssh up`` to deploy SkyPilot on the machines:
+
+.. code-block:: console
+
+    $ sky ssh up
+
+Check that the SSH Node Pools are set up :
+
+.. code-block:: console
+
+    $ sky check ssh
+
+    ...
+    🎉 Enabled infra 🎉
+      SSH [compute]
+         SSH Node Pools:
+         ├── my-cluster
+         └── my-box
+
+Enabled SSH Node Pools are listed in ``sky status``:
+
+.. code-block:: console
+
+    $ sky status
+
+    Enabled Infra: ssh/my-cluster, ssh/my-box, ...
+    ...
+
+Launch compute on enabled SSH Node Pools, using ``--infra ssh/<node_pool_name>``:
+
+.. code-block:: console
+
+    $ sky launch --infra ssh/my-cluster --gpus H100:1 -- nvidia-smi
+    $ sky launch --infra ssh/my-box -- echo "Hello, world!"
+
+Equivalently, use ``resources.infra: ssh/<node_pool_name>`` in a task YAML:
+
+.. code-block:: yaml
+
+    resources:
+      infra: ssh/my-cluster
+
+See more customization options and details about SSH Node Pools in the rest of this guide.
+
+Defining SSH Node Pools
+-----------------------
+
+In ``~/.sky/ssh_node_pools.yaml``, you can define multiple SSH Node Pools, each with a list of IPs and SSH credentials.
+
+If passwordless SSH is enabled, you can simply list the IPs or hostnames:
+
+.. code-block:: yaml
+
+   # ~/.sky/ssh_node_pools.yaml
+
+   my-cluster:
+      hosts:
+        - 1.2.3.4
+        - another-node
+
+Alternatively, you can customize SSH options, including:
+
+- SSH user
+- SSH private key
+- SSH password (if passwordless sudo is not enabled)
+
+Example:
+
+.. code-block:: yaml
+
+   # ~/.sky/ssh_node_pools.yaml
+
+   my-cluster:
+      # Defaults for all nodes in this pool (optional).
+      user: root
+      identity_file: ~/.ssh/id_rsa
+      password:  # Optional; if passwordless sudo is not enabled.
+
+      # Override defaults for a specific node.
+      hosts:
+        - ip: 1.2.3.4
+          user: alice
+          identity_file: alice-key
+          password: alice-password
+        - ip: 5.6.7.8
+          user: bob
+          identity_file: bob-key
+          password: bob-password
+
+The ``~/.sky/ssh_node_pools.yaml`` file is stored on the server side, not client side:
+
+- If you use a :ref:`local API server <sky-api-server-local>`, set ``~/.sky/ssh_node_pools.yaml`` on your local machine.
+- If you use a :ref:`remote API server <sky-api-server-remote>`, write the file on the remote API server host. This is most likely accessible by admins only.
+
+Observability of SSH Node Pools
+-------------------------------
+
+Open ``sky dashboard`` and click on the ``Infra`` tab to see an overview of all SSH Node Pools:
+
+.. image:: ../images/ssh-node-pools/infra.png
+   :width: 85%
+   :align: center
+   :alt: SSH Node Pools in Dashboard
+
+Click on an SSH Node Pool to see more details, including per-node GPU availability:
+
+.. image:: ../images/ssh-node-pools/pool-details.png
+   :width: 85%
+   :align: center
+   :alt: SSH Node Pool details in Dashboard
+
+To use the CLI to see what GPUs are available, run:
+
+.. code-block:: console
+
+   $ sky show-gpus --infra ssh
+   $ sky show-gpus --infra ssh/my-cluster
+
+
+Using multiple SSH Node Pools
+-----------------------------
+
+You can set up multiple SSH Node Pools as shown above.
+
+Once set up, you can launch compute on either a specific SSH Node Pool, or let
+SkyPilot automatically select one with available resources.
 
 .. code-block:: bash
 
     # Run on cluster1
-    sky launch --infra k8s/cluster1-ctx -- echo "Running on cluster 1"
+    sky launch --infra ssh/cluster1 -- echo "Running on cluster 1"
 
     # Run on cluster2
-    sky launch --infra k8s/cluster2-ctx -- echo "Running on cluster 2"
+    sky launch --infra ssh/cluster2 -- echo "Running on cluster 2"
 
-    # Let SkyPilot automatically select the cluster with available resources
-    sky launch --infra k8s -- echo "Running on SkyPilot selected cluster"
+    # Let SkyPilot automatically select the cluster with available resources.
+    sky launch --infra ssh -- echo "Running on SkyPilot selected cluster"
 
-You can view the available clusters and GPUs using:
+Cleanup
+-------
 
-.. code-block:: bash
+To remove all state created by SkyPilot on your machines, run ``sky ssh down``.
 
-    # List GPUs on cluster1
-    sky show-gpus --infra k8s/cluster1-ctx
+.. code-block:: console
 
-    # List GPUs on cluster2
-    sky show-gpus --infra k8s/cluster2-ctx
+   $ sky ssh down
+
+This removes the SkyPilot runtime on your machines and disables the SSH Node Pools.
+
+
+Details: Prerequisites
+----------------------
+
+**SkyPilot API server host:**
+
+* `kubectl <https://kubernetes.io/docs/tasks/tools/install-kubectl/>`_
+* `SkyPilot <https://docs.skypilot.co/en/latest/getting-started/installation.html>`_
+
+**Remote machines:**
+
+* Debian-based OS (tested on Debian 11)
+* SSH access from SkyPilot API server host to all remote machines
+* All machines in a SSH Node Pool must have network access to each other
+
+

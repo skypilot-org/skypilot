@@ -828,6 +828,12 @@ OR
       store: gcs
       mode: MOUNT
 
+
+.. _yaml-spec-volumes:
+
+Volumes
++++++++
+
 SkyPilot also supports mounting network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
 
 To mount an existing volume:
