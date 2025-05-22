@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import requests
 
+from sky import authentication
 from sky import sky_logging
 from sky.utils import status_lib
 
@@ -143,31 +144,8 @@ class HyperbolicClient:
     def launch_instance(self, gpu_model: str, gpu_count: int,
                         name: str) -> Tuple[str, str]:
         """Launch a new instance with the specified configuration."""
-        # Read SSH public key with fallback options
-        ssh_key_paths = [
-            os.path.expanduser('~/.ssh/id_rsa.pub'),
-            os.path.expanduser('~/.ssh/id_ed25519.pub'),
-            os.path.expanduser('~/.ssh/id_ecdsa.pub'),
-        ]
-
-        ssh_public_key = None
-        for key_path in ssh_key_paths:
-            if os.path.exists(key_path):
-                try:
-                    with open(key_path, 'r', encoding='utf-8') as f:
-                        ssh_public_key = f.read().strip()
-                    logger.info(f'Using SSH key from {key_path}')
-                    break
-                except (IOError, OSError) as e:
-                    logger.warning(
-                        f'Failed to read SSH key from {key_path}: {e}')
-                    continue
-
-        if not ssh_public_key:
-            raise RuntimeError('No SSH public key found. Refer '
-                               'https://docs.hyperbolic.xyz/docs/renting-faq')
-
-        payload = {
+        # Initialize config with basic instance info
+        config = {
             'gpuModel': gpu_model,
             'gpuCount': str(gpu_count),
             'userMetadata': {
@@ -177,9 +155,12 @@ class HyperbolicClient:
                 }
             }
         }
+
+        config = authentication.setup_hyperbolic_authentication(config)
+
         endpoint = '/v2/marketplace/instances/create-cheapest'
         try:
-            response = self._make_request('POST', endpoint, payload=payload)
+            response = self._make_request('POST', endpoint, payload=config)
             logger.debug(f'Launch response: {json.dumps(response, indent=2)}')
 
             instance_id = response.get('instanceName')
