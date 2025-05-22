@@ -1295,7 +1295,10 @@ class Resources:
 
         if isinstance(self.cloud, clouds.DummyCloud):
             return self.cloud.get_reservations_available_resources(
-                '', '', None, specific_reservations)
+                instance_type='',
+                region='',
+                zone=None,
+                specific_reservations=specific_reservations)
 
         assert (self.cloud is not None and self.instance_type is not None and
                 self.region is not None), (
