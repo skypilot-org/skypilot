@@ -219,6 +219,11 @@ def launch(
             # Always launch the controller in the default workspace.
             with skypilot_config.with_active_workspace(
                     skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+                # TODO(zhwu): the buckets need to be correctly handled for
+                # a specific workspace. For example, if a job is launched in
+                # workspace A, but the controller is in workspace B, the
+                # intermediate bucket and newly created bucket should be in
+                # workspace A.
                 return execution.launch(task=controller_task,
                                         cluster_name=controller_name,
                                         stream_logs=stream_logs,
