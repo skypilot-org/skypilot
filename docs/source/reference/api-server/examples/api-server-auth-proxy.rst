@@ -99,8 +99,6 @@ Set up the environment variables for your API server deployment. ``NAMESPACE`` a
 
     NAMESPACE=skypilot # TODO: change to your installed namespace
     RELEASE_NAME=skypilot # TODO: change to your installed release name
-    VERSION=1.0.0-dev20250410 # TODO: change to the version you want to upgrade to
-    IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
 Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-oauth2-proxy`` deployment. Replace ``<CLIENT ID>`` and ``<CLIENT SECRET>`` with the values from the Okta admin console above, and ``<OKTA URL>`` with your Okta login URL.
 
@@ -112,8 +110,6 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
       --set ingress.oauth2-proxy.oidc-issuer-url=https://<OKTA URL>.okta.com \
       --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
       --set ingress.oauth2-proxy.client-secret=<CLIENT SECRET>
-
-If your API server endpoint only has HTTP, not HTTPS, add ``--set ingress.oauth2-proxy.use-http=true``.
 
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to Okta to sign in.
 
