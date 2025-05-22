@@ -1137,6 +1137,14 @@ def get_accelerator_label_key_values(
     #  support pollingthe clusters for autoscaling information, such as the
     #  node pools configured etc.
 
+    is_ssh_node_pool = context.startswith('ssh-')
+    if is_ssh_node_pool:
+        cloud_name = 'SSH'
+    else:
+        cloud_name = 'Kubernetes cluster'
+    context_display_name = context.lstrip('ssh-') if (
+        is_ssh_node_pool) else context
+
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
         # If autoscaler is set in config.yaml, override the label key and value
@@ -1176,13 +1184,16 @@ def get_accelerator_label_key_values(
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
-                raise exceptions.ResourcesUnavailableError(
-                    'Could not detect GPU labels in Kubernetes cluster. '
+                msg = (
+                    f'Could not detect GPU labels in {cloud_name}. '
                     'If this cluster has GPUs, please ensure GPU nodes have '
                     'node labels of either of these formats: '
                     f'{supported_formats}. Please refer to '
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
+                msg += 'Please refer to the documentation on how to set up node labels.'
+                msg += f'{suffix}'
+                raise exceptions.ResourcesUnavailableError(msg)
         else:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
