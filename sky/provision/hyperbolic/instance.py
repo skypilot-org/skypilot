@@ -10,7 +10,7 @@ from sky.utils import status_lib
 PROVIDER_NAME = 'hyperbolic'
 POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
-TIMEOUT = 180
+TIMEOUT = 300
 
 logger = sky_logging.init_logger(__name__)
 
@@ -39,7 +39,7 @@ def _filter_instances(cluster_name_on_cloud: str,
                     instance_status not in status_filters):
                 logger.debug(
                     f'Skipping instance {instance_id} '
-                    f'- status {instance_status}not in {status_filters}')
+                    f'- status {instance_status} not in {status_filters}')
                 continue
 
             filtered_instances[instance_id] = instance
@@ -167,41 +167,29 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'RTX3070': 'RTX-3070',
                 'RTX3060': 'RTX-3060',
             }
+            gpu_model = gpu_model_map.get(gpu_model, gpu_model)
+            logger.info(f'Mapped GPU model to {gpu_model}')
 
-            if gpu_model in gpu_model_map:
-                gpu_model = gpu_model_map[gpu_model]
-                logger.debug(f'Mapped GPU model to {gpu_model}')
-            else:
-                # If not in map, assume it's already in the correct format
-                logger.warning(
-                    f'GPU model {gpu_model} not found in mapping, using as-is')
+            # Launch instance
+            instance_id, ssh_command = utils.launch_instance(
+                gpu_model, gpu_count, cluster_name_on_cloud)
+            logger.info(f'Launched instance {instance_id} with SSH command: '
+                        f'{ssh_command}')
+            created_instance_ids = [instance_id]
 
-            # Validate CPU and memory values
-            cpu_count = int(parts[2])
-            memory_gb = int(parts[3])
-            logger.debug(
-                f'Parsed CPU count: {cpu_count}, memory: {memory_gb}GB')
-
-            if cpu_count < 1 or memory_gb < 1:
-                raise ValueError(f'Invalid CPU count ({cpu_count}) '
-                                 f'or memory ({memory_gb}GB). '
-                                 'Both must be positive integers.')
+            # Wait for instance to be ready
+            if not utils.wait_for_instance(
+                    instance_id, utils.HyperbolicInstanceStatus.RUNNING.value):
+                raise RuntimeError(
+                    f'Instance {instance_id} failed to reach RUNNING state')
 
         except ValueError as e:
-            logger.error(
-                f'Failed to parse instance type {instance_type}: {str(e)}')
-            raise RuntimeError(
-                f'Failed to parse instance type {instance_type}: {str(e)}'
-            ) from e
+            logger.error(f'Failed to parse instance type: {e}')
+            raise RuntimeError(str(e)) from e
+        except Exception as e:
+            logger.error(f'Failed to launch instance: {e}')
+            raise RuntimeError(str(e)) from e
 
-        # Launch instance with GPU configuration and metadata
-        logger.info(
-            f'Launching instance with GPU model {gpu_model}, count {gpu_count}')
-        instance_id = utils.launch_instance(gpu_model=gpu_model,
-                                            gpu_count=gpu_count,
-                                            name=cluster_name_on_cloud)
-        logger.info(f'Successfully launched instance {instance_id}')
-        created_instance_ids = [instance_id]
     except Exception as e:
         logger.error(f'Unexpected error: {e}')
         raise
@@ -239,19 +227,44 @@ def terminate_instances(
     provider_config: Optional[dict] = None,
     worker_only: bool = False,
 ) -> None:
+    """Terminate all instances in the cluster."""
     del provider_config, worker_only  # unused
     logger.info(
         f'Terminating all instances for cluster {cluster_name_on_cloud}')
+
+    # First check if instances exist
     instances = _filter_instances(cluster_name_on_cloud, None)
     if not instances:
         logger.info(f'No instances found for cluster {cluster_name_on_cloud}')
         return
+
+    # Terminate each instance
     for instance_id in instances:
         try:
             utils.terminate_instance(instance_id)
             logger.info(f'Terminated instance {instance_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
+            continue
+
+    # Wait for instances to be terminated
+    start_time = time.time()
+    while True:
+        if time.time() - start_time > TIMEOUT:
+            logger.error(
+                f'Timed out after {TIMEOUT}s waiting for instances to terminate'
+            )
+            break
+
+        instances = _filter_instances(
+            cluster_name_on_cloud,
+            [utils.HyperbolicInstanceStatus.TERMINATED.value])
+        if not instances:
+            logger.info('All instances terminated successfully')
+            break
+
+        logger.info('Waiting for instances to terminate...')
+        time.sleep(POLL_INTERVAL)
 
 
 def get_cluster_info(
@@ -269,10 +282,15 @@ def get_cluster_info(
         # Extract hostname and port from sshCommand
         ssh_command = instance_info.get('sshCommand', '')
         if ssh_command:
-            # Format: ssh ubuntu@hostname -p port
+            # Format: ssh user@hostname -p port
             parts = ssh_command.split()
             if len(parts) >= 4:
-                hostname = parts[1].split('@')[1]
+                user_host = parts[1]  # user@hostname
+                if '@' in user_host:
+                    ssh_user = user_host.split('@')[0]
+                    hostname = user_host.split('@')[1]
+                else:
+                    hostname = user_host
                 port = int(parts[3])
             else:
                 hostname = instance_id
@@ -298,6 +316,7 @@ def get_cluster_info(
         head_instance_id=head_instance_id,
         provider_name=PROVIDER_NAME,
         provider_config=provider_config,
+        ssh_user=ssh_user,
     )
 
 
@@ -316,18 +335,63 @@ def query_instances(
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
-                   provider_config: dict, desired_status: str,
-                   timeout: int) -> None:
-    """Waits for instances to reach the desired status. Minimal stub."""
-    del (
-        region,
-        cluster_name_on_cloud,
-        provider_config,
-        desired_status,
-        timeout  # unused
-    )
-    time.sleep(1)
-    return
+                   state: Optional[status_lib.ClusterStatus]) -> None:
+    """Wait for instances to reach the desired state."""
+    del region  # unused
+    if state == status_lib.ClusterStatus.UP:
+        # Check if any instances are in RUNNING state
+        instances = _filter_instances(
+            cluster_name_on_cloud,
+            [utils.HyperbolicInstanceStatus.RUNNING.value])
+        if not instances:
+            # Check if any instances are in a failed state
+            failed_instances = _filter_instances(cluster_name_on_cloud, [
+                utils.HyperbolicInstanceStatus.FAILED.value,
+                utils.HyperbolicInstanceStatus.ERROR.value
+            ])
+            if failed_instances:
+                raise RuntimeError(
+                    f'Cluster {cluster_name_on_cloud} has failed instances: '
+                    f'{failed_instances}')
+            raise RuntimeError(f'No running instances found for cluster '
+                               f'{cluster_name_on_cloud}')
+        # Check if any instances are in TERMINATED state
+        terminated_instances = _filter_instances(
+            cluster_name_on_cloud,
+            [utils.HyperbolicInstanceStatus.TERMINATED.value])
+        if terminated_instances:
+            error_msg = (
+                f'Cluster {cluster_name_on_cloud} is in UP state, but '
+                f'{len(terminated_instances)} instances are terminated.')
+            raise RuntimeError(error_msg)
+    elif state == status_lib.ClusterStatus.STOPPED:
+        # Check if any instances are in TERMINATED state
+        instances = _filter_instances(
+            cluster_name_on_cloud,
+            [utils.HyperbolicInstanceStatus.TERMINATED.value])
+        if not instances:
+            # Check if any instances are in a failed state
+            failed_instances = _filter_instances(cluster_name_on_cloud, [
+                utils.HyperbolicInstanceStatus.FAILED.value,
+                utils.HyperbolicInstanceStatus.ERROR.value
+            ])
+            if failed_instances:
+                raise RuntimeError(
+                    f'Cluster {cluster_name_on_cloud} has failed instances: '
+                    f'{failed_instances}')
+            raise RuntimeError(f'No terminated instances found for cluster '
+                               f'{cluster_name_on_cloud}')
+        # Check if any instances are in RUNNING state
+        running_instances = _filter_instances(
+            cluster_name_on_cloud,
+            [utils.HyperbolicInstanceStatus.RUNNING.value])
+        if running_instances:
+            error_msg = (
+                f'Cluster {cluster_name_on_cloud} is in STOPPED state, but '
+                f'{len(running_instances)} instances are running.')
+            raise RuntimeError(error_msg)
+    else:
+        raise RuntimeError(f'Unsupported state: {state}')
 
 
 def stop_instances(

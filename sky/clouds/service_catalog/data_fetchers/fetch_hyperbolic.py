@@ -42,33 +42,47 @@ def create_catalog() -> None:
         raise RuntimeError(f'Failed to fetch instance data: {request_error}'
                           ) from request_error
 
+    # Deduplicate instances by type and region, keeping the cheapest
+    unique_instances = {}
+    for instance in instances:
+        instance_type = instance.get('InstanceType')
+        region = instance.get('Region', 'default')
+        key = (instance_type, region)
+
+        # Convert price to float for comparison
+        try:
+            current_price = float(instance.get('Price', float('inf')))
+        except (ValueError, TypeError):
+            current_price = float('inf')
+
+        # Keep the instance with the lowest price
+        if key not in unique_instances:
+            unique_instances[key] = instance
+        else:
+            existing_price = float(unique_instances[key].get(
+                'Price', float('inf')))
+            if current_price < existing_price:
+                unique_instances[key] = instance
+
     os.makedirs('hyperbolic', exist_ok=True)
     with open('hyperbolic/vms.csv', 'w', newline='', encoding='utf-8') as f:
         fieldnames = [
-            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-            'MemoryGiB', 'StorageGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
+            'InstanceType', 'AcceleratorCount', 'AcceleratorName', 'MemoryGiB',
+            'StorageGiB', 'vCPUs', 'Price', 'Region', 'GpuInfo'
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-        for instance in instances:
+        for instance in unique_instances.values():
             try:
                 entry = instance.copy()
-                gpu_info = {
-                    'gpus': [{
-                        'name': instance['AcceleratorName'].lower(),
-                        'manufacturer': 'nvidia',
-                        'count': instance['AcceleratorCount'],
-                        'MemoryInfo': {
-                            'SizeInMiB': instance['MemoryGiB'] * 1024
-                        }
-                    }],
-                    'totalgpumemoryinmib': instance['MemoryGiB'] * 1024
-                }
-                entry['GpuInfo'] = json.dumps(gpu_info,
+                # Add default region if not present
+                if 'Region' not in entry:
+                    entry['Region'] = 'default'
+                # Use GpuInfo directly from the API response
+                entry['GpuInfo'] = json.dumps(instance.get('GpuInfo', {}),
                                               ensure_ascii=False).replace(
                                                   '"', "'")  # pylint: disable=invalid-string-quote
-                entry['SpotPrice'] = ''
                 writer.writerow(entry)
             except (KeyError, ValueError) as instance_error:
                 instance_type = instance.get('InstanceType', 'unknown')
