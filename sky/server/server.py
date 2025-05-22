@@ -112,25 +112,10 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
-# Ordered list of headers to pull the user name from.
-_AUTH_HEADERS = [
-    'X-Forwarded-Preferred-Username',
-    'X-Auth-Request-Preferred-Username',
-    'X-Forwarded-Email',
-    'X-Auth-Request-Email',
-    'X-Forwarded-User',
-    'X-Auth-Request-User',
-]
-
-
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
-    user_name = None
-    for header in _AUTH_HEADERS:
-        if request.headers.get(header):
-            user_name = request.headers.get(header)
-            break
-    if user_name is None:
+    if 'X-Auth-Request-Email' not in request.headers:
         return None
+    user_name = request.headers['X-Auth-Request-Email']
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
