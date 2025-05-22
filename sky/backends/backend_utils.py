@@ -1563,7 +1563,7 @@ def check_owner_identity(cluster_name: str) -> None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{colorama.Fore.YELLOW}'
-                f'The cluster {cluster_name} is in workspace '
+                f'The cluster {cluster_name!r} is in workspace '
                 f'{cluster_workspace!r}, but the active workspace is '
                 f'{active_workspace!r}.{colorama.Fore.RESET}')
 
