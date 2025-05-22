@@ -1019,14 +1019,19 @@ def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
-    is_ssh: bool = False
+    is_ssh: Optional[bool] = None
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
 
     if context is None:
         # Include contexts from both Kubernetes and SSH clouds
         kubernetes_contexts = clouds.Kubernetes.existing_allowed_contexts()
         ssh_contexts = clouds.SSH.existing_allowed_contexts()
-        context_list = kubernetes_contexts + ssh_contexts
+        if is_ssh is None:
+            context_list = kubernetes_contexts + ssh_contexts
+        elif is_ssh:
+            context_list = ssh_contexts
+        else:
+            context_list = kubernetes_contexts
     else:
         context_list = [context]
 

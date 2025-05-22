@@ -3527,31 +3527,22 @@ def show_gpus(
                 is_ssh=is_ssh))
         if not realtime_gpu_availability_lists:
             # Customize message based on context
-            if is_ssh:
-                err_msg = 'No GPUs found in SSH Node Pool. '
-                debug_msg = 'To further debug, run: sky check '
-                if name_filter is not None:
-                    gpu_info_msg = f' {name_filter!r}'
-                    if quantity_filter is not None:
-                        gpu_info_msg += (' with requested quantity'
-                                         f' {quantity_filter}')
-                    err_msg = (f'Resources{gpu_info_msg} not found '
-                               'in SSH Node Pool. ')
-                    debug_msg = (
-                        'To show available accelerators in SSH Node Pools,'
-                        ' run: sky show-gpus --cloud ssh ')
-            else:
-                err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
-                debug_msg = 'To further debug, run: sky check '
-                if name_filter is not None:
-                    gpu_info_msg = f' {name_filter!r}'
-                    if quantity_filter is not None:
-                        gpu_info_msg += (' with requested quantity'
-                                         f' {quantity_filter}')
-                    err_msg = (f'Resources{gpu_info_msg} not found '
-                               'in any allowed Kubernetes cluster. ')
-                    debug_msg = ('To show available accelerators on kubernetes,'
-                                 ' run: sky show-gpus --cloud kubernetes ')
+            identity = ('SSH Node Pool'
+                        if is_ssh else 'any allowed Kubernetes cluster')
+            cloud_name = 'ssh' if is_ssh else 'kubernetes'
+            err_msg = f'No GPUs found in {identity}. '
+            debug_msg = (f'To further debug, run: sky check {cloud_name}')
+            if name_filter is not None:
+                gpu_info_msg = f' {name_filter!r}'
+                if quantity_filter is not None:
+                    gpu_info_msg += (' with requested quantity'
+                                     f' {quantity_filter}')
+                err_msg = (f'Resources{gpu_info_msg} not found '
+                           f'in {identity}. ')
+                identity_short = 'SSH Node Pool' if is_ssh else 'Kubernetes'
+                debug_msg = (
+                    f'To show available accelerators in {identity_short}, '
+                    f'run: sky show-gpus --cloud {cloud_name}')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3689,7 +3680,8 @@ def show_gpus(
 
         if show_node_info:
             yield '\n'
-            yield _format_kubernetes_node_info_combined(all_nodes_info, identity)
+            yield _format_kubernetes_node_info_combined(all_nodes_info,
+                                                        identity)
 
     def _possibly_show_k8s_like_realtime(
             is_ssh: bool = False

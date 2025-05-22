@@ -1444,7 +1444,7 @@ def realtime_kubernetes_gpu_availability(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None,
-        is_ssh: bool = False) -> server_common.RequestId:
+        is_ssh: Optional[bool] = None) -> server_common.RequestId:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:

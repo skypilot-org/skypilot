@@ -110,7 +110,8 @@ def deploy_ssh_cluster(cleanup: bool = False,
             logger.info(
                 ux_utils.finishing_message(
                     '🎉 SSH Node Pools set up successfully. ',
-                    follow_up_message = f'Run `{colorama.Style.BRIGHT}sky check ssh{colorama.Style.RESET_ALL}` to verify access, `{colorama.Style.BRIGHT}sky launch --infra ssh{colorama.Style.RESET_ALL}` to launch a cluster. ',
+                    follow_up_message=
+                    f'Run `{colorama.Style.BRIGHT}sky check ssh{colorama.Style.RESET_ALL}` to verify access, `{colorama.Style.BRIGHT}sky launch --infra ssh{colorama.Style.RESET_ALL}` to launch a cluster. ',
                     log_path=log_path,
                     is_local=True))
 
