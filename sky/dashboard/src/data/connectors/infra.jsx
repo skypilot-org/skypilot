@@ -132,17 +132,11 @@ async function getKubernetesContextGPUs() {
       }
     );
 
-    // Handle non-success responses
     if (!response.ok) {
-      if (response.status === 422) {
-        console.log('No GPU resources available in Kubernetes contexts');
-        return [];
-      } else {
-        console.error(
-          `Error fetching Kubernetes context GPUs: ${response.status} ${response.statusText}`
-        );
-        return [];
-      }
+      console.error(
+        `Error fetching Kubernetes context GPUs (in getKubernetesContextGPUs): ${response.status} ${response.statusText}`
+      );
+      return [];
     }
 
     const id =
@@ -150,35 +144,80 @@ async function getKubernetesContextGPUs() {
       response.headers.get('x-request-id');
 
     if (!id) {
-      console.error('No request ID returned for Kubernetes GPU availability');
+      console.error(
+        'No request ID returned for Kubernetes GPU availability (in getKubernetesContextGPUs)'
+      );
       return [];
     }
 
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const rawText = await fetchedData.text();
+
     if (fetchedData.status === 500) {
       try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
+        const errorData = JSON.parse(rawText);
+        if (errorData.detail && errorData.detail.error) {
           try {
-            const error = JSON.parse(data.detail.error);
+            const errorDetail = JSON.parse(errorData.detail.error);
             console.error(
-              'Error fetching Kubernetes context GPUs:',
-              error.message
+              '[infra.jsx] getKubernetesContextGPUs: Server error detail:',
+              errorDetail.message
             );
           } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
+            console.error(
+              '[infra.jsx] getKubernetesContextGPUs: Error parsing server error JSON:',
+              jsonError,
+              'Original error text:', errorData.detail.error
+            );
           }
         }
       } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
+        console.error(
+          '[infra.jsx] getKubernetesContextGPUs: Error parsing 500 error response JSON:',
+          parseError,
+          'Raw text was:', rawText
+        );
       }
       return [];
     }
-    const data = await fetchedData.json();
+    const data = JSON.parse(rawText);
     const contextGPUs = data.return_value ? JSON.parse(data.return_value) : [];
     return contextGPUs;
   } catch (error) {
-    console.error('Error fetching Kubernetes context GPUs:', error);
+    console.error(
+      '[infra.jsx] Outer error in getKubernetesContextGPUs:',
+      error
+    );
+    return [];
+  }
+}
+
+async function getAllContexts() {
+  try {
+    const response = await fetch(`${ENDPOINT}/all_contexts`, {
+      method: 'GET', // Assuming GET for a simple list endpoint
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) {
+      console.error(
+        `Error fetching all contexts: ${response.status} ${response.statusText}`
+      );
+      return [];
+    }
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
+    if (!id) {
+      console.error('No request ID returned for /all_contexts');
+      return [];
+    }
+    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const data = await fetchedData.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  } catch (error) {
+    console.error('[infra.jsx] Error in getAllContexts:', error);
     return [];
   }
 }
@@ -218,79 +257,144 @@ async function getKubernetesPerNodeGPUs(context) {
       return {};
     }
     const data = await fetchedData.json();
-    const nodeGPUs = data.return_value ? JSON.parse(data.return_value) : {};
-    return nodeGPUs['node_info_dict'] || {};
+    const nodeInfo = data.return_value ? JSON.parse(data.return_value) : {};
+    const nodeInfoDict = nodeInfo['node_info_dict'] || {};
+    return nodeInfoDict;
   } catch (error) {
-    console.error('Error fetching Kubernetes per node GPUs:', error);
+    console.error(
+      '[infra.jsx] Error in getKubernetesPerNodeGPUs for context',
+      context,
+      ':',
+      error
+    );
     return {};
   }
 }
 
 async function getKubernetesGPUs() {
   try {
-    const contextGPUs = await getKubernetesContextGPUs();
+    // 1. Fetch all context names (Kubernetes + SSH)
+    const allAvailableContextNames = await getAllContexts();
 
-    // Handle empty response case
-    if (!contextGPUs || contextGPUs.length === 0) {
-      console.log('No Kubernetes GPUs available');
+    if (!allAvailableContextNames || allAvailableContextNames.length === 0) {
+      console.log('No contexts found from /all_contexts endpoint.');
       return {
+        allContextNames: [],
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
       };
     }
 
-    const allGPUs = {};
+    // 2. Fetch GPU availability information (this might not include all contexts)
+    const contextGPUAvailability = await getKubernetesContextGPUs();
+    const gpuAvailabilityMap = new Map();
+    if (contextGPUAvailability) {
+      contextGPUAvailability.forEach(cg => {
+        gpuAvailabilityMap.set(cg[0], cg[1]); // cg[0] is context, cg[1] is gpusInCtx
+      });
+    }
+
+    const allGPUsSummary = {};
     const perContextGPUsData = {};
-    const perNodeGPUs = {};
+    const perNodeGPUs_dict = {};
 
-    for (const contextGPU of contextGPUs) {
-      const context = contextGPU[0];
-      const gpus = contextGPU[1];
-
+    // 3. Iterate through all_available_context_names and fetch node info for each
+    for (const context of allAvailableContextNames) {
       if (!perContextGPUsData[context]) {
         perContextGPUsData[context] = [];
       }
 
-      for (const gpu of gpus) {
-        const gpuName = gpu[0];
-        const gpuRequestableQtyPerNode = gpu[1].join(', ');
-        const gpuTotal = gpu[2];
-        const gpuFree = gpu[3];
+      // Get GPU details from the availability map if present
+      const gpusInCtx = gpuAvailabilityMap.get(context);
+      if (gpusInCtx && gpusInCtx.length > 0) {
+        for (const gpu of gpusInCtx) {
+          const gpuName = gpu[0];
+          const gpuRequestableQtyPerNode = gpu[1].join(', ');
+          const gpuTotal = gpu[2];
+          const gpuFree = gpu[3];
 
-        if (gpuName in allGPUs) {
-          allGPUs[gpuName].gpu_total += gpuTotal;
-          allGPUs[gpuName].gpu_free += gpuFree;
-        } else {
-          allGPUs[gpuName] = {
+          if (gpuName in allGPUsSummary) {
+            allGPUsSummary[gpuName].gpu_total += gpuTotal;
+            allGPUsSummary[gpuName].gpu_free += gpuFree;
+          } else {
+            allGPUsSummary[gpuName] = {
+              gpu_total: gpuTotal,
+              gpu_free: gpuFree,
+              gpu_name: gpuName,
+            };
+          }
+
+          perContextGPUsData[context].push({
+            gpu_name: gpuName,
+            gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
             gpu_total: gpuTotal,
             gpu_free: gpuFree,
-            gpu_name: gpuName,
-          };
+            context: context,
+          });
         }
-
-        perContextGPUsData[context].push({
-          gpu_name: gpuName,
-          gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
-          gpu_total: gpuTotal,
-          gpu_free: gpuFree,
-          context: context,
-        });
       }
 
-      const nodeGPUs = await getKubernetesPerNodeGPUs(context);
-      for (const node in nodeGPUs) {
-        perNodeGPUs[`${context}/${node}`] = {
-          node_name: nodeGPUs[node]['name'],
-          gpu_name: nodeGPUs[node]['accelerator_type'] || '-',
-          gpu_total: nodeGPUs[node]['total']['accelerator_count'],
-          gpu_free: nodeGPUs[node]['free']['accelerators_available'],
-          context: context,
-        };
+      // Fetch node information for the current context
+      const nodeInfoForContext = await getKubernetesPerNodeGPUs(context);
+      if (nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+        for (const nodeName in nodeInfoForContext) {
+          const nodeData = nodeInfoForContext[nodeName];
+          // Ensure accelerator_type, total, and free fields exist or provide defaults
+          const acceleratorType = nodeData['accelerator_type'] || '-';
+          const totalAccelerators = nodeData['total']?.['accelerator_count'] ?? 0;
+          const freeAccelerators = nodeData['free']?.['accelerators_available'] ?? 0;
+          
+          perNodeGPUs_dict[`${context}/${nodeName}`] = {
+            node_name: nodeData['name'],
+            gpu_name: acceleratorType,
+            gpu_total: totalAccelerators,
+            gpu_free: freeAccelerators,
+            context: context,
+          };
+
+          // If this node provides a GPU type not found via GPU availability,
+          // add it to perContextGPUsData with 0/0 counts if it's not already there.
+          // This helps list CPU-only nodes or nodes with GPUs not picked by availability check.
+          if (acceleratorType !== '-' && !perContextGPUsData[context].some(gpu => gpu.gpu_name === acceleratorType)) {
+             if (!(acceleratorType in allGPUsSummary)) {
+                allGPUsSummary[acceleratorType] = {
+                    gpu_total: 0, // Initialize with 0, will be summed up if multiple nodes have this
+                    gpu_free: 0,
+                    gpu_name: acceleratorType,
+                };
+            }
+            // This ensures the GPU type is listed under the context, even if availability check missed it.
+            // We can't reliably sum total/free here from nodeInfo alone for per-context summary
+            // if the GPU availability check is the source of truth for those numbers.
+            // However, we must ensure the accelerator type is listed.
+             const existingGpuEntry = perContextGPUsData[context].find(
+                (gpu) => gpu.gpu_name === acceleratorType
+             );
+             if (!existingGpuEntry) {
+                perContextGPUsData[context].push({
+                    gpu_name: acceleratorType,
+                    gpu_requestable_qty_per_node: '-', // Or derive if possible
+                    gpu_total: 0, // Placeholder, actual totals come from availability
+                    gpu_free: 0,  // Placeholder
+                    context: context,
+                });
+             }
+          }
+        }
+      }
+       // If after processing nodes and GPU availability, a context has no GPUs listed
+      // but nodes were found, ensure it appears in perContext data (e.g. for CPU only nodes)
+      if (perContextGPUsData[context].length === 0 && nodeInfoForContext && Object.keys(nodeInfoForContext).length > 0) {
+        // This indicates a CPU-only context or one where GPU detection failed in availability check
+        // but nodes are present. It's already handled by allAvailableContextNames.
+        // We might add a placeholder if needed for UI consistency, but `allContextNames` should list it.
       }
     }
-    return {
-      allGPUs: Object.values(allGPUs).sort((a, b) =>
+
+    const result = {
+      allContextNames: allAvailableContextNames.sort(),
+      allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
         a.gpu_name.localeCompare(b.gpu_name)
       ),
       perContextGPUs: Object.values(perContextGPUsData)
@@ -300,16 +404,18 @@ async function getKubernetesGPUs() {
             a.context.localeCompare(b.context) ||
             a.gpu_name.localeCompare(b.gpu_name)
         ),
-      perNodeGPUs: Object.values(perNodeGPUs).sort(
+      perNodeGPUs: Object.values(perNodeGPUs_dict).sort(
         (a, b) =>
           a.context.localeCompare(b.context) ||
           a.node_name.localeCompare(b.node_name) ||
           a.gpu_name.localeCompare(b.gpu_name)
       ),
     };
+    return result;
   } catch (error) {
-    console.error('Error fetching Kubernetes GPUs:', error);
+    console.error('[infra.jsx] Outer error in getKubernetesGPUs:', error);
     return {
+      allContextNames: [],
       allGPUs: [],
       perContextGPUs: [],
       perNodeGPUs: [],

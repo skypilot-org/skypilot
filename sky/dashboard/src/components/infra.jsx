@@ -138,7 +138,7 @@ export function InfrastructureSection({
                             </NonCapitalizedTooltip>
                           </td>
                           <td className="p-3">{nodes.length}</td>
-                          <td className="p-3">{gpuTypes}</td>
+                          <td className="p-3">{gpuTypes || '-'}</td>
                           <td className="p-3">{totalGpus}</td>
                         </tr>
                       );
@@ -366,6 +366,7 @@ export function GPUs() {
   const [cloudDataLoaded, setCloudDataLoaded] = useState(false);
   const router = useRouter();
 
+  const [allKubeContextNames, setAllKubeContextNames] = useState([]);
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
@@ -385,17 +386,20 @@ export function GPUs() {
     try {
       const gpusResponse = await getGPUs();
       const {
+        allContextNames: fetchedAllKubeContextNames,
         allGPUs: fetchedAllGPUs,
         perContextGPUs: fetchedPerContextGPUs,
         perNodeGPUs: fetchedPerNodeGPUs,
       } = gpusResponse;
 
+      setAllKubeContextNames(fetchedAllKubeContextNames || []);
       setAllGPUs(fetchedAllGPUs || []);
       setPerContextGPUs(fetchedPerContextGPUs || []);
       setPerNodeGPUs(fetchedPerNodeGPUs || []);
       setKubeDataLoaded(true);
     } catch (err) {
       console.error('Error fetching Kubernetes data:', err);
+      setAllKubeContextNames([]);
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
@@ -472,18 +476,20 @@ export function GPUs() {
     }, {});
   }, [perContextGPUs]);
 
-  // Separate SSH contexts from Kubernetes contexts
+  // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
-    return Object.keys(groupedPerContextGPUs).filter((context) =>
+    const contexts = allKubeContextNames.filter((context) =>
       context.startsWith('ssh-')
     );
-  }, [groupedPerContextGPUs]);
+    return contexts;
+  }, [allKubeContextNames]);
 
   const kubeContexts = React.useMemo(() => {
-    return Object.keys(groupedPerContextGPUs).filter(
+    const contexts = allKubeContextNames.filter(
       (context) => !context.startsWith('ssh-')
     );
-  }, [groupedPerContextGPUs]);
+    return contexts;
+  }, [allKubeContextNames]);
 
   // Filter GPUs by context type (SSH vs Kubernetes)
   const sshGPUs = React.useMemo(() => {
