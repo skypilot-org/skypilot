@@ -3580,6 +3580,10 @@ def show_gpus(
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 if not _filter_ctx(ctx):
                     continue
+                if is_ssh:
+                    display_ctx = ctx.lstrip('ssh-')
+                else:
+                    display_ctx = ctx
                 num_filtered_contexts += 1
                 realtime_gpu_table = log_utils.create_table(
                     ['GPU', qty_header, 'UTILIZATION'])
@@ -3601,11 +3605,11 @@ def show_gpus(
                     if capacity > 0:
                         total_gpu_info[gpu][0] += capacity
                         total_gpu_info[gpu][1] += available
-                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
                 # Collect node info for this context
                 nodes_info = sdk.stream_and_get(
                     sdk.kubernetes_node_info(context=ctx))
-                all_nodes_info.append((ctx, nodes_info))
+                all_nodes_info.append((display_ctx, nodes_info))
         if num_filtered_contexts > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
@@ -3655,7 +3659,7 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _format_kubernetes_realtime_gpu(
-            total_table: 'prettytable.PrettyTable',
+            total_table: Optional['prettytable.PrettyTable'],
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             show_node_info: bool, is_ssh: bool) -> Generator[str, None, None]:
