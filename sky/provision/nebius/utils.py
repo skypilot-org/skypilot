@@ -219,13 +219,14 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
             f' to be ready.')
 
     filesystems_spec = []
-    for fs in filesystems:
-        filesystems_spec.append(nebius.compute().AttachedFilesystemSpec(
-            mount_tag=fs['filesystem_mount_tag'],
-            attach_mode=nebius.compute().AttachedFilesystemSpec.AttachMode[
-                fs['filesystem_attach_mode']],
-            existing_filesystem=nebius.compute().ExistingFilesystem(
-                id=fs['filesystem_id'])))
+    if filesystems:
+        for fs in filesystems:
+            filesystems_spec.append(nebius.compute().AttachedFilesystemSpec(
+                mount_tag=fs['filesystem_mount_tag'],
+                attach_mode=nebius.compute().AttachedFilesystemSpec.AttachMode[
+                    fs['filesystem_attach_mode']],
+                existing_filesystem=nebius.compute().ExistingFilesystem(
+                    id=fs['filesystem_id'])))
 
     service = nebius.vpc().SubnetServiceClient(nebius.sdk())
     sub_net = service.list(nebius.vpc().ListSubnetsRequest(
