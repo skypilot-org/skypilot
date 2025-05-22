@@ -1564,8 +1564,8 @@ def check_owner_identity(cluster_name: str) -> None:
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{colorama.Fore.YELLOW}'
                 f'The cluster {cluster_name} is in workspace '
-                f'{cluster_workspace}, but the active workspace is '
-                f'{active_workspace}.{colorama.Fore.RESET}')
+                f'{cluster_workspace!r}, but the active workspace is '
+                f'{active_workspace!r}.{colorama.Fore.RESET}')
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud

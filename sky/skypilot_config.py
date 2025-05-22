@@ -309,13 +309,16 @@ def with_active_workspace(workspace: str) -> Iterator[None]:
     """
     original_workspace = get_active_workspace()
     _active_workspace_context.workspace = workspace
+    logger.debug(f'Set context workspace: {workspace}')
     yield
+    logger.debug(f'Reset context workspace: {original_workspace}')
     _active_workspace_context.workspace = original_workspace
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
     context_workspace = getattr(_active_workspace_context, 'workspace', None)
     if not force_user_workspace and context_workspace is not None:
+        logger.debug(f'Get context workspace: {context_workspace}')
         return context_workspace
     return get_nested(keys=('active_workspace',),
                       default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
@@ -553,6 +556,10 @@ def override_skypilot_config(
             not in get_nested(keys=('workspaces',), default_value={})):
         raise ValueError(f'Workspace {workspace} does not exist. '
                          'Please check your config and try again.')
+    # Initialize the active workspace context to the workspace specified, so
+    # that a new request is not affected by the previous request's workspace.
+    _active_workspace_context.workspace = workspace
+
     try:
         common_utils.validate_schema(
             config,
