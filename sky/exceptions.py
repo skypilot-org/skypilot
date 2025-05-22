@@ -232,12 +232,6 @@ class ResourcesMismatchError(Exception):
     pass
 
 
-class DiskInstanceZoneMismatchError(Exception):
-    """Raised when the zones of the disk and the zones
-    of the instance to be scheduled on are mismatched."""
-    pass
-
-
 class SkyPilotExcludeArgsBaseException(Exception):
     """Base class for exceptions that don't need args while serialization.
 

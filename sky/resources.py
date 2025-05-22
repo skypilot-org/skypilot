@@ -785,9 +785,6 @@ class Resources:
         network_type = resources_utils.StorageType.NETWORK
         read_write_mode = resources_utils.DiskAttachMode.READ_WRITE
         for volume in volumes:
-            existing_volume = False
-            if 'name' in volume:
-                existing_volume = True
             if 'path' not in volume:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Invalid volume {volume!r}. '
@@ -808,35 +805,36 @@ class Resources:
                             storage_type_str)
             if 'auto_delete' not in volume:
                 volume['auto_delete'] = False
-            if existing_volume:
-                if 'attach_mode' not in volume:
-                    volume['attach_mode'] = read_write_mode
-                else:
-                    if isinstance(volume['attach_mode'], str):
-                        attach_mode_str = str(volume['attach_mode']).lower()
-                        if attach_mode_str not in supported_attach_modes:
-                            logger.warning(
-                                f'Invalid attach_mode {attach_mode_str!r}. '
-                                f'Set it to {read_write_mode.value}.')
-                            volume['attach_mode'] = read_write_mode
-                        else:
-                            volume[
-                                'attach_mode'] = resources_utils.DiskAttachMode(
-                                    attach_mode_str)
-                volume['auto_delete'] = False
-                volume['storage_type'] = network_type
-                valid_volumes.append(volume)
-                continue
+            if 'attach_mode' in volume:
+                if isinstance(volume['attach_mode'], str):
+                    attach_mode_str = str(volume['attach_mode']).lower()
+                    if attach_mode_str not in supported_attach_modes:
+                        logger.warning(
+                            f'Invalid attach_mode {attach_mode_str!r}. '
+                            f'Set it to {read_write_mode.value}.')
+                        volume['attach_mode'] = read_write_mode
+                    else:
+                        volume['attach_mode'] = resources_utils.DiskAttachMode(
+                            attach_mode_str)
+            else:
+                volume['attach_mode'] = read_write_mode
             if volume['storage_type'] == network_type:
                 if 'disk_size' not in volume:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Invalid volume {volume!r}. '
-                            f'Network volumes must have a "disk_size" field.')
-                if round(volume['disk_size']) != volume['disk_size']:
+                    logger.info(f'No disk_size specified for volume '
+                                f'{volume["path"]}. Set it to 100GB.')
+                    volume['disk_size'] = 100
+                elif round(volume['disk_size']) != volume['disk_size']:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Volume size must be an integer. '
                                          f'Got: {volume["size"]}.')
+                if 'name' not in volume:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Network volume {volume["path"]} '
+                                         f'must have "name" field.')
+            elif 'name' in volume:
+                logger.info(f'Volume {volume["path"]} is a local disk. '
+                            f'The "name" field will be ignored.')
+                del volume['name']
             if 'disk_tier' in volume:
                 if isinstance(volume['disk_tier'], str):
                     disk_tier_str = str(volume['disk_tier']).lower()
@@ -1236,11 +1234,12 @@ class Resources:
                 raise ValueError(f'Volumes are only supported for GCP'
                                  f' not for {self.cloud}.')
 
-        mount_existing_volumes = False
+        need_region_or_zone = False
         try:
             for volume in self.volumes:
-                if 'name' in volume:
-                    mount_existing_volumes = True
+                if ('name' in volume and volume['storage_type']
+                        == resources_utils.StorageType.NETWORK):
+                    need_region_or_zone = True
                 if 'disk_tier' not in volume:
                     continue
                 # TODO(hailong): check instance local SSD
@@ -1248,7 +1247,7 @@ class Resources:
                 # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
                 self.cloud.check_disk_tier_enabled(self.instance_type,
                                                    volume['disk_tier'])
-            if (mount_existing_volumes and self._region is None and
+            if (need_region_or_zone and self._region is None and
                     self._zone is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('When specifying the volume name, please'

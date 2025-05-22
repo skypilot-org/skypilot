@@ -171,6 +171,9 @@ available_node_types:
           initializeParams:
             diskType: zones/{{zones}}/diskTypes/{{volume.disk_tier}}
         {%- endif %}
+          {%- if volume.disk_name %}
+            diskName: {{volume.disk_name}}
+          {%- endif %}
           {%- if volume.disk_size %}
             diskSizeGb: {{volume.disk_size}}
           {%- endif %}

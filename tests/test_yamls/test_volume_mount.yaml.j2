@@ -6,20 +6,23 @@ num_nodes: 1
 
 file_mounts:
   /mnt/region:
-    name: {{disk_name}}
+    name: {{existing_disk_name}}
     store: volume
     source: ~/.ssh/id_rsa.pub
+    persistent: true
   {% if mig_config %}
     config:
       attach_mode: read_only
   {% endif %}
   /mnt/ab:
+    name: {{new_disk_name}}
     store: volume
     source: ~/tmp-workdir
     config:
       size: 10
 {% if not mig_config %}
   /mnt/cd:
+    name: local-ssd0
     store: volume
     source: ~/.ssh/id_rsa.pub
     config:

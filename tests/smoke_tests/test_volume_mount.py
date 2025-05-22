@@ -36,11 +36,12 @@ def test_volume_mount_tpu():
     instance_type = 'n2-standard-2'
     now = datetime.now()
     formatted_time = now.strftime("%Y%m%d%H%M%S")
-    disk_name = f'volume-mount1-{formatted_time}'
-
+    new_disk_name = f'new-pd1-{formatted_time}'
+    existing_disk_name = f'existing-pd1-{formatted_time}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
-            f, name, disk_name, region, instance_type, None, False, False, True)
+            f, name, existing_disk_name, new_disk_name, region, instance_type,
+            None, False, False, True)
         test = smoke_tests_utils.Test(
             'test_volume_mount_tpu',
             test_commands,
@@ -57,13 +58,14 @@ def test_volume_mount_tpu_container():
     instance_type = 'n2-standard-2'
     now = datetime.now()
     formatted_time = now.strftime("%Y%m%d%H%M%S")
-    disk_name = f'volume-mount2-{formatted_time}'
+    new_disk_name = f'new-pd2-{formatted_time}'
+    existing_disk_name = f'existing-pd2-{formatted_time}'
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
-            f, name, disk_name, region, instance_type, image_id, False, False,
-            True)
+            f, name, existing_disk_name, new_disk_name, region, instance_type,
+            image_id, False, False, True)
         test = smoke_tests_utils.Test(
             'test_volume_mount_tpu_container',
             test_commands,
@@ -80,12 +82,13 @@ def test_volume_mount_compute():
     instance_type = 'n2-standard-2'
     now = datetime.now()
     formatted_time = now.strftime("%Y%m%d%H%M%S")
-    disk_name = f'volume-mount3-{formatted_time}'
+    new_disk_name = f'new-pd3-{formatted_time}'
+    existing_disk_name = f'existing-pd3-{formatted_time}'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
-            f, name, disk_name, region, instance_type, None, False, False,
-            False)
+            f, name, existing_disk_name, new_disk_name, region, instance_type,
+            None, False, False, False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_compute',
             test_commands,
@@ -102,13 +105,14 @@ def test_volume_mount_compute_container():
     instance_type = 'n2-standard-2'
     now = datetime.now()
     formatted_time = now.strftime("%Y%m%d%H%M%S")
-    disk_name = f'volume-mount4-{formatted_time}'
+    new_disk_name = f'new-pd4-{formatted_time}'
+    existing_disk_name = f'existing-pd4-{formatted_time}'
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
-            f, name, disk_name, region, instance_type, image_id, False, False,
-            False)
+            f, name, existing_disk_name, new_disk_name, region, instance_type,
+            image_id, False, False, False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_compute_container',
             test_commands,
@@ -125,11 +129,13 @@ def test_volume_mount_mig():
     instance_type = 'g2-standard-4'
     now = datetime.now()
     formatted_time = now.strftime("%Y%m%d%H%M%S")
-    disk_name = f'volume-mount5-{formatted_time}'
+    new_disk_name = f'new-pd5-{formatted_time}'
+    existing_disk_name = f'existing-pd5-{formatted_time}'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
-            f, name, disk_name, region, instance_type, None, True, True, False)
+            f, name, existing_disk_name, new_disk_name, region, instance_type,
+            None, True, True, False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_mig',
             test_commands,
@@ -146,13 +152,14 @@ def test_volume_mount_mig_container():
     instance_type = 'g2-standard-4'
     now = datetime.now()
     formatted_time = now.strftime("%Y%m%d%H%M%S")
-    disk_name = f'volume-mount6-{formatted_time}'
+    new_disk_name = f'new-pd6-{formatted_time}'
+    existing_disk_name = f'existing-pd6-{formatted_time}'
     image_id = 'docker:ubuntu:20.04'
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_cmd = _volume_mounts_commands_generator(
-            f, name, disk_name, region, instance_type, image_id, True, True,
-            False)
+            f, name, existing_disk_name, new_disk_name, region, instance_type,
+            image_id, True, True, False)
         test = smoke_tests_utils.Test(
             'test_volume_mount_mig_container',
             test_commands,
@@ -162,16 +169,19 @@ def test_volume_mount_mig_container():
         smoke_tests_utils.run_one_test(test)
 
 
-def _volume_mounts_commands_generator(f: TextIO, name: str, disk_name: str,
-                                      region: str, instance_type: str,
-                                      image_id: str, use_mig: bool,
-                                      zonal_disk: bool, tpu: bool):
+def _volume_mounts_commands_generator(f: TextIO, name: str,
+                                      existing_disk_name: str,
+                                      new_disk_name: str, region: str,
+                                      instance_type: str, image_id: str,
+                                      use_mig: bool, zonal_disk: bool,
+                                      tpu: bool):
     template_str = pathlib.Path(
         'tests/test_yamls/test_volume_mount.yaml.j2').read_text()
     template = jinja2.Template(template_str)
 
     content = template.render(
-        disk_name=disk_name,
+        existing_disk_name=existing_disk_name,
+        new_disk_name=new_disk_name,
         mig_config=use_mig,
         tpu_config=tpu,
     )
@@ -180,15 +190,19 @@ def _volume_mounts_commands_generator(f: TextIO, name: str, disk_name: str,
     file_path = f.name
 
     if zonal_disk:
-        disk_cmd = (
-            f'(gcloud compute disks delete {disk_name} --zone={region}-a --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --zone={region}-a'
+        pre_launch_disk_cmd = (
+            f'(gcloud compute disks delete {existing_disk_name} --zone={region}-a --quiet || true) && gcloud compute disks create {existing_disk_name} --size=10 --type=pd-ssd --zone={region}-a'
         )
-        clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe ${disk_name} --zone=${region}-a --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {disk_name} --zone={region}-a --quiet'
+        post_launch_disk_cmd = (
+            f'gcloud compute disks describe {new_disk_name} --zone={region}-a')
+        clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe {existing_disk_name} --zone={region}-a --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {existing_disk_name} --zone={region}-a --quiet'
     else:
-        disk_cmd = (
-            f'(gcloud compute disks delete {disk_name} --region={region} --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --region={region} --replica-zones={region}-a,{region}-b'
+        pre_launch_disk_cmd = (
+            f'(gcloud compute disks delete {existing_disk_name} --region={region} --quiet || true) && gcloud compute disks create {existing_disk_name} --size=10 --type=pd-ssd --region={region} --replica-zones={region}-a,{region}-b'
         )
-        clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe ${disk_name} --region=${region} --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {disk_name} --region={region} --quiet'
+        post_launch_disk_cmd = (
+            f'gcloud compute disks describe {new_disk_name} --region={region}')
+        clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe {existing_disk_name} --region={region} --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {existing_disk_name} --region={region} --quiet'
     if image_id:
         if tpu:
             launch_cmd = f'sky launch -y -c {name} --infra gcp/{region} --gpus tpu-v2-8 --image-id {image_id} {file_path}'
@@ -201,10 +215,16 @@ def _volume_mounts_commands_generator(f: TextIO, name: str, disk_name: str,
             launch_cmd = f'sky launch -y -c {name} --infra gcp/{region} --instance-type {instance_type} {file_path}'
 
     test_commands = [
-        smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=disk_cmd),
+        smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                   cmd=pre_launch_disk_cmd),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         launch_cmd,
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
+    # Have not support creating new volumes for TPU node now
+    if not tpu:
+        test_commands.append(
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, cmd=post_launch_disk_cmd))
 
     return test_commands, clean_cmd

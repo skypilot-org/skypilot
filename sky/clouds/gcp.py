@@ -1204,10 +1204,13 @@ class GCP(clouds.Cloud):
                 'device_name': f'sky-disk-{i}',
                 'auto_delete': volume['auto_delete'],
             }
-            if 'name' in volume:
-                volume_info = volume_utils.check_volume_name(
-                    project_id, region, zones, use_mig, volume['name'])
+            if ('name' in volume and volume['storage_type']
+                    == resources_utils.StorageType.NETWORK):
+                volume_info = volume_utils.check_volume_name_exist_in_region(
+                    project_id, region, use_mig, volume['name'])
                 if volume_info is not None:
+                    volume_utils.check_volume_zone_match(
+                        volume['name'], zones, volume_info['available_zones'])
                     volume_spec['source'] = volume_info['selfLink']
                     volume_spec[
                         'attach_mode'] = volume_utils.translate_attach_mode(
@@ -1221,7 +1224,7 @@ class GCP(clouds.Cloud):
                         device_name = f'{constants.DEVICE_NAME_PREFIX}persistent-disk-{tpu_disk_index}'
                         tpu_disk_index += 1
                     device_mount_points[device_name] = volume['path']
-                continue
+                    continue
             if tpu_vm:
                 # TODO(hailong): support creating block storage for TPU VM
                 continue
@@ -1243,6 +1246,7 @@ class GCP(clouds.Cloud):
                 volume_spec['disk_size'] = None
                 volume_spec['auto_delete'] = True
             else:
+                volume_spec['disk_name'] = volume['name']
                 device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
                 device_mount_points[device_name] = volume['path']
 

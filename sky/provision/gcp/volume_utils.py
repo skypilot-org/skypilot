@@ -161,12 +161,11 @@ def translate_attach_mode(attach_mode: resources_utils.DiskAttachMode) -> str:
     return 'READ_WRITE'
 
 
-def check_volume_name(project_id: str, region: clouds.Region,
-                      zones: Optional[List[clouds.Zone]], use_mig: bool,
-                      volume_name: str) -> Dict[str, Any]:
+def check_volume_name_exist_in_region(
+        project_id: str, region: clouds.Region, use_mig: bool,
+        volume_name: str) -> Optional[Dict[str, Any]]:
     """Check if the volume name exists and return the volume info."""
-    logger.debug(
-        f'Checking volume {volume_name} in region {region} and zones {zones}')
+    logger.debug(f'Checking volume {volume_name} in region {region}')
     try:
         compute = gcp.build('compute',
                             'v1',
@@ -176,16 +175,18 @@ def check_volume_name(project_id: str, region: clouds.Region,
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Not able to build compute client') from None
 
-    # If zones is None, check the region disk
-    # If zones is not None, check zone disks first, then region disk
-    if zones is None:
-        # Set zones to an empty list to normalize the logic below
-        zones = []
+    # Get all the zones in the region
+    all_zones = compute.zones().list(project=project_id).execute()
+    region_zones = []
+    if 'items' in all_zones:
+        for zone in all_zones['items']:
+            if zone['region'].split('/')[-1] == region.name:
+                region_zones.append(zone['name'])
     volume_info = None
-    for zone in zones:
+    for zone in region_zones:
         try:
             volume_info = compute.disks().get(project=project_id,
-                                              zone=zone.name,
+                                              zone=zone,
                                               disk=volume_name).execute()
             if volume_info is not None:
                 if use_mig:
@@ -194,6 +195,7 @@ def check_volume_name(project_id: str, region: clouds.Region,
                     # Refer to https://cloud.google.com/compute/docs/
                     # reference/rest/v1/instances/insert
                     volume_info['selfLink'] = volume_name
+                volume_info['available_zones'] = [zone]
                 return volume_info
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
@@ -209,31 +211,37 @@ def check_volume_name(project_id: str, region: clouds.Region,
         volume_info = compute.regionDisks().get(project=project_id,
                                                 region=region.name,
                                                 disk=volume_name).execute()
-        # Check the zones are in the `replicaZones` of the region disk
         # 'replicaZones':
         #  ['https://xxx/compute/v1/projects/sky-dev-465/zones/us-central1-a',
         # 'https://xxx/compute/v1/projects/sky-dev-465/zones/us-central1-c']
-        replica_zones = [
-            zone.split('/')[-1] for zone in volume_info['replicaZones']
-        ]
-        for zone in zones:
-            if zone.name not in replica_zones:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.DiskInstanceZoneMismatchError(
-                        f'Zone {zone.name} is not in the `replicaZones`'
-                        f' {replica_zones} of the region disk {volume_name}')
+        if volume_info is not None and 'replicaZones' in volume_info:
+            replica_zones = [
+                zone.split('/')[-1] for zone in volume_info['replicaZones']
+            ]
+            volume_info['available_zones'] = replica_zones
         return volume_info
-    except exceptions.DiskInstanceZoneMismatchError as e:
-        raise exceptions.ResourcesUnavailableError(str(e)) from None
     except gcp.http_error_exception() as e:
         if e.resp.status == 403:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Not able to access the volume '
                                  f'{volume_name!r}') from None
         if e.resp.status == 404:
-            with ux_utils.print_exception_no_traceback():
-                # Return a ResourcesUnavailableError to trigger failover
-                raise exceptions.ResourcesUnavailableError(
-                    f'Volume {volume_name} not found in region {region}'
-                    f' or zones {zones}') from None
+            logger.warning(
+                f'Volume {volume_name} is not found in region {region}.'
+                f' It will be created.')
+            return volume_info
         raise
+
+
+def check_volume_zone_match(volume_name: str,
+                            zones: Optional[List[clouds.Zone]],
+                            available_zones: List[str]):
+    if zones is None:
+        return None
+    for zone in zones:
+        if zone.name in available_zones:
+            return None
+    with ux_utils.print_exception_no_traceback():
+        # Return a ResourcesUnavailableError to trigger failover
+        raise exceptions.ResourcesUnavailableError(
+            f'Volume {volume_name} not available in zones {zones}') from None
