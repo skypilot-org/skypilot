@@ -1293,9 +1293,18 @@ class Resources:
             skypilot_config.get_nested(
                 (str(self.cloud).lower(), 'specific_reservations'), set()))
 
+        if isinstance(self.cloud, clouds.DummyCloud):
+            return self.cloud.get_reservations_available_resources(
+                instance_type='',
+                region='',
+                zone=None,
+                specific_reservations=specific_reservations)
+
         assert (self.cloud is not None and self.instance_type is not None and
-                self.region
-                is not None), ('Cloud, instance type, region must be specified')
+                self.region is not None), (
+                    f'Cloud, instance type, region must be specified. '
+                    f'Resources={self}, cloud={self.cloud}, '
+                    f'instance_type={self.instance_type}, region={self.region}')
         return self.cloud.get_reservations_available_resources(
             self.instance_type, self.region, self.zone, specific_reservations)
 

@@ -52,6 +52,7 @@ import contextlib
 import copy
 import json
 import os
+import tempfile
 import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -540,14 +541,40 @@ def override_skypilot_config(
 @contextlib.contextmanager
 def replace_skypilot_config(
         new_configs: Optional[config_utils.Config]) -> Iterator[None]:
-    """Replaces the global config with the new configs."""
+    """Replaces the global config with the new configs.
+
+    This function is concurrent safe when it is:
+    1. called in different processes;
+    2. or called in a same process but with different context, refer to
+       sky_utils.context for more details.
+    """
     if new_configs is None:
         yield
         return
     original_config = _get_loaded_config()
-    _set_loaded_config(new_configs)
-    yield
-    _set_loaded_config(original_config)
+    original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    if new_configs != original_config:
+        # Modify the global config of current process or context
+        _set_loaded_config(new_configs)
+        with tempfile.NamedTemporaryFile(delete=False,
+                                         mode='w',
+                                         prefix='mutated-skypilot-config-',
+                                         suffix='.yaml') as temp_file:
+            common_utils.dump_yaml(temp_file.name, dict(**new_configs))
+        # Modify the env var of current process or context so that the
+        # new config will be used by spawned sub-processes.
+        # Note that this code modifies os.environ directly because it
+        # will be hijacked to be context-aware if a context is active.
+        os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+        yield
+        # Restore the original config and env var.
+        _set_loaded_config(original_config)
+        if original_env_var:
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
+        else:
+            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
+    else:
+        yield
 
 
 def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:

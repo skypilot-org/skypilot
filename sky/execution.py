@@ -176,7 +176,6 @@ def _execute(
             for storage in task.storage_mounts.values():
                 # Ensure the storage is constructed.
                 storage.construct()
-
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 

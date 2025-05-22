@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 import typing
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 from urllib import parse
 import uuid
 
@@ -116,6 +116,7 @@ class ApiServerStatus(enum.Enum):
     HEALTHY = 'healthy'
     UNHEALTHY = 'unhealthy'
     VERSION_MISMATCH = 'version_mismatch'
+    NEEDS_AUTH = 'needs_auth'
 
 
 @dataclasses.dataclass
@@ -127,15 +128,21 @@ class ApiServerInfo:
     commit: Optional[str] = None
 
 
+def get_api_cookie_jar_path() -> str:
+    return os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR,
+                          server_constants.API_COOKIE_FILE_DEFAULT_LOCATION)
+
+
 def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
     """Returns the cookie jar used by the client to access the API server."""
-    cookie_file = os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR)
     cookie_jar = requests.cookies.RequestsCookieJar()
-    if cookie_file and os.path.exists(cookie_file):
+    cookie_file = get_api_cookie_jar_path()
+    if cookie_file:
         cookie_path = pathlib.Path(cookie_file).expanduser().resolve()
-        file_cookie_jar = MozillaCookieJar(cookie_path)
-        file_cookie_jar.load()
-        cookie_jar.update(file_cookie_jar)
+        if cookie_path.exists():
+            file_cookie_jar = MozillaCookieJar(cookie_path)
+            file_cookie_jar.load()
+            cookie_jar.update(file_cookie_jar)
     return cookie_jar
 
 
@@ -196,6 +203,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             response = requests.get(f'{server_url}/api/health',
                                     timeout=2.5,
                                     cookies=get_api_cookie_jar())
+            logger.debug(f'Health check status: {response.status_code}')
             if response.status_code == 200:
                 try:
                     result = response.json()
@@ -217,9 +225,24 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                         server_info.status = ApiServerStatus.VERSION_MISMATCH
                     return server_info
                 except (json.JSONDecodeError, AttributeError) as e:
+                    # Try to check if we got redirected to a login page.
+                    for prev_response in response.history:
+                        logger.debug(f'Previous response: {prev_response.url}')
+                        # Heuristic: check if the url looks like a login page or
+                        # oauth flow.
+                        if any(key in prev_response.url
+                               for key in ['login', 'oauth2']):
+                            logger.debug(
+                                f'URL {prev_response.url} looks like '
+                                'a login page or oauth flow, so try to '
+                                'get the cookie.')
+                            return ApiServerInfo(
+                                status=ApiServerStatus.NEEDS_AUTH)
                     logger.warning('Failed to parse API server response: '
                                    f'{str(e)}')
                     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+            elif response.status_code == 401:
+                return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
             else:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
         except requests.exceptions.Timeout:
@@ -369,7 +392,12 @@ def _start_api_server(deploy: bool = False,
                 f'SkyPilot API server started. {dashboard_msg}'))
 
 
-def check_server_healthy(endpoint: Optional[str] = None,) -> None:
+def check_server_healthy(
+    endpoint: Optional[str] = None
+) -> Literal[
+        # Use an incomplete list of Literals here to enforce raising for other
+        # enum values.
+        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH]:
     """Check if the API server is healthy.
 
     Args:
@@ -379,6 +407,11 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
     Raises:
         RuntimeError: If the server is not healthy or the client version does
             not match the server version.
+
+    Returns:
+        ApiServerStatus: The status of the API server, unless the server is
+            unhealthy or the client version does not match the server version,
+            in which case an exception is raised.
     """
     endpoint = endpoint if endpoint is not None else get_server_url()
     api_server_info = get_api_server_status(endpoint)
@@ -441,6 +474,8 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
 
         hinted_for_server_install_version_mismatch = True
 
+    return api_server_status
+
 
 def _get_version_info_hint(server_info: ApiServerInfo) -> str:
     assert server_info.version is not None, 'Server version is None'
@@ -491,11 +526,13 @@ def get_skypilot_version_on_disk() -> str:
 def check_server_healthy_or_start_fn(deploy: bool = False,
                                      host: str = '127.0.0.1',
                                      foreground: bool = False):
+    api_server_status = None
     try:
-        check_server_healthy()
+        api_server_status = check_server_healthy()
     except exceptions.ApiServerConnectionError as exc:
         endpoint = get_server_url()
-        if not is_api_server_local():
+        if (not is_api_server_local() or
+                api_server_status == ApiServerStatus.NEEDS_AUTH):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the

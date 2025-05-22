@@ -12,6 +12,7 @@ import uvicorn
 
 from sky.server import server
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import context
 
 
@@ -113,7 +114,7 @@ async def test_validate():
     with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
-                   return_value=(mock_dag, None)), \
+                   return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate') as mock_validate:
         # Call validate endpoint
         await server.validate(mock_validate_body)
@@ -125,7 +126,7 @@ async def test_validate():
     with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
-                   return_value=(mock_dag, None)), \
+                   return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=ValueError(error_msg)):
         with pytest.raises(fastapi.HTTPException) as exc_info:
@@ -144,7 +145,7 @@ async def test_validate():
     with mock.patch('sky.server.server.dag_utils.load_chain_dag_from_yaml_str',
                    return_value=mock_dag), \
          mock.patch('sky.server.server.admin_policy_utils.apply',
-                   return_value=(mock_dag, None)), \
+                   return_value=(mock_dag, config_utils.Config())), \
          mock.patch.object(mock_dag, 'validate',
                           side_effect=slow_validate):
         # Start validation in background
