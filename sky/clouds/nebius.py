@@ -211,6 +211,18 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
+        config_fs = skypilot_config.get_nested(
+            ('nebius', region.name, 'filesystems'), [])
+        resources_vars_fs = []
+        for i, fs in enumerate(config_fs):
+            resources_vars_fs.append({
+                'filesystem_id': fs['filesystem_id'],
+                'filesystem_attach_mode': fs['attach_mode'],
+                'filesystem_mount_path': fs.get(
+                    'mount_path', f'/mnt/filesystem-skypilot-{i+1}'),
+                'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
+            })
+
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -218,6 +230,7 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
+            'filesystems': resources_vars_fs
         }
 
         if acc_dict is not None:
@@ -226,12 +239,6 @@ class Nebius(clouds.Cloud):
             # the docker run command. We patch this by adding it here.
             resources_vars['docker_run_options'] = ['--gpus all']
 
-        resources_vars['filesystem_id'] = skypilot_config.get_nested(
-            ('nebius', region.name, 'filesystem', 'filesystem_id'), '')
-        resources_vars['filesystem_attach_mode'] = skypilot_config.get_nested(
-            ('nebius', region.name, 'filesystem', 'attach_mode'), 'READ_WRITE')
-        resources_vars['filesystem_mount_path'] = skypilot_config.get_nested(
-            ('nebius', region.name, 'filesystem', 'mount_path'), '/mnt/fs')
         return resources_vars
 
     def _get_feasible_launchable_resources(

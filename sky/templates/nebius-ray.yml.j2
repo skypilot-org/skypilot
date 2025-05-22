@@ -46,10 +46,13 @@ available_node_types:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
-      Filesystem:
-        filesystem_id: {{ filesystem_id }}
-        attach_mode: {{ filesystem_attach_mode }}
-        mount_path: {{ filesystem_mount_path }}
+      filesystems:
+        {%- for fs in filesystems %}
+        - filesystem_id: {{ fs.filesystem_id }}
+          filesystem_mount_tag: {{ fs.filesystem_mount_tag }}
+          filesystem_attach_mode: {{ fs.filesystem_attach_mode }}
+          filesystem_mount_path: {{ fs.filesystem_mount_path }}
+        {%- endfor %}
       UserData: |
         runcmd:
           - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
@@ -134,11 +137,11 @@ setup_commands:
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    {%- if filesystem_id != '' %}
-    sudo mkdir {{ filesystem_mount_path }};
-    sudo mount -t virtiofs filesystem-skypilot {{ filesystem_mount_path }};
-    sudo chmod a+w {{ filesystem_mount_path }};
-    {% endif %}
+    {%- for fs in filesystems %}
+    sudo mkdir {{ fs.filesystem_mount_path }};
+    sudo mount -t virtiofs {{ fs.filesystem_mount_tag }} {{ fs.filesystem_mount_path }};
+    sudo chmod a+w {{ fs.filesystem_mount_path }};
+    {%- endfor %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;

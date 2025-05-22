@@ -1,6 +1,6 @@
 """Nebius library wrapper for SkyPilot."""
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 import uuid
 
 from sky import sky_logging
@@ -159,7 +159,7 @@ def start(instance_id: str) -> None:
 def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
            preset: str, region: str, image_family: str, disk_size: int,
            user_data: str, associate_public_ip_address: bool,
-           filesystem_id: str, filesystem_attach_mode: str) -> str:
+           filesystems: List[Dict[str, Any]]) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -218,6 +218,15 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
             f' seconds) while waiting for disk {disk_name}'
             f' to be ready.')
 
+    filesystems_spec = []
+    for fs in filesystems:
+        filesystems_spec.append(nebius.compute().AttachedFilesystemSpec(
+            mount_tag=fs['filesystem_mount_tag'],
+            attach_mode=nebius.compute().AttachedFilesystemSpec.AttachMode[
+                fs['filesystem_attach_mode']],
+            existing_filesystem=nebius.compute().ExistingFilesystem(
+                id=fs['filesystem_id'])))
+
     service = nebius.vpc().SubnetServiceClient(nebius.sdk())
     sub_net = service.list(nebius.vpc().ListSubnetsRequest(
         parent_id=project_id,)).wait()
@@ -238,14 +247,7 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
             cloud_init_user_data=user_data,
             resources=nebius.compute().ResourcesSpec(platform=platform,
                                                      preset=preset),
-            filesystems=[
-                nebius.compute().AttachedFilesystemSpec(
-                    mount_tag='filesystem-skypilot',
-                    attach_mode=nebius.compute(
-                    ).AttachedFilesystemSpec.AttachMode[filesystem_attach_mode],
-                    existing_filesystem=nebius.compute().ExistingFilesystem(
-                        id=filesystem_id)),
-            ] if filesystem_id is not None else None,
+            filesystems=filesystems_spec if filesystems_spec else None,
             network_interfaces=[
                 nebius.compute().NetworkInterfaceSpec(
                     subnet_id=sub_net.items[0].metadata.id,
