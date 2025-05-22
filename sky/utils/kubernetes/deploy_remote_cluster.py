@@ -663,7 +663,9 @@ def main():
     else:
         # Using YAML configuration
         targets = load_ssh_targets(args.ssh_node_pools_file)
-        clusters_config = get_cluster_config(targets, args.infra)
+        clusters_config = get_cluster_config(targets,
+                                             args.infra,
+                                             file_path=args.ssh_node_pools_file)
 
         # Print information about clusters being processed
         num_clusters = len(clusters_config)
