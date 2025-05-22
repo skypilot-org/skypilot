@@ -1180,6 +1180,19 @@ async def kubernetes_pod_ssh_proxy(
         proc.terminate()
 
 
+@app.get('/all_contexts')
+async def all_contexts(request: fastapi.Request) -> None:
+    """Gets all Kubernetes and SSH node pool contexts."""
+
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='all_contexts',
+        request_body=payloads.RequestBody(),
+        func=core.get_all_contexts,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
