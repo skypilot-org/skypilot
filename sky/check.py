@@ -332,7 +332,7 @@ def get_cached_enabled_clouds_or_refresh(
         capability, skypilot_config.get_active_workspace())
     if not cached_enabled_clouds:
         try:
-            check_capability(sky_cloud.CloudCapability.COMPUTE, quiet=True)
+            check_capability(capability, quiet=True)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
