@@ -567,3 +567,21 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     client.get_or_add_ssh_key(public_key)
     config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)
+
+
+def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Hyperbolic."""
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # Add SSH key to instance metadata
+    config.setdefault('userMetadata', {}).setdefault('skypilot', {})
+    config['userMetadata']['skypilot']['ssh_public_key'] = public_key
+
+    # Set up auth section for Ray template
+    config.setdefault('auth', {})
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)

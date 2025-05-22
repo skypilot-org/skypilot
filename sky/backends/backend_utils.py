@@ -917,7 +917,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
-            clouds.Hyperbolic,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
@@ -934,6 +933,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
+    elif isinstance(cloud, clouds.Hyperbolic):
+        config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
