@@ -136,3 +136,5 @@ During the login flow, the token provided by the web login will encode the cooki
 .. note::
 
     If your auth proxy is not automatically detected, try using ``sky api login --cookies`` to force auth proxy mode.
+
+If the `X-Auth-Request-Email` header is set by your auth proxy, SkyPilot will use it as the user name all requests.
