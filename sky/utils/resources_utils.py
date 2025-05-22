@@ -50,6 +50,20 @@ class DiskTier(enum.Enum):
         return types.index(self) <= types.index(other)
 
 
+class StorageType(enum.Enum):
+    """Storage type."""
+    # Durable network storage, e.g. GCP persistent disks
+    NETWORK = 'network'
+    # Local instance storage, e.g. GCP local SSDs
+    INSTANCE = 'instance'
+
+
+class DiskAttachMode(enum.Enum):
+    """Disk attach mode."""
+    READ_ONLY = 'read_only'
+    READ_WRITE = 'read_write'
+
+
 @dataclasses.dataclass
 class ClusterName:
     display_name: str

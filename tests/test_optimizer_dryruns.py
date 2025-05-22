@@ -13,6 +13,7 @@ from sky import cli
 from sky import clouds
 from sky import exceptions
 from sky import optimizer
+from sky import skypilot_config
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -726,6 +727,33 @@ def test_optimize_disk_tier(enable_all_clouds):
     ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
     assert ultra_tier_candidates == set(
         map(registry.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates
+
+
+def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
+    """
+    Tests that 'sky launch --dryrun' with reservations configured
+    does not raise an AssertionError when Optimizer processes DummySink.
+    Simulates 'sky launch --gpus A100:8 --cloud aws --dryrun'
+    """
+    override_config_dict = {
+        'aws': {
+            'specific_reservations': ['cr-xxx', 'cr-yyy']
+        }
+    }
+    runner = cli_testing.CliRunner()
+    with skypilot_config.override_skypilot_config(override_config_dict):
+        # Ensure AWS is treated as an enabled cloud. The enable_all_clouds
+        # fixture should typically handle this.
+        result = runner.invoke(
+            cli.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
+
+        # Check for a successful dryrun invocation
+        if result.exit_code != 0:
+            pytest.fail(f"'sky launch --dryrun' failed with exit code "
+                        f"{result.exit_code}.\nOutput:\n{result.output}\n"
+                        f"Exception Info: {result.exc_info}")
+
+    # If no exception is raised and exit code is 0, the test passes.
 
 
 def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
