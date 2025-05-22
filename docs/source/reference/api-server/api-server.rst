@@ -8,6 +8,7 @@ a SkyPilot client submits :ref:`asynchronous requests <async>` to a **SkyPilot A
 handles all requests.
 
 .. _sky-api-server-local:
+
 Local API server (individual users)
 -------------------------------------
 
