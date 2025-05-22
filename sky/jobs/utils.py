@@ -1020,10 +1020,15 @@ def format_job_table(
         jobs[get_hash(task)].append(task)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
+    workspaces = set()
     for job_tasks in jobs.values():
         managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
+        workspaces.add(job_tasks[0].get('workspace',
+                                        constants.SKYPILOT_DEFAULT_WORKSPACE))
+
+    show_workspace = len(workspaces) > 1 or show_all
 
     user_cols: List[str] = []
     if show_user:
@@ -1034,7 +1039,7 @@ def format_job_table(
     columns = [
         'ID',
         'TASK',
-        'WORKSPACE',
+        *(['WORKSPACE'] if show_workspace else []),
         'NAME',
         *user_cols,
         'REQUESTED',
@@ -1137,7 +1142,7 @@ def format_job_table(
             job_values = [
                 job_id,
                 '',
-                workspace,
+                *([''] if show_workspace else []),
                 job_name,
                 *user_values,
                 '-',
@@ -1167,10 +1172,11 @@ def format_job_table(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
+            task_workspace = '-' if len(job_tasks) > 1 else workspace
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
-                '-' if len(job_tasks) > 1 else workspace,
+                *([task_workspace] if show_workspace else []),
                 task['task_name'],
                 *user_values,
                 task['resources'],
