@@ -490,6 +490,13 @@ class SkySSHUpLineProcessor(LineProcessor):
                         '✔ SkyPilot runtime already deployed on worker node '
                         f'{node_name}. Skipping.{colorama.Style.RESET_ALL}')
 
+        if 'Failed to setup TCP forwarding on head node' in log_line:
+            node_name = log_line.split('(')[-1].split(')')[0]
+            logger.info(
+                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.RED}'
+                f'✗ Failed to setup TCP forwarding on head node {node_name}.'
+                f'{colorama.Style.RESET_ALL}')
+
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
                  traceback: Optional[types.TracebackType]) -> None:
