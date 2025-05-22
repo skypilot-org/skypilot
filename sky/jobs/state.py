@@ -120,7 +120,8 @@ def create_table(cursor, conn):
         dag_yaml_path TEXT,
         env_file_path TEXT,
         user_hash TEXT,
-        workspace TEXT DEFAULT NULL)""")
+        workspace TEXT DEFAULT NULL,
+        priority INTEGER DEFAULT 500)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -142,6 +143,14 @@ def create_table(cursor, conn):
                                  'workspace',
                                  'TEXT DEFAULT NULL',
                                  value_to_replace_existing_entries='default')
+
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'job_info',
+                                 'priority',
+                                 'INTEGER',
+                                 value_to_replace_existing_entries=500)
+
     conn.commit()
 
 
@@ -199,6 +208,7 @@ columns = [
     'env_file_path',
     'user_hash',
     'workspace',
+    'priority',
 ]
 
 
@@ -342,8 +352,12 @@ class ManagedJobScheduleState(enum.Enum):
     - LAUNCHING -> ALIVE: The launch attempt was completed. It may have
       succeeded or failed. The job controller is not allowed to sky.launch again
       without transitioning to ALIVE_WAITING and then LAUNCHING.
+    - LAUNCHING -> ALIVE_BACKOFF: The launch failed to find resources, and is
+      in backoff waiting for resources.
     - ALIVE -> ALIVE_WAITING: The job controller wants to sky.launch again,
       either for recovery or to launch a subsequent task.
+    - ALIVE_BACKOFF -> ALIVE_WAITING: The backoff period has ended, and the job
+      controller wants to try to launch again.
     - ALIVE_WAITING -> LAUNCHING: The scheduler has determined that the job
       controller may launch again.
     - LAUNCHING, ALIVE, or ALIVE_WAITING -> DONE: The job controller is exiting
@@ -357,6 +371,7 @@ class ManagedJobScheduleState(enum.Enum):
     state or vice versa. (In fact, schedule state is defined on the job and
     status on the task.)
     - INACTIVE or WAITING should only be seen when a job is PENDING.
+    - ALIVE_BACKOFF should only be seen when a job is STARTING.
     - ALIVE_WAITING should only be seen when a job is RECOVERING, has multiple
       tasks, or needs to retry launching.
     - LAUNCHING and ALIVE can be seen in many different statuses.
@@ -382,6 +397,9 @@ class ManagedJobScheduleState(enum.Enum):
     # The job is running sky.launch, or soon will, using a limited number of
     # allowed launch slots.
     LAUNCHING = 'LAUNCHING'
+    # The job is alive, but is in backoff waiting for resources - a special case
+    # of ALIVE.
+    ALIVE_BACKOFF = 'ALIVE_BACKOFF'
     # The controller for the job is running, but it's not currently launching.
     ALIVE = 'ALIVE'
     # The job is in a terminal state. (Not necessarily SUCCEEDED.)
@@ -1004,16 +1022,16 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 
 
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
-                          user_hash: str) -> None:
+                          user_hash: str, priority: int) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
             'schedule_state = (?), dag_yaml_path = (?), env_file_path = (?), '
-            '  user_hash = (?) '
+            '  user_hash = (?), priority = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
             (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
-             env_file_path, user_hash, job_id,
+             env_file_path, user_hash, priority, job_id,
              ManagedJobScheduleState.INACTIVE.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
@@ -1043,15 +1061,28 @@ def scheduler_set_alive(job_id: int) -> None:
         assert updated_count == 1, (job_id, updated_count)
 
 
-def scheduler_set_alive_waiting(job_id: int) -> None:
+def scheduler_set_alive_backoff(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
             'schedule_state = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
+            (ManagedJobScheduleState.ALIVE_BACKOFF.value, job_id,
+             ManagedJobScheduleState.LAUNCHING.value)).rowcount
+        assert updated_count == 1, (job_id, updated_count)
+
+
+def scheduler_set_alive_waiting(job_id: int) -> None:
+    """Do not call without holding the scheduler lock."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        updated_count = cursor.execute(
+            'UPDATE job_info SET '
+            'schedule_state = (?) '
+            'WHERE spot_job_id = (?) AND schedule_state IN (?, ?)',
             (ManagedJobScheduleState.ALIVE_WAITING.value, job_id,
-             ManagedJobScheduleState.ALIVE.value)).rowcount
+             ManagedJobScheduleState.ALIVE.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1108,23 +1139,46 @@ def get_num_alive_jobs() -> int:
 def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
+    Selects the highest-priority (lowest numerical value) WAITING or
+    ALIVE_WAITING job, provided it's priority is less than or equal to any
+    currently LAUNCHING or ALIVE_BACKOFF job.
+
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
     """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        row = cursor.execute(
+        # Get the highest priority (numerically smallest) LAUNCHING job's priority
+        hp_launching_job_row = cursor.execute(
+            'SELECT priority FROM job_info '
+            'WHERE schedule_state IN (?, ?) '
+            'ORDER BY priority ASC, spot_job_id ASC LIMIT 1',
+            (ManagedJobScheduleState.LAUNCHING.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()
+
+        effective_min_priority_to_consider = 1000  # Max priority value (lowest actual priority)
+        if hp_launching_job_row:
+            effective_min_priority_to_consider = hp_launching_job_row[0]
+
+        # Select the highest-priority (lowest numerical value) WAITING or ALIVE_WAITING job
+        # whose priority is less than or equal to effective_min_priority_to_consider.
+        waiting_job_row = cursor.execute(
             'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
-            'WHERE schedule_state in (?, ?) '
-            'ORDER BY spot_job_id LIMIT 1',
+            'WHERE schedule_state IN (?, ?) AND priority <= ? '
+            'ORDER BY priority ASC, spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
-             ManagedJobScheduleState.ALIVE_WAITING.value)).fetchone()
+             ManagedJobScheduleState.ALIVE_WAITING.value,
+             effective_min_priority_to_consider)).fetchone()
+
+        if waiting_job_row is None:
+            return None
+
         return {
-            'job_id': row[0],
-            'schedule_state': ManagedJobScheduleState(row[1]),
-            'dag_yaml_path': row[2],
-            'env_file_path': row[3],
-        } if row is not None else None
+            'job_id': waiting_job_row[0],
+            'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
+            'dag_yaml_path': waiting_job_row[2],
+            'env_file_path': waiting_job_row[3],
+        }
 
 
 def get_workspace(job_id: int) -> str:

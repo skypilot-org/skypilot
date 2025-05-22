@@ -4177,6 +4177,12 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
+@click.option('--priority',
+              type=int,
+              default=500,
+              show_default=True,
+              help=('Job priority from 0 to 1000. A lower number is higher '
+                    'priority.'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4214,6 +4220,7 @@ def jobs_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    priority: int,
     detach_run: bool,
     yes: bool,
     async_call: bool,
@@ -4285,7 +4292,10 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    request_id = managed_jobs.launch(dag,
+                                     name,
+                                     priority=priority,
+                                     _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
     if not async_call and not detach_run:

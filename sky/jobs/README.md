@@ -81,8 +81,11 @@ WAITING -\-> LAUNCHING : scheduled
 
 state "Controller process alive (pid set)" as ControllerProc {
     state "LAUNCHING" as LAUNCHING_PID : (pid set)
+    state ALIVE_BACKOFF : (waiting for resources)
     LAUNCHING -> LAUNCHING_PID
     LAUNCHING_PID -> ALIVE : launch\nfinished
+    LAUNCHING_PID -up-> ALIVE_BACKOFF
+    ALIVE_BACKOFF -> ALIVE_WAITING
     ALIVE -up-> ALIVE_WAITING : recover or\nnew task
     ALIVE_WAITING -down-> LAUNCHING_PID : scheduled
 }

@@ -50,6 +50,7 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    priority: int = 500,
     stream_logs: bool = True,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -186,6 +187,7 @@ def launch(
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             'dashboard_user_id': common.SERVER_ID,
+            'priority': priority,
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
                 remote_user_config_path=remote_user_config_path,
