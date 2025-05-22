@@ -3689,7 +3689,7 @@ def show_gpus(
 
         if show_node_info:
             yield '\n'
-            yield _format_kubernetes_node_info_combined(all_nodes_info)
+            yield _format_kubernetes_node_info_combined(all_nodes_info, identity)
 
     def _possibly_show_k8s_like_realtime(
             is_ssh: bool = False
