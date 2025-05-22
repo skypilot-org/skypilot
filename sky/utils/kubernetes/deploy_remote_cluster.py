@@ -734,17 +734,16 @@ def main():
                 history_workers_info=history_workers_info,
                 history_use_ssh_config=history_use_ssh_config)
 
-            successful_hosts = []
-            for host in cluster_config['hosts']:
-                if isinstance(host, str):
-                    host_node = host
-                else:
-                    host_node = host['ip']
-                if host_node not in unsuccessful_workers:
-                    successful_hosts.append(host)
-            cluster_config['hosts'] = successful_hosts
-
             if not args.cleanup:
+                successful_hosts = []
+                for host in cluster_config['hosts']:
+                    if isinstance(host, str):
+                        host_node = host
+                    else:
+                        host_node = host['ip']
+                    if host_node not in unsuccessful_workers:
+                        successful_hosts.append(host)
+                cluster_config['hosts'] = successful_hosts
                 with open(history_yaml_file, 'w', encoding='utf-8') as f:
                     print(f'{YELLOW}Writing history to {history_yaml_file}{NC}')
                     yaml.dump(cluster_config, f)

@@ -1018,14 +1018,20 @@ def enabled_clouds() -> List[clouds.Cloud]:
 def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
-    quantity_filter: Optional[int] = None
+    quantity_filter: Optional[int] = None,
+    is_ssh: Optional[bool] = None
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
 
     if context is None:
         # Include contexts from both Kubernetes and SSH clouds
         kubernetes_contexts = clouds.Kubernetes.existing_allowed_contexts()
         ssh_contexts = clouds.SSH.existing_allowed_contexts()
-        context_list = kubernetes_contexts + ssh_contexts
+        if is_ssh is None:
+            context_list = kubernetes_contexts + ssh_contexts
+        elif is_ssh:
+            context_list = ssh_contexts
+        else:
+            context_list = kubernetes_contexts
     else:
         context_list = [context]
 
@@ -1036,7 +1042,7 @@ def realtime_kubernetes_gpu_availability(
     ) -> List[models.RealtimeGpuAvailability]:
         counts, capacity, available = service_catalog.list_accelerator_realtime(
             gpus_only=True,
-            clouds='kubernetes',
+            clouds='ssh' if is_ssh else 'kubernetes',
             name_filter=name_filter,
             region_filter=context,
             quantity_filter=quantity_filter,
@@ -1068,16 +1074,19 @@ def realtime_kubernetes_gpu_availability(
             name_filter=name_filter,
             quantity_filter=quantity_filter), context_list)
 
+    cloud_identity = 'ssh' if is_ssh else 'kubernetes'
+    cloud_identity_capital = 'SSH' if is_ssh else 'Kubernetes'
+
     for ctx, queried in zip(context_list, parallel_queried):
         cumulative_count += len(queried)
         if len(queried) == 0:
             # don't add gpu results for clusters that don't have any
-            logger.debug(f'No gpus found in k8s cluster {ctx}')
+            logger.debug(f'No gpus found in {cloud_identity} cluster {ctx}')
             continue
         availability_lists.append((ctx, queried))
 
     if cumulative_count == 0:
-        err_msg = 'No GPUs found in any Kubernetes clusters. '
+        err_msg = f'No GPUs found in any {cloud_identity_capital} clusters. '
         debug_msg = 'To further debug, run: sky check '
         if name_filter is not None:
             gpu_info_msg = f' {name_filter!r}'
@@ -1085,9 +1094,9 @@ def realtime_kubernetes_gpu_availability(
                 gpu_info_msg += (' with requested quantity'
                                  f' {quantity_filter}')
             err_msg = (f'Resources{gpu_info_msg} not found '
-                       'in Kubernetes clusters. ')
-            debug_msg = ('To show available accelerators on kubernetes,'
-                         ' run: sky show-gpus --cloud kubernetes ')
+                       f'in {cloud_identity_capital} clusters. ')
+            debug_msg = (f'To show available accelerators on {cloud_identity}, '
+                         f' run: sky show-gpus --cloud {cloud_identity} ')
         full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                         debug_msg)
         raise ValueError(full_err_msg)

@@ -1443,7 +1443,8 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
 def realtime_kubernetes_gpu_availability(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None) -> server_common.RequestId:
+        quantity_filter: Optional[int] = None,
+        is_ssh: Optional[bool] = None) -> server_common.RequestId:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
@@ -1453,6 +1454,7 @@ def realtime_kubernetes_gpu_availability(
         context=context,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
+        is_ssh=is_ssh,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/'
