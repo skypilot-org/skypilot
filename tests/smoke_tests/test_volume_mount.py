@@ -183,12 +183,12 @@ def _volume_mounts_commands_generator(f: TextIO, name: str, disk_name: str,
         disk_cmd = (
             f'(gcloud compute disks delete {disk_name} --zone={region}-a --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --zone={region}-a'
         )
-        clean_cmd = f'sky down -y {name} && gcloud compute disks describe {disk_name} --zone={region}-a && gcloud compute disks delete {disk_name} --zone={region}-a --quiet'
+        clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe ${disk_name} --zone=${region}-a --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {disk_name} --zone={region}-a --quiet'
     else:
         disk_cmd = (
             f'(gcloud compute disks delete {disk_name} --region={region} --quiet || true) && gcloud compute disks create {disk_name} --size=10 --type=pd-ssd --region={region} --replica-zones={region}-a,{region}-b'
         )
-        clean_cmd = f'sky down -y {name} && gcloud compute disks describe {disk_name} --region={region} && gcloud compute disks delete {disk_name} --region={region} --quiet'
+        clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe ${disk_name} --region=${region} --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {disk_name} --region={region} --quiet'
     if image_id:
         if tpu:
             launch_cmd = f'sky launch -y -c {name} --infra gcp/{region} --gpus tpu-v2-8 --image-id {image_id} {file_path}'
