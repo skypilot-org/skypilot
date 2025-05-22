@@ -1209,3 +1209,16 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup=cleanup,
         infra=infra,
     )
+
+def get_all_contexts() -> List[str]:
+    """Get all available contexts from Kubernetes and SSH clouds.
+
+    Returns:
+        List[str]: A list of all available context names.
+    """
+    kube_contexts = clouds.Kubernetes.existing_allowed_contexts()
+    ssh_contexts = clouds.SSH.get_ssh_node_pool_contexts()
+    # Ensure ssh_contexts are prefixed appropriately if not already
+    # For now, assuming get_ssh_node_pool_contexts already returns them
+    # in the desired format (e.g., 'ssh-my-cluster')
+    return sorted(list(set(kube_contexts + ssh_contexts)))
