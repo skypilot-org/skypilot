@@ -140,6 +140,7 @@ def test_show_status_table():
             'resources_str': '1x(cpus=8, mem=32, m6i.2xlarge, ...)',
             'resources_str_full': ('1x(cpus=8, mem=32, m6i.2xlarge, '
                                    'disk=50)'),
+            'workspace': 'test-workspace',
         }
 
         # Test basic table
