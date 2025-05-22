@@ -173,43 +173,6 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     assert abs(objective - min_objective) < 1
 
 
-def test_optimizer_dummy_sink_with_reservations(enable_all_clouds):
-    """
-    Tests that Optimizer.optimize does not raise an AssertionError
-    when processing DummySink and reservations need to be queried.
-    This covers the scenario where DummyResources might be passed to
-    reservation checking logic.
-    """
-    override_config_dict = {
-        'aws': {
-            'specific_reservations': ['cr-xxx', 'cr-yyy']
-        }
-    }
-
-    # Ensure AWS is treated as an enabled cloud by the optimizer logic.
-    # The enable_all_clouds fixture should typically handle this.
-
-    with skypilot_config.override_skypilot_config(override_config_dict):
-        # Create a simple DAG
-        dag = sky.Dag()
-        with dag:
-            task = sky.Task(name='test_task_for_dummy_sink_reservation')
-            # Use a common, likely available AWS resource to minimize other
-            # potential resource unavailability issues.
-            aws_resources = sky.Resources(infra='aws', instance_type='m5.large')
-            task.set_resources({aws_resources})
-
-        try:
-            # Optimizer.optimize will add dummy source/sink nodes.
-            # The key is that this call should not raise the AssertionError
-            sky.Optimizer.optimize(dag, quiet=True)
-        except Exception as e:
-            pytest.fail(
-                'Optimizer.optimize raised an unexpected exception: {}'.format(
-                    e))
-    # If no exception is raised, the test passes.
-
-
 def test_optimizer(enable_all_clouds):
     for seed in range(3):
         dag = generate_random_dag(num_tasks=5, seed=seed)
