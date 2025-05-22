@@ -175,17 +175,19 @@ def check_host_in_ssh_config(hostname: str) -> bool:
 
 
 def get_cluster_config(targets: Dict[str, Any],
-                       cluster_name: Optional[str] = None) -> Dict[str, Any]:
+                       cluster_name: Optional[str] = None,
+                       file_path: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for specific clusters or all clusters."""
     if not targets:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'{RED}Error: No clusters defined in SSH targets file{NC}')
+            raise ValueError(f'{RED}Error: No clusters defined in SSH '
+                             f'Node Pools file {file_path}{NC}')
 
     if cluster_name:
         if cluster_name not in targets:
-            raise ValueError(f'{RED}Error: Cluster {cluster_name!r} '
-                             f'not found in SSH targets file{NC}')
+            raise ValueError(
+                f'{RED}Error: Cluster {cluster_name!r} not found in '
+                f'SSH Node Pools file {file_path}{NC}')
         return {cluster_name: targets[cluster_name]}
 
     # Return all clusters if no specific cluster is specified
