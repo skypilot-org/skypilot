@@ -133,9 +133,9 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
               file=sys.stderr)
         sys.exit(1)
 
+
 def check_host_in_ssh_config(hostname: str) -> bool:
-    """
-    Return True iff *hostname* matches at least one `Host`/`Match` stanza
+    """Return True iff *hostname* matches at least one `Host`/`Match` stanza
     in the user's OpenSSH client configuration (including anything pulled in
     via Include).
 
@@ -164,13 +164,14 @@ def check_host_in_ssh_config(hostname: str) -> bool:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        check=False,          # we only want the text, not to raise
+        check=False,  # we only want the text, not to raise
     )
 
     # Look for lines like:
     #   debug1: ~/.ssh/config line 42: Applying options for <hostname>
     # Anything other than "*"
-    pattern = re.compile(r"^debug\d+: .*Applying options for ([^*].*)$", re.MULTILINE)
+    pattern = re.compile(r'^debug\d+: .*Applying options for ([^*].*)$',
+                         re.MULTILINE)
 
     return bool(pattern.search(proc.stdout))
 
