@@ -3,7 +3,7 @@ import enum
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -19,7 +19,7 @@ GATEWAY_BASE_URL = 'https://api.dev-hyperbolic.xyz'  #'http://localhost:8000'
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
-TIMEOUT = 180
+TIMEOUT = 300
 
 logger = sky_logging.init_logger(__name__)
 
@@ -132,8 +132,33 @@ class HyperbolicClient:
         except requests.exceptions.RequestException as e:
             raise HyperbolicError(f'Request failed: {str(e)}') from e
 
-    def launch_instance(self, gpu_model: str, gpu_count: int, name: str) -> str:
+    def launch_instance(self, gpu_model: str, gpu_count: int,
+                        name: str) -> Tuple[str, str]:
         """Launch a new instance with the specified configuration."""
+        # Read SSH public key with fallback options
+        ssh_key_paths = [
+            os.path.expanduser('~/.ssh/id_rsa.pub'),
+            os.path.expanduser('~/.ssh/id_ed25519.pub'),
+            os.path.expanduser('~/.ssh/id_ecdsa.pub'),
+        ]
+
+        ssh_public_key = None
+        for key_path in ssh_key_paths:
+            if os.path.exists(key_path):
+                try:
+                    with open(key_path, 'r', encoding='utf-8') as f:
+                        ssh_public_key = f.read().strip()
+                    logger.info(f'Using SSH key from {key_path}')
+                    break
+                except (IOError, OSError) as e:
+                    logger.warning(
+                        f'Failed to read SSH key from {key_path}: {e}')
+                    continue
+
+        if not ssh_public_key:
+            raise RuntimeError('No SSH public key found. Refer '
+                               'https://docs.hyperbolic.xyz/docs/renting-faq')
+
         payload = {
             'gpuModel': gpu_model,
             'gpuCount': str(gpu_count),
@@ -147,11 +172,40 @@ class HyperbolicClient:
         endpoint = '/v2/marketplace/instances/create-cheapest'
         try:
             response = self._make_request('POST', endpoint, payload=payload)
+            logger.debug(f'Launch response: {json.dumps(response, indent=2)}')
+
             instance_id = response.get('instanceName')
             if not instance_id:
+                logger.error(f'No instance ID in response: {response}')
                 raise HyperbolicError('No instance ID returned from API')
-            return instance_id
+
+            logger.info(f'Successfully launched instance {instance_id}, '
+                        f'waiting for it to be ready...')
+
+            # Wait for instance to be ready
+            if not self.wait_for_instance(
+                    instance_id, HyperbolicInstanceStatus.RUNNING.value):
+                raise HyperbolicError(
+                    f'Instance {instance_id} failed to reach RUNNING state')
+
+            # Get instance details to get SSH command
+            instances = self.list_instances()
+            instance = instances.get(instance_id)
+            if not instance:
+                raise HyperbolicError(
+                    f'Instance {instance_id} not found after launch')
+
+            ssh_command = instance.get('sshCommand')
+            if not ssh_command:
+                logger.error(
+                    f'No SSH command available for instance {instance_id}')
+                raise HyperbolicError('No SSH command available for instance')
+
+            logger.info(f'Instance {instance_id} is ready with SSH command')
+            return instance_id, ssh_command
+
         except Exception as e:
+            logger.error(f'Failed to launch instance: {str(e)}')
             raise HyperbolicError(f'Failed to launch instance: {str(e)}') from e
 
     def list_instances(
@@ -293,7 +347,8 @@ def get_client() -> HyperbolicClient:
 
 
 # Backward-compatible wrapper functions
-def launch_instance(gpu_model: str, gpu_count: int, name: str) -> str:
+def launch_instance(gpu_model: str, gpu_count: int,
+                    name: str) -> Tuple[str, str]:
     """Launch a new instance with the specified configuration."""
     return get_client().launch_instance(gpu_model, gpu_count, name)
 
