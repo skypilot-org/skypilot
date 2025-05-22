@@ -484,10 +484,9 @@ class SkySSHUpLineProcessor(LineProcessor):
 
         if 'already exists in history. ' in log_line:
             node_name = log_line.split('(')[-1].split(')')[0]
-            logger.info(
-                f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}'
-                '✔ SkyPilot runtime already deployed on worker node '
-                f'{node_name}. Skipping.{colorama.Style.RESET_ALL}')
+            logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}'
+                        '✔ SkyPilot runtime already deployed on worker node '
+                        f'{node_name}. Skipping.{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
