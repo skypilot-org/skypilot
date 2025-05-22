@@ -123,7 +123,7 @@ def check_capabilities(
     for cloud_tuple, check_result_list in sorted(check_results_dict.items(),
                                                  key=lambda item: item[0][0]):
         _print_checked_cloud(echo, verbose, cloud_tuple, check_result_list,
-                             cloud2ctx2text.get(cloud_repr, {}))
+                             cloud2ctx2text.get(cloud_tuple[0], {}))
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
@@ -382,11 +382,6 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
 
-    def _dim_color(str_to_format: str) -> str:
-        return (f'{colorama.Style.DIM}'
-                f'{str_to_format}'
-                f'{colorama.Style.RESET_ALL}')
-
     filtered_contexts = []
     for context in contexts:
         if not show_details:
@@ -420,14 +415,10 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                     f'Use `sky ssh up --infra {context.lstrip("ssh-")}` to set up.'
                 )
         contexts_formatted.append(
-            f'\n    {symbol}{_dim_color(cleaned_context)}{_dim_color(text_suffix)}'
-        )
+            f'\n    {symbol}{cleaned_context}{text_suffix}')
     identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
                     else 'Allowed contexts')
-    context_info = f'  {identity_str}:{"".join(contexts_formatted)}'
-
-    return (f'\n  {colorama.Style.DIM}{context_info}'
-            f'{colorama.Style.RESET_ALL}')
+    return f'\n    {identity_str}:{"".join(contexts_formatted)}'
 
 
 def _format_enabled_cloud(cloud_name: str,
