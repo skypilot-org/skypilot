@@ -4337,7 +4337,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
             f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
-        job_identity_str = (f'managed jobs with IDs {job_id_str}'
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else repr(name))
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
