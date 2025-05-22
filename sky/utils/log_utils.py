@@ -324,7 +324,8 @@ class SkySSHUpLineProcessor(LineProcessor):
             clusters_part = log_line.split('SKYPILOT_CLUSTER_INFO:',
                                            1)[1].strip()
             if clusters_part.startswith('Found'):
-                logger.info(f'{colorama.Fore.CYAN}{clusters_part}'
+                logger.info(f'{colorama.Style.RESET_ALL}'
+                            f'{colorama.Fore.CYAN}{clusters_part}'
                             f'{colorama.Style.RESET_ALL}')
 
         # Current cluster being operated on
@@ -346,7 +347,8 @@ class SkySSHUpLineProcessor(LineProcessor):
                         f'Deploying SkyPilot \\[{self.current_cluster}]',
                         log_path=self.log_path,
                         is_local=self.is_local))
-                logger.info(f'{colorama.Fore.CYAN}\nSetting up Node Pool: '
+                logger.info(f'{colorama.Style.RESET_ALL}'
+                            f'{colorama.Fore.CYAN}\nSetting up Node Pool: '
                             f'{self.current_cluster}{colorama.Style.RESET_ALL}')
 
         # Handle cluster completion marker
