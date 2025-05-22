@@ -1548,11 +1548,13 @@ class RetryingVmProvisioner(object):
                     controller_str = ('' if controller is None else
                                       f' {controller.value.name}')
                     if isinstance(to_provision.cloud, clouds.Kubernetes):
-                        # Omit the region name for Kubernetes.
+                        suffix = '.'
+                        if region.name.startswith('ssh-'):
+                            suffix = f' ({region.name.lstrip("ssh-")})'
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on '
-                                f'{to_provision.cloud}.'))
+                                f'{to_provision.cloud}{suffix}'))
                     else:
                         logger.info(
                             ux_utils.starting_message(
