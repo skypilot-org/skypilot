@@ -124,6 +124,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    VOLUME = 'VOLUME'
 
     @classmethod
     def from_cloud(cls, cloud: str) -> 'StoreType':

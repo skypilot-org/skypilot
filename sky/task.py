@@ -512,6 +512,7 @@ class Task:
         # storage objects with the storage/storage_mount objects.
         fm_storages = []
         file_mounts = config.pop('file_mounts', None)
+        volumes = []
         if file_mounts is not None:
             copy_mounts = {}
             for dst_path, src in file_mounts.items():
@@ -521,7 +522,27 @@ class Task:
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
                 elif isinstance(src, dict):
-                    fm_storages.append((dst_path, src))
+                    if (src.get('store') ==
+                            storage_lib.StoreType.VOLUME.value.lower()):
+                        # Build the volumes config for resources.
+                        volume_config = {
+                            'path': dst_path,
+                        }
+                        if src.get('name'):
+                            volume_config['name'] = src.get('name')
+                        persistent = src.get('persistent', False)
+                        volume_config['auto_delete'] = not persistent
+                        volume_config_detail = src.get('config', {})
+                        volume_config.update(volume_config_detail)
+                        volumes.append(volume_config)
+                        source_path = src.get('source')
+                        if source_path:
+                            # For volume, copy the source path to the
+                            # data directory of the volume mount point.
+                            copy_mounts[
+                                f'{dst_path.rstrip("/")}/data'] = source_path
+                    else:
+                        fm_storages.append((dst_path, src))
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unable to parse file_mount '
@@ -599,6 +620,8 @@ class Task:
                 'experimental.config_overrides')
             resources_config[
                 '_cluster_config_overrides'] = cluster_config_override
+        if volumes:
+            resources_config['volumes'] = volumes
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
