@@ -622,6 +622,7 @@ def exec(  # pylint: disable=redefined-builtin
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
+    config: Optional[config_utils.Config] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Executes a task on an existing cluster.
@@ -684,7 +685,7 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    dag, config = admin_policy_utils.apply(entrypoint)
+    dag = dag_utils.convert_entrypoint_to_dag(task)
     with skypilot_config.replace_skypilot_config(config):
         return _execute(
             dag=dag,

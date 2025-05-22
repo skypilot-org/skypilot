@@ -637,11 +637,6 @@ def exec(  # pylint: disable=redefined-builtin
     dag, upload_list = client_common.prepare_upload_mounts_to_api_server(
         dag, workdir_only=True)
     dag_id = validate(dag, workdir_only=True)
-    if dag_id is not None:
-        request_id = optimize(dag_id=dag_id)
-    else:
-        request_id = optimize(dag=dag)
-    stream_and_get(request_id)
     client_common.upload_mounts_to_api_server(upload_list)
     body = payloads.ExecBody(
         cluster_name=cluster_name,
