@@ -51,14 +51,11 @@ def test_workspace_switching(generic_cloud: str):
 
             # Launch second cluster with workspace train-ws
             f'export SKYPILOT_PROJECT_CONFIG={ws2_config_path}; '
-            f'sky launch -y --async -c {name}-2 '
+            f'sky launch -y -c {name}-2 '
             f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'echo hi',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 f'{name}-1', [sky.ClusterStatus.UP],
-                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                f'{name}-2', [sky.ClusterStatus.UP],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 | grep {ws1_name}',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep {ws2_name}',
