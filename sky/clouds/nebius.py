@@ -217,7 +217,7 @@ class Nebius(clouds.Cloud):
         for i, fs in enumerate(config_fs):
             resources_vars_fs.append({
                 'filesystem_id': fs['filesystem_id'],
-                'filesystem_attach_mode': fs['attach_mode'],
+                'filesystem_attach_mode': fs.get('attach_mode', 'READ_WRITE'),
                 'filesystem_mount_path': fs.get(
                     'mount_path', f'/mnt/filesystem-skypilot-{i+1}'),
                 'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
