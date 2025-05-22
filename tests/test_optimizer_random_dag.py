@@ -5,12 +5,13 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import skypilot_config
 from sky.clouds import service_catalog
-from sky.utils import registry
 
 ALL_INSTANCE_TYPE_INFOS = sum(
     sky.list_accelerators(gpus_only=True).values(), [])
@@ -170,6 +171,43 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     # We use $1 as the tolerance for the objective value, since there can be
     # floating point precision issues.
     assert abs(objective - min_objective) < 1
+
+
+def test_optimizer_dummy_sink_with_reservations(enable_all_clouds):
+    """
+    Tests that Optimizer.optimize does not raise an AssertionError
+    when processing DummySink and reservations need to be queried.
+    This covers the scenario where DummyResources might be passed to
+    reservation checking logic.
+    """
+    override_config_dict = {
+        'aws': {
+            'specific_reservations': ['cr-xxx', 'cr-yyy']
+        }
+    }
+
+    # Ensure AWS is treated as an enabled cloud by the optimizer logic.
+    # The enable_all_clouds fixture should typically handle this.
+
+    with skypilot_config.override_skypilot_config(override_config_dict):
+        # Create a simple DAG
+        dag = sky.Dag()
+        with dag:
+            task = sky.Task(name='test_task_for_dummy_sink_reservation')
+            # Use a common, likely available AWS resource to minimize other
+            # potential resource unavailability issues.
+            aws_resources = sky.Resources(infra='aws', instance_type='m5.large')
+            task.set_resources({aws_resources})
+
+        try:
+            # Optimizer.optimize will add dummy source/sink nodes.
+            # The key is that this call should not raise the AssertionError
+            sky.Optimizer.optimize(dag, quiet=True)
+        except Exception as e:
+            pytest.fail(
+                'Optimizer.optimize raised an unexpected exception: {}'.format(
+                    e))
+    # If no exception is raised, the test passes.
 
 
 def test_optimizer(enable_all_clouds):
