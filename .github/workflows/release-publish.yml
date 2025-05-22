@@ -14,7 +14,7 @@ jobs:
       version: ${{ steps.extract_version.outputs.version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref }}
 
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref }}
 
@@ -119,7 +119,7 @@ jobs:
       package_name: 'skypilot'
       version: ${{ needs.extract-version.outputs.version }}
     secrets: inherit
-  
+
   publish-helm:
     needs: [extract-version, publish-to-pypi, trigger-docker-build]
     uses: ./.github/workflows/publish-helm.yml
@@ -129,13 +129,39 @@ jobs:
       package_name: 'skypilot'
     secrets: inherit
 
+  create-release:
+    needs: [extract-version, publish-to-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push tag
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Release v${{ needs.extract-version.outputs.version }}"
+          tag_name: "v${{ needs.extract-version.outputs.version }}"
+          generate_release_notes: true
+          draft: true
+
+
   cleanup-branches:
     needs: extract-version
     if: github.event.pull_request.merged == false && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}

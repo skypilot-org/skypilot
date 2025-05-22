@@ -142,8 +142,8 @@ The ``~/.sky/ssh_node_pools.yaml`` file is stored on the server side, not client
 - If you use a :ref:`local API server <sky-api-server-local>`, set ``~/.sky/ssh_node_pools.yaml`` on your local machine.
 - If you use a :ref:`remote API server <sky-api-server-remote>`, write the file on the remote API server host. This is most likely accessible by admins only.
 
-Viewing SSH Node Pools in Dashboard
------------------------------------
+Observability of SSH Node Pools
+-------------------------------
 
 Open ``sky dashboard`` and click on the ``Infra`` tab to see an overview of all SSH Node Pools:
 

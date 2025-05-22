@@ -2,9 +2,11 @@
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import dataclasses
 import datetime
+import json
 import logging
 import multiprocessing
 import os
@@ -49,6 +51,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
@@ -218,6 +221,34 @@ app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 
 
+@app.get('/token')
+async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
+    # Use base64 encoding to avoid having to escape anything in the HTML.
+    json_bytes = json.dumps(request.cookies).encode('utf-8')
+    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    token_page_path = html_dir / 'token_page.html'
+    try:
+        with open(token_page_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+    except FileNotFoundError as e:
+        raise fastapi.HTTPException(
+            status_code=500, detail='Token page template not found.') from e
+
+    html_content = html_content.replace(
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER', base64_str)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            # X-Accel-Buffering: no is useful for preventing buffering issues
+            # with some reverse proxies.
+            'X-Accel-Buffering': 'no'
+        })
+
+
 @app.post('/check')
 async def check(request: fastapi.Request,
                 check_body: payloads.CheckBody) -> None:
@@ -327,25 +358,26 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
+    context.initialize()
+
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        dag, _ = admin_policy_utils.apply(
-            dag, request_options=validate_body.request_options)
-        # Skip validating workdir and file_mounts, as those need to be
-        # validated after the files are uploaded to the SkyPilot API server
-        # with `upload_mounts_to_api_server`.
-        dag.validate(skip_file_mounts=True, skip_workdir=True)
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag, request_options=validate_body.request_options) as dag:
+            # Skip validating workdir and file_mounts, as those need to be
+            # validated after the files are uploaded to the SkyPilot API server
+            # with `upload_mounts_to_api_server`.
+            dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        loop = asyncio.get_running_loop()
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await loop.run_in_executor(None, validate_dag, dag)
+        await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
