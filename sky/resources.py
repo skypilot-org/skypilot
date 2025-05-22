@@ -96,7 +96,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 23
+    _VERSION = 24
 
     def __init__(
         self,
@@ -114,6 +114,7 @@ class Resources:
         image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
+        network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, Dict[str, Any], None] = None,
@@ -192,6 +193,8 @@ class Resources:
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
+          network_tier: the network performance tier to use. If None, defaults to
+            ``'standard'``.
           ports: the ports to open on the instance.
           labels: the labels to apply to the instance. These are useful for
             assigning metadata that may be used by external tools.
@@ -277,6 +280,20 @@ class Resources:
             disk_tier = resources_utils.DiskTier(disk_tier_str)
         self._disk_tier = disk_tier
 
+        if isinstance(network_tier, str):
+            network_tier_str = str(network_tier).lower()
+            supported_tiers = [tier.value for tier in resources_utils.NetworkTier]
+            if network_tier_str not in supported_tiers:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid network_tier {network_tier_str!r}. '
+                                     f'Network tier must be one of '
+                                     f'{", ".join(supported_tiers)}.')
+            network_tier = resources_utils.NetworkTier(network_tier_str)
+        self._network_tier = network_tier
+        if self._network_tier == resources_utils.NetworkTier.BEST:
+            if isinstance(self._cloud, clouds.GCP):
+                self._image_id = {self._region: 'docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx'}
+
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
@@ -319,6 +336,7 @@ class Resources:
         self._try_validate_managed_job_attributes()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
+        self._try_validate_network_tier()
         self._try_validate_ports()
         self._try_validate_labels()
 
@@ -384,6 +402,10 @@ class Resources:
         if self.disk_tier is not None:
             disk_tier = f', disk_tier={self.disk_tier.value}'
 
+        network_tier = ''
+        if self.network_tier is not None:
+            network_tier = f', network_tier={self.network_tier.value}'
+
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -403,7 +425,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}{ports}')
+            f'{disk_tier}{network_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -524,6 +546,10 @@ class Resources:
     @property
     def disk_tier(self) -> Optional[resources_utils.DiskTier]:
         return self._disk_tier
+    
+    @property
+    def network_tier(self) -> Optional[resources_utils.NetworkTier]:
+        return self._network_tier
 
     @property
     def ports(self) -> Optional[List[str]]:
@@ -1090,6 +1116,24 @@ class Resources:
                         f'Disk tier {self.disk_tier.value} is not supported '
                         f'for instance type {self.instance_type}.') from None
 
+    def _try_validate_network_tier(self) -> None:
+        """Try to validate the network_tier attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if self.network_tier is None:
+            return
+        if self.cloud is not None:
+            try:
+                self.cloud.check_network_tier_enabled(self.instance_type,
+                                                      self.network_tier)
+            except exceptions.NotSupportedError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Network tier {self.network_tier.value} is not supported '
+                        f'for instance type {self.instance_type}.') from None
+                
     def _try_validate_ports(self) -> None:
         """Try to validate the ports attribute.
 
@@ -1349,6 +1393,12 @@ class Resources:
                 # Add parenthesis for better readability.
                 if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
                     return False
+                
+        if self.network_tier is not None:
+            if other.network_tier is None:
+                return False
+            if not (self.network_tier <= other.network_tier):
+                return False
 
         if check_ports:
             if self.ports is not None:
@@ -1404,6 +1454,7 @@ class Resources:
             not self._use_spot_specified,
             self._disk_size == _DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
+            self._network_tier is None,
             self._image_id is None,
             self._ports is None,
             self._docker_login_config is None,
@@ -1447,6 +1498,7 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            network_tier=override.pop('network_tier', self.network_tier),
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
@@ -1483,6 +1535,9 @@ class Resources:
         if (self.disk_tier is not None and
                 self.disk_tier != resources_utils.DiskTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        if (self.network_tier is not None and
+                self.network_tier != resources_utils.NetworkTier.BEST):
+            features.add(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
         elif self.image_id is not None:
@@ -1645,6 +1700,7 @@ class Resources:
         resources_fields['zone'] = config.pop('zone', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
+        resources_fields['network_tier'] = config.pop('network_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
@@ -1695,6 +1751,8 @@ class Resources:
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
+        if self.network_tier is not None:
+            config['network_tier'] = self.network_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
         if self._autostop_config is not None:
@@ -1856,6 +1914,12 @@ class Resources:
 
         if version < 23:
             self._autostop_config = None
+
+        if version < 24:
+            original_network_tier = state.get('_network_tier', None)
+            if original_network_tier is not None:
+                state['_network_tier'] = resources_utils.NetworkTier(
+                    original_network_tier)
 
         self.__dict__.update(state)
 

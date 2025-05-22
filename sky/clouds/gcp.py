@@ -498,6 +498,8 @@ class GCP(clouds.Cloud):
             False,
             override_configs=resources.cluster_config_overrides)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
+        network_tier = r.network_tier
+        resources_vars['network_tier'] = network_tier
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
@@ -532,7 +534,7 @@ class GCP(clouds.Cloud):
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if enable_gpu_direct:
+                if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
                     image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
                     if acc == 'K80':
@@ -603,7 +605,7 @@ class GCP(clouds.Cloud):
             None,
             override_configs=resources.cluster_config_overrides)
         resources_vars['user_data'] = None
-        if enable_gpu_direct:
+        if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
             resources_vars['user_data'] = constants.GPU_DIRECT_TCPX_USER_DATA
             resources_vars[
                 'docker_run_options'] = constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
