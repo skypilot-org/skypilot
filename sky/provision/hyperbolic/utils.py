@@ -31,12 +31,16 @@ class HyperbolicError(Exception):
 
 class HyperbolicInstanceStatus(enum.Enum):
     """Statuses enum for Hyperbolic instances."""
-    CREATING = 'creating'
+    UNKNOWN = 'unknown'
+    ONLINE = 'online'
+    OFFLINE = 'offline'
     STARTING = 'starting'
-    RUNNING = 'online'
+    STOPPING = 'stopping'
+    BUSY = 'busy'
+    RESTARTING = 'restarting'
+    CREATING = 'creating'
     FAILED = 'failed'
     ERROR = 'error'
-    RESTARTING = 'restarting'
     TERMINATED = 'terminated'
 
     @classmethod
@@ -46,10 +50,14 @@ class HyperbolicInstanceStatus(enum.Enum):
         return {
             cls.CREATING: status_lib.ClusterStatus.INIT,
             cls.STARTING: status_lib.ClusterStatus.INIT,
-            cls.RUNNING: status_lib.ClusterStatus.UP,
+            cls.ONLINE: status_lib.ClusterStatus.UP,
             cls.FAILED: status_lib.ClusterStatus.INIT,
             cls.ERROR: status_lib.ClusterStatus.INIT,
             cls.RESTARTING: status_lib.ClusterStatus.INIT,
+            cls.STOPPING: status_lib.ClusterStatus.INIT,
+            cls.UNKNOWN: status_lib.ClusterStatus.INIT,
+            cls.BUSY: status_lib.ClusterStatus.INIT,
+            cls.OFFLINE: status_lib.ClusterStatus.INIT,
             cls.TERMINATED: None,
         }
 
@@ -184,9 +192,9 @@ class HyperbolicClient:
 
             # Wait for instance to be ready
             if not self.wait_for_instance(
-                    instance_id, HyperbolicInstanceStatus.RUNNING.value):
+                    instance_id, HyperbolicInstanceStatus.ONLINE.value):
                 raise HyperbolicError(
-                    f'Instance {instance_id} failed to reach RUNNING state')
+                    f'Instance {instance_id} failed to reach ONLINE state')
 
             # Get instance details to get SSH command
             instances = self.list_instances()
