@@ -84,7 +84,7 @@ class SSH(kubernetes.Kubernetes):
             # since there is no context name available.
             return region, zone
 
-        all_contexts = self.existing_allowed_contexts(silent=True)
+        all_contexts = self.existing_allowed_contexts()
 
         if region is not None and region not in all_contexts:
             region_name = region.lstrip('ssh-')
@@ -167,8 +167,7 @@ class SSH(kubernetes.Kubernetes):
 
         # Get SSH contexts
         try:
-            existing_allowed_contexts = cls.existing_allowed_contexts(
-                silent=True)
+            existing_allowed_contexts = cls.existing_allowed_contexts()
         except Exception as e:  # pylint: disable=broad-except
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
