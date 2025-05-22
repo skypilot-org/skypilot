@@ -542,7 +542,7 @@ def cancel_job_by_name(job_name: str,
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    msg = cancel_jobs_by_id(job_ids, current_workspace)
+    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
     return f'{job_name!r} {msg}'
 
 

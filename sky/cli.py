@@ -2028,7 +2028,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users, query_clusters, show_workspace)
+        normal_clusters + controllers, verbose, all_users, query_clusters,
+        show_workspace)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
