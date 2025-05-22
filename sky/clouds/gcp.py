@@ -991,22 +991,19 @@ class GCP(clouds.Cloud):
                     'auth list --filter=status:ACTIVE '
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
-        workspace_config = skypilot_config.get_workspace_cloud('gcp')
-        project_id = workspace_config.get('project_id', None)
-        if project_id is None:
-            try:
-                project_id = cls.get_project_id()
-            except Exception as e:  # pylint: disable=broad-except
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.CloudUserIdentityError(
-                        f'Failed to get GCP user identity with unknown '
-                        f'exception.\n'
-                        '  Reason: '
-                        f'{common_utils.format_exception(e, use_bracket=True)}'
-                    ) from e
-            # TODO: Return a list of identities in the profile when we support
-            # automatic switching for GCP. Currently we only support one
-            # identity.
+        try:
+            project_id = cls.get_project_id()
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
+        # TODO: Return a list of identities in the profile when we support
+        # automatic switching for GCP. Currently we only support one
+        # identity.
         return [[f'{account} [project_id={project_id}]']]
 
     @classmethod

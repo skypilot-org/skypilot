@@ -36,7 +36,18 @@ def check_capabilities(
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
-    echo('Checking credentials to enable infra for SkyPilot.')
+    all_workspaces_results: Dict[str,
+                                 Dict[str,
+                                      List[sky_cloud.CloudCapability]]] = {}
+    available_workspaces = list(skypilot_config.get_workspaces().keys())
+    hide_workspace_str = (available_workspaces == [
+        constants.SKYPILOT_DEFAULT_WORKSPACE
+    ])
+    initial_hint = 'Checking credentials to enable infra for SkyPilot.'
+    if len(available_workspaces) > 1:
+        initial_hint = (f'Checking credentials to enable infra for SkyPilot '
+                        f'(Workspaces: {", ".join(available_workspaces)}).')
+    echo(initial_hint)
     if capabilities is None:
         capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
@@ -209,13 +220,6 @@ def check_capabilities(
         return enabled_clouds
 
     # --- Main check_capabilities logic ---
-    all_workspaces_results: Dict[str,
-                                 Dict[str,
-                                      List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(skypilot_config.get_workspaces().keys())
-    hide_workspace_str = (available_workspaces == [
-        constants.SKYPILOT_DEFAULT_WORKSPACE
-    ])
 
     if workspace is not None:
         # Check only the specified workspace
@@ -236,14 +240,12 @@ def check_capabilities(
         # Check all workspaces
         workspaces_to_check = available_workspaces
 
-        if len(workspaces_to_check) > 1:
-            echo(f'Checking enabled infra for all workspaces: '
-                 f'{", ".join(workspaces_to_check)}')
-
         hide_per_cloud_details_flag = (not verbose and
                                        len(workspaces_to_check) > 1)
 
         for ws_name in workspaces_to_check:
+            if not hide_workspace_str:
+                echo(f'\nChecking enabled infra for workspace: {ws_name!r}')
             with skypilot_config.with_active_workspace(ws_name):
                 enabled_ws_clouds = _execute_check_logic_for_workspace(
                     ws_name, hide_per_cloud_details_flag, hide_workspace_str)
