@@ -78,14 +78,12 @@ def optimize(
     # is shown on `sky launch`. The optimizer is also invoked during failover,
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
-    dag, _ = admin_policy_utils.apply(
-        dag,
-        use_mutated_config_in_current_request=True,
-        request_options=request_options)
-    return optimizer.Optimizer.optimize(dag=dag,
-                                        minimize=minimize,
-                                        blocked_resources=blocked_resources,
-                                        quiet=quiet)
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, request_options=request_options) as dag:
+        return optimizer.Optimizer.optimize(dag=dag,
+                                            minimize=minimize,
+                                            blocked_resources=blocked_resources,
+                                            quiet=quiet)
 
 
 @usage_lib.entrypoint

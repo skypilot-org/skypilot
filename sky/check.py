@@ -95,7 +95,7 @@ def check_capabilities(
     ]
 
     combinations = list(itertools.product(clouds_to_check, capabilities))
-    with rich_utils.safe_status('Checking Cloud(s)...'):
+    with rich_utils.safe_status('Checking infra choices...'):
         check_results = subprocess_utils.run_in_parallel(
             check_one_cloud_one_capability, combinations)
 
@@ -347,10 +347,10 @@ def _print_checked_cloud(
         capability_string = f'[{", ".join(enabled_capabilities)}]'
         if verbose and cloud is not cloudflare:
             activated_account = cloud.get_active_user_identity_str()
-    if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
-        detail_string = _format_context_details(cloud_tuple[1],
-                                                show_details=True,
-                                                ctx2text=ctx2text)
+        if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
+            detail_string = _format_context_details(cloud_tuple[1],
+                                                    show_details=True,
+                                                    ctx2text=ctx2text)
     echo(
         click.style(
             f'{style_str}  {cloud_repr}: {status_msg} {capability_string}'

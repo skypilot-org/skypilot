@@ -52,6 +52,7 @@ import contextlib
 import copy
 import json
 import os
+import tempfile
 import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -62,6 +63,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -105,11 +107,64 @@ ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
-# The loaded config.
-_dict = config_utils.Config()
-_loaded_config_path: Optional[str] = None
-_config_overridden: bool = False
+
+class ConfigContext:
+
+    def __init__(self,
+                 config: config_utils.Config = config_utils.Config(),
+                 config_path: Optional[str] = None,
+                 config_overridden: bool = False):
+        self.config = config
+        self.config_path = config_path
+        self.config_overridden = config_overridden
+
+
+# The global loaded config.
+_global_config_context = ConfigContext()
 _reload_config_lock = threading.Lock()
+
+
+def _get_config_context() -> ConfigContext:
+    """Get config context for current context.
+
+    If no context is available, the global config context is returned.
+    """
+    ctx = context.get()
+    if not ctx:
+        return _global_config_context
+    if ctx.config_context is None:
+        # Config context for current context is not initialized, inherit from
+        # the global one.
+        ctx.config_context = ConfigContext(
+            config=copy.deepcopy(_global_config_context.config),
+            config_path=_global_config_context.config_path,
+            config_overridden=_global_config_context.config_overridden,
+        )
+    return ctx.config_context
+
+
+def _get_loaded_config() -> config_utils.Config:
+    return _get_config_context().config
+
+
+def _set_loaded_config(config: config_utils.Config) -> None:
+    _get_config_context().config = config
+
+
+def _get_loaded_config_path() -> Optional[str]:
+    return _get_config_context().config_path
+
+
+def _set_loaded_config_path(path: Optional[str]) -> None:
+    _get_config_context().config_path = path
+
+
+def _is_config_overridden() -> bool:
+    return _get_config_context().config_overridden
+
+
+def _set_config_overridden(config_overridden: bool) -> None:
+    _get_config_context().config_overridden = config_overridden
 
 
 def get_user_config_path() -> str:
@@ -224,7 +279,7 @@ def get_nested(keys: Tuple[str, ...],
     Returns:
         The value of the nested key, or 'default_value' if not found.
     """
-    return _dict.get_nested(
+    return _get_loaded_config().get_nested(
         keys,
         default_value,
         override_configs,
@@ -237,14 +292,14 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
-    copied_dict = copy.deepcopy(_dict)
+    copied_dict = copy.deepcopy(_get_loaded_config())
     copied_dict.set_nested(keys, value)
     return dict(**copied_dict)
 
 
 def to_dict() -> config_utils.Config:
     """Returns a deep-copied version of the current config."""
-    return copy.deepcopy(_dict)
+    return copy.deepcopy(_get_loaded_config())
 
 
 def _get_config_file_path(envvar: str) -> Optional[str]:
@@ -345,10 +400,9 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
 
 
 def _reload_config_from_internal_file(internal_config_path: str) -> None:
-    global _dict, _loaded_config_path
     # Reset the global variables, to avoid using stale values.
-    _dict = config_utils.Config()
-    _loaded_config_path = None
+    _set_loaded_config(config_utils.Config())
+    _set_loaded_config_path(None)
 
     config_path = os.path.expanduser(internal_config_path)
     if not os.path.exists(config_path):
@@ -359,14 +413,13 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _dict = parse_config_file(config_path)
-    _loaded_config_path = config_path
+    _set_loaded_config(parse_config_file(config_path))
+    _set_loaded_config_path(config_path)
 
 
 def _reload_config_as_server() -> None:
-    global _dict
     # Reset the global variables, to avoid using stale values.
-    _dict = config_utils.Config()
+    _set_loaded_config(config_utils.Config())
 
     overrides: List[config_utils.Config] = []
     server_config = get_server_config()
@@ -382,13 +435,12 @@ def _reload_config_as_server() -> None:
         logger.debug(
             f'server config: \n'
             f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
-    _dict = overlaid_server_config
+    _set_loaded_config(overlaid_server_config)
 
 
 def _reload_config_as_client() -> None:
-    global _dict
     # Reset the global variables, to avoid using stale values.
-    _dict = config_utils.Config()
+    _set_loaded_config(config_utils.Config())
 
     overrides: List[config_utils.Config] = []
     user_config = get_user_config()
@@ -407,15 +459,15 @@ def _reload_config_as_client() -> None:
         logger.debug(
             f'client config (before task and CLI overrides): \n'
             f'{common_utils.dump_yaml_str(dict(overlaid_client_config))}')
-    _dict = overlaid_client_config
+    _set_loaded_config(overlaid_client_config)
 
 
 def loaded_config_path() -> Optional[str]:
     """Returns the path to the loaded config file, or
     '<overridden>' if the config is overridden."""
-    if _config_overridden:
+    if _is_config_overridden():
         return '<overridden>'
-    return _loaded_config_path
+    return _get_loaded_config_path()
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
@@ -424,21 +476,20 @@ _reload_config()
 
 def loaded() -> bool:
     """Returns if the user configurations are loaded."""
-    return bool(_dict)
+    return bool(_get_loaded_config())
 
 
 @contextlib.contextmanager
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
-    global _dict, _config_overridden
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
         # If no override configs (None or empty dict), do nothing.
         yield
         return
-    original_config = _dict
+    original_config = _get_loaded_config()
     override_configs = config_utils.Config(override_configs)
     disallowed_diff_keys = []
     for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
@@ -455,7 +506,7 @@ def override_skypilot_config(
             'and will be ignored. Remove these keys to disable this warning. '
             'If you want to specify it, please modify it on server side or '
             'contact your administrator.')
-    config = _dict.get_nested(
+    config = original_config.get_nested(
         keys=tuple(),
         default_value=None,
         override_configs=dict(override_configs),
@@ -469,8 +520,8 @@ def override_skypilot_config(
             'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
             'Error: ',
             skip_none=False)
-        _config_overridden = True
-        _dict = config
+        _set_config_overridden(True)
+        _set_loaded_config(config)
         yield
     except exceptions.InvalidSkyPilotConfigError as e:
         with ux_utils.print_exception_no_traceback():
@@ -483,8 +534,43 @@ def override_skypilot_config(
                 f'{common_utils.dump_yaml_str(dict(override_configs))}\n'
                 f'Details: {e}') from e
     finally:
-        _dict = original_config
-        _config_overridden = False
+        _set_loaded_config(original_config)
+        _set_config_overridden(False)
+
+
+@contextlib.contextmanager
+def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
+    """Replaces the global config with the new configs.
+
+    This function is concurrent safe when it is:
+    1. called in different processes;
+    2. or called in a same process but with different context, refer to
+       sky_utils.context for more details.
+    """
+    original_config = _get_loaded_config()
+    original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    if new_configs != original_config:
+        # Modify the global config of current process or context
+        _set_loaded_config(new_configs)
+        with tempfile.NamedTemporaryFile(delete=False,
+                                         mode='w',
+                                         prefix='mutated-skypilot-config-',
+                                         suffix='.yaml') as temp_file:
+            common_utils.dump_yaml(temp_file.name, dict(**new_configs))
+        # Modify the env var of current process or context so that the
+        # new config will be used by spawned sub-processes.
+        # Note that this code modifies os.environ directly because it
+        # will be hijacked to be context-aware if a context is active.
+        os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+        yield
+        # Restore the original config and env var.
+        _set_loaded_config(original_config)
+        if original_env_var:
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
+        else:
+            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
+    else:
+        yield
 
 
 def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
@@ -529,11 +615,11 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         cli_config: A path to a config file or a comma-separated
         list of key-value pairs.
     """
-    global _dict
     parsed_config = _compose_cli_config(cli_config)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'applying following CLI overrides: \n'
                      f'{common_utils.dump_yaml_str(dict(parsed_config))}')
-    _dict = overlay_skypilot_config(original_config=_dict,
-                                    override_configs=parsed_config)
+    _set_loaded_config(
+        overlay_skypilot_config(original_config=_get_loaded_config(),
+                                override_configs=parsed_config))
     return parsed_config

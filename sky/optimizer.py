@@ -74,8 +74,8 @@ class Optimizer:
     def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
                      gigabytes: float) -> float:
         """Returns estimated egress cost."""
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, clouds.DummyCloud) or isinstance(
+                dst_cloud, clouds.DummyCloud):
             return 0.0
 
         if not src_cloud.is_same_cloud(dst_cloud):
@@ -89,8 +89,8 @@ class Optimizer:
                      gigabytes: float) -> float:
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, clouds.DummyCloud) or isinstance(
+                dst_cloud, clouds.DummyCloud):
             return 0.0
         if not src_cloud.is_same_cloud(dst_cloud):
             # 10Gbps is close to the average of observed b/w from S3
@@ -168,7 +168,7 @@ class Optimizer:
 
         def make_dummy(name):
             dummy = task_lib.Task(name)
-            dummy.set_resources({DummyResources(cloud=DummyCloud())})
+            dummy.set_resources({DummyResources(cloud=clouds.DummyCloud())})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
 
@@ -198,7 +198,7 @@ class Optimizer:
         node: task_lib.Task,
         resources: resources_lib.Resources,
     ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
-        if isinstance(parent_resources.cloud, DummyCloud):
+        if isinstance(parent_resources.cloud, clouds.DummyCloud):
             # Special case.  The current 'node' is a real
             # source node, and its input may be on a different
             # cloud from 'resources'.
@@ -1169,11 +1169,6 @@ class DummyResources(resources_lib.Resources):
 
     def get_cost(self, seconds):
         return 0
-
-
-class DummyCloud(clouds.Cloud):
-    """A dummy Cloud that has zero egress cost from/to."""
-    pass
 
 
 def _filter_out_blocked_launchable_resources(

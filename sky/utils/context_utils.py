@@ -1,5 +1,6 @@
 """Utilities for SkyPilot context."""
 import asyncio
+import contextvars
 import functools
 import io
 import multiprocessing
@@ -170,3 +171,17 @@ def cancellation_guard(func: F) -> F:
         return func(*args, **kwargs)
 
     return typing.cast(F, wrapper)
+
+
+# TODO(aylei): replace this with asyncio.to_thread once we drop support for
+# python 3.8
+def to_thread(func, /, *args, **kwargs):
+    """Asynchronously run function *func* in a separate thread.
+
+    This is same as asyncio.to_thread added in python 3.9
+    """
+    loop = asyncio.get_running_loop()
+    # This is critical to pass the current coroutine context to the new thread
+    pyctx = contextvars.copy_context()
+    func_call = functools.partial(pyctx.run, func, *args, **kwargs)
+    return loop.run_in_executor(None, func_call)

@@ -826,6 +826,16 @@ class GCPComputeInstance(GCPInstance):
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # pylint: disable=line-too-long
         if config.get('sourceMachineImage') is not None:
             return False
+        # bulkInsert does not support attaching existing
+        # disks to the instances with READ_WRITE mode.
+        if config.get('disks') is not None:
+            for disk in config['disks']:
+                if disk.get('source') is not None and disk.get(
+                        'mode', 'READ_WRITE') == 'READ_WRITE':
+                    return False
+                if disk.get('initializeParams') is not None and disk.get(
+                        'initializeParams', {}).get('diskName') is not None:
+                    return False
         return True
 
     @classmethod

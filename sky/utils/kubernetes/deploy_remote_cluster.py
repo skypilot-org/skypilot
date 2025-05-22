@@ -133,22 +133,6 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
                 f'{RED}Error loading SSH targets file: {e}{NC}') from e
 
 
-# def check_host_in_ssh_config(hostname: str) -> bool:
-#     """Check if a hostname is defined in SSH config file."""
-#     if not os.path.exists(SSH_CONFIG_PATH):
-#         return False
-
-#     try:
-#         result = subprocess.run(['ssh', '-G', hostname],
-#                                 capture_output=True,
-#                                 text=True,
-#                                 check=False)
-#         # If successful, the host is in the SSH config
-#         return result.returncode == 0 and 'hostname' in result.stdout
-#     except Exception:  # pylint: disable=broad-except
-#         return False
-
-
 def _gather_patterns(path: pathlib.Path, seen=None):
     """Recursively collect *only* the raw Host patterns from SSH config files."""
     if seen is None:
@@ -724,13 +708,13 @@ def main():
             if history is not None:
                 for key in ['user', 'identity_file', 'password']:
                     if history.get(key) != cluster_config.get(key):
-                        raise RuntimeError(
+                        raise ValueError(
                             f'Cluster configuration has changed for field {key!r}. '
                             f'Previous value: {history.get(key)}, '
                             f'Current value: {cluster_config.get(key)}')
                 history_hosts_info = prepare_hosts_info(history)
                 if history_hosts_info[0] != hosts_info[0]:
-                    raise RuntimeError(
+                    raise ValueError(
                         f'Cluster configuration has changed for master node. '
                         f'Previous value: {history_hosts_info[0]}, '
                         f'Current value: {hosts_info[0]}')
@@ -1383,7 +1367,7 @@ def deploy_cluster(head_node,
             --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
             --set 'toolkit.env[2].value=nvidia' &&
             echo 'Waiting for GPU operator installation...' &&
-            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product='; do
+            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
                 echo 'Waiting for GPU operator...'
                 sleep 5
             done 

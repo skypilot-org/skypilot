@@ -54,6 +54,9 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
 
+  :ref:`provision <config-yaml-provision>`:
+    :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
+
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
     :ref:`remote_identity <config-yaml-kubernetes-remote-identity>`: my-k8s-service-account
@@ -354,6 +357,23 @@ Example:
 .. code-block:: yaml
 
   admin_policy: my_package.SkyPilotPolicyV1
+
+.. _config-yaml-provision:
+
+``provision``
+~~~~~~~~~~~~~
+
+.. _config-yaml-provision-ssh-timeout:
+
+``provision.ssh_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for SSH connection probing during provisioning (optional).
+
+Cluster SSH connection is probed during provisioning to check if a cluster is up. This timeout
+determines how long to wait for the connection to be established.
+
+Default: ``10``.
 
 .. _config-yaml-aws:
 
