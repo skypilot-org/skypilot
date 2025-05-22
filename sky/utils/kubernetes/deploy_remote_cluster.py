@@ -116,7 +116,7 @@ def parse_args():
 def load_ssh_targets(file_path: str) -> Dict[str, Any]:
     """Load SSH targets from YAML file."""
     if not os.path.exists(file_path):
-        print(f'{RED}Error: SSH targets file not found: {file_path}{NC}',
+        print(f'{RED}Error: SSH Node Pools file not found: {file_path}{NC}',
               file=sys.stderr)
         sys.exit(1)
 
@@ -128,7 +128,8 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
         print(f'{RED}{e.note}{NC}', file=sys.stderr)
         sys.exit(1)
     except (yaml.YAMLError, IOError, OSError) as e:
-        print(f'{RED}Error loading SSH targets file: {e}{NC}', file=sys.stderr)
+        print(f'{RED}Error loading SSH Node Pools file: {e}{NC}',
+              file=sys.stderr)
         sys.exit(1)
 
 
@@ -149,17 +150,21 @@ def check_host_in_ssh_config(hostname: str) -> bool:
 
 
 def get_cluster_config(targets: Dict[str, Any],
-                       cluster_name: Optional[str] = None) -> Dict[str, Any]:
+                       cluster_name: Optional[str] = None,
+                       file_path: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for specific clusters or all clusters."""
     if not targets:
-        print(f'{RED}Error: No clusters defined in SSH targets file{NC}',
-              file=sys.stderr)
+        print(
+            f'{RED}Error: No clusters defined in SSH Node Pools '
+            f'file {file_path}{NC}',
+            file=sys.stderr)
         sys.exit(1)
 
     if cluster_name:
         if cluster_name not in targets:
             print(
-                f'{RED}Error: Cluster {cluster_name!r} not found in SSH targets file{NC}',
+                f'{RED}Error: Cluster {cluster_name!r} not found in '
+                f'SSH Node Pools file {file_path}{NC}',
                 file=sys.stderr)
             sys.exit(1)
         return {cluster_name: targets[cluster_name]}
@@ -639,7 +644,9 @@ def main():
     else:
         # Using YAML configuration
         targets = load_ssh_targets(args.ssh_node_pools_file)
-        clusters_config = get_cluster_config(targets, args.infra)
+        clusters_config = get_cluster_config(targets,
+                                             args.infra,
+                                             file_path=args.ssh_node_pools_file)
 
         # Print information about clusters being processed
         num_clusters = len(clusters_config)
