@@ -1399,10 +1399,57 @@ def local_down() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
+    """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
+
+    Args:
+        infra: Name of the cluster configuration in ssh_targets.yaml.
+            If None, the first cluster in the file is used.
+
+    Returns:
+        request_id: The request ID of the SSH cluster deployment request.
+    """
+    body = payloads.SSHUpBody(
+        infra=infra,
+        cleanup=False,
+    )
+    response = requests.post(f'{server_common.get_server_url()}/ssh_up',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
+    """Tears down a Kubernetes cluster on SSH targets.
+
+    Args:
+        infra: Name of the cluster configuration in ssh_targets.yaml.
+            If None, the first cluster in the file is used.
+
+    Returns:
+        request_id: The request ID of the SSH cluster teardown request.
+    """
+    body = payloads.SSHUpBody(
+        infra=infra,
+        cleanup=True,
+    )
+    response = requests.post(f'{server_common.get_server_url()}/ssh_down',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def realtime_kubernetes_gpu_availability(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None) -> server_common.RequestId:
+        quantity_filter: Optional[int] = None,
+        is_ssh: Optional[bool] = None) -> server_common.RequestId:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
@@ -1412,6 +1459,7 @@ def realtime_kubernetes_gpu_availability(
         context=context,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
+        is_ssh=is_ssh,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/'

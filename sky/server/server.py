@@ -909,6 +909,33 @@ async def local_down(request: fastapi.Request) -> None:
     )
 
 
+@app.post('/ssh_up')
+async def ssh_up(request: fastapi.Request,
+                 ssh_up_body: payloads.SSHUpBody) -> None:
+    """Deploys a Kubernetes cluster on SSH targets."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_up',
+        request_body=ssh_up_body,
+        func=core.ssh_up,
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
+@app.post('/ssh_down')
+async def ssh_down(request: fastapi.Request,
+                   ssh_up_body: payloads.SSHUpBody) -> None:
+    """Tears down a Kubernetes cluster on SSH targets."""
+    # We still call ssh_up but with cleanup=True
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_down',
+        request_body=ssh_up_body,
+        func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
 # === API server related APIs ===
 @app.get('/api/get')
 async def api_get(request_id: str) -> requests_lib.RequestPayload:
@@ -1183,6 +1210,19 @@ async def kubernetes_pod_ssh_proxy(
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
+
+
+@app.get('/all_contexts')
+async def all_contexts(request: fastapi.Request) -> None:
+    """Gets all Kubernetes and SSH node pool contexts."""
+
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='all_contexts',
+        request_body=payloads.RequestBody(),
+        func=core.get_all_contexts,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
 
 
 # === Internal APIs ===

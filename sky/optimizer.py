@@ -21,6 +21,7 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -376,6 +377,10 @@ class Optimizer:
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
+                    elif all(
+                            isinstance(orig_resources.cloud, clouds.SSH)
+                            for orig_resources in node.resources):
+                        source_hint = 'node pool'
                     elif all(
                             isinstance(orig_resources.cloud, clouds.Kubernetes)
                             for orig_resources in node.resources):
@@ -858,11 +863,19 @@ class Optimizer:
                 'accelerators': f'{resources.accelerators}',
                 'use_spot': resources.use_spot
             }
+
+            # Handle special case for Kubernetes and SSH clouds
             if isinstance(resources.cloud, clouds.Kubernetes):
-                # Region for Kubernetes is the context name, i.e. different
-                # Kubernetes clusters. We add region to the key to show all the
-                # Kubernetes clusters in the optimizer table for better UX.
+                # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
+                # context name, i.e. different Kubernetes clusters. We add
+                # region to the key to show all the Kubernetes clusters in the
+                # optimizer table for better UX.
+
+                if resources.cloud.__class__.__name__ == 'SSH':
+                    resource_key_dict[
+                        'cloud'] = 'SSH'  # Force the cloud name to be SSH
                 resource_key_dict['region'] = resources.region
+
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
@@ -1216,7 +1229,13 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         if disabled_clouds:
             is_or_are = 'is' if len(disabled_clouds) == 1 else 'are'
             task_name = f' {task.name!r}' if task.name is not None else ''
-            msg = (f'Task{task_name} requires {", ".join(disabled_clouds)} '
+            disabled_display_names = []
+            for c in disabled_clouds:
+                cloud_obj_one = registry.CLOUD_REGISTRY.from_str(c)
+                if cloud_obj_one is not None:
+                    disabled_display_names.append(cloud_obj_one.display_name())
+            cloud_names = ', '.join(disabled_display_names)
+            msg = (f'Task{task_name} requires {cloud_names} '
                    f'which {is_or_are} not enabled. To enable access, change '
                    f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
                    f'sky check {" ".join(c.lower() for c in disabled_clouds)}'

@@ -1780,6 +1780,27 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
+def _show_enabled_infra():
+    """Show the enabled infrastructure."""
+    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
+             f'{colorama.Style.RESET_ALL} ')
+    enabled_clouds = global_user_state.get_cached_enabled_clouds(
+        clouds.CloudCapability.COMPUTE)
+    enabled_ssh_infras = []
+    enabled_k8s_infras = []
+    enabled_cloud_infras = []
+    for cloud in enabled_clouds:
+        cloud_infra = cloud.get_infras()
+        if isinstance(cloud, clouds.SSH):
+            enabled_ssh_infras.extend(cloud_infra)
+        elif isinstance(cloud, clouds.Kubernetes):
+            enabled_k8s_infras.extend(cloud_infra)
+        else:
+            enabled_cloud_infras.extend(cloud_infra)
+    all_infras = enabled_ssh_infras + enabled_k8s_infras + enabled_cloud_infras
+    click.echo(f'{title}{", ".join(all_infras)}\n')
+
+
 @cli.command()
 @config_option(expose_value=False)
 @click.option('--verbose',
@@ -1966,6 +1987,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
+        _show_enabled_infra()
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
     query_clusters: Optional[List[str]] = None if not clusters else clusters
@@ -3462,13 +3484,22 @@ def show_gpus(
 
     # Kubernetes specific bools
     enabled_clouds = sdk.get(sdk.enabled_clouds())
-    cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+    cloud_is_kubernetes = isinstance(
+        cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
+    cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = clouds.cloud_in_iterable(
-        clouds.Kubernetes(),
-        enabled_clouds,
-    )
+    kubernetes_is_enabled = False
+    ssh_is_enabled = False
+    for cloud in enabled_clouds:
+        if isinstance(cloud, clouds.SSH):
+            ssh_is_enabled = True
+        elif isinstance(cloud, clouds.Kubernetes):
+            kubernetes_is_enabled = True
+    query_k8s_realtime_gpu = (kubernetes_is_enabled and
+                              (cloud_name is None or cloud_is_kubernetes))
+    query_ssh_realtime_gpu = (ssh_is_enabled and
+                              (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3478,7 +3509,8 @@ def show_gpus(
     def _get_kubernetes_realtime_gpu_tables(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        is_ssh: bool = False,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable'], List[Tuple[
                    str, 'models.KubernetesNodesInfo']]]:
@@ -3491,19 +3523,26 @@ def show_gpus(
             sdk.realtime_kubernetes_gpu_availability(
                 context=context,
                 name_filter=name_filter,
-                quantity_filter=quantity_filter))
+                quantity_filter=quantity_filter,
+                is_ssh=is_ssh))
         if not realtime_gpu_availability_lists:
-            err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
-            debug_msg = 'To further debug, run: sky check '
+            # Customize message based on context
+            identity = ('SSH Node Pool'
+                        if is_ssh else 'any allowed Kubernetes cluster')
+            cloud_name = 'ssh' if is_ssh else 'kubernetes'
+            err_msg = f'No GPUs found in {identity}. '
+            debug_msg = (f'To further debug, run: sky check {cloud_name}')
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
                     gpu_info_msg += (' with requested quantity'
                                      f' {quantity_filter}')
                 err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in any allowed Kubernetes cluster. ')
-                debug_msg = ('To show available accelerators on kubernetes,'
-                             ' run: sky show-gpus --cloud kubernetes ')
+                           f'in {identity}. ')
+                identity_short = 'SSH Node Pool' if is_ssh else 'Kubernetes'
+                debug_msg = (
+                    f'To show available accelerators in {identity_short}, '
+                    f'run: sky show-gpus --cloud {cloud_name}')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3512,6 +3551,14 @@ def show_gpus(
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
         all_nodes_info = []
+
+        # display an aggregated table for all contexts
+        # if there are more than one contexts with GPUs.
+        def _filter_ctx(ctx: str) -> bool:
+            ctx_is_ssh = ctx and ctx.startswith('ssh-')
+            return ctx_is_ssh is is_ssh
+
+        num_filtered_contexts = 0
 
         if realtime_gpu_availability_lists:
             if len(realtime_gpu_availability_lists[0]) != 2:
@@ -3522,6 +3569,13 @@ def show_gpus(
                     (context, realtime_gpu_availability_lists)
                 ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
+                if not _filter_ctx(ctx):
+                    continue
+                if is_ssh:
+                    display_ctx = ctx.lstrip('ssh-')
+                else:
+                    display_ctx = ctx
+                num_filtered_contexts += 1
                 realtime_gpu_table = log_utils.create_table(
                     ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
@@ -3542,15 +3596,12 @@ def show_gpus(
                     if capacity > 0:
                         total_gpu_info[gpu][0] += capacity
                         total_gpu_info[gpu][1] += available
-                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
                 # Collect node info for this context
                 nodes_info = sdk.stream_and_get(
                     sdk.kubernetes_node_info(context=ctx))
-                all_nodes_info.append((ctx, nodes_info))
-
-        # display an aggregated table for all contexts
-        # if there are more than one contexts with GPUs
-        if len(realtime_gpu_infos) > 1:
+                all_nodes_info.append((display_ctx, nodes_info))
+        if num_filtered_contexts > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
@@ -3562,10 +3613,11 @@ def show_gpus(
         return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
     def _format_kubernetes_node_info_combined(
-            contexts_info: List[Tuple[str,
-                                      'models.KubernetesNodesInfo']]) -> str:
+            contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            cloud_str: str = 'Kubernetes',
+            context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table(
-            ['CONTEXT', 'NODE', 'GPU', 'UTILIZATION'])
+            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3588,7 +3640,7 @@ def show_gpus(
                     'free'
                 ])
 
-        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -3598,26 +3650,29 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _format_kubernetes_realtime_gpu(
-            total_table: 'prettytable.PrettyTable',
+            total_table: Optional['prettytable.PrettyTable'],
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
-            show_node_info: bool) -> Generator[str, None, None]:
+            show_node_info: bool, is_ssh: bool) -> Generator[str, None, None]:
+        identity = 'SSH Node Pool' if is_ssh else 'Kubernetes'
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-               'Kubernetes GPUs'
+               f'{identity} GPUs'
                f'{colorama.Style.RESET_ALL}')
         # print total table
         if total_table is not None:
             yield '\n'
             yield from total_table.get_string()
 
+        ctx_name = 'SSH Node Pool' if is_ssh else 'Context'
+
         # print individual infos.
         for (ctx, k8s_realtime_table) in k8s_realtime_infos:
             yield '\n'
             # Print context header separately
             if ctx:
-                context_str = f'Context: {ctx}'
+                context_str = f'{ctx_name}: {ctx}'
             else:
-                context_str = 'Default Context'
+                context_str = f'Default {ctx_name}'
             yield (
                 f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
             )
@@ -3625,7 +3680,101 @@ def show_gpus(
 
         if show_node_info:
             yield '\n'
-            yield _format_kubernetes_node_info_combined(all_nodes_info)
+            yield _format_kubernetes_node_info_combined(all_nodes_info,
+                                                        identity)
+
+    def _possibly_show_k8s_like_realtime(
+            is_ssh: bool = False
+    ) -> Generator[str, None, Tuple[bool, bool, str]]:
+        # If cloud is kubernetes, we want to show real-time capacity
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or query_k8s_realtime_gpu):
+            context = region
+
+            try:
+                # If --cloud kubernetes is not specified, we want to catch
+                # the case where no GPUs are available on the cluster and
+                # print the warning at the end.
+                k8s_realtime_infos, total_table, all_nodes_info = (
+                    _get_kubernetes_realtime_gpu_tables(context, is_ssh=is_ssh))
+            except ValueError as e:
+                if not (cloud_is_kubernetes or cloud_is_ssh):
+                    # Make it a note if cloud is not kubernetes
+                    k8s_messages += 'Note: '
+                k8s_messages += str(e)
+            else:
+                print_section_titles = True
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=True,
+                                                           is_ssh=is_ssh)
+
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        return False, print_section_titles, k8s_messages
+
+    def _possibly_show_k8s_like_realtime_for_acc(
+            name: Optional[str],
+            quantity: Optional[int],
+            is_ssh: bool = False) -> Generator[str, None, Tuple[bool, bool]]:
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or
+                query_k8s_realtime_gpu) and not show_all:
+            print_section_titles = True
+            # TODO(romilb): Show filtered per node GPU availability here as well
+            try:
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region,
+                     name_filter=name,
+                     quantity_filter=quantity,
+                     is_ssh=is_ssh)
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False,
+                                                           is_ssh=is_ssh)
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources H100 not found ...")
+                yield common_utils.format_exception(e, use_bracket=True)
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            yield k8s_messages
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                return True, print_section_titles
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                return True, print_section_titles
+        return False, print_section_titles
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3643,46 +3792,26 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
+                c for c in service_catalog.ALL_CLOUDS
+                if c != 'kubernetes' and c != 'ssh'
             ]
 
         k8s_messages = ''
         if accelerator_str is None:
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
-            # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud_name is None or
-                                          cloud_is_kubernetes):
-                context = region
-
-                try:
-                    # If --cloud kubernetes is not specified, we want to catch
-                    # the case where no GPUs are available on the cluster and
-                    # print the warning at the end.
-                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
-                except ValueError as e:
-                    if not cloud_is_kubernetes:
-                        # Make it a note if cloud is not kubernetes
-                        k8s_messages += 'Note: '
-                    k8s_messages += str(e)
-                else:
-                    print_section_titles = True
-
-                    yield from _format_kubernetes_realtime_gpu(
-                        total_table,
-                        k8s_realtime_infos,
-                        all_nodes_info,
-                        show_node_info=True)
-
-                if kubernetes_autoscaling:
-                    k8s_messages += (
-                        '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            if cloud_is_kubernetes:
-                # Do not show clouds if --cloud kubernetes is specified
-                if not kubernetes_is_enabled:
-                    yield ('Kubernetes is not enabled. To fix, run: '
-                           'sky check kubernetes ')
-                yield k8s_messages
+            stop_iter = False
+            k8s_messages = ''
+            for is_ssh in [False, True]:
+                stop_iter_one, print_section_titles_one, k8s_messages_one = (
+                    yield from _possibly_show_k8s_like_realtime(is_ssh))
+                stop_iter = stop_iter or stop_iter_one
+                print_section_titles = (print_section_titles or
+                                        print_section_titles_one)
+                k8s_messages += k8s_messages_one
+                if print_section_titles_one:
+                    yield '\n\n'
+            if stop_iter:
                 return
 
             # For show_all, show the k8s message at the start since output is
@@ -3757,34 +3886,17 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and
-            (cloud_name is None or cloud_is_kubernetes) and not show_all):
-            # Print section title if not showing all and instead a specific
-            # accelerator is requested
-            print_section_titles = True
-            # TODO(romilb): Show filtered per node GPU availability here as well
-            try:
-                (k8s_realtime_infos, total_table,
-                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
-                     context=region, name_filter=name, quantity_filter=quantity)
-
-                yield from _format_kubernetes_realtime_gpu(total_table,
-                                                           k8s_realtime_infos,
-                                                           all_nodes_info,
-                                                           show_node_info=False)
-            except ValueError as e:
-                # In the case of a specific accelerator, show the error message
-                # immediately (e.g., "Resources H100 not found ...")
-                yield common_utils.format_exception(e, use_bracket=True)
-            if kubernetes_autoscaling:
-                k8s_messages += ('\n' +
-                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            yield k8s_messages
-        if cloud_is_kubernetes:
-            # Do not show clouds if --cloud kubernetes is specified
-            if not kubernetes_is_enabled:
-                yield ('Kubernetes is not enabled. To fix, run: '
-                       'sky check kubernetes ')
+        stop_iter = False
+        for is_ssh in [False, True]:
+            stop_iter_one, print_section_titles_one = (
+                yield from _possibly_show_k8s_like_realtime_for_acc(
+                    name, quantity, is_ssh))
+            stop_iter = stop_iter or stop_iter_one
+            print_section_titles = (print_section_titles or
+                                    print_section_titles_one)
+            if print_section_titles_one:
+                yield '\n\n'
+        if stop_iter:
             return
 
         # For clouds other than Kubernetes, get the accelerator details
@@ -6072,6 +6184,58 @@ def api_info():
                f'version: {api_server_info["version"]}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def ssh():
+    """Commands for managing SSH Node Pools."""
+    pass
+
+
+@ssh.command('up', cls=_DocumentedCodeCommand)
+@click.option(
+    '--infra',
+    help='Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. '
+    'If not specified, all clusters in the file will be set up.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+def ssh_up(infra: Optional[str], async_call: bool):
+    """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
+
+    This command sets up a Kubernetes cluster on the machines specified in
+    ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
+    """
+    request_id = sdk.ssh_up(infra=infra)
+    if async_call:
+        print(f'Request submitted with ID: {request_id}')
+    else:
+        sdk.stream_and_get(request_id)
+
+
+@ssh.command('down', cls=_DocumentedCodeCommand)
+@click.option(
+    '--infra',
+    help='Name of the cluster to clean up in ~/.sky/ssh_node_pools.yaml. '
+    'If not specified, all clusters in the file will be cleaned up.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+def ssh_down(infra, async_call):
+    """Clean up a cluster set up with 'sky ssh up'.
+
+    This command removes the Kubernetes installation from the machines specified
+    in ~/.sky/ssh_node_pools.yaml.
+    """
+    request_id = sdk.ssh_down(infra=infra)
+    if async_call:
+        print(f'Request submitted with ID: {request_id}')
+    else:
+        sdk.stream_and_get(request_id)
 
 
 def main():

@@ -518,12 +518,14 @@ class Azure(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud's storage service."""
         # TODO(seungjin): Implement separate check for
         # if the user has access to Azure Blob Storage.

@@ -283,7 +283,8 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     @annotations.lru_cache(scope='request')
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
         token_cred_msg = (
@@ -314,7 +315,8 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     @annotations.lru_cache(scope='request')
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to Nebius Object Storage.
 
         Returns:

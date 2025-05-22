@@ -86,6 +86,16 @@ class InfraInfo:
             cloud_name = 'kubernetes'  # Normalize k8s to kubernetes
             region = '/'.join(parts[1:]) if len(parts) >= 2 else None
             zone = None
+        elif cloud_name == 'ssh':
+            # For SSH, the entire string after "ssh/" is the
+            # node pool name. We prepend 'ssh-' for the internal implementation
+            # which reuses the context name.
+            # TODO(romilb): This is a workaround while we use the global
+            # kubeconfig to store the ssh contexts.
+            region = '/'.join(parts[1:]) if len(parts) >= 2 else None
+            if region:
+                region = f'ssh-{region}'
+            zone = None
         else:
             # For non-Kubernetes clouds, continue with regular parsing
             # but be careful to only split into max 3 parts
@@ -133,6 +143,12 @@ class InfraInfo:
         if zone is None:
             zone = '*'
 
+        # If the cloud is ssh, we remove the ssh- prefix from the region
+        # TODO(romilb): This is a workaround while we use the global
+        # kubeconfig to store the ssh contexts.
+        if region and region.startswith('ssh-'):
+            region = region[4:]
+
         # Build the parts list and filter out trailing wildcards
         parts = [cloud.lower(), region, zone]
         while parts and parts[-1] == '*':
@@ -160,7 +176,11 @@ class InfraInfo:
         if self.zone is not None and self.zone != '*':
             region_or_zone = self.zone
         elif self.region is not None and self.region != '*':
-            region_or_zone = self.region
+            # If using region, we remove the ssh- prefix if it exists for SSH
+            # Node Pools.
+            # TODO(romilb): This is a workaround while we use the global
+            # kubeconfig to store the ssh contexts.
+            region_or_zone = self.region.lstrip('ssh-')
 
         if region_or_zone is not None and truncate:
             region_or_zone = common_utils.truncate_long_string(
