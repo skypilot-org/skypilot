@@ -34,6 +34,7 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    priority: int = 500,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -46,6 +47,7 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        priority: Priority of the managed job.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -77,6 +79,7 @@ def launch(
     body = payloads.JobsLaunchBody(
         task=dag_str,
         name=name,
+        priority=priority,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/launch',
