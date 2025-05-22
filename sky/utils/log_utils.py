@@ -371,7 +371,7 @@ class SkySSHUpLineProcessor(LineProcessor):
         if log_line.startswith('SSH connection successful'):
             node_name = log_line.split('(')[-1].split(')')[0]
             logger.info(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}'
-                        '✔ SSH connection established to head node'
+                        '✔ SSH connection established to head node '
                         f'{node_name}.{colorama.Style.RESET_ALL}')
 
         # Kubernetes installation steps
@@ -486,8 +486,8 @@ class SkySSHUpLineProcessor(LineProcessor):
             node_name = log_line.split('(')[-1].split(')')[0]
             logger.info(
                 f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}'
-                '✔ K3s already deployed on worker node '
-                f'{node_name}. Skipping deployment.{colorama.Style.RESET_ALL}')
+                '✔ SkyPilot runtime already deployed on worker node '
+                f'{node_name}. Skipping.{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],

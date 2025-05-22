@@ -6,6 +6,8 @@ import sys
 import tempfile
 from typing import List, Optional
 
+import colorama
+
 from sky import check as sky_check
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -107,8 +109,8 @@ def deploy_ssh_cluster(cleanup: bool = False,
         else:
             logger.info(
                 ux_utils.finishing_message(
-                    '🎉 SSH Node Pools set up successfully. '
-                    'Run `sky check` to verify access.',
+                    '🎉 SSH Node Pools set up successfully. ',
+                    follow_up_message = f'Run `{colorama.Style.BRIGHT}sky check ssh{colorama.Style.RESET_ALL}` to verify access, `{colorama.Style.BRIGHT}sky launch --infra ssh{colorama.Style.RESET_ALL}` to launch a cluster. ',
                     log_path=log_path,
                     is_local=True))
 

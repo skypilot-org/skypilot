@@ -472,7 +472,8 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
         message = ('Stopping spot instances is currently not supported on '
                    f'{resources.cloud}')
     else:
-        message = f'Stopping is currently not supported for {resources}'
+        message = ('Stopping is currently not supported for '
+                   f'{resources.cloud.display_name()}')
     return message
 
 
