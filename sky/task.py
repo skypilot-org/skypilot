@@ -533,23 +533,7 @@ class Task:
                         persistent = src.get('persistent', False)
                         volume_config['auto_delete'] = not persistent
                         volume_config_detail = src.get('config', {})
-                        if volume_config_detail:
-                            if volume_config_detail.get('size'):
-                                volume_config[
-                                    'disk_size'] = volume_config_detail.get(
-                                        'size')
-                            if volume_config_detail.get('storage_type'):
-                                volume_config[
-                                    'storage_type'] = volume_config_detail.get(
-                                        'storage_type')
-                            if volume_config_detail.get('disk_tier'):
-                                volume_config[
-                                    'disk_tier'] = volume_config_detail.get(
-                                        'disk_tier')
-                            if volume_config_detail.get('attach_mode'):
-                                volume_config[
-                                    'attach_mode'] = volume_config_detail.get(
-                                        'attach_mode')
+                        volume_config.update(volume_config_detail)
                         volumes.append(volume_config)
                         source_path = src.get('source')
                         if source_path:

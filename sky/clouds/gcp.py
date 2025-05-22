@@ -1175,7 +1175,7 @@ class GCP(clouds.Cloud):
                 specs['disk_tier'] == 'pd-extreme'):
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
-            specs['disk_iops'] = 20000
+            specs['disk_iops'] = constants.PD_EXTREME_IOPS
         return specs
 
     @classmethod
@@ -1198,6 +1198,7 @@ class GCP(clouds.Cloud):
         volumes_specs: List[Dict[str, Any]] = []
         device_mount_points: Dict[str, str] = {}
         ssd_index = 0
+        # TPU data disk index starts from 1, 0 is the boot disk
         tpu_disk_index = 1
         for i, volume in enumerate(volumes):
             volume_spec = {
@@ -1251,7 +1252,10 @@ class GCP(clouds.Cloud):
                 device_mount_points[device_name] = volume['path']
 
                 volume_spec['storage_type'] = constants.NETWORK_STORAGE_TYPE
-                volume_spec['disk_size'] = volume['disk_size']
+                if 'disk_size' in volume:
+                    volume_spec['disk_size'] = volume['disk_size']
+                else:
+                    volume_spec['disk_size'] = constants.DEFAULT_DISK_SIZE
                 disk_tier = cls.failover_disk_tier(instance_type,
                                                    volume['disk_tier'])
                 volume_spec['disk_tier'] = cls._get_data_disk_type(
@@ -1259,7 +1263,7 @@ class GCP(clouds.Cloud):
                 if volume_spec['disk_tier'] == 'pd-extreme':
                     # Only pd-extreme supports custom iops.
                     # see https://cloud.google.com/compute/docs/disks#disk-types
-                    volume_spec['disk_iops'] = 20000
+                    volume_spec['disk_iops'] = constants.PD_EXTREME_IOPS
             volumes_specs.append(volume_spec)
 
         return volumes_specs, device_mount_points

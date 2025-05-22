@@ -819,11 +819,8 @@ class Resources:
             else:
                 volume['attach_mode'] = read_write_mode
             if volume['storage_type'] == network_type:
-                if 'disk_size' not in volume:
-                    logger.info(f'No disk_size specified for volume '
-                                f'{volume["path"]}. Set it to 100GB.')
-                    volume['disk_size'] = 100
-                elif round(volume['disk_size']) != volume['disk_size']:
+                if ('disk_size' in volume and
+                        round(volume['disk_size']) != volume['disk_size']):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Volume size must be an integer. '
                                          f'Got: {volume["size"]}.')
@@ -1228,7 +1225,9 @@ class Resources:
         if self.volumes is None:
             return
         if self.cloud is None:
-            return
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cloud must be specified when '
+                                 'volumes are provided.')
         if not self.cloud.is_same_cloud(clouds.GCP()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Volumes are only supported for GCP'
