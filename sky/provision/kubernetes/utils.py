@@ -1278,15 +1278,24 @@ def get_accelerator_label_key_values(
             if env_options.Options.SHOW_DEBUG_INFO.get():
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
-            raise exceptions.ResourcesUnavailableError(
-                f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
-                f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
-                ' contains GPUs, please ensure GPU drivers are installed on '
-                'the node. Check if the GPUs are setup correctly by running '
-                '`kubectl describe nodes` and looking for the '
-                f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
-                'Please refer to the documentation on how to set up GPUs.'
-                f'{suffix}')
+            if is_ssh_node_pool:
+                msg = (
+                    f'Could not detect GPUs in SSH Node Pool '
+                    f'\'{context_display_name}\'. If this cluster contains '
+                    'GPUs, please ensure GPU drivers are installed on the node '
+                    'and re-run '
+                    f'`sky ssh up --infra {context_display_name}`. {suffix}')
+            else:
+                msg = (
+                    f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
+                    f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
+                    ' contains GPUs, please ensure GPU drivers are installed on '
+                    'the node. Check if the GPUs are setup correctly by running '
+                    '`kubectl describe nodes` and looking for the '
+                    f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
+                    'Please refer to the documentation on how to set up GPUs.'
+                    f'{suffix}')
+            raise exceptions.ResourcesUnavailableError(msg)
     assert False, 'This should not be reached'
 
 
