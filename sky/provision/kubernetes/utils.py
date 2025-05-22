@@ -1138,10 +1138,7 @@ def get_accelerator_label_key_values(
     #  node pools configured etc.
 
     is_ssh_node_pool = context.startswith('ssh-')
-    if is_ssh_node_pool:
-        cloud_name = 'SSH'
-    else:
-        cloud_name = 'Kubernetes cluster'
+    cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
     context_display_name = context.lstrip('ssh-') if (
         is_ssh_node_pool) else context
 
@@ -1184,14 +1181,14 @@ def get_accelerator_label_key_values(
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
-                msg = (
-                    f'Could not detect GPU labels in {cloud_name}. '
-                    'If this cluster has GPUs, please ensure GPU nodes have '
-                    'node labels of either of these formats: '
-                    f'{supported_formats}. Please refer to '
-                    'the documentation on how to set up node labels.'
-                    f'{suffix}')
-                msg += 'Please refer to the documentation on how to set up node labels.'
+                msg = (f'Could not detect GPU labels in {cloud_name}.')
+                if not is_ssh_node_pool:
+                    msg += (' Run `sky check ssh` to debug.')
+                else:
+                    msg += (' If this cluster has GPUs, please ensure GPU nodes have '
+                            'node labels of either of these formats: '
+                            f'{supported_formats}. Please refer to '
+                            'the documentation on how to set up node labels.')
                 msg += f'{suffix}'
                 raise exceptions.ResourcesUnavailableError(msg)
         else:
@@ -1204,7 +1201,7 @@ def get_accelerator_label_key_values(
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
-                                f'Node {node_name!r} in Kubernetes cluster has '
+                                f'Node {node_name!r} in {cloud_name} has '
                                 f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
@@ -1268,10 +1265,10 @@ def get_accelerator_label_key_values(
                 # TODO(Doyoung): Update the error message raised with the
                 # multi-host TPU support.
                 raise exceptions.ResourcesUnavailableError(
-                    'Could not find any node in the Kubernetes cluster '
+                    f'Could not find any node in the {cloud_name} '
                     f'with {acc_type}. Please ensure at least one node in the '
                     f'cluster has {acc_type} and node labels are setup '
-                    'correctly. Please refer to the documentration for more. '
+                    'correctly. Please refer to the documentation for more. '
                     f'{suffix}. Note that multi-host TPU podslices are '
                     'currently not unsupported.')
     else:
