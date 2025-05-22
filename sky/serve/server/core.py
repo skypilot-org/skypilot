@@ -142,8 +142,7 @@ def up(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(
-        task, use_mutated_config_in_current_request=False)
+    dag, mutated_user_config = admin_policy_utils.apply(task)
     task = dag.tasks[0]
 
     with rich_utils.safe_status(
@@ -355,8 +354,7 @@ def update(
     # and get the mutated config.
     # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
     # will not apply the config.
-    dag, _ = admin_policy_utils.apply(
-        task, use_mutated_config_in_current_request=False)
+    dag, _ = admin_policy_utils.apply(task)
     task = dag.tasks[0]
 
     assert task.service is not None
