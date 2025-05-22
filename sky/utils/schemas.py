@@ -404,7 +404,7 @@ def get_storage_schema():
             'config': {
                 'type': 'object',
                 'properties': {
-                    'size': {
+                    'disk_size': {
                         'type': 'integer',
                     },
                     'disk_tier': {

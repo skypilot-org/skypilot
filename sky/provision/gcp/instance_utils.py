@@ -831,7 +831,10 @@ class GCPComputeInstance(GCPInstance):
         if config.get('disks') is not None:
             for disk in config['disks']:
                 if disk.get('source') is not None and disk.get(
-                        'mode', '') == 'READ_WRITE':
+                        'mode', 'READ_WRITE') == 'READ_WRITE':
+                    return False
+                if disk.get('initializeParams') is not None and disk.get(
+                        'initializeParams', {}).get('diskName') is not None:
                     return False
         return True
 

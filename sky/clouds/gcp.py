@@ -1247,7 +1247,10 @@ class GCP(clouds.Cloud):
                 volume_spec['disk_size'] = None
                 volume_spec['auto_delete'] = True
             else:
-                volume_spec['disk_name'] = volume['name']
+                # TODO(hailong): this should be fixed when move the
+                # disk creation out of the instance creation phase
+                if not use_mig:
+                    volume_spec['disk_name'] = volume['name']
                 device_name = f'{constants.DEVICE_NAME_PREFIX}sky-disk-{i}'
                 device_mount_points[device_name] = volume['path']
 

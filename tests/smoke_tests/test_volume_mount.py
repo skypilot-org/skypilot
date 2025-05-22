@@ -193,16 +193,15 @@ def _volume_mounts_commands_generator(f: TextIO, name: str,
         pre_launch_disk_cmd = (
             f'(gcloud compute disks delete {existing_disk_name} --zone={region}-a --quiet || true) && gcloud compute disks create {existing_disk_name} --size=10 --type=pd-ssd --zone={region}-a'
         )
-        post_launch_disk_cmd = (
-            f'gcloud compute disks describe {new_disk_name} --zone={region}-a')
         clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe {existing_disk_name} --zone={region}-a --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {existing_disk_name} --zone={region}-a --quiet'
     else:
         pre_launch_disk_cmd = (
             f'(gcloud compute disks delete {existing_disk_name} --region={region} --quiet || true) && gcloud compute disks create {existing_disk_name} --size=10 --type=pd-ssd --region={region} --replica-zones={region}-a,{region}-b'
         )
-        post_launch_disk_cmd = (
-            f'gcloud compute disks describe {new_disk_name} --region={region}')
         clean_cmd = f'sky down -y {name} && while true; do users=$(gcloud compute disks describe {existing_disk_name} --region={region} --format="value(users)"); if [ -z "$users" ]; then break; fi; echo "users: $users"; sleep 10; done && echo "no users use the disk" && gcloud compute disks delete {existing_disk_name} --region={region} --quiet'
+    post_launch_disk_cmd = (
+        f'gcloud compute disks describe {new_disk_name} --zone={region}-a || gcloud compute disks describe {new_disk_name} --zone={region}-b || gcloud compute disks describe {new_disk_name} --zone={region}-c || gcloud compute disks describe {new_disk_name} --zone={region}-f'
+    )
     if image_id:
         if tpu:
             launch_cmd = f'sky launch -y -c {name} --infra gcp/{region} --gpus tpu-v2-8 --image-id {image_id} {file_path}'
@@ -222,7 +221,8 @@ def _volume_mounts_commands_generator(f: TextIO, name: str,
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     # Have not support creating new volumes for TPU node now
-    if not tpu:
+    # and MIGs do not support specifying volume name
+    if not tpu and not use_mig:
         test_commands.append(
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, cmd=post_launch_disk_cmd))
