@@ -1315,10 +1315,10 @@ def deploy_cluster(head_node,
             --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \\
             --set 'toolkit.env[2].value=nvidia' &&
             echo 'Waiting for GPU operator installation...' &&
-            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:'; do
+            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product:'; do
                 echo 'Waiting for GPU operator...'
                 sleep 5
-            done
+            done 
             echo 'GPU operator installed successfully.'
         """
         result = run_remote(head_node,
