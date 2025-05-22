@@ -312,17 +312,22 @@ class Resources:
 
         if isinstance(network_tier, str):
             network_tier_str = str(network_tier).lower()
-            supported_tiers = [tier.value for tier in resources_utils.NetworkTier]
+            supported_tiers = [
+                tier.value for tier in resources_utils.NetworkTier
+            ]
             if network_tier_str not in supported_tiers:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid network_tier {network_tier_str!r}. '
-                                     f'Network tier must be one of '
-                                     f'{", ".join(supported_tiers)}.')
+                    raise ValueError(
+                        f'Invalid network_tier {network_tier_str!r}. '
+                        f'Network tier must be one of '
+                        f'{", ".join(supported_tiers)}.')
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
         if self._network_tier == resources_utils.NetworkTier.BEST:
             if isinstance(self._cloud, clouds.GCP):
-                self._image_id = {self._region: 'docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx'}
+                self._image_id = {
+                    self._region: 'docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx'
+                }
 
         if ports is not None:
             if isinstance(ports, tuple):
@@ -584,7 +589,7 @@ class Resources:
     @property
     def disk_tier(self) -> Optional[resources_utils.DiskTier]:
         return self._disk_tier
-    
+
     @property
     def network_tier(self) -> Optional[resources_utils.NetworkTier]:
         return self._network_tier
@@ -1243,6 +1248,47 @@ class Resources:
                         f'Disk tier {self.disk_tier.value} is not supported '
                         f'for instance type {self.instance_type}.') from None
 
+    def _try_validate_volumes(self) -> None:
+        """Try to validate the volumes attribute.
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if self.volumes is None:
+            return
+        if self.cloud is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cloud must be specified when '
+                                 'volumes are provided.')
+        if not self.cloud.is_same_cloud(clouds.GCP()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Volumes are only supported for GCP'
+                                 f' not for {self.cloud}.')
+
+        need_region_or_zone = False
+        try:
+            for volume in self.volumes:
+                if ('name' in volume and volume['storage_type']
+                        == resources_utils.StorageType.NETWORK):
+                    need_region_or_zone = True
+                if 'disk_tier' not in volume:
+                    continue
+                # TODO(hailong): check instance local SSD
+                # support for instance_type.
+                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
+                self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                   volume['disk_tier'])
+            if (need_region_or_zone and self._region is None and
+                    self._zone is None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('When specifying the volume name, please'
+                                     ' also specify the region or zone.')
+        except exceptions.NotSupportedError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Disk tier {volume["disk_tier"].value} is not '
+                    f'supported for instance type {self.instance_type}.'
+                ) from None
+
     def _try_validate_ports(self) -> None:
         """Try to validate the ports attribute.
 
@@ -1511,7 +1557,7 @@ class Resources:
                 # Add parenthesis for better readability.
                 if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
                     return False
-                
+
         if self.network_tier is not None:
             if other.network_tier is None:
                 return False
@@ -2067,6 +2113,15 @@ class Resources:
 
         if version < 23:
             self._autostop_config = None
+
+        if version < 24:
+            self._volumes = None
+
+        if version < 25:
+            original_network_tier = state.get('_network_tier', None)
+            if original_network_tier is not None:
+                state['_network_tier'] = resources_utils.NetworkTier(
+                    original_network_tier)
 
         self.__dict__.update(state)
 

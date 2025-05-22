@@ -139,7 +139,9 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
-    _SUPPORTED_NETWORK_TIERS = {resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST}
+    _SUPPORTED_NETWORK_TIERS = {
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
+    }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
@@ -717,8 +719,9 @@ class Cloud:
                     f'{disk_tier} is not supported by {cls._REPR}.')
 
     @classmethod
-    def check_network_tier_enabled(cls, instance_type: Optional[str],
-                                network_tier: resources_utils.NetworkTier) -> None:
+    def check_network_tier_enabled(
+            cls, instance_type: Optional[str],
+            network_tier: resources_utils.NetworkTier) -> None:
         """Errors out if the network tier is not supported by the cloud provider.
 
         Raises:
@@ -729,8 +732,6 @@ class Cloud:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     f'{network_tier} is not supported by {cls._REPR}.')
-
-
 
     @classmethod
     def _translate_disk_tier(

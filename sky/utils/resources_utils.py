@@ -48,7 +48,7 @@ class DiskTier(enum.Enum):
     def __le__(self, other: 'DiskTier') -> bool:
         types = list(DiskTier)
         return types.index(self) <= types.index(other)
-    
+
 
 class NetworkTier(enum.Enum):
     STANDARD = 'standard'
@@ -57,22 +57,23 @@ class NetworkTier(enum.Enum):
     @classmethod
     def supported_tiers(cls) -> List[str]:
         return [tier.value for tier in cls]
-    
+
     @classmethod
     def cli_help_message(cls) -> str:
         return (
             f'Network tier. Could be one of {", ".join(cls.supported_tiers())}'
             f'. Default: {cls.STANDARD.value}')
-    
+
     @classmethod
     def from_str(cls, tier: str) -> 'NetworkTier':
         if tier not in cls.supported_tiers():
             raise ValueError(f'Invalid network tier: {tier}')
         return cls(tier)
-    
+
     def __le__(self, other: 'NetworkTier') -> bool:
         types = list(NetworkTier)
         return types.index(self) <= types.index(other)
+
 
 class StorageType(enum.Enum):
     """Storage type."""
