@@ -174,6 +174,10 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
             --namespace $NAMESPACE \
             --reuse-values \
             --set apiService.sshKeySecret=$SECRET_NAME
+      
+      .. note::
+
+         SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys or password in the `ssh_node_pools.yaml` file for helm deployment.
    
    .. tab-item:: VM Deployment
 
