@@ -288,6 +288,56 @@ async def get_workspace_config(request: fastapi.Request) -> None:
     )
 
 
+@app.put('/workspaces/{workspace_name}')
+async def update_workspace(
+    request: fastapi.Request,
+    workspace_name: str,
+    workspace_body: payloads.UpdateWorkspaceBody
+) -> None:
+    """Updates a specific workspace configuration."""
+    workspace_body.workspace_name = workspace_name
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='update_workspace',
+        request_body=workspace_body,
+        func=core.update_workspace,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.post('/workspaces/{workspace_name}')
+async def create_workspace(
+    request: fastapi.Request,
+    workspace_name: str,
+    workspace_body: payloads.CreateWorkspaceBody
+) -> None:
+    """Creates a new workspace configuration."""
+    workspace_body.workspace_name = workspace_name
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='create_workspace',
+        request_body=workspace_body,
+        func=core.create_workspace,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.delete('/workspaces/{workspace_name}')
+async def delete_workspace(
+    request: fastapi.Request,
+    workspace_name: str
+) -> None:
+    """Deletes a workspace configuration."""
+    delete_body = payloads.DeleteWorkspaceBody(workspace_name=workspace_name)
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='delete_workspace',
+        request_body=delete_body,
+        func=core.delete_workspace,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,

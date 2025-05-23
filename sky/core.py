@@ -1226,3 +1226,143 @@ def get_all_contexts() -> List[str]:
     # For now, assuming get_ssh_node_pool_contexts already returns them
     # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
+
+
+# =========================
+# = Workspace Management =
+# =========================
+
+
+def _update_workspaces_config(workspaces: Dict[str, Any]) -> Dict[str, Any]:
+    """Internal helper to update the entire workspaces configuration.
+    
+    Args:
+        workspaces: The new workspaces configuration dictionary.
+        
+    Returns:
+        The updated workspaces configuration.
+        
+    Raises:
+        ValueError: If the workspaces configuration is invalid.
+        FileNotFoundError: If the config file cannot be found.
+        PermissionError: If the config file cannot be written.
+    """
+    # Validate the workspaces configuration against the schema
+    from sky.utils import schemas
+    
+    workspaces_schema = schemas.get_config_schema()['properties']['workspaces']
+    try:
+        common_utils.validate_schema(workspaces, workspaces_schema, 
+                                   'Invalid workspaces configuration: ')
+    except exceptions.InvalidSkyPilotConfigError as e:
+        raise ValueError(f"Invalid workspaces configuration: {e}") from e
+    
+    # Get current config and update workspaces
+    current_config = skypilot_config.to_dict()
+    current_config['workspaces'] = workspaces
+    
+    # Write the updated config back to file
+    config_path = skypilot_config.get_user_config_path()
+    config_path = os.path.expanduser(config_path)
+    
+    try:
+        common_utils.dump_yaml(config_path, current_config)
+        # Reload the config to ensure it's applied
+        skypilot_config.safe_reload_config()
+        return skypilot_config.get_workspaces()
+    except Exception as e:
+        raise RuntimeError(f"Failed to update workspaces config: {e}") from e
+
+
+@usage_lib.entrypoint
+def update_workspace(workspace_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Updates a specific workspace configuration.
+    
+    Args:
+        workspace_name: The name of the workspace to update.
+        config: The new configuration for the workspace.
+        
+    Returns:
+        The updated workspaces configuration.
+        
+    Raises:
+        ValueError: If the workspace configuration is invalid.
+        FileNotFoundError: If the config file cannot be found.
+        PermissionError: If the config file cannot be written.
+    """
+    # Validate the workspace configuration
+    from sky.utils import schemas
+    
+    workspace_schema = schemas.get_config_schema()['properties']['workspaces']['additionalProperties']
+    try:
+        common_utils.validate_schema(config, workspace_schema,
+                                   f'Invalid configuration for workspace {workspace_name}: ')
+    except exceptions.InvalidSkyPilotConfigError as e:
+        raise ValueError(f"Invalid configuration for workspace {workspace_name}: {e}") from e
+    
+    # Get current workspaces and update the specific workspace
+    current_workspaces = skypilot_config.get_workspaces()
+    current_workspaces[workspace_name] = config
+    
+    # Use the internal helper function to save
+    return _update_workspaces_config(current_workspaces)
+
+
+@usage_lib.entrypoint
+def create_workspace(workspace_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Creates a new workspace configuration.
+    
+    Args:
+        workspace_name: The name of the workspace to create.
+        config: The configuration for the new workspace.
+        
+    Returns:
+        The updated workspaces configuration.
+        
+    Raises:
+        ValueError: If the workspace already exists or configuration is invalid.
+        FileNotFoundError: If the config file cannot be found.
+        PermissionError: If the config file cannot be written.
+    """
+    # Check if workspace already exists
+    current_workspaces = skypilot_config.get_workspaces()
+    if workspace_name in current_workspaces:
+        raise ValueError(f"Workspace '{workspace_name}' already exists. Use update instead.")
+    
+    # Validate the workspace name
+    if not workspace_name or not isinstance(workspace_name, str):
+        raise ValueError("Workspace name must be a non-empty string.")
+    
+    # Create the workspace using update_workspace
+    return update_workspace(workspace_name, config)
+
+
+@usage_lib.entrypoint
+def delete_workspace(workspace_name: str) -> Dict[str, Any]:
+    """Deletes a workspace configuration.
+    
+    Args:
+        workspace_name: The name of the workspace to delete.
+        
+    Returns:
+        The updated workspaces configuration.
+        
+    Raises:
+        ValueError: If the workspace doesn't exist or is the default workspace.
+        FileNotFoundError: If the config file cannot be found.
+        PermissionError: If the config file cannot be written.
+    """
+    # Prevent deletion of default workspace
+    if workspace_name == constants.SKYPILOT_DEFAULT_WORKSPACE:
+        raise ValueError(f"Cannot delete the default workspace '{constants.SKYPILOT_DEFAULT_WORKSPACE}'.")
+    
+    # Check if workspace exists
+    current_workspaces = skypilot_config.get_workspaces()
+    if workspace_name not in current_workspaces:
+        raise ValueError(f"Workspace '{workspace_name}' does not exist.")
+    
+    # Remove the workspace
+    del current_workspaces[workspace_name]
+    
+    # Use the internal helper function to save
+    return _update_workspaces_config(current_workspaces)
