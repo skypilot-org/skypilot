@@ -68,7 +68,12 @@ class TestWorkspaceManagement(unittest.TestCase):
         expected_return = new_workspaces.copy()
         mock_get_workspaces.return_value = expected_return
 
-        result = core._update_workspaces_config(new_workspaces)
+        def modifier_fn(workspaces: dict) -> None:
+            """Modifier function that replaces workspaces content."""
+            workspaces.clear()
+            workspaces.update(new_workspaces)
+
+        result = core._update_workspaces_config(modifier_fn)
 
         # Verify the function called the right methods
         mock_dump_yaml.assert_called_once()
@@ -79,12 +84,27 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertEqual(result, expected_return)
 
     @mock.patch('sky.skypilot_config.get_workspaces')
+    @mock.patch('sky.core._check_workspace_has_no_active_resources')
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
     @mock.patch('sky.core._update_workspaces_config')
-    def test_update_workspace(self, mock_update_workspaces,
+    def test_update_workspace(self, mock_update_workspaces_config,
+                              mock_sky_check, mock_validate_schema,
+                              mock_get_schema, mock_check_resources,
                               mock_get_workspaces):
         """Test updating a specific workspace."""
         mock_get_workspaces.return_value = self.sample_config[
             'workspaces'].copy()
+        mock_check_resources.return_value = None
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
 
         new_config = {
             'gcp': {
@@ -97,36 +117,73 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         expected_workspaces = self.sample_config['workspaces'].copy()
         expected_workspaces['dev'] = new_config
-        mock_update_workspaces.return_value = expected_workspaces
+        mock_update_workspaces_config.return_value = expected_workspaces
 
         result = core.update_workspace('dev', new_config)
 
-        # Verify the internal helper was called with the right args
-        mock_update_workspaces.assert_called_once_with(expected_workspaces)
+        # Verify the internal helper was called with a function
+        mock_update_workspaces_config.assert_called_once()
         self.assertEqual(result, expected_workspaces)
 
     @mock.patch('sky.skypilot_config.get_workspaces')
-    @mock.patch('sky.core.update_workspace')
-    def test_create_workspace(self, mock_update_workspace, mock_get_workspaces):
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch('sky.core._update_workspaces_config')
+    def test_create_workspace(self, mock_update_workspaces_config, 
+                              mock_sky_check, mock_validate_schema,
+                              mock_get_schema, mock_get_workspaces):
         """Test creating a new workspace."""
         mock_get_workspaces.return_value = self.sample_config[
             'workspaces'].copy()
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
 
-        new_config = {'gcp': {'project_id': 'test-project'}}
+        new_config = {'gcp': {'project_id': 'staging-project'}}
 
         expected_return = {'updated': 'workspaces'}
-        mock_update_workspace.return_value = expected_return
+        mock_update_workspaces_config.return_value = expected_return
 
-        result = core.create_workspace('test', new_config)
+        result = core.create_workspace('staging', new_config)
 
-        mock_update_workspace.assert_called_once_with('test', new_config)
+        # Verify that _update_workspaces_config was called with a function
+        mock_update_workspaces_config.assert_called_once()
         self.assertEqual(result, expected_return)
 
     @mock.patch('sky.skypilot_config.get_workspaces')
-    def test_create_workspace_already_exists(self, mock_get_workspaces):
+    @mock.patch('sky.utils.schemas.get_config_schema')
+    @mock.patch('sky.utils.common_utils.validate_schema')
+    @mock.patch('sky.check.check')
+    @mock.patch('sky.core._update_workspaces_config')
+    def test_create_workspace_already_exists(self, mock_update_workspaces_config,
+                                           mock_sky_check, mock_validate_schema,
+                                           mock_get_schema, mock_get_workspaces):
         """Test creating a workspace that already exists should fail."""
         mock_get_workspaces.return_value = self.sample_config[
             'workspaces'].copy()
+        mock_get_schema.return_value = {
+            'properties': {
+                'workspaces': {
+                    'additionalProperties': {}
+                }
+            }
+        }
+        mock_validate_schema.return_value = None
+        
+        # Mock _update_workspaces_config to simulate the ValueError being raised
+        # inside the modifier function
+        def side_effect(modifier_fn):
+            # Simulate calling the modifier function with existing workspaces
+            workspaces = self.sample_config['workspaces'].copy()
+            modifier_fn(workspaces)  # This should raise ValueError
+            
+        mock_update_workspaces_config.side_effect = side_effect
 
         new_config = {'gcp': {'project_id': 'test-project'}}
 
@@ -137,20 +194,23 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertIn("already exists", str(cm.exception))
 
     @mock.patch('sky.skypilot_config.get_workspaces')
+    @mock.patch('sky.core._check_workspace_has_no_active_resources')
     @mock.patch('sky.core._update_workspaces_config')
-    def test_delete_workspace(self, mock_update_workspaces,
-                              mock_get_workspaces):
+    def test_delete_workspace(self, mock_update_workspaces_config,
+                              mock_check_resources, mock_get_workspaces):
         """Test deleting a workspace."""
         mock_get_workspaces.return_value = self.sample_config[
             'workspaces'].copy()
+        mock_check_resources.return_value = None
 
         expected_workspaces = self.sample_config['workspaces'].copy()
         del expected_workspaces['dev']
-        mock_update_workspaces.return_value = expected_workspaces
+        mock_update_workspaces_config.return_value = expected_workspaces
 
         result = core.delete_workspace('dev')
 
-        mock_update_workspaces.assert_called_once_with(expected_workspaces)
+        # Verify the internal helper was called with a function
+        mock_update_workspaces_config.assert_called_once()
         self.assertEqual(result, expected_workspaces)
 
     @mock.patch('sky.skypilot_config.get_workspaces')
