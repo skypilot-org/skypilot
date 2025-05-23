@@ -6169,10 +6169,14 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
+@click.option('--get-token',
+              is_flag=True,
+              default=False,
+              help='Force token-based login.')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str]):
+def api_login(endpoint: Optional[str], get_token: bool):
     """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint)
+    sdk.api_login(endpoint, get_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

@@ -16,6 +16,7 @@ metadata:
     # OAuth2 Proxy authentication
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-http" }}http{{ else }}https{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
     nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-http" }}http{{ else }}https{{ end }}://$host/oauth2/auth
+    nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email
     {{- else }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
