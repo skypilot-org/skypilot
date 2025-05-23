@@ -673,6 +673,22 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
+def force_override_config(override_configs: Dict[str, Any],
+                          dump_file: bool = False) -> None:
+    """Force overrides the config.
+
+    This is only for internal use.
+    """
+    original_config = _get_loaded_config()
+    original_config['workspaces'] = override_configs
+    _set_loaded_config(original_config)
+    if dump_file:
+        with open(os.path.expanduser(_GLOBAL_CONFIG_PATH),
+                  'w',
+                  encoding='utf-8') as f:
+            yaml.safe_dump(dict(_get_loaded_config()), f)
+
+
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     workspaces = get_nested(('workspaces',), default_value={})

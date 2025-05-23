@@ -250,17 +250,21 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
         })
 
 
-@app.post('/check')
-async def check(request: fastapi.Request,
-                check_body: payloads.CheckBody) -> None:
-    """Checks enabled clouds."""
+def _schedule_check(request_id: str, check_body: payloads.CheckBody) -> None:
     executor.schedule_request(
-        request_id=request.state.request_id,
+        request_id=request_id,
         request_name='check',
         request_body=check_body,
         func=sky_check.check,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
+
+
+@app.post('/check')
+async def check(request: fastapi.Request,
+                check_body: payloads.CheckBody) -> None:
+    """Checks enabled clouds."""
+    _schedule_check(request.state.request_id, check_body)
 
 
 @app.post('/enabled_clouds')
@@ -1281,6 +1285,19 @@ async def serve_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/update_workspace')
+async def update_workspace(
+        request: fastapi.Request,
+        update_workspace_body: payloads.UpdateWorkspaceBody) -> None:
+    """Updates the workspace."""
+    workspace_config = update_workspace_body.workspace_config
+    if workspace_config is None:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Workspace config is required')
+    skypilot_config.force_override_config(workspace_config, dump_file=True)
+    _schedule_check(request.state.request_id, payloads.CheckBody())
 
 
 # Redirect the root path to dashboard
