@@ -212,6 +212,7 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
+        # TODO(zhwu): client side should not rely on global_user_state.
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if not glob_storage:
             click.echo(f'Storage {storage_object} not found.')
@@ -1784,8 +1785,7 @@ def _show_enabled_infra():
     """Show the enabled infrastructure."""
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
              f'{colorama.Style.RESET_ALL} ')
-    enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        clouds.CloudCapability.COMPUTE)
+    enabled_clouds = sdk.get(sdk.enabled_clouds())
     enabled_ssh_infras = []
     enabled_k8s_infras = []
     enabled_cloud_infras = []
