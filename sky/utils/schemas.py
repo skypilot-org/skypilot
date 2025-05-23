@@ -223,6 +223,9 @@ def _get_single_resources_schema():
             'disk_tier': {
                 'type': 'string',
             },
+            'network_tier': {
+                'type': 'string',
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
