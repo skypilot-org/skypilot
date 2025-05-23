@@ -115,10 +115,10 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
 
       const processedUsers = (usersData || []).map((user) => {
         const userClusters = (clustersData || []).filter(
-          (c) => c.user_hash === user.userId || c.user === user.username // Match by hash or name as fallback
+          (c) => c.user_hash === user.userId // Match by hash only
         );
         const userJobs = (jobsData || []).filter(
-          (j) => j.user_hash === user.userId || j.user === user.username // Match by hash or name as fallback
+          (j) => j.user_hash === user.userId // Match by hash only
         );
         return {
           ...user,
@@ -228,12 +228,26 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                 {user.fullEmail}
               </TableCell>
               <TableCell>
-                {user.clusterCount}{' '}
-                {user.clusterCount === 1 ? 'cluster' : 'clusters'}
+                {user.clusterCount > 0 ? (
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                    {user.clusterCount}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
               </TableCell>
               <TableCell>
-                {user.jobCount}{' '}
-                {user.jobCount === 1 ? 'active job' : 'active jobs'}
+                {user.jobCount > 0 ? (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                    {user.jobCount}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
               </TableCell>
             </TableRow>
           ))}
