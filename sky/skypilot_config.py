@@ -310,11 +310,19 @@ def with_active_workspace(workspace: str) -> Iterator[None]:
     Raises:
         RuntimeError: If called from a non-main thread.
     """
+    original_workspace = get_active_workspace()
+    if original_workspace == workspace:
+        # No change, do nothing.
+        yield
+        return
+
     if threading.current_thread() is not threading.main_thread():
+        # We prevent the update of the active workspace from a non-main thread.
+        # This is to avoid the race condition when the active workspace is
+        # updated from a non-main thread.
         raise RuntimeError(
             'with_active_workspace() must be called from the main thread')
 
-    original_workspace = get_active_workspace()
     global _active_workspace_context
     _active_workspace_context = workspace
     logger.debug(f'Set context workspace: {workspace}')
