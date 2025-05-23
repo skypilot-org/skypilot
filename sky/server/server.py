@@ -263,12 +263,14 @@ async def check(request: fastapi.Request,
 
 
 @app.get('/enabled_clouds')
-async def enabled_clouds(request: fastapi.Request) -> None:
+async def enabled_clouds(
+        request: fastapi.Request,
+        enabled_clouds_body: payloads.EnabledCloudsBody) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(),
+        request_body=enabled_clouds_body,
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -644,18 +646,6 @@ async def endpoints(request: fastapi.Request,
         func=core.endpoints,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=endpoint_body.cluster,
-    )
-
-
-@app.get('/enabled_infra')
-async def enabled_infra(request: fastapi.Request) -> None:
-    """Gets the enabled infrastructures."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='enabled_infra',
-        request_body=payloads.RequestBody(),
-        func=core.enabled_infras,
-        schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
 

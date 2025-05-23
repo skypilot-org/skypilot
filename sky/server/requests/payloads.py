@@ -128,6 +128,11 @@ class CheckBody(RequestBody):
     verbose: bool = False
 
 
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    expand: bool = False
+
+
 class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str

@@ -1970,7 +1970,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         # Show enabled infras.
         title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
                  f'{colorama.Style.RESET_ALL} ')
-        all_infras = sdk.get(sdk.enabled_infra())
+        all_infras = sdk.get(sdk.enabled_clouds(expand=True))
         click.echo(f'{title}{", ".join(all_infras)}\n')
 
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
