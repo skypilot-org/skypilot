@@ -6,14 +6,18 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import yaml
 
+from sky import sky_logging
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import annotations
 from sky.utils import registry
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 
@@ -95,6 +99,26 @@ class SSH(kubernetes.Kubernetes):
         return region, zone
 
     @classmethod
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def _ssh_log_skipped_contexts_once(
+            cls, skipped_contexts: Tuple[str, ...]) -> None:
+        """Log skipped contexts for only once.
+
+        We don't directly cache the result of _filter_existing_allowed_contexts
+        as the admin policy may update the allowed contexts.
+        """
+        if skipped_contexts:
+            count = len(set(skipped_contexts))
+            is_singular = count == 1
+            logger.warning(
+                f'SSH Node {("Pool" if is_singular else "Pools")} '
+                f'{set(skipped_contexts)!r} specified in '
+                f'{SSH_NODE_POOLS_PATH} {("has" if is_singular else "have")} '
+                'not been set up. Skipping '
+                f'{("that pool" if is_singular else "those pools")}. '
+                'Run `sky ssh up` to set up.')
+
+    @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts that start with 'ssh-'.
 
@@ -128,7 +152,7 @@ class SSH(kubernetes.Kubernetes):
                 else:
                     skipped_contexts.append(context)
             if not silent:
-                cls._log_skipped_contexts_once(tuple(skipped_contexts))
+                cls._ssh_log_skipped_contexts_once(tuple(skipped_contexts))
             return existing_contexts
 
         # If no allowed_contexts found, return all SSH contexts
