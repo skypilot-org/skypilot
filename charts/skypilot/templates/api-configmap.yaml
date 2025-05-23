@@ -7,4 +7,16 @@ metadata:
 data:
   config.yaml: |
 {{ .Values.apiService.config | indent 4 }} 
+---
+{{- end }}
+{{- if .Values.apiService.sshNodePools}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-ssh-node-pools
+  namespace: {{ .Release.Namespace }}
+data:
+  ssh_node_pools.yaml: |
+{{ .Values.apiService.sshNodePools | indent 4 }} 
+---
 {{- end }}

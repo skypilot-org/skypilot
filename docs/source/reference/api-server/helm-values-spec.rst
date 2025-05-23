@@ -46,6 +46,7 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
     :ref:`resources <helm-values-apiService-resources>`:
       requests:
@@ -232,6 +233,28 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-sshNodePools:
+
+``apiService.sshNodePools``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the ``~/.sky/ssh_node_pools.yaml`` to set on the API server. Set to ``null`` to use an empty ssh node pools. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sshNodePools: |-
+      my-cluster:
+        hosts:
+          - 1.2.3.4
+          - 1.2.3.5
+
+      my-box:
+        hosts:
+          - hostname_in_ssh_config
 
 .. _helm-values-apiService-skipResourceCheck:
 
