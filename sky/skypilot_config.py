@@ -732,4 +732,5 @@ def ensure_config_file_on_pvc() -> None:
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug(f'Failed to ensure config file on PVC: {e}')
 
+
 ensure_config_file_on_pvc()
