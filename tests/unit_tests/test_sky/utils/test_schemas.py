@@ -189,7 +189,7 @@ class TestWorkspaceSchema(unittest.TestCase):
         for config in valid_workspace_configs:
             # Should not raise an exception
             try:
-                jsonschema.validate(instance=config, 
+                jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
             except jsonschema.exceptions.ValidationError as e:
                 self.fail(f"Valid config {config} was rejected: {e}")
@@ -198,22 +198,16 @@ class TestWorkspaceSchema(unittest.TestCase):
         """Test that non-GCP clouds only allow 'disabled' property."""
         # Test that all non-GCP clouds only accept 'disabled' property
         non_gcp_clouds = ['aws', 'azure', 'kubernetes', 'oci', 'nebius']
-        
+
         for cloud in non_gcp_clouds:
             # Valid: only disabled
-            valid_config = {
-                'my-workspace': {
-                    cloud: {
-                        'disabled': True
-                    }
-                }
-            }
+            valid_config = {'my-workspace': {cloud: {'disabled': True}}}
             try:
-                jsonschema.validate(instance=valid_config, 
+                jsonschema.validate(instance=valid_config,
                                     schema=self.workspaces_schema)
             except jsonschema.exceptions.ValidationError as e:
                 self.fail(f"Valid config for {cloud} was rejected: {e}")
-            
+
             # Invalid: additional property should be rejected
             invalid_config = {
                 'my-workspace': {
@@ -224,43 +218,39 @@ class TestWorkspaceSchema(unittest.TestCase):
                 }
             }
             with self.assertRaises(
-                jsonschema.exceptions.ValidationError,
-                msg=f"Config with extra property for {cloud} should be "
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Config with extra property for {cloud} should be "
                     f"rejected"):
-                jsonschema.validate(instance=invalid_config, 
+                jsonschema.validate(instance=invalid_config,
                                     schema=self.workspaces_schema)
 
     def test_gcp_allows_project_id_and_disabled(self):
         """Test that GCP allows both 'project_id' and 'disabled' properties."""
         # Valid: both project_id and disabled
-        valid_configs = [
-            {
-                'my-workspace': {
-                    'gcp': {
-                        'project_id': 'my-project',
-                        'disabled': False
-                    }
-                }
-            },
-            {
-                'my-workspace': {
-                    'gcp': {
-                        'project_id': 'my-project'
-                    }
-                }
-            },
-            {
-                'my-workspace': {
-                    'gcp': {
-                        'disabled': True
-                    }
+        valid_configs = [{
+            'my-workspace': {
+                'gcp': {
+                    'project_id': 'my-project',
+                    'disabled': False
                 }
             }
-        ]
-        
+        }, {
+            'my-workspace': {
+                'gcp': {
+                    'project_id': 'my-project'
+                }
+            }
+        }, {
+            'my-workspace': {
+                'gcp': {
+                    'disabled': True
+                }
+            }
+        }]
+
         for config in valid_configs:
             try:
-                jsonschema.validate(instance=config, 
+                jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
             except jsonschema.exceptions.ValidationError as e:
                 self.fail(f"Valid GCP config {config} was rejected: {e}")
@@ -278,7 +268,7 @@ class TestWorkspaceSchema(unittest.TestCase):
             }
         }
         with self.assertRaises(jsonschema.exceptions.ValidationError):
-            jsonschema.validate(instance=invalid_config, 
+            jsonschema.validate(instance=invalid_config,
                                 schema=self.workspaces_schema)
 
     def test_invalid_workspace_types(self):
@@ -314,22 +304,16 @@ class TestWorkspaceSchema(unittest.TestCase):
 
         for invalid_config in invalid_configs:
             with self.assertRaises(
-                jsonschema.exceptions.ValidationError,
-                msg=f"Invalid config {invalid_config} should be rejected"):
-                jsonschema.validate(instance=invalid_config, 
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Invalid config {invalid_config} should be rejected"):
+                jsonschema.validate(instance=invalid_config,
                                     schema=self.workspaces_schema)
 
     def test_unknown_cloud_names_rejected(self):
         """Test that unknown cloud names are rejected."""
-        invalid_config = {
-            'my-workspace': {
-                'unknown-cloud': {
-                    'disabled': True
-                }
-            }
-        }
+        invalid_config = {'my-workspace': {'unknown-cloud': {'disabled': True}}}
         with self.assertRaises(jsonschema.exceptions.ValidationError):
-            jsonschema.validate(instance=invalid_config, 
+            jsonschema.validate(instance=invalid_config,
                                 schema=self.workspaces_schema)
 
     def test_only_lowercase_cloud_names_allowed(self):
@@ -343,11 +327,11 @@ class TestWorkspaceSchema(unittest.TestCase):
             }
         }
         try:
-            jsonschema.validate(instance=valid_config, 
+            jsonschema.validate(instance=valid_config,
                                 schema=self.workspaces_schema)
         except jsonschema.exceptions.ValidationError as e:
             self.fail(f"Valid lowercase config was rejected: {e}")
-        
+
         # Invalid: uppercase cloud names should be rejected
         invalid_configs = [
             {
@@ -372,12 +356,12 @@ class TestWorkspaceSchema(unittest.TestCase):
                 }
             }
         ]
-        
+
         for config in invalid_configs:
             with self.assertRaises(
-                jsonschema.exceptions.ValidationError,
-                msg=f"Uppercase cloud config {config} should be rejected"):
-                jsonschema.validate(instance=config, 
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Uppercase cloud config {config} should be rejected"):
+                jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
 
 
