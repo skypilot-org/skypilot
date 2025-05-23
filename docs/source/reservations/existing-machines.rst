@@ -158,11 +158,29 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
          --namespace $NAMESPACE \
          --reuse-values \
          --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
+      
+      If your `ssh_node_pools.yaml` requires SSH keys, you can create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
+
+      .. code-block:: bash
+
+         SECRET_NAME=apiserver-ssh-key
+         # The NAMESPACE should be consistent with the API server deployment
+         kubectl create secret generic $SECRET_NAME \
+            --namespace $NAMESPACE \
+            --from-file=id_rsa=/path/to/id_rsa \
+            --from-file=other_id_rsa=/path/to/other_id_rsa
+
+         helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --namespace $NAMESPACE \
+            --reuse-values \
+            --set apiService.sshKeySecret=$SECRET_NAME
    
    .. tab-item:: VM Deployment
 
       If you use a :ref:`VM Deployment <sky-api-server-cloud-deploy>`, set ``~/.sky/ssh_node_pools.yaml`` on the API server host.
       This is usually only available to the administrator who deployed the API server.
+
+      If any SSH key is needed, you should also set it on the API server host.
 
 
 Observability of SSH Node Pools

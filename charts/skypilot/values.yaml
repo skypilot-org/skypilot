@@ -47,7 +47,9 @@ apiService:
   #  my-box:
   #    hosts:
   #      - hostname_in_ssh_config
-
+  # Optional secret that contains SSH keys for the API server to use, all the entries in the secret will be mounted to ~/.ssh/ directory in the API server.
+  sshKeySecret: null
+  
 
   # Skip resource check for the API server, not recommended for production deployment
   skipResourceCheck: false

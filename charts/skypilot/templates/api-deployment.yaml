@@ -73,6 +73,16 @@ spec:
           # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
           ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
           {{- end }}
+          {{- if .Values.apiService.sshKeySecret }}
+          mkdir -p /root/.ssh
+          echo "Linking ssh keys to /root/.ssh"
+          for file in /var/skypilot/ssh_keys/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ln -sf "$file" "/root/.ssh/$filename"
+            fi
+          done
+          {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
             exec sky api start --deploy --foreground
@@ -113,6 +123,10 @@ spec:
         {{- if .Values.apiService.sshNodePools }}
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
+        {{- end }}
+        {{- if .Values.apiService.sshKeySecret }}
+        - name: skypilot-ssh-identity
+          mountPath: /var/skypilot/ssh_keys
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-config
@@ -330,6 +344,12 @@ spec:
       {{- end }}
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
-        configMap:
-          name: {{ .Release.Name }}-ssh-node-pools
+        secret:
+          secretName: {{ .Release.Name }}-ssh-node-pools
+      {{- end }}
+      {{- if .Values.apiService.sshKeySecret }}
+      - name: skypilot-ssh-identity
+        secret:
+          secretName: {{ .Values.apiService.sshKeySecret }}
+          defaultMode: 0600 
       {{- end }}

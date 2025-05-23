@@ -47,6 +47,7 @@ Below is the available helm value keys and the default value of each key:
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
+    :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
     :ref:`resources <helm-values-apiService-resources>`:
       requests:
@@ -255,6 +256,32 @@ Default: ``null``
       my-box:
         hosts:
           - hostname_in_ssh_config
+
+.. _helm-values-apiService-sshKeySecret:
+
+``apiService.sshKeySecret``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Optional secret that contains SSH identity files to the API server to use, all the entries in the secret will be mounted to ``~/.ssh/`` directory in the API server. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sshKeySecret: my-ssh-key-secret
+
+The content of the secret should be like:
+
+.. code-block:: yaml
+
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: my-ssh-key-secret
+  data:
+    id_rsa: <secret-content>
+
 
 .. _helm-values-apiService-skipResourceCheck:
 
