@@ -1009,12 +1009,11 @@ def storage_delete(name: str) -> None:
 # = Catalog Observe =
 # ===================
 @usage_lib.entrypoint
-def enabled_clouds(
-        expand: bool = False) -> Union[List[str], List[clouds.Cloud]]:
+def enabled_clouds(expand: bool = False) -> List[str]:
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE)
     if not expand:
-        return cached_clouds
+        return [cloud.display_name() for cloud in cached_clouds]
     enabled_ssh_infras = []
     enabled_k8s_infras = []
     enabled_cloud_infras = []

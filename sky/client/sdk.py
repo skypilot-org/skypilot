@@ -144,8 +144,7 @@ def enabled_clouds(expand: bool = False) -> server_common.RequestId:
         The request ID of the enabled clouds request.
 
     Request Returns:
-        If expand, a list of enabled clouds in string format. Otherwise, a list
-        of clouds.Cloud objects.
+        A list of enabled clouds in string format.
     """
     body = payloads.EnabledCloudsBody(expand=expand)
     response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',

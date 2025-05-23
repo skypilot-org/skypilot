@@ -3474,13 +3474,8 @@ def show_gpus(
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = False
-    ssh_is_enabled = False
-    for cloud in enabled_clouds:
-        if isinstance(cloud, clouds.SSH):
-            ssh_is_enabled = True
-        elif isinstance(cloud, clouds.Kubernetes):
-            kubernetes_is_enabled = True
+    kubernetes_is_enabled = clouds.Kubernetes.display_name() in enabled_clouds
+    ssh_is_enabled = clouds.SSH.display_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
                               (cloud_name is None or cloud_is_kubernetes))
     query_ssh_realtime_gpu = (ssh_is_enabled and
