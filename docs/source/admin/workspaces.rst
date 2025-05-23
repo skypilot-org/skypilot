@@ -14,7 +14,7 @@ Example use cases:
 
 
 Configuration
-------------
+-------------
 
 Define workspaces in your :ref:`SkyPilot config file <config-yaml>` on the API server host, i.e., ``~/.sky/config.yaml``.
 
@@ -102,7 +102,7 @@ All SkyPilot CLI or API calls with ``/monorepo/team-b`` as the PWD will use the 
 For team-c, since it has no workspace set, all CLI or API calls there will use the ``default`` workspace.
 
 Viewing the workspaces in dashboard
-----------------------------------
+------------------------------------
 
 The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all configured workspaces.
 
