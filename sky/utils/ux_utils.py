@@ -161,7 +161,8 @@ def finishing_message(message: str,
     follow_up_message = follow_up_message if (follow_up_message
                                               is not None) else ''
     success_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.GREEN}✓ '
-                      f'{message}{colorama.Style.RESET_ALL}{follow_up_message}')
+                      f'{message}{colorama.Style.RESET_ALL}{follow_up_message}'
+                      f'{colorama.Style.RESET_ALL}')
     if log_path is None:
         return success_prefix
     path_hint = log_path_hint(log_path, is_local)

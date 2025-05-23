@@ -58,7 +58,7 @@ MULTI_WORD_TERMS = {
     'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
     'Google Cloud', 'LoadBalancer Service', 'Dynamic Workload Scheduler',
     'Sky Computing', 'VS Code', 'Cudo Compute', 'Samsung Cloud Platform',
-    'OAuth2 Proxy'
+    'Node Pool', 'Node Pools', 'OAuth2 Proxy'
 }
 
 

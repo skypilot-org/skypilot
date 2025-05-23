@@ -452,7 +452,10 @@ class Resources:
     def repr_with_region_zone(self) -> str:
         region_str = ''
         if self.region is not None:
-            region_str = f', region={self.region}'
+            region_name = self.region
+            if self.region.startswith('ssh-'):
+                region_name = self.region.lstrip('ssh-')
+            region_str = f', region={region_name}'
         zone_str = ''
         if self.zone is not None:
             zone_str = f', zone={self.zone}'

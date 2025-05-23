@@ -340,6 +340,32 @@ If you have existing machines, i.e., a list of IP addresses you can SSH into, yo
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-dark
 
+
+Example usage:
+
+.. tab-set::
+
+    .. tab-item:: CLI
+        :sync: cli
+
+        .. code-block:: console
+
+            $ sky launch --infra ssh  # Use any available SSH node pool.
+            $ sky launch --infra ssh/my-node-pool  # Use a particular SSH node pool.
+
+    .. tab-item:: Python
+        :sync: python
+
+        .. code-block:: python
+
+            import sky
+            task = sky.Task().set_resources(sky.Resources(
+                infra='ssh',  # Use any available SSH node pool.
+                # infra='ssh/my-node-pool',  # Use a particular SSH node pool.
+            ))
+            sky.launch(task)
+
+
 See :ref:`Using Existing Machines <existing-machines>`.
 
 
