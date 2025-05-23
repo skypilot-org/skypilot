@@ -162,6 +162,9 @@ def _get_single_resources_schema():
             'instance_type': {
                 'type': 'string',
             },
+            'num_nodes': {
+                'type': 'integer',
+            },
             'use_spot': {
                 'type': 'boolean',
             },

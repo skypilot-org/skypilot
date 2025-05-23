@@ -599,6 +599,46 @@ class Task:
                 'experimental.config_overrides')
             resources_config[
                 '_cluster_config_overrides'] = cluster_config_override
+
+        # Handle num_nodes conflict between top-level and resources
+        task_num_nodes = config.get('num_nodes', None)
+        
+        # Check if any resource config has num_nodes specified
+        resources_has_num_nodes = False
+        if resources_config.get('num_nodes') is not None:
+            resources_has_num_nodes = True
+        elif resources_config.get('any_of'):
+            for resource_config in resources_config['any_of']:
+                if resource_config.get('num_nodes') is not None:
+                    resources_has_num_nodes = True
+                    break
+        elif resources_config.get('ordered'):
+            for resource_config in resources_config['ordered']:
+                if resource_config.get('num_nodes') is not None:
+                    resources_has_num_nodes = True
+                    break
+        
+        # Error if both are specified
+        if task_num_nodes is not None and resources_has_num_nodes:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify num_nodes in both top-level task and '
+                    'resources section. Please specify it in only one place.')
+        
+        # If task num_nodes is specified, apply to all resources
+        if task_num_nodes is not None and not resources_has_num_nodes:
+            def apply_num_nodes_to_config(config_dict):
+                if config_dict.get('num_nodes') is None:
+                    config_dict['num_nodes'] = task_num_nodes
+            
+            apply_num_nodes_to_config(resources_config)
+            if resources_config.get('any_of'):
+                for resource_config in resources_config['any_of']:
+                    apply_num_nodes_to_config(resource_config)
+            if resources_config.get('ordered'):
+                for resource_config in resources_config['ordered']:
+                    apply_num_nodes_to_config(resource_config)
+
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
@@ -1293,6 +1333,7 @@ class Task:
         required_features = set()
 
         # Multi-node
+        # TODO(rohan): do we need to update this to check for resources.num_nodes?
         if self.num_nodes > 1:
             required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 

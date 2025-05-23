@@ -104,6 +104,7 @@ class Resources:
         self,
         cloud: Optional[clouds.Cloud] = None,
         instance_type: Optional[str] = None,
+        num_nodes: Optional[int] = None,
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
@@ -152,6 +153,7 @@ class Resources:
         Args:
           cloud: the cloud to use. Deprecated. Use `infra` instead.
           instance_type: the instance type to use.
+          num_nodes: the number of nodes to provision.
           cpus: the number of CPUs required for the task.
             If a str, must be a string of the form ``'2'`` or ``'2+'``, where
             the ``+`` indicates that the task requires at least 2 CPUs.
@@ -337,6 +339,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
         self._set_autostop_config(autostop)
+        self._set_num_nodes(num_nodes)
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -349,6 +352,7 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
         self._try_validate_labels()
+        self._try_validate_num_nodes()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -479,6 +483,10 @@ class Resources:
     @property
     def instance_type(self) -> Optional[str]:
         return self._instance_type
+
+    @property
+    def num_nodes(self) -> Optional[int]:
+        return self._num_nodes
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -758,6 +766,16 @@ class Resources:
         autostop: Union[bool, int, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+    def _set_num_nodes(self, num_nodes: Optional[int]) -> None:
+        if num_nodes is None:
+            self._num_nodes = None
+            return
+        if not isinstance(num_nodes, int) or num_nodes <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes should be a positive int. Got: {num_nodes}')
+        self._num_nodes = num_nodes
 
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""
@@ -1186,6 +1204,18 @@ class Resources:
                     'The following labels are invalid:'
                     '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
+    def _try_validate_num_nodes(self) -> None:
+        """Try to validate the num_nodes attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if self._num_nodes is not None:
+            if not isinstance(self._num_nodes, int) or self._num_nodes <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'num_nodes should be a positive int. Got: {self._num_nodes}')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -1468,6 +1498,7 @@ class Resources:
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
+            num_nodes=override.pop('num_nodes', self._num_nodes),
             cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self.memory),
             accelerators=override.pop('accelerators', self.accelerators),
@@ -1671,6 +1702,7 @@ class Resources:
         resources_fields['zone'] = config.pop('zone', None)
 
         resources_fields['instance_type'] = config.pop('instance_type', None)
+        resources_fields['num_nodes'] = config.pop('num_nodes', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
         resources_fields['accelerators'] = config.pop('accelerators', None)
@@ -1728,6 +1760,7 @@ class Resources:
         add_if_not_none('infra', infra)
 
         add_if_not_none('instance_type', self.instance_type)
+        add_if_not_none('num_nodes', self.num_nodes)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)
@@ -1901,6 +1934,14 @@ class Resources:
 
         if version < 23:
             self._autostop_config = None
+            
+        # @TODO(rohan): add specific version number conditional
+        # also, if num_nodes is not in state, but we are running the updated
+        # optimizer which uses Resources.num_nodes, we will need to populate 
+        # the num_nodes field of the task's Resources objects to match the
+        # num_nodes value from the top-level task yaml.
+        if '_num_nodes' not in state:
+            self._num_nodes = None
 
         self.__dict__.update(state)
 

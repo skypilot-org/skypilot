@@ -245,7 +245,7 @@ class Optimizer:
         Note that the egress cost/time is not considered in this function.
         The estimated run time of a task running on a resource is given by
         `task.estimate_runtime(resources)` or 1 hour by default.
-        The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
+        The estimated cost is `resources.num_nodes * resources.get_cost(runtime)`.
         """
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
@@ -327,9 +327,6 @@ class Optimizer:
                     #    Resources(infra='gcp', accelerators='V100'),
                     #    ...
                     # as having the same run time.
-                    # FIXME(zongheng): take 'num_nodes' as an arg/into
-                    # account. It may be another reason to treat num_nodes as
-                    # part of a Resources.
                     if node.time_estimator_func is None:
                         estimated_runtime = 1 * 3600
                     else:
@@ -348,8 +345,9 @@ class Optimizer:
                         # them.
                         # TODO: different policies can be applied here for
                         # whether to choose reserved instances.
+                        num_nodes = resources.num_nodes if resources.num_nodes is not None else node.num_nodes
                         estimated_cost_or_time = cost_per_node * max(
-                            node.num_nodes - num_available_reserved_nodes, 0)
+                            num_nodes - num_available_reserved_nodes, 0)
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
@@ -389,9 +387,11 @@ class Optimizer:
                     fuzzy_candidates_str = (
                         f'\nTry one of these offered accelerators: {cyan}'
                         f'{fuzzy_candidates}{reset}')
-                node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
-                                                 r.repr_with_region_zone
-                                                 for r in node.resources)
+                node_resources_reprs = []
+                for r in node.resources:
+                    num_nodes = r.num_nodes if r.num_nodes is not None else node.num_nodes
+                    node_resources_reprs.append(f'{num_nodes}x ' + r.repr_with_region_zone)
+                node_resources_reprs = ', '.join(node_resources_reprs)
                 hints_concat = '\n'.join([
                     f'{bold}Resource: {repr(resource)}{reset}\n' +
                     '\n'.join(hint_list)
@@ -682,7 +682,9 @@ class Optimizer:
                 execution_time = node.estimate_runtime(resources)
 
             cost_per_node = resources.get_cost(execution_time)
-            total_cost += cost_per_node * node.num_nodes
+            # Use resource's num_nodes if set, otherwise fall back to task's num_nodes
+            num_nodes = resources.num_nodes if resources.num_nodes is not None else node.num_nodes
+            total_cost += cost_per_node * num_nodes
 
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress costs for multi-node clusters
@@ -871,7 +873,9 @@ class Optimizer:
             best_plan_rows = []
             for t, r in ordered_best_plan.items():
                 assert t.name is not None, t
-                best_plan_rows.append([t.name, str(t.num_nodes)] +
+                # Use resource's num_nodes if set, otherwise fall back to task's num_nodes
+                display_num_nodes = r.num_nodes if r.num_nodes is not None else t.num_nodes
+                best_plan_rows.append([t.name, str(display_num_nodes)] +
                                       _get_resources_element_list(r))
             logger.info(
                 f'{colorama.Style.BRIGHT}Best plan: {colorama.Style.RESET_ALL}')
@@ -896,13 +900,16 @@ class Optimizer:
                 for resource, cost in v.items()
             }
             task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
-            plural = 's' if task.num_nodes > 1 else ''
+            # Get num_nodes from the chosen resource if set, otherwise from the task
+            chosen_resources = best_plan[task]
+            display_num_nodes = chosen_resources.num_nodes if chosen_resources.num_nodes is not None else task.num_nodes
+            plural = 's' if display_num_nodes > 1 else ''
             if num_tasks > 1:
                 # Add a new line for better readability, when there are multiple
                 # tasks.
                 logger.info('')
             logger.info(f'Considered resources {task_str}'
-                        f'({task.num_nodes} node{plural}):')
+                        f'({display_num_nodes} node{plural}):')
 
             # Only print 1 row per cloud.
             # The following code is to generate the table
@@ -1284,9 +1291,10 @@ def _fill_in_launchable_resources(
                        if resources.cloud is not None else enabled_clouds)
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
-
+        # Use resource's num_nodes if set, otherwise fall back to task's num_nodes
+        num_nodes = resources.num_nodes if resources.num_nodes is not None else task.num_nodes
         feasible_list = subprocess_utils.run_in_parallel(
-            lambda cloud, r=resources, n=task.num_nodes:
+            lambda cloud, r=resources, n=num_nodes:
             (cloud, cloud.get_feasible_launchable_resources(r, n)),
             clouds_list)
         for cloud, feasible_resources in feasible_list:
@@ -1310,8 +1318,9 @@ def _fill_in_launchable_resources(
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])
             num_node_str = ''
-            if task.num_nodes > 1:
-                num_node_str = f'{task.num_nodes}x '
+            num_nodes = resources.num_nodes if resources.num_nodes is not None else task.num_nodes
+            if num_nodes > 1:
+                num_node_str = f'{num_nodes}x '
             if not quiet:
                 logger.info(
                     f'No resource satisfying {num_node_str}'
