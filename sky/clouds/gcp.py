@@ -1004,10 +1004,10 @@ class GCP(clouds.Cloud):
         return cls._get_user_identities(gcp_workspace_config)
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @annotations.lru_cache(scope='request', maxsize=5)
     def _get_user_identities(
             cls, workspace_config: Optional[str]) -> List[List[str]]:
-        # We use add workspace_config in args to avoid caching the GCP identity
+        # We add workspace_config in args to avoid caching the GCP identity
         # for when different workspace configs are used. Use json.dumps to
         # ensure the config is hashable.
         del workspace_config  # Unused
