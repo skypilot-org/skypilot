@@ -1975,7 +1975,9 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         if user_hash is not None:
             if not common_utils.is_valid_user_hash(user_hash):
                 raise ValueError(f'Invalid user hash: {user_hash}')
-            with open(os.path.expanduser('~/.sky/user_hash'), 'w') as f:
+            with open(os.path.expanduser('~/.sky/user_hash'),
+                      'w',
+                      encoding='utf-8') as f:
                 f.write(user_hash)
 
     # Set the endpoint in the config file
