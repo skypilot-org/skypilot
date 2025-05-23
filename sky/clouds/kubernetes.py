@@ -106,17 +106,6 @@ class Kubernetes(clouds.Cloud):
         context = resources.region
         if context is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
-        # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
-            context)
-        if is_exec_auth:
-            assert isinstance(message, str), message
-            # Controllers cannot spin up new pods with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to down itself with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.AUTODOWN] = message
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
@@ -550,7 +539,13 @@ class Kubernetes(clouds.Cloud):
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
-        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        if (skypilot_config.get_nested(('kubernetes', 'remote_identity'), None)
+                != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+            k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        else:
+            # If using local credentials, the remote cluster will get the
+            # context name from the kubeconfig
+            k8s_env_vars = {}
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -807,9 +802,13 @@ class Kubernetes(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
+            converted = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(
+                os.path.expanduser(CREDENTIAL_PATH))
+
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+            return {DEFAULT_KUBECONFIG_PATH: converted}
         else:
             return {}
 
