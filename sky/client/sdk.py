@@ -237,7 +237,7 @@ def list_accelerator_counts(
             accelerator names mapped to a list of available counts. See usage
             in cli.py.
     """
-    body = payloads.ListAcceleratorsBody(
+    body = payloads.ListAcceleratorCountsBody(
         gpus_only=gpus_only,
         name_filter=name_filter,
         region_filter=region_filter,

@@ -75,8 +75,12 @@ class TestWithNoCloudEnabled:
                                    ['--cloud', 'aws', '--region', 'us-west-1'])
         assert not result.exit_code
 
+        result = cli_runner.invoke(cli.show_gpus,
+                                   ['--infra', 'aws/us-west-1'])
+        assert not result.exit_code
+
         for cloud in CLOUDS_TO_TEST:
-            result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud])
+            result = cli_runner.invoke(cli.show_gpus, ['--infra', cloud])
             assert not result.exit_code
 
             result = cli_runner.invoke(cli.show_gpus,
