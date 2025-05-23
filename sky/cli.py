@@ -1789,8 +1789,7 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
              f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
 
-    enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        clouds.CloudCapability.COMPUTE, workspace=active_workspace)
+    enabled_clouds = sdk.get(sdk.enabled_clouds())
     enabled_ssh_infras = []
     enabled_k8s_infras = []
     enabled_cloud_infras = []
