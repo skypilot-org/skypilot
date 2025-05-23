@@ -290,10 +290,8 @@ async def get_workspace_config(request: fastapi.Request) -> None:
 
 @app.put('/workspaces/{workspace_name}')
 async def update_workspace(
-    request: fastapi.Request,
-    workspace_name: str,
-    workspace_body: payloads.UpdateWorkspaceBody
-) -> None:
+        request: fastapi.Request, workspace_name: str,
+        workspace_body: payloads.UpdateWorkspaceBody) -> None:
     """Updates a specific workspace configuration."""
     workspace_body.workspace_name = workspace_name
     executor.schedule_request(
@@ -307,10 +305,8 @@ async def update_workspace(
 
 @app.post('/workspaces/{workspace_name}')
 async def create_workspace(
-    request: fastapi.Request,
-    workspace_name: str,
-    workspace_body: payloads.CreateWorkspaceBody
-) -> None:
+        request: fastapi.Request, workspace_name: str,
+        workspace_body: payloads.CreateWorkspaceBody) -> None:
     """Creates a new workspace configuration."""
     workspace_body.workspace_name = workspace_name
     executor.schedule_request(
@@ -323,10 +319,8 @@ async def create_workspace(
 
 
 @app.delete('/workspaces/{workspace_name}')
-async def delete_workspace(
-    request: fastapi.Request,
-    workspace_name: str
-) -> None:
+async def delete_workspace(request: fastapi.Request,
+                           workspace_name: str) -> None:
     """Deletes a workspace configuration."""
     delete_body = payloads.DeleteWorkspaceBody(workspace_name=workspace_name)
     executor.schedule_request(
