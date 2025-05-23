@@ -42,18 +42,19 @@ The above is achieved by configuring the following section in the config file:
          disabled: true
 
 
-.. dropdown:: Schema of the ``workspaces`` section:
+.. dropdown:: Schema of the ``workspaces`` field:
 
    .. code-block:: yaml
 
       workspaces:
-        # Workspace 'default' is created by SkyPilot and is used if no workspaces
-        # are defined. Admins can optionally override settings for this workspace.
+        # Workspace 'default' is created by SkyPilot and is used if no
+        # workspaces are defined. Admins can optionally override settings for
+        # this workspace.
         default: {}
 
         <workspace name>:
            <infra name>:  # aws, gcp, ...; ssh; k8s
-             disabled: false  # Disable an infra provider for this workspace (default: false)
+             disabled: false  # Disable an infra provider for this workspace (default: false).
 
            # Currently, 'gcp' supports an additional field:
            gcp:
@@ -66,21 +67,28 @@ To apply the configuration, follow the following steps:
 
    .. tab-item:: Helm Deployment
 
-      If you used :ref:`Helm Deployment <sky-api-server-helm-deploy-command>` for your API server, include workspace configuration to in local SkyPilot config file and run:
+      If you used :ref:`Helm Deployment <sky-api-server-helm-deploy-command>` to
+      deploy a remote API server, write workspace configuration in a local
+      SkyPilot config file, and run:
 
       .. code-block:: bash
 
-         # RELEASE_NAME and NAMESPACE are the same as the ones used in the helm deployment
+         # RELEASE_NAME and NAMESPACE are the same as the ones used in the Helm
+         # deployment.
          helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
             --namespace $NAMESPACE \
             --reuse-values \
             --set-file apiService.config=/your/path/to/config.yaml
-      
-      To change workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`
 
-   .. tab-item:: VM Deployment
+      To change workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
 
-      If you used a :ref:`VM Deployment <sky-api-server-cloud-deploy>` for your API server or testing workspaces locally, edit the workspace configuration in the :ref:`SkyPilot config file <config-yaml>`, `~/.sky/config.yaml`. API server will automatically reload the configuration to apply the changes.
+   .. tab-item:: VM Deployment or Local API Server
+
+      If you used a :ref:`VM Deployment <sky-api-server-cloud-deploy>` for your
+      API server or testing workspaces locally, edit the workspace configuration
+      in the :ref:`SkyPilot config file <config-yaml>`, ``~/.sky/config.yaml``.
+      The API server will automatically reload the configuration to apply the
+      changes.
 
 Setting the active workspace
 ----------------------------
@@ -111,7 +119,7 @@ Then, ``/monorepo/team-a/.sky.yaml`` may set:
 
 All SkyPilot CLI or API calls with ``/monorepo/team-a`` as the PWD will use the workspace ``team-a``.
 
-Similarly, ``/monorepo/team-b/.sky.yaml`` may set.
+Similarly, ``/monorepo/team-b/.sky.yaml`` may set:
 
 .. code-block:: yaml
 
@@ -121,7 +129,7 @@ All SkyPilot CLI or API calls with ``/monorepo/team-b`` as the PWD will use the 
 
 For team-c, since it has no workspace set, all CLI or API calls there will use the ``default`` workspace.
 
-Viewing the workspaces in dashboard
+Viewing workspaces in dashboard
 ------------------------------------
 
 The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all configured workspaces.

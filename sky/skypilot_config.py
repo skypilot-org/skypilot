@@ -555,7 +555,8 @@ def override_skypilot_config(
     if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and workspace
             not in get_nested(keys=('workspaces',), default_value={})):
         raise ValueError(f'Workspace {workspace} does not exist. '
-                         'Please check your config and try again.')
+                         'Use `sky check` to see if it is defined on the API '
+                         'server and try again.')
     # Initialize the active workspace context to the workspace specified, so
     # that a new request is not affected by the previous request's workspace.
     _active_workspace_context.workspace = workspace
