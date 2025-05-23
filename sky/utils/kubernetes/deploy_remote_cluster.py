@@ -795,7 +795,7 @@ def main():
                 )
             except Exception as e:  # pylint: disable=broad-except
                 print(
-                    f'{RED}Error in deploying SSH Target {cluster_name}: {e}{NC}'
+                    f'{RED}Error deploying SSH Node Pool {cluster_name}: {e}{NC}'
                 )
 
 
