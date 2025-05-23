@@ -58,8 +58,8 @@ export function SideBar({ highlighted = 'clusters' }) {
 
   // Common link style
   const linkStyle = (isHighlighted) => `
-        flex items-center space-x-2 
-        ${isHighlighted ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-700'} 
+        flex items-center space-x-2
+        ${isHighlighted ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-700'}
         relative z-10 py-2 px-4 rounded-sm
         hover:bg-gray-100 hover:text-blue-700 transition-colors
         cursor-pointer w-full
@@ -104,7 +104,8 @@ export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
   const [userEmail, setUserEmail] = useState(null);
-  const [showDefaultTitle, setShowDefaultTitle] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     fetch(`${ENDPOINT}/api/health`)
@@ -112,16 +113,26 @@ export function TopBar() {
       .then((data) => {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
-          setShowDefaultTitle(false);
-        } else {
-          setShowDefaultTitle(true);
         }
       })
       .catch((error) => {
         console.error('Error fetching user data:', error);
-        setShowDefaultTitle(true);
       });
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    // Bind the event listener
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      // Unbind the event listener on clean up
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [dropdownRef]);
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
@@ -207,23 +218,127 @@ export function TopBar() {
           </Link>
         </div>
 
-        {/* User email display */}
-        <div className="ml-auto flex items-center space-x-2">
-          {userEmail && !showDefaultTitle && (
-            <Link
-              href="/users"
-              className="flex items-center space-x-2 text-gray-700 hover:text-blue-600"
+        {/* External links - now shows only icons on mobile */}
+        <div
+          className={`flex items-center space-x-1 ${isMobile ? 'ml-0' : 'ml-auto'}`}
+        >
+          <CustomTooltip
+            content="Documentation"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://skypilot.readthedocs.io/en/latest/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+              title="Docs"
             >
-              <UserCircleIcon className="w-5 h-5" />
-              {!isMobile && <span className="text-sm">{userEmail}</span>}
-            </Link>
-          )}
-          {showDefaultTitle && !isMobile && (
-            <span className="text-sm font-semibold text-gray-700">
-              SkyPilot Dashboard
-            </span>
-          )}
+              {!isMobile && <span className="mr-1">Docs</span>}
+              <ExternalLinkIcon
+                className={`${isMobile ? 'w-4 h-4' : 'w-3.5 h-3.5'}`}
+              />
+            </a>
+          </CustomTooltip>
+
+          <div className="border-l border-gray-200 h-6 mx-1"></div>
+
+          {/* Keep the rest of the external links as icons only */}
+          <CustomTooltip
+            content="GitHub Repository"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://github.com/skypilot-org/skypilot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="GitHub"
+            >
+              <GitHubIcon className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+            </a>
+          </CustomTooltip>
+
+          <CustomTooltip
+            content="Join Slack"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://slack.skypilot.co/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="Slack"
+            >
+              <SlackIcon className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+            </a>
+          </CustomTooltip>
+
+          <CustomTooltip
+            content="Leave Feedback"
+            className="text-sm text-muted-foreground"
+          >
+            <a
+              href="https://github.com/skypilot-org/skypilot/issues/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="Leave Feedback"
+            >
+              <CommentFeedbackIcon
+                className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`}
+              />
+            </a>
+          </CustomTooltip>
         </div>
+
+        {/* User Profile Icon and Dropdown */}
+        {userEmail && (
+          <div className="relative ml-2" ref={dropdownRef}>
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+              title="User Profile"
+            >
+              <UserCircleIcon
+                className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`}
+              />
+            </button>
+
+            {isDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                {(() => {
+                  let displayName = userEmail;
+                  let emailToDisplay = null;
+                  if (userEmail && userEmail.includes('@')) {
+                    displayName = userEmail.split('@')[0];
+                    emailToDisplay = userEmail;
+                  }
+                  return (
+                    <>
+                      <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
+                        {displayName}
+                      </div>
+                      {emailToDisplay && (
+                        <div className="px-4 pt-0 pb-2 text-xs text-gray-500">
+                          {emailToDisplay}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+                <div className="border-t border-gray-200 mx-1 my-1"></div>
+                <Link
+                  href="/users"
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                  onClick={() => setIsDropdownOpen(false)}
+                  prefetch={false}
+                >
+                  See all users
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
