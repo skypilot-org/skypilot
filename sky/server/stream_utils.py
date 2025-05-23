@@ -36,6 +36,21 @@ async def log_streamer(request_id: Optional[str],
                        follow: bool = True) -> AsyncGenerator[str, None]:
     """Streams the logs of a request."""
 
+    # Buffer settings
+    BUFFER_SIZE = 8 * 1024  # 8KB
+    BUFFER_TIMEOUT = 0.05  # 50ms
+    buffer = []
+    buffer_bytes = 0
+    last_flush_time = asyncio.get_event_loop().time()
+
+    async def flush_buffer() -> None:
+        nonlocal buffer, buffer_bytes, last_flush_time
+        if buffer:
+            yield ''.join(buffer)
+            buffer.clear()
+            buffer_bytes = 0
+            last_flush_time = asyncio.get_event_loop().time()
+
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
             f'[dim]Checking request: {request_id}[/dim]')
@@ -95,7 +110,13 @@ async def log_streamer(request_id: Optional[str],
             # while keeps the loop tight to make log stream responsive.
             await asyncio.sleep(0)
             line: Optional[bytes] = await f.readline()
+            
+            current_time = asyncio.get_event_loop().time()
             if not line:
+                if buffer and (current_time - last_flush_time) >= BUFFER_TIMEOUT:
+                    async for chunk in flush_buffer():
+                        yield chunk
+                
                 if request_id is not None:
                     request_task = requests_lib.get_request(request_id)
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
@@ -117,7 +138,16 @@ async def log_streamer(request_id: Optional[str],
                     line_str, raise_for_mismatch=False)
                 if is_payload:
                     continue
-            yield line_str
+
+            # Add to buffer
+            buffer.append(line_str)
+            buffer_bytes += len(line_str.encode('utf-8'))
+
+            # Check if we should flush the buffer
+            if (buffer_bytes >= BUFFER_SIZE or 
+                (current_time - last_flush_time) >= BUFFER_TIMEOUT):
+                async for chunk in flush_buffer():
+                    yield chunk
 
 
 def stream_response(
