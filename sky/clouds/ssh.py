@@ -108,10 +108,15 @@ class SSH(kubernetes.Kubernetes):
         as the admin policy may update the allowed contexts.
         """
         if skipped_contexts:
+            count = len(set(skipped_contexts))
+            is_singular = count == 1
             logger.warning(
-                f'SSH Node Pools {set(skipped_contexts)!r} specified in '
-                '~/.sky/ssh_node_pools.yaml has not been set up. '
-                'Skipping those pools. Run `sky ssh up` to set up.')
+                f'SSH Node {("Pool" if is_singular else "Pools")} '
+                f'{set(skipped_contexts)!r} specified in '
+                f'{SSH_NODE_POOLS_PATH} {("has" if is_singular else "have")} '
+                'not been set up. Skipping '
+                f'{("that pool" if is_singular else "those pools")}. '
+                'Run `sky ssh up` to set up.')
 
     @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
