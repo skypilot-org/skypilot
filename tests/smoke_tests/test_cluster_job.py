@@ -1829,6 +1829,10 @@ def test_gcp_zero_quota_failover():
 
 
 def test_long_setup_run_script(generic_cloud: str):
+    if generic_cloud == 'kubernetes':
+        low_resource_arg = ''
+    else:
+        low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      suffix='.yaml') as f:
@@ -1853,13 +1857,13 @@ def test_long_setup_run_script(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'long-setup-run-script',
             [
-                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
+                f'sky launch -y -c {name} --infra {generic_cloud} {low_resource_arg} {f.name}',
                 f'sky exec {name} "echo hello"',
                 f'sky exec {name} {f.name}',
                 f'sky logs {name} --status 1',
                 f'sky logs {name} --status 2',
                 f'sky logs {name} --status 3',
-                f'sky jobs launch -y -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
+                f'sky jobs launch -y -n {name} --cloud {generic_cloud} {low_resource_arg} {f.name}',
                 f'sky jobs queue | grep {name} | grep SUCCEEDED',
             ],
             f'sky down -y {name}; sky jobs cancel -n {name} -y',
