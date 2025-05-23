@@ -16,7 +16,7 @@ Example use cases:
 Configuration
 -------------
 
-Define workspaces in your :ref:`SkyPilot config file <config-yaml>` on the API server host, i.e., ``~/.sky/config.yaml``.
+Workspaces are defined in the :ref:`SkyPilot config file <config-yaml>` of API server, i.e., ``~/.sky/config.yaml`` on the API server host.
 
 For example, assume:
 
@@ -24,7 +24,7 @@ For example, assume:
 - SkyPilot API server is configured to use AWS and GCP.
 - You want team-a to use both infra, and team-b to use GCP only with a different project ID.
 
-The above is achieved by configuring the following:
+The above is achieved by configuring the following section in the config file:
 
 .. code-block:: yaml
 
@@ -42,25 +42,45 @@ The above is achieved by configuring the following:
          disabled: true
 
 
-Schema of the ``workspaces`` section:
+.. dropdown:: Schema of the ``workspaces`` section:
 
-.. code-block:: yaml
+   .. code-block:: yaml
 
-   workspaces:
-     # Workspace 'default' is created by SkyPilot and is used if no workspaces
-     # are defined. Admins can optionally override settings for this workspace.
-     default: {}
+      workspaces:
+         # Workspace 'default' is created by SkyPilot and is used if no workspaces
+         # are defined. Admins can optionally override settings for this workspace.
+         default: {}
 
-     <workspace name>:
-       <infra name>:  # aws, gcp, ...; ssh; k8s
-         disabled: false  # Disable an infra provider for this workspace (default: false)
+         <workspace name>:
+            <infra name>:  # aws, gcp, ...; ssh; k8s
+               disabled: false  # Disable an infra provider for this workspace (default: false)
 
-       # Currently, 'gcp' supports an additional field:
-       gcp:
-         disabled: false
-         project_id: GCP project ID
+            # Currently, 'gcp' supports an additional field:
+            gcp:
+               disabled: false
+               project_id: GCP project ID
 
+To apply the configuration, follow the following steps:
 
+.. tab-set::
+
+   .. tab-item:: Helm Deployment
+
+      If your use :ref:`Helm Deployment <sky-api-server-helm-deploy-command>` for your API server, apply the workspace configuration to your local config file and run:
+
+      .. code-block:: bash
+
+         # RELEASE_NAME and NAMESPACE are the same as the ones used in the helm deployment
+         helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --namespace $NAMESPACE \
+            --reuse-values \
+            --set-file apiService.config=/your/path/to/config.yaml
+      
+      To apply a new workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`
+
+   .. tab-item:: VM Deployment
+
+      If you are using a :ref:`VM Deployment <sky-api-server-cloud-deploy>` for your API server or testing workspaces locally, edit the workspace configuration in the :ref:`SkyPilot config file <config-yaml>` on the **API server host** directly. API server will automatically reload the configuration to apply the changes.
 
 Setting the active workspace
 ----------------------------
