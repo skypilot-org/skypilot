@@ -1249,6 +1249,20 @@ def endpoints(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def enabled_infra() -> server_common.RequestId:
+    """Gets the enabled infrastructures.
+
+    Request Returns:
+        A list of string representation of the enabled infrastructures.
+    """
+    response = requests.get(f'{server_common.get_server_url()}/enabled_infra',
+                            cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 

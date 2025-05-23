@@ -1015,6 +1015,25 @@ def enabled_clouds() -> List[clouds.Cloud]:
 
 
 @usage_lib.entrypoint
+def enabled_infras() -> List[str]:
+    cached_clouds = enabled_clouds()
+    enabled_ssh_infras = []
+    enabled_k8s_infras = []
+    enabled_cloud_infras = []
+    for cloud in cached_clouds:
+        cloud_infra = cloud.get_infras()
+        if isinstance(cloud, clouds.SSH):
+            enabled_ssh_infras.extend(cloud_infra)
+        elif isinstance(cloud, clouds.Kubernetes):
+            enabled_k8s_infras.extend(cloud_infra)
+        else:
+            enabled_cloud_infras.extend(cloud_infra)
+    all_infras = sorted(enabled_ssh_infras) + sorted(
+        enabled_k8s_infras) + sorted(enabled_cloud_infras)
+    return all_infras
+
+
+@usage_lib.entrypoint
 def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,

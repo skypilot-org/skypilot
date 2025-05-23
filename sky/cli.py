@@ -1781,27 +1781,6 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra():
-    """Show the enabled infrastructure."""
-    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
-             f'{colorama.Style.RESET_ALL} ')
-    enabled_clouds = sdk.get(sdk.enabled_clouds())
-    enabled_ssh_infras = []
-    enabled_k8s_infras = []
-    enabled_cloud_infras = []
-    for cloud in enabled_clouds:
-        cloud_infra = cloud.get_infras()
-        if isinstance(cloud, clouds.SSH):
-            enabled_ssh_infras.extend(cloud_infra)
-        elif isinstance(cloud, clouds.Kubernetes):
-            enabled_k8s_infras.extend(cloud_infra)
-        else:
-            enabled_cloud_infras.extend(cloud_infra)
-    all_infras = sorted(enabled_ssh_infras) + sorted(
-        enabled_k8s_infras) + sorted(enabled_cloud_infras)
-    click.echo(f'{title}{", ".join(all_infras)}\n')
-
-
 @cli.command()
 @config_option(expose_value=False)
 @click.option('--verbose',
@@ -1988,7 +1967,12 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
-        _show_enabled_infra()
+        # Show enabled infras.
+        title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
+                 f'{colorama.Style.RESET_ALL} ')
+        all_infras = sdk.get(sdk.enabled_infra())
+        click.echo(f'{title}{", ".join(all_infras)}\n')
+
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
     query_clusters: Optional[List[str]] = None if not clusters else clusters

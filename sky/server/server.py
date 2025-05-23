@@ -647,6 +647,18 @@ async def endpoints(request: fastapi.Request,
     )
 
 
+@app.get('/enabled_infra')
+async def enabled_infra(request: fastapi.Request) -> None:
+    """Gets the enabled infrastructures."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='enabled_infra',
+        request_body=payloads.RequestBody(),
+        func=core.enabled_infras,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 @app.post('/down')
 async def down(request: fastapi.Request,
                down_body: payloads.StopOrDownBody) -> None:
