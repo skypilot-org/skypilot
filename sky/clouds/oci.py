@@ -79,6 +79,9 @@ class OCI(clouds.Cloud):
             clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
                 ('High availability controllers are not supported on '
                  f'{cls._REPR}.'),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+                ('Customized multiple network interfaces are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
