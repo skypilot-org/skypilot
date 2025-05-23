@@ -16,12 +16,14 @@ export async function getUsers() {
     const data = await response.json();
     // Data from API is: [{ id: 'user_hash', name: 'username' }, ...]
     // Transform to: [{ userId: 'user_hash', username: 'username' }, ...]
-    return data.map(user => ({
-      userId: user.id,
-      username: user.name,
-    })) || [];
+    return (
+      data.map((user) => ({
+        userId: user.id,
+        username: user.name,
+      })) || []
+    );
   } catch (error) {
-    console.error("Failed to fetch users:", error);
+    console.error('Failed to fetch users:', error);
     return []; // Return empty array on error
   }
-} 
+}

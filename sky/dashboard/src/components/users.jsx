@@ -1,6 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import { CircularProgress } from '@mui/material';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -90,7 +96,10 @@ export function Users() {
 function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [sortConfig, setSortConfig] = useState({ key: 'username', direction: 'ascending' });
+  const [sortConfig, setSortConfig] = useState({
+    key: 'username',
+    direction: 'ascending',
+  });
 
   const fetchDataAndProcess = useCallback(async () => {
     if (setLoading) setLoading(true); // Use parent setLoading if available
@@ -99,17 +108,17 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       const [usersData, clustersData, jobsResponse] = await Promise.all([
         getUsers(),
         getClusters(), // Fetches all clusters
-        getManagedJobs() // Fetches all jobs
+        getManagedJobs(), // Fetches all jobs
       ]);
 
       const jobsData = jobsResponse.jobs || [];
 
-      const processedUsers = (usersData || []).map(user => {
+      const processedUsers = (usersData || []).map((user) => {
         const userClusters = (clustersData || []).filter(
-          c => c.user_hash === user.userId || c.user === user.username // Match by hash or name as fallback
+          (c) => c.user_hash === user.userId || c.user === user.username // Match by hash or name as fallback
         );
         const userJobs = (jobsData || []).filter(
-          j => j.user_hash === user.userId || j.user === user.username // Match by hash or name as fallback
+          (j) => j.user_hash === user.userId || j.user === user.username // Match by hash or name as fallback
         );
         return {
           ...user,
@@ -171,7 +180,9 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     return (
       <div className="text-center py-12">
         <p className="text-lg font-semibold text-gray-500">No users found.</p>
-        <p className="text-sm text-gray-400 mt-1">There are currently no users to display.</p>
+        <p className="text-sm text-gray-400 mt-1">
+          There are currently no users to display.
+        </p>
       </div>
     );
   }
@@ -181,16 +192,28 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead onClick={() => requestSort('usernameDisplay')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
+            <TableHead
+              onClick={() => requestSort('usernameDisplay')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+            >
               Name{getSortDirection('usernameDisplay')}
             </TableHead>
-            <TableHead onClick={() => requestSort('fullEmail')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
+            <TableHead
+              onClick={() => requestSort('fullEmail')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+            >
               Email{getSortDirection('fullEmail')}
             </TableHead>
-            <TableHead onClick={() => requestSort('clusterCount')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
+            <TableHead
+              onClick={() => requestSort('clusterCount')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+            >
               Clusters{getSortDirection('clusterCount')}
             </TableHead>
-            <TableHead onClick={() => requestSort('jobCount')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
+            <TableHead
+              onClick={() => requestSort('jobCount')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+            >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
           </TableRow>
@@ -198,13 +221,19 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
         <TableBody>
           {sortedUsers.map((user) => (
             <TableRow key={user.userId}>
-              <TableCell className="truncate" title={user.username}>{user.usernameDisplay}</TableCell>
-              <TableCell className="truncate" title={user.fullEmail}>{user.fullEmail}</TableCell>
-              <TableCell>
-                {user.clusterCount} {user.clusterCount === 1 ? 'cluster' : 'clusters'}
+              <TableCell className="truncate" title={user.username}>
+                {user.usernameDisplay}
+              </TableCell>
+              <TableCell className="truncate" title={user.fullEmail}>
+                {user.fullEmail}
               </TableCell>
               <TableCell>
-                {user.jobCount} {user.jobCount === 1 ? 'active job' : 'active jobs'}
+                {user.clusterCount}{' '}
+                {user.clusterCount === 1 ? 'cluster' : 'clusters'}
+              </TableCell>
+              <TableCell>
+                {user.jobCount}{' '}
+                {user.jobCount === 1 ? 'active job' : 'active jobs'}
               </TableCell>
             </TableRow>
           ))}
@@ -212,4 +241,4 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       </Table>
     </Card>
   );
-} 
+}

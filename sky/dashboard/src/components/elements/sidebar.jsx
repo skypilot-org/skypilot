@@ -151,9 +151,7 @@ export function TopBar() {
             className="flex items-center px-1 pt-1 h-full"
             prefetch={false}
           >
-            <div
-              className={`h-20 w-20 flex items-center justify-center`}
-            >
+            <div className={`h-20 w-20 flex items-center justify-center`}>
               <Image
                 src={`${BASE_PATH}/skypilot.svg`}
                 alt="SkyPilot Logo"
@@ -212,13 +210,18 @@ export function TopBar() {
         {/* User email display */}
         <div className="ml-auto flex items-center space-x-2">
           {userEmail && !showDefaultTitle && (
-            <Link href="/users" className="flex items-center space-x-2 text-gray-700 hover:text-blue-600">
+            <Link
+              href="/users"
+              className="flex items-center space-x-2 text-gray-700 hover:text-blue-600"
+            >
               <UserCircleIcon className="w-5 h-5" />
               {!isMobile && <span className="text-sm">{userEmail}</span>}
             </Link>
           )}
           {showDefaultTitle && !isMobile && (
-            <span className="text-sm font-semibold text-gray-700">SkyPilot Dashboard</span>
+            <span className="text-sm font-semibold text-gray-700">
+              SkyPilot Dashboard
+            </span>
           )}
         </div>
       </div>
