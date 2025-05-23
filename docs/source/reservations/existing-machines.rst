@@ -149,7 +149,7 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
    
    .. tab-item:: Helm Deployment
 
-      If you use a :ref:`Helm Deployment <sky-api-server-helm-deploy-command>`, apply the config to a ``ssh_node_pool.yaml`` file on your local machine and run:
+      If you use a :ref:`Helm Deployment <sky-api-server-helm-deploy-command>`, save the config to a ``ssh_node_pool.yaml`` file on your local machine and run:
 
       .. code-block:: bash
 
