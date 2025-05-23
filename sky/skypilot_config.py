@@ -729,7 +729,7 @@ def ensure_config_file_on_pvc() -> None:
                                f'Will use empty config.')
         else:
             logger.debug('No ConfigMap config found, will use default config')
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to ensure config file on PVC: {e}')
 
 
