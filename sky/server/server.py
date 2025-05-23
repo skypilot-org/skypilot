@@ -270,7 +270,7 @@ async def enabled_clouds(request: fastapi.Request,
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(workspace=workspace),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
