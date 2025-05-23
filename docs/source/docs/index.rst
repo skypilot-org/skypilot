@@ -285,6 +285,7 @@ Read the research:
    :caption: Data
 
    ../reference/storage
+   ../reference/volumes
    ../examples/syncing-code-artifacts
 
 .. toctree::
