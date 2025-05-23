@@ -1958,6 +1958,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         # status query.
         service_status_request_id = serve_lib.status(service_names=None)
 
+    workspace_request_id = None
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -1991,6 +1992,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         flag='ip' if ip else
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
+    else:
+        workspace_request_id = sdk.workspaces()
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -2014,12 +2017,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         else:
             normal_clusters.append(cluster_record)
 
-    all_workspaces = {
-        c.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-        for c in cluster_records
-    }
+    if workspace_request_id is not None:
+        all_workspaces = sdk.get(workspace_request_id)
+    else:
+        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
     active_workspace = skypilot_config.get_active_workspace()
-    all_workspaces.add(active_workspace)
     show_workspace = len(all_workspaces) > 1
     _show_enabled_infra(active_workspace, show_workspace)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
