@@ -13,7 +13,7 @@ Currently, the following volume types are supported:
   - Network volumes: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_
   - Instance volumes: `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_ (temporary)
 
-Use Cases
+Use cases
 ---------
 
 Use volumes for regional storage with high performance. A volume is created in a
@@ -107,8 +107,8 @@ There are three ways to mount volumes:
             # region: us-central1
             # zone: us-central1-a
 
-Configuration Options
-~~~~~~~~~~~~~~~~~~~~
+Configuration options
+~~~~~~~~~~~~~~~~~~~~~
 
 Here's a complete example showing all available configuration options:
 
