@@ -89,6 +89,10 @@ def check_capabilities(
     disallowed_cloud_names = [
         c for c in get_all_clouds() if c not in config_allowed_cloud_names
     ]
+    # Throw errors for clouds explicitly checked that are not allowed.
+    disallowed_explicit_check_cloud_names = [
+        c for c, _ in clouds_to_check if c not in config_allowed_cloud_names
+    ] if clouds is not None else []
     # Check only the clouds which are allowed in the config.
     clouds_to_check = [
         c for c in clouds_to_check if c[0] in config_allowed_cloud_names
@@ -164,6 +168,11 @@ def check_capabilities(
             '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
+    if disallowed_explicit_check_cloud_names:
+        echo('\n' + '\n'.join([
+            f'Error: {cloud} is not included in allowed_clouds in `~/.sky/config.yaml`'  # pylint: disable=line-too-long
+            for cloud in disallowed_explicit_check_cloud_names
+        ]))
     if not all_enabled_clouds:
         echo(
             click.style(
