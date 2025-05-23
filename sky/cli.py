@@ -1802,8 +1802,8 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
             enabled_k8s_infras.extend(cloud_infra)
         else:
             enabled_cloud_infras.extend(cloud_infra)
-    all_infras = enabled_ssh_infras + enabled_k8s_infras + enabled_cloud_infras
-
+    all_infras = sorted(enabled_ssh_infras) + sorted(
+        enabled_k8s_infras) + sorted(enabled_cloud_infras)
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -3826,15 +3826,17 @@ def show_gpus(
             print_section_titles = False
             stop_iter = False
             k8s_messages = ''
+            prev_print_section_titles = False
             for is_ssh in [False, True]:
+                if prev_print_section_titles:
+                    yield '\n\n'
                 stop_iter_one, print_section_titles_one, k8s_messages_one = (
                     yield from _possibly_show_k8s_like_realtime(is_ssh))
                 stop_iter = stop_iter or stop_iter_one
                 print_section_titles = (print_section_titles or
                                         print_section_titles_one)
                 k8s_messages += k8s_messages_one
-                if print_section_titles_one:
-                    yield '\n\n'
+                prev_print_section_titles = print_section_titles_one
             if stop_iter:
                 return
 
@@ -3911,15 +3913,17 @@ def show_gpus(
 
         print_section_titles = False
         stop_iter = False
+        prev_print_section_titles = False
         for is_ssh in [False, True]:
+            if prev_print_section_titles:
+                yield '\n\n'
             stop_iter_one, print_section_titles_one = (
                 yield from _possibly_show_k8s_like_realtime_for_acc(
                     name, quantity, is_ssh))
             stop_iter = stop_iter or stop_iter_one
             print_section_titles = (print_section_titles or
                                     print_section_titles_one)
-            if print_section_titles_one:
-                yield '\n\n'
+            prev_print_section_titles = print_section_titles_one
         if stop_iter:
             return
 

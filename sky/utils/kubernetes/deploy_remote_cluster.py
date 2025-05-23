@@ -6,6 +6,7 @@ import concurrent.futures as cf
 import os
 import random
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -134,19 +135,45 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
 
 
 def check_host_in_ssh_config(hostname: str) -> bool:
-    """Check if a hostname is defined in SSH config file."""
-    if not os.path.exists(SSH_CONFIG_PATH):
-        return False
+    """Return True iff *hostname* matches at least one `Host`/`Match` stanza
+    in the user's OpenSSH client configuration (including anything pulled in
+    via Include).
 
-    try:
-        result = subprocess.run(['ssh', '-G', hostname],
-                                capture_output=True,
-                                text=True,
-                                check=False)
-        # If successful, the host is in the SSH config
-        return result.returncode == 0 and 'hostname' in result.stdout
-    except Exception:  # pylint: disable=broad-except
-        return False
+    It calls:  ssh -vvG <hostname> -o ConnectTimeout=0
+    which:
+      • -G  expands the effective config without connecting
+      • -vv prints debug lines that show which stanzas are applied
+      • ConnectTimeout=0 avoids a DNS lookup if <hostname> is a FQDN/IP
+
+    No config files are opened or parsed manually.
+
+    Parameters
+    ----------
+    hostname : str
+        The alias/IP/FQDN you want to test.
+
+    Returns
+    -------
+    bool
+        True  – a specific stanza matched the host
+        False – nothing but the global defaults (`Host *`) applied
+    """
+    # We direct stderr→stdout because debug output goes to stderr.
+    proc = subprocess.run(
+        ['ssh', '-vvG', hostname, '-o', 'ConnectTimeout=0'],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,  # we only want the text, not to raise
+    )
+
+    # Look for lines like:
+    #   debug1: ~/.ssh/config line 42: Applying options for <hostname>
+    # Anything other than "*"
+    pattern = re.compile(r'^debug\d+: .*Applying options for ([^*].*)$',
+                         re.MULTILINE)
+
+    return bool(pattern.search(proc.stdout))
 
 
 def get_cluster_config(targets: Dict[str, Any],
@@ -266,7 +293,8 @@ def run_remote(node,
                ssh_key='',
                connect_timeout=30,
                use_ssh_config=False,
-               print_output=False):
+               print_output=False,
+               use_shell=False):
     """Run a command on a remote machine via SSH."""
     if use_ssh_config:
         # Use SSH config for connection parameters
@@ -282,13 +310,17 @@ def run_remote(node,
         if ssh_key:
             ssh_cmd.extend(['-i', ssh_key])
 
-        ssh_cmd.append(f'{user}@{node}')
+        ssh_cmd.append(f'{user}@{node}' if user else node)
         ssh_cmd.append(cmd)
+
+    if use_shell:
+        ssh_cmd = ' '.join(ssh_cmd)
 
     process = subprocess.run(ssh_cmd,
                              capture_output=True,
                              text=True,
-                             check=False)
+                             check=False,
+                             shell=use_shell)
     if process.returncode != 0:
         print(f'{RED}Error executing command {cmd} on {node}:{NC}')
         print(f'STDERR: {process.stderr}')
@@ -929,6 +961,30 @@ def deploy_cluster(head_node,
         print(f'{GREEN}SKYPILOT_CLUSTER_COMPLETED: {NC}')
 
         return []
+
+    print(f'{YELLOW}Checking TCP Forwarding Options...{NC}')
+    cmd = (
+        'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
+        f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
+        'else '
+        'sudo sed -i \'s/^#\?\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '  # pylint: disable=anomalous-backslash-in-string
+        '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
+        f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
+        'fi')
+    result = run_remote(
+        head_node,
+        shlex.quote(cmd),
+        ssh_user,
+        ssh_key,
+        use_ssh_config=head_use_ssh_config,
+        # For SkySSHUpLineProcessor
+        print_output=True,
+        use_shell=True)
+    if result is None:
+        print(
+            f'{RED}Failed to setup TCP forwarding on head node ({head_node}). '
+            f'Please check the SSH configuration.{NC}',
+            file=sys.stderr)
 
     # Get effective IP for master node if using SSH config - needed for workers to connect
     if head_use_ssh_config:
