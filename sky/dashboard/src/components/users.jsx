@@ -51,8 +51,15 @@ export function Users() {
 
   return (
     <Layout highlighted="users">
-      <div className="flex items-center justify-between mb-6 h-5">
-        <h1 className="text-2xl font-semibold text-gray-900">Users</h1>
+      <div className="flex items-center justify-between mb-4 h-5">
+        <div className="text-base">
+          <Link
+            href="/users"
+            className="text-sky-blue hover:underline leading-none"
+          >
+            Users
+          </Link>
+        </div>
         <div className="flex items-center">
           {loading && (
             <div className="flex items-center mr-2">
@@ -180,10 +187,10 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
             <TableHead onClick={() => requestSort('fullEmail')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
               Email{getSortDirection('fullEmail')}
             </TableHead>
-            <TableHead onClick={() => requestSort('clusterCount')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 text-center w-1/4">
+            <TableHead onClick={() => requestSort('clusterCount')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
               Clusters{getSortDirection('clusterCount')}
             </TableHead>
-            <TableHead onClick={() => requestSort('jobCount')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 text-center w-1/4">
+            <TableHead onClick={() => requestSort('jobCount')} className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4">
               Jobs{getSortDirection('jobCount')}
             </TableHead>
           </TableRow>
@@ -193,14 +200,14 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
             <TableRow key={user.userId}>
               <TableCell className="truncate" title={user.username}>{user.usernameDisplay}</TableCell>
               <TableCell className="truncate" title={user.fullEmail}>{user.fullEmail}</TableCell>
-              <TableCell className="text-center">
+              <TableCell>
                 <Link href={`/clusters?user=${user.userId}`} passHref legacyBehavior>
                   <a className="text-sky-600 hover:text-sky-700 hover:underline">
                     {user.clusterCount} {user.clusterCount === 1 ? 'cluster' : 'clusters'} <ExternalLinkIcon className="inline-block ml-1 h-3.5 w-3.5" />
                   </a>
                 </Link>
               </TableCell>
-              <TableCell className="text-center">
+              <TableCell>
                 <Link href={`/jobs?user=${user.userId}`} passHref legacyBehavior>
                   <a className="text-sky-600 hover:text-sky-700 hover:underline">
                     {user.jobCount} {user.jobCount === 1 ? 'active job' : 'active jobs'} <ExternalLinkIcon className="inline-block ml-1 h-3.5 w-3.5" />

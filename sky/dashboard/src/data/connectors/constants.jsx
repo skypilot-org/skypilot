@@ -34,3 +34,7 @@ export const COMMON_GPUS = [
   'V100',
   'V100-32GB',
 ];
+export const REFRESH_INTERVAL = 5000; // 5 seconds
+export const LOG_REFRESH_INTERVAL = 2000;
+export const API_HEALTH_ENDPOINT = `${ENDPOINT}/api/health`;
+export const SKYPILOT_VERSION = '0.5.0';

@@ -8,6 +8,7 @@ import {
   Slack,
   MessageSquare,
   Users,
+  UserCircle,
 } from 'lucide-react';
 
 export function FilterIcon(props) {
@@ -655,4 +656,8 @@ export function RssIcon(props) {
       <circle cx="5" cy="19" r="1"></circle>
     </svg>
   );
+}
+
+export function UserCircleIcon(props) {
+  return <UserCircle {...props} />;
 }

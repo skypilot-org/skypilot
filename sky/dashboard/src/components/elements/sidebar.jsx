@@ -19,8 +19,9 @@ import {
   SlackIcon,
   CommentFeedbackIcon,
   UsersIcon,
+  UserCircleIcon,
 } from '@/components/elements/icons';
-import { BASE_PATH } from '@/data/connectors/constants';
+import { BASE_PATH, API_HEALTH_ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 
@@ -111,6 +112,18 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
+  const [userEmail, setUserEmail] = useState(null);
+
+  useEffect(() => {
+    fetch(API_HEALTH_ENDPOINT)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user && data.user.name) {
+          setUserEmail(data.user.name);
+        }
+      })
+      .catch((error) => console.error('Error fetching user data:', error));
+  }, []);
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
@@ -212,77 +225,14 @@ export function TopBar() {
           </Link>
         </div>
 
-        {/* External links - now shows only icons on mobile */}
-        <div
-          className={`flex items-center space-x-1 ${isMobile ? 'ml-0' : 'ml-auto'}`}
-        >
-          <CustomTooltip
-            content="Documentation"
-            className="text-sm text-muted-foreground"
-          >
-            <a
-              href="https://skypilot.readthedocs.io/en/latest/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
-              title="Docs"
-            >
-              {!isMobile && <span className="mr-1">Docs</span>}
-              <ExternalLinkIcon
-                className={`${isMobile ? 'w-4 h-4' : 'w-3.5 h-3.5'}`}
-              />
-            </a>
-          </CustomTooltip>
-
-          <div className="border-l border-gray-200 h-6 mx-1"></div>
-
-          {/* Keep the rest of the external links as icons only */}
-          <CustomTooltip
-            content="GitHub Repository"
-            className="text-sm text-muted-foreground"
-          >
-            <a
-              href="https://github.com/skypilot-org/skypilot"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-              title="GitHub"
-            >
-              <GitHubIcon className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
-            </a>
-          </CustomTooltip>
-
-          <CustomTooltip
-            content="Join Slack"
-            className="text-sm text-muted-foreground"
-          >
-            <a
-              href="https://slack.skypilot.co/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-              title="Slack"
-            >
-              <SlackIcon className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
-            </a>
-          </CustomTooltip>
-
-          <CustomTooltip
-            content="Leave Feedback"
-            className="text-sm text-muted-foreground"
-          >
-            <a
-              href="https://github.com/skypilot-org/skypilot/issues/new"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-              title="Leave Feedback"
-            >
-              <CommentFeedbackIcon
-                className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`}
-              />
-            </a>
-          </CustomTooltip>
+        {/* User email display */}
+        <div className="ml-auto flex items-center space-x-2">
+          {userEmail && (
+            <Link href="/users" className="flex items-center space-x-2 text-gray-700 hover:text-blue-600">
+              <UserCircleIcon className="w-5 h-5" />
+              <span className="text-sm">{userEmail}</span>
+            </Link>
+          )}
         </div>
       </div>
     </div>
