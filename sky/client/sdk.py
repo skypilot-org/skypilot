@@ -153,9 +153,9 @@ def enabled_clouds(workspace: Optional[str] = None) -> server_common.RequestId:
     """
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
-    response = requests.get(
-        f'{server_common.get_server_url()}/enabled_clouds?workspace={workspace}',
-        cookies=server_common.get_api_cookie_jar())
+    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
+                             f'workspace={workspace}'),
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
