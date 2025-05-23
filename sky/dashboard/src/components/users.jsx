@@ -201,18 +201,10 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableCell className="truncate" title={user.username}>{user.usernameDisplay}</TableCell>
               <TableCell className="truncate" title={user.fullEmail}>{user.fullEmail}</TableCell>
               <TableCell>
-                <Link href={`/clusters?user=${user.userId}`} passHref legacyBehavior>
-                  <a className="text-sky-600 hover:text-sky-700 hover:underline">
-                    {user.clusterCount} {user.clusterCount === 1 ? 'cluster' : 'clusters'} <ExternalLinkIcon className="inline-block ml-1 h-3.5 w-3.5" />
-                  </a>
-                </Link>
+                {user.clusterCount} {user.clusterCount === 1 ? 'cluster' : 'clusters'}
               </TableCell>
               <TableCell>
-                <Link href={`/jobs?user=${user.userId}`} passHref legacyBehavior>
-                  <a className="text-sky-600 hover:text-sky-700 hover:underline">
-                    {user.jobCount} {user.jobCount === 1 ? 'active job' : 'active jobs'} <ExternalLinkIcon className="inline-block ml-1 h-3.5 w-3.5" />
-                  </a>
-                </Link>
+                {user.jobCount} {user.jobCount === 1 ? 'active job' : 'active jobs'}
               </TableCell>
             </TableRow>
           ))}
