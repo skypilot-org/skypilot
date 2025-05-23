@@ -3665,6 +3665,7 @@ def show_gpus(
             yield from total_table.get_string()
 
         ctx_name = 'SSH Node Pool' if is_ssh else 'Context'
+        ctx_column_title = 'NODE_POOL' if is_ssh else 'CONTEXT'
 
         # print individual infos.
         for (ctx, k8s_realtime_table) in k8s_realtime_infos:
@@ -3682,7 +3683,8 @@ def show_gpus(
         if show_node_info:
             yield '\n'
             yield _format_kubernetes_node_info_combined(all_nodes_info,
-                                                        identity)
+                                                        identity,
+                                                        ctx_column_title)
 
     def _possibly_show_k8s_like_realtime(
             is_ssh: bool = False
