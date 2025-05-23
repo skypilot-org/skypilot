@@ -1303,7 +1303,7 @@ class ManagedJobCodeGen:
             # before #4787.
             # TODO(cooperc): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 5:
+        elif managed_job_version < 4:
             # For backward compatibility, since current_workspace is not
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
@@ -1319,7 +1319,7 @@ class ManagedJobCodeGen:
     def cancel_job_by_name(cls, job_name: str) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 5:
+        if managed_job_version < 4:
             # For backward compatibility, since current_workspace is not
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
