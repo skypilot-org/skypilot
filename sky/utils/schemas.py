@@ -1177,7 +1177,12 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(
         service_catalog.ALL_CLOUDS) + ['cloudflare']
-    allowed_workspace_cloud_regex = '|'.join(allowed_workspace_cloud_names)
+    # Create pattern for non-GCP clouds (all clouds except gcp)
+    non_gcp_clouds = [
+        cloud for cloud in allowed_workspace_cloud_names
+        if cloud.lower() != 'gcp'
+    ]
+    non_gcp_cloud_regex = '|'.join(non_gcp_clouds)
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -1186,8 +1191,10 @@ def get_config_schema():
             'type': 'object',
             'additionalProperties': False,
             'patternProperties': {
-                allowed_workspace_cloud_regex: {
+                # Pattern for non-GCP clouds - only allows 'disabled' property
+                f'^({non_gcp_cloud_regex})$': {
                     'type': 'object',
+                    'additionalProperties': False,
                     'properties': {
                         'disabled': {
                             'type': 'boolean'
@@ -1196,6 +1203,8 @@ def get_config_schema():
                 },
             },
             'properties': {
+                # Explicit definition for GCP allows both project_id and
+                # disabled
                 'gcp': {
                     'type': 'object',
                     'properties': {
