@@ -66,7 +66,7 @@ To apply the configuration, follow the following steps:
 
    .. tab-item:: Helm Deployment
 
-      If your use :ref:`Helm Deployment <sky-api-server-helm-deploy-command>` for your API server, apply the workspace configuration to your local config file and run:
+      If you used :ref:`Helm Deployment <sky-api-server-helm-deploy-command>` for your API server, include workspace configuration to in local SkyPilot config file and run:
 
       .. code-block:: bash
 
@@ -76,11 +76,11 @@ To apply the configuration, follow the following steps:
             --reuse-values \
             --set-file apiService.config=/your/path/to/config.yaml
       
-      To apply a new workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`
+      To change workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`
 
    .. tab-item:: VM Deployment
 
-      If you are using a :ref:`VM Deployment <sky-api-server-cloud-deploy>` for your API server or testing workspaces locally, edit the workspace configuration in the :ref:`SkyPilot config file <config-yaml>` on the **API server host** directly. API server will automatically reload the configuration to apply the changes.
+      If you used a :ref:`VM Deployment <sky-api-server-cloud-deploy>` for your API server or testing workspaces locally, edit the workspace configuration in the :ref:`SkyPilot config file <config-yaml>`, `~/.sky/config.yaml`. API server will automatically reload the configuration to apply the changes.
 
 Setting the active workspace
 ----------------------------
