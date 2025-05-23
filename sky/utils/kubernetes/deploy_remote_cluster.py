@@ -21,7 +21,10 @@ YELLOW = '\033[1;33m'
 WARNING_YELLOW = '\x1b[33m'
 NC = '\033[0m'  # No color
 
-DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
+ENV_VAR_SSH_NODE_POOLS_CONFIG = 'SKYPILOT_SSH_NODE_POOLS_CONFIG'
+DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser(
+    os.environ.get(ENV_VAR_SSH_NODE_POOLS_CONFIG) or
+    '~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
@@ -1380,7 +1383,7 @@ def deploy_cluster(head_node,
             while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
                 echo 'Waiting for GPU operator...'
                 sleep 5
-            done 
+            done
             echo 'GPU operator installed successfully.'
         """
         result = run_remote(head_node,

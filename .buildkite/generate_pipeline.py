@@ -66,7 +66,8 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
 
 
 def _get_buildkite_queue(cloud: str, remote_server: bool,
-                         run_on_cloud_kube_backend: bool) -> str:
+                         run_on_cloud_kube_backend: bool,
+                         is_ssh_test: bool) -> str:
     """Get the Buildkite queue for a given cloud.
 
     We use a separate queue for generic cloud tests on remote servers because:
@@ -77,10 +78,15 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
     """
-    if run_on_cloud_kube_backend:
+    if not is_ssh_test and run_on_cloud_kube_backend:
         return QUEUE_KUBE_BACKEND
 
-    queue = CLOUD_QUEUE_MAP[cloud]
+    if is_ssh_test:
+        # ssh test's --infra are overridden during tests,
+        # we can use the generic cloud queue to run these tests
+        queue = QUEUE_GENERIC_CLOUD
+    else:
+        queue = CLOUD_QUEUE_MAP[cloud]
     if queue == QUEUE_GENERIC_CLOUD and remote_server:
         return QUEUE_GENERIC_CLOUD_REMOTE_SERVER
     return queue
@@ -116,6 +122,8 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument('--controller-cloud')
 
+    parser.add_argument('--ssh')
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -146,6 +154,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--base-branch {parsed_args.base_branch}')
     if parsed_args.controller_cloud:
         extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
+    if parsed_args.ssh:
+        extra_args.append(f'--ssh')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
@@ -175,6 +185,7 @@ def _extract_marked_tests(
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
     remote_server = '--remote-server' in extra_args
+    is_ssh_test = '--ssh' in extra_args
 
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
@@ -248,7 +259,7 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             _get_buildkite_queue(cloud, remote_server,
-                                 run_on_cloud_kube_backend)
+                                 run_on_cloud_kube_backend, is_ssh_test)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))

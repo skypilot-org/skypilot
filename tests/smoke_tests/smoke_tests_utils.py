@@ -1,3 +1,4 @@
+import argparse
 import contextlib
 import enum
 import inspect
@@ -23,6 +24,7 @@ from sky import serve
 from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
+from sky.clouds import ssh
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
@@ -358,8 +360,7 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 
 @contextlib.contextmanager
 def override_sky_config(
-    test: Test, env_dict: Dict[str, str]
-) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+        test: Test, env_dict: Dict[str, str]) -> Generator[None, None, None]:
     override_sky_config_dict = skypilot_config.config_utils.Config()
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
@@ -380,24 +381,66 @@ def override_sky_config(
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
 
-    if not override_sky_config_dict:
-        yield None
-        return
+    if override_sky_config_dict:
 
-    temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
-        # Read the original config
-        original_config = skypilot_config.parse_config_file(
-            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
-    else:
-        original_config = skypilot_config.config_utils.Config()
-    overlay_config = skypilot_config.overlay_skypilot_config(
-        original_config, override_sky_config_dict)
-    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
-    temp_config_file.flush()
-    # Update the environment variable to use the temporary file
-    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
-    yield temp_config_file
+        temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
+        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+            # Read the original config
+            original_config = skypilot_config.parse_config_file(
+                env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+        else:
+            original_config = skypilot_config.config_utils.Config()
+        overlay_config = skypilot_config.overlay_skypilot_config(
+            original_config, override_sky_config_dict)
+        temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
+        temp_config_file.flush()
+        # Update the environment variable to use the temporary file
+        env_dict[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+
+    if is_ssh_test():
+        ssh_node_pool_commands = parse_ssh_command(test.commands)
+        test.echo(
+            f'ssh_node_pool_commands: {ssh_node_pool_commands}, test.commands: {test.commands}'
+        )
+        if ssh_node_pool_commands:
+            temp_ssh_node_pools_file = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.yaml')
+            with open(temp_ssh_node_pools_file.name, 'w') as f:
+                yaml.safe_dump(
+                    {
+                        'test-ssh-node-pools': [
+                            f'node_pool_{index}'
+                            for index in range(len(ssh_node_pool_commands))
+                        ]
+                    }, f)
+
+            # Launch VMs for ssh node pools
+            new_test_commands = [command for command in ssh_node_pool_commands]
+            # Setup ssh node pools
+            new_test_commands += ['sky ssh up', 'sky check ssh']
+            # Replace the cloud and infra flags with the ssh node pools
+            for command in test.commands:
+                if 'sky ' in command:
+                    modified_command = re.sub(
+                        r'(--cloud\s+.+?(?=\s|$)|--infra\s+.+?(?=\s|$))',
+                        r'--infra ssh/test-ssh-node-pools', command)
+                    new_test_commands.append(modified_command)
+                else:
+                    new_test_commands.append(command)
+            test.echo(f'new_test_commands: {new_test_commands}')
+            test.commands = new_test_commands
+            # Teardown ssh node pools
+            teardown_command = 'sky ssh down; sky down \'node_pool_*\''
+            if test.teardown:
+                test.teardown += f'; {teardown_command}'
+            else:
+                test.teardown = teardown_command
+            env_dict[
+                ssh.
+                ENV_VAR_SSH_NODE_POOLS_CONFIG] = temp_ssh_node_pools_file.name
+
+    yield None
 
 
 def run_one_test(test: Test) -> None:
@@ -691,10 +734,126 @@ def pytest_controller_cloud() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
 
 
-def override_env_config(config: Dict[str, str]):
-    """Override the environment variable for the test."""
-    for key, value in config.items():
-        os.environ[key] = value
+def is_ssh_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_SSH', None) is not None
+
+
+def parse_ssh_command(commands: List[str]) -> List[str]:
+    """Parse the SSH command to get a list of commands to launch a node pool."""
+    ssh_node_pool_commands = []
+
+    for original_command_str in commands:
+        # Check if the command is a relevant SkyPilot launch command
+        is_sky_launch_type = False
+        if 'sky launch' in original_command_str or \
+           'sky jobs launch' in original_command_str or \
+           'sky serve up' in original_command_str:
+            # Basic check passed, now try to identify the core sky command part
+            # to ensure we're not matching substrings in other contexts.
+            if re.search(r'\bsky\s+(?:launch|jobs\s+launch|serve\s+up)\b',
+                         original_command_str):
+                is_sky_launch_type = True
+
+        if is_sky_launch_type:
+            # --- Argument extraction for the main/controller SSH node pool VM ---
+            # Search for each argument type independently
+            gpus_val, infra_val, instance_type_val, cloud_val, yaml_path_val = None, None, None, None, None
+
+            gpus_match = re.search(r'--gpus\s+(\S+)', original_command_str)
+            if gpus_match:
+                gpus_val = gpus_match.group(1)
+
+            infra_match = re.search(r'--infra\s+(\S+)', original_command_str)
+            if infra_match:
+                infra_val = infra_match.group(1)
+                if 'kubernetes' in infra_val:  # Specific handling for kubernetes
+                    infra_val = 'aws'
+
+            # Handle both --instance-type and -t
+            it_match = re.search(r'(?:--instance-type|-t)\s+(\S+)',
+                                 original_command_str)
+            if it_match:
+                instance_type_val = it_match.group(1)
+
+            cloud_match = re.search(r'--cloud\s+(\S+)', original_command_str)
+            if cloud_match:
+                cloud_val = cloud_match.group(1)
+
+            # General YAML path from the command for jobs/serve task definition
+            # This can be a positional argument or part of other structures.
+            # Regex looks for a path-like string ending in .yaml
+            yaml_path_match = re.search(r'([\w./-]+\.yaml)',
+                                        original_command_str)
+            if yaml_path_match:
+                yaml_path_val = yaml_path_match.group(
+                    1)  # group(1) because of the parens
+
+            # --- Construct command for the SSH node pool VM (controller/head) ---
+            # This VM uses the arguments found above.
+            normal_node_cmd_parts = ['sky', 'launch']
+            if gpus_val:
+                normal_node_cmd_parts.extend(['--gpus', gpus_val])
+            if infra_val:  # Already adjusted for kubernetes if needed
+                normal_node_cmd_parts.extend(['--infra', infra_val])
+            if instance_type_val:
+                normal_node_cmd_parts.extend(
+                    ['--instance-type', instance_type_val])
+            if cloud_val:
+                normal_node_cmd_parts.extend(['--cloud', cloud_val])
+
+            normal_node_cmd_parts.extend(
+                ['-c', f'node_pool_{len(ssh_node_pool_commands)}', '-y'])
+            ssh_node_pool_commands.append(' '.join(normal_node_cmd_parts))
+
+            # --- Handle job/service specific nodes based on YAML ---
+            if 'sky jobs launch' in original_command_str or 'sky serve up' in original_command_str:
+                num_nodes_for_job = 1
+                job_node_base_cmd_parts = [
+                    'sky', 'launch'
+                ]  # Base for job/service replica nodes
+
+                if yaml_path_val:  # Use the YAML found in the original command
+                    with open(yaml_path_val, 'r') as f:
+                        task_config = yaml.safe_load(f)
+
+                    # Resources for job nodes from YAML
+                    if 'resources' in task_config:
+                        resources = task_config['resources']
+                        if 'infra' in resources:
+                            job_infra = resources['infra']
+                            if 'kubernetes' in job_infra:
+                                job_infra = 'aws'
+                            job_node_base_cmd_parts.extend(
+                                ['--infra', job_infra])
+                        if 'accelerators' in resources:
+                            accel_val = resources['accelerators']
+                            if isinstance(accel_val, dict):
+                                accel_val = next(iter(accel_val.keys()), '')
+                            elif isinstance(accel_val, list):
+                                accel_val = accel_val[0] if accel_val else ''
+                            if accel_val:
+                                job_node_base_cmd_parts.extend(
+                                    ['--gpus', str(accel_val)])
+                        if 'instance_type' in resources:
+                            job_node_base_cmd_parts.extend(
+                                ['--instance-type', resources['instance_type']])
+                        if 'cloud' in resources:
+                            job_node_base_cmd_parts.extend(
+                                ['--cloud', resources['cloud']])
+
+                    if 'num_nodes' in task_config:
+                        num_nodes_for_job = int(task_config['num_nodes'])
+
+                for _ in range(num_nodes_for_job):
+                    final_job_node_cmd_parts = list(
+                        job_node_base_cmd_parts)  # Start fresh for each node
+                    final_job_node_cmd_parts.extend([
+                        '-c', f'node_pool_{len(ssh_node_pool_commands)}', '-y'
+                    ])
+                    ssh_node_pool_commands.append(
+                        ' '.join(final_job_node_cmd_parts))
+
+    return ssh_node_pool_commands
 
 
 def get_api_server_url() -> str:

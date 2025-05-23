@@ -19,7 +19,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
+ENV_VAR_SSH_NODE_POOLS_CONFIG = 'SKYPILOT_SSH_NODE_POOLS_CONFIG'
+SSH_NODE_POOLS_PATH = os.path.expanduser(
+    os.environ.get(ENV_VAR_SSH_NODE_POOLS_CONFIG) or
+    '~/.sky/ssh_node_pools.yaml')
 
 
 @registry.CLOUD_REGISTRY.register()
