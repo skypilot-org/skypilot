@@ -153,17 +153,16 @@ export async function getWorkspaces() {
 export async function getEnabledClouds(workspaceName = null) {
   try {
     // Step 1: Call the /enabled_clouds endpoint to schedule the task
-    const requestBody = {};
+    let url = `${ENDPOINT}/enabled_clouds`;
     if (workspaceName) {
-      requestBody.workspace = workspaceName; // Changed to workspace
+      url += `?workspace=${encodeURIComponent(workspaceName)}`;
     }
 
-    const scheduleResponse = await fetch(`${ENDPOINT}/enabled_clouds`, {
-      method: 'POST', // Changed to POST
+    const scheduleResponse = await fetch(url, {
+      method: 'GET', // Changed back to GET
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(requestBody), // Send body with workspaceName if provided
     });
 
     if (!scheduleResponse.ok) {
