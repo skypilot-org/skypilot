@@ -1013,7 +1013,7 @@ def enabled_clouds(expand: bool = False) -> List[str]:
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE)
     if not expand:
-        return [cloud.display_name() for cloud in cached_clouds]
+        return [cloud.canonical_name() for cloud in cached_clouds]
     enabled_ssh_infras = []
     enabled_k8s_infras = []
     enabled_cloud_infras = []

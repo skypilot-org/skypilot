@@ -498,7 +498,7 @@ class Cloud:
         For Kubernetes and SSH, return a list of resource pools.
         For all other clouds, return self.
         """
-        return [cls.display_name()]
+        return [cls.canonical_name()]
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod

@@ -896,6 +896,6 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def expand_infras(cls) -> List[str]:
         return [
-            f'{cls._REPR.lower()}/{c}'
+            f'{cls.canonical_name()}/{c}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
