@@ -997,14 +997,21 @@ class GCP(clouds.Cloud):
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    # @annotations.lru_cache(scope='request',
-    #                        maxsize=1)  # Cache since getting identity is slow.
-    # We should not use cache GCP identity as the workspace may be able to
-    # switch between different projects.
-    # TODO(zhwu): figure out a better way to handle this, instead of getting rid
-    # of the cache.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
+        gcp_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('gcp'), sort_keys=True)
+        return cls._get_user_identities(gcp_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=1)
+    def _get_user_identities(
+            cls, workspace_config: Optional[str]) -> List[List[str]]:
+        # We use add workspace_config in args to avoid caching the GCP identity
+        # for when different workspace configs are used. Use json.dumps to
+        # ensure the config is hashable.
+        del workspace_config  # Unused
+
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
                                   '--format="value(account)"')
