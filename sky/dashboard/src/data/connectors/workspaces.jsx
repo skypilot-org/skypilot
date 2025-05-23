@@ -302,3 +302,169 @@ export async function getEnabledClouds(workspaceName = null) {
     throw error; // Re-throw to allow UI to handle it
   }
 }
+
+// Helper function to poll for task completion
+async function pollForTaskCompletion(requestId, taskName) {
+  console.log(`Polling for ${taskName} task completion with request_id: ${requestId}`);
+  
+  const resultResponse = await fetch(
+    `${ENDPOINT}/api/get?request_id=${requestId}`
+  );
+  
+  if (!resultResponse.ok) {
+    let errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
+    try {
+      const errorData = await resultResponse.json();
+      if (errorData && errorData.detail) {
+        let innerDetail = errorData.detail;
+        try {
+          const parsedDetail = JSON.parse(innerDetail);
+          if (parsedDetail && parsedDetail.error) {
+            innerDetail = parsedDetail.error;
+          } else if (
+            parsedDetail &&
+            parsedDetail.result &&
+            parsedDetail.result.error
+          ) {
+            innerDetail = parsedDetail.result.error;
+          }
+        } catch (parseErr) {
+          /* Inner detail is not JSON, use as is */
+        }
+        errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${innerDetail}`;
+      }
+    } catch (e) {
+      /* ignore error parsing errorData */
+    }
+    throw new Error(errorDetail);
+  }
+
+  const resultData = await resultResponse.json();
+  console.log(`[Connector Debug] ${taskName} resultData:`, resultData);
+
+  if (resultData.status === 'FAILED') {
+    const errorMessage =
+      resultData.error ||
+      (resultData.result && resultData.result.error) ||
+      `Unknown error during ${taskName} task execution`;
+    throw new Error(
+      `${taskName} failed for request ID ${requestId}: ${errorMessage}`
+    );
+  }
+
+  let data = {};
+  if (resultData.status === 'SUCCEEDED' && resultData.return_value) {
+    try {
+      data = JSON.parse(resultData.return_value);
+      console.log(`Successfully parsed ${taskName} data:`, data);
+    } catch (parseError) {
+      console.error(
+        `Failed to parse ${taskName} data from return_value:`,
+        parseError,
+        'Raw return_value:',
+        resultData.return_value
+      );
+      throw new Error(
+        `Failed to parse ${taskName} data for request ID ${requestId}: ${parseError.message}`
+      );
+    }
+  } else if (resultData.result) {
+    console.warn(
+      `Using resultData.result as fallback for ${taskName} status ${resultData.status}`
+    );
+    data = resultData.result;
+  }
+
+  return data;
+}
+
+// Update workspace configuration
+export async function updateWorkspace(workspaceName, config) {
+  try {
+    console.log(`Updating workspace ${workspaceName} with config:`, config);
+    
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ config }),
+    });
+
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling updateWorkspace: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('Failed to obtain request ID for updateWorkspace');
+    }
+
+    return await pollForTaskCompletion(requestId, 'updateWorkspace');
+  } catch (error) {
+    console.error('Failed to update workspace:', error);
+    throw error;
+  }
+}
+
+// Create new workspace
+export const createWorkspace = async (workspaceName, config) => {
+  try {
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ config }),
+    });
+    
+    if (!scheduleResponse.ok) {
+      const errorText = await scheduleResponse.text();
+      throw new Error(
+        `Error scheduling createWorkspace: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('Failed to obtain request ID for createWorkspace');
+    }
+
+    return await pollForTaskCompletion(requestId, 'createWorkspace');
+  } catch (error) {
+    console.error('Failed to create workspace:', error);
+    throw error;
+  }
+};
+
+// Delete workspace
+export async function deleteWorkspace(workspaceName) {
+  try {
+    console.log(`Deleting workspace ${workspaceName}`);
+    
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling deleteWorkspace: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('Failed to obtain request ID for deleteWorkspace');
+    }
+
+    return await pollForTaskCompletion(requestId, 'deleteWorkspace');
+  } catch (error) {
+    console.error('Failed to delete workspace:', error);
+    throw error;
+  }
+}

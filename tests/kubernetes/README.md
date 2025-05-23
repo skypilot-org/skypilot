@@ -49,7 +49,7 @@ curl --header "Content-Type: application/json-patch+json" \
    * Tip - to create an example GPU cluster for testing, this command will create a 6 node cluster with 2x T4-8cpu, 2x V100-8cpu and 2x 16cpu CPU-only node:
    ```bash
    PROJECT_ID=$(gcloud config get-value project)
-   CLUSTER_NAME=skypilot-test-cluster
+   CLUSTER_NAME=zhwu-api-test
    REGION=us-central1-c
    GKE_VERSION=$(gcloud container get-server-config \
    --region=${REGION} \

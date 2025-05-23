@@ -218,15 +218,11 @@ export function Workspaces() {
   }, []);
 
   const handleShowWorkspaceDetails = (workspaceName) => {
-    if (rawWorkspacesData && rawWorkspacesData[workspaceName]) {
-      setSelectedWorkspaceConfig({
-        [workspaceName]: rawWorkspacesData[workspaceName],
-      });
-      setModalDisplayTitleName(workspaceName);
-      setIsModalOpen(true);
-    } else {
-      console.error(`Configuration not found for workspace: ${workspaceName}`);
-    }
+    router.push(`/workspaces/${workspaceName}`);
+  };
+
+  const handleCreateNewWorkspace = () => {
+    router.push('/workspaces/new');
   };
 
   const handleCloseModal = () => {
@@ -432,6 +428,7 @@ export function Workspaces() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Existing Workspace Cards */}
           {workspaceDetails.map((ws) => (
             <Card key={ws.name}>
               <CardHeader>
@@ -483,11 +480,32 @@ export function Workspaces() {
                   size="sm"
                   onClick={() => handleShowWorkspaceDetails(ws.name)}
                 >
-                  Details
+                  Edit
                 </Button>
               </CardFooter>
             </Card>
           ))}
+
+          {/* Create New Workspace Card */}
+          <Card 
+            key="create-new"
+            className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
+            onClick={handleCreateNewWorkspace}
+          >
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="text-center">
+                <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
+                  <span className="text-3xl text-sky-600">+</span>
+                </div>
+                <h3 className="text-lg font-medium text-sky-700 mb-2">
+                  Create New Workspace
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Set up a new workspace with custom infrastructure configurations
+                </p>
+              </div>
+            </div>
+          </Card>
         </div>
       )}
 

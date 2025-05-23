@@ -1266,7 +1266,7 @@ def _update_workspaces_config(workspaces: Dict[str, Any]) -> Dict[str, Any]:
     config_path = os.path.expanduser(config_path)
     
     try:
-        common_utils.dump_yaml(config_path, current_config)
+        common_utils.dump_yaml(config_path, dict(current_config))
         # Reload the config to ensure it's applied
         skypilot_config.safe_reload_config()
         return skypilot_config.get_workspaces()
@@ -1305,7 +1305,17 @@ def update_workspace(workspace_name: str, config: Dict[str, Any]) -> Dict[str, A
     current_workspaces[workspace_name] = config
     
     # Use the internal helper function to save
-    return _update_workspaces_config(current_workspaces)
+    result = _update_workspaces_config(current_workspaces)
+    
+    # Validate the workspace by running sky check for it
+    try:
+        sky_check.check(quiet=True, workspace=workspace_name)
+    except Exception as e:
+        logger.warning(f'Workspace {workspace_name} configuration saved but '
+                      f'validation check failed: {e}')
+        # Don't fail the update if the check fails, just warn
+    
+    return result
 
 
 @usage_lib.entrypoint
@@ -1333,7 +1343,7 @@ def create_workspace(workspace_name: str, config: Dict[str, Any]) -> Dict[str, A
     if not workspace_name or not isinstance(workspace_name, str):
         raise ValueError("Workspace name must be a non-empty string.")
     
-    # Create the workspace using update_workspace
+    # Create the workspace using update_workspace (which includes validation)
     return update_workspace(workspace_name, config)
 
 
