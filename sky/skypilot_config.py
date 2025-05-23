@@ -146,6 +146,7 @@ def _get_config_context() -> ConfigContext:
 
 
 def _get_loaded_config() -> config_utils.Config:
+    safe_reload_config()
     return _get_config_context().config
 
 
@@ -673,20 +674,17 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def force_override_config(override_configs: Dict[str, Any],
-                          dump_file: bool = False) -> None:
+def force_override_config_file(override_configs: Dict[str, Any]) -> None:
     """Force overrides the config.
 
     This is only for internal use.
     """
     original_config = _get_loaded_config()
-    original_config['workspaces'] = override_configs
-    _set_loaded_config(original_config)
-    if dump_file:
-        with open(os.path.expanduser(_GLOBAL_CONFIG_PATH),
-                  'w',
-                  encoding='utf-8') as f:
-            yaml.safe_dump(dict(_get_loaded_config()), f)
+    for k, v in override_configs.items():
+        original_config[k] = v
+    with open(os.path.expanduser(_GLOBAL_CONFIG_PATH), 'w',
+              encoding='utf-8') as f:
+        yaml.safe_dump(dict(original_config), f)
 
 
 def get_workspaces() -> Dict[str, Any]:

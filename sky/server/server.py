@@ -1296,7 +1296,7 @@ async def update_workspace(
     if workspace_config is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail='Workspace config is required')
-    skypilot_config.force_override_config(workspace_config, dump_file=True)
+    skypilot_config.force_override_config_file({'workspaces': workspace_config})
     _schedule_check(request.state.request_id, payloads.CheckBody())
 
 
