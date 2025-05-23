@@ -1257,7 +1257,7 @@ def _update_workspaces_config(
     processes try to update the workspace configuration simultaneously.
 
     Args:
-        workspace_modifier_fn: A function that takes the current workspaces 
+        workspace_modifier_fn: A function that takes the current workspaces
             dict and modifies it in-place. This ensures all read-modify-write
             operations happen atomically inside the lock.
 
@@ -1311,8 +1311,7 @@ def _check_workspace_has_no_active_resources(workspace_name: str,
         all_clusters = global_user_state.get_clusters()
         workspace_clusters = [
             cluster for cluster in all_clusters
-            if (cluster.get('workspace', 
-                            constants.SKYPILOT_DEFAULT_WORKSPACE)
+            if (cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
                 == workspace_name)
         ]
         return workspace_clusters
@@ -1328,8 +1327,7 @@ def _check_workspace_has_no_active_resources(workspace_name: str,
 
             workspace_active_jobs = [
                 job for job in managed_jobs
-                if job.get('workspace', 
-                           constants.SKYPILOT_DEFAULT_WORKSPACE) ==
+                if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) ==
                 workspace_name
             ]
 
