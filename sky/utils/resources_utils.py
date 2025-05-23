@@ -51,6 +51,7 @@ class DiskTier(enum.Enum):
 
 
 class NetworkTier(enum.Enum):
+    """All network tiers supported by SkyPilot."""
     STANDARD = 'standard'
     BEST = 'best'
 

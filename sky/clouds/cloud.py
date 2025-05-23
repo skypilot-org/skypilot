@@ -45,6 +45,7 @@ class CloudImplementationFeatures(enum.Enum):
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    CUSTOM_NETWORK_TIER = 'custom_network_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
@@ -722,7 +723,8 @@ class Cloud:
     def check_network_tier_enabled(
             cls, instance_type: Optional[str],
             network_tier: resources_utils.NetworkTier) -> None:
-        """Errors out if the network tier is not supported by the cloud provider.
+        """Errors out if the network tier is not supported by the
+        cloud provider.
 
         Raises:
             exceptions.NotSupportedError: If the network tier is not supported.
