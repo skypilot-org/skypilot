@@ -18,6 +18,7 @@ import {
   GitHubIcon,
   SlackIcon,
   CommentFeedbackIcon,
+  UsersIcon,
 } from '@/components/elements/icons';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
@@ -174,6 +175,15 @@ export function TopBar() {
           >
             <BriefcaseIcon className="w-4 h-4" />
             {!isMobile && <span>Jobs</span>}
+          </Link>
+
+          <Link
+            href="/users"
+            className={getLinkClasses('/users')}
+            prefetch={false}
+          >
+            <UsersIcon className="w-4 h-4" />
+            {!isMobile && <span>Users</span>}
           </Link>
 
           <div

@@ -1,4 +1,14 @@
 import React from 'react';
+import {
+  Briefcase,
+  Settings,
+  Bell,
+  ExternalLink,
+  Github,
+  Slack,
+  MessageSquare,
+  Users,
+} from 'lucide-react';
 
 export function FilterIcon(props) {
   return (
@@ -314,28 +324,6 @@ export function UserPlusIcon(props) {
   );
 }
 
-export function UsersIcon(props) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
 export function AppleIcon(props) {
   return (
     <svg
@@ -645,23 +633,8 @@ export function BookDocIcon(props) {
   );
 }
 
-export function CommentFeedbackIcon(props) {
-  return (
-    <svg
-      {...props}
-      stroke="currentColor"
-      fill="currentColor"
-      strokeWidth="0"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <g>
-        <path fill="none" d="M0 0h24v24H0z"></path>
-        <path d="M6.455 19L2 22.5V4a1 1 0 0 1 1-1h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6.455zM4 18.385L5.763 17H20V5H4v13.385zM11 13h2v2h-2v-2zm0-6h2v5h-2V7z"></path>
-      </g>
-    </svg>
-  );
-}
+export const CommentFeedbackIcon = MessageSquare;
+export const UsersIcon = Users;
 
 export function RssIcon(props) {
   return (
