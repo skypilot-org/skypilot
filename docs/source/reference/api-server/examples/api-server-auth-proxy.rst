@@ -58,6 +58,13 @@ Copy and paste the token into the terminal to save the auth for the SkyPilot CLI
 
 This will copy the relevant auth cookies from the browser into the CLI.
 
+SkyPilot will use the user info passed by the auth proxy in your SkyPilot API server.
+
+.. image:: ../../../images/client-server/cluster-users.png
+    :alt: User emails in the SkyPilot dashboard
+    :align: center
+    :width: 70%
+
 .. _oauth2-proxy-okta:
 
 Setting up OAuth2 Proxy with Okta
