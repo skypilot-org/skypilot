@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
+from sky import skypilot_config
 
 if typing.TYPE_CHECKING:
     import requests
@@ -19,6 +20,8 @@ API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
+
+_LAMBDA_DEFAULT_PROFILE = 'default'
 
 
 class LambdaCloudError(Exception):
@@ -131,11 +134,34 @@ class LambdaCloudClient:
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
         assert os.path.exists(self.credentials), 'Credentials not found'
+        is_old_format = False
+        ws2creds = {}
         with open(self.credentials, 'r', encoding='utf-8') as f:
-            lines = [line.strip() for line in f.readlines() if ' = ' in line]
-            self._credentials = {
-                line.split(' = ')[0]: line.split(' = ')[1] for line in lines
-            }
+            content = f.read()
+            try:
+                ws2creds = json.loads(content)
+            except json.decoder.JSONDecodeError:
+                is_old_format = True
+                lines = [
+                    line.strip()
+                    for line in content.split('\n')
+                    if ' = ' in line
+                ]
+                # TODO(tian): Have a constant for this.
+                ws2creds[_LAMBDA_DEFAULT_PROFILE] = {
+                    line.split(' = ')[0]: line.split(' = ')[1] for line in lines
+                }
+        if is_old_format:
+            with open(self.credentials, 'w', encoding='utf-8') as f:
+                json.dump(ws2creds, f)
+        profile = skypilot_config.get_workspace_cloud('lambda_cloud').get(
+            'profile', None)
+        if profile is None:
+            profile = _LAMBDA_DEFAULT_PROFILE
+        if profile not in ws2creds:
+            raise LambdaCloudError(
+                f'Profile {profile} not found in {self.credentials}')
+        self._credentials = ws2creds[profile]
         self.api_key = self._credentials['api_key']
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
