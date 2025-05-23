@@ -250,8 +250,8 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
-app.add_middleware(RequestIDMiddleware)
 app.add_middleware(AuthProxyMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 
@@ -1160,7 +1160,7 @@ async def api_status(
 
 
 @app.get('/api/health')
-async def health() -> Dict[str, str]:
+async def health(request: fastapi.Request) -> Dict[str, Any]:
     """Checks the health of the API server.
 
     Returns:
@@ -1172,12 +1172,14 @@ async def health() -> Dict[str, str]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
+    user = _get_auth_user_header(request)
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
+        'user': user.to_dict() if user is not None else None,
     }
 
 

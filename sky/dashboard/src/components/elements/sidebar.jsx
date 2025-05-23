@@ -21,7 +21,7 @@ import {
   UsersIcon,
   UserCircleIcon,
 } from '@/components/elements/icons';
-import { BASE_PATH, API_HEALTH_ENDPOINT } from '@/data/connectors/constants';
+import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 
@@ -93,15 +93,6 @@ export function SideBar({ highlighted = 'clusters' }) {
               <BriefcaseIcon className="w-5 h-5 min-w-5" />
               <span>Jobs</span>
             </Link>
-            <div
-              className={`flex items-center space-x-2 text-gray-400 relative z-10 py-2 px-4 rounded-sm w-full`}
-            >
-              <ServiceBellIcon className="w-5 h-5 min-w-5" />
-              <span>Services</span>
-              <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-                Soon
-              </span>
-            </div>
           </div>
         </div>
       </nav>
@@ -113,16 +104,23 @@ export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
   const [userEmail, setUserEmail] = useState(null);
+  const [showDefaultTitle, setShowDefaultTitle] = useState(false);
 
   useEffect(() => {
-    fetch(API_HEALTH_ENDPOINT)
+    fetch(`${ENDPOINT}/api/health`)
       .then((res) => res.json())
       .then((data) => {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
+          setShowDefaultTitle(false);
+        } else {
+          setShowDefaultTitle(true);
         }
       })
-      .catch((error) => console.error('Error fetching user data:', error));
+      .catch((error) => {
+        console.error('Error fetching user data:', error);
+        setShowDefaultTitle(true);
+      });
   }, []);
 
   // Function to determine if a path is active
@@ -154,7 +152,7 @@ export function TopBar() {
             prefetch={false}
           >
             <div
-              className={`${isMobile ? 'h-16 w-16' : 'h-20 w-20'} flex items-center justify-center`}
+              className={`h-20 w-20 flex items-center justify-center`}
             >
               <Image
                 src={`${BASE_PATH}/skypilot.svg`}
@@ -190,29 +188,6 @@ export function TopBar() {
             {!isMobile && <span>Jobs</span>}
           </Link>
 
-          <Link
-            href="/users"
-            className={getLinkClasses('/users')}
-            prefetch={false}
-          >
-            <UsersIcon className="w-4 h-4" />
-            {!isMobile && <span>Users</span>}
-          </Link>
-
-          <div
-            className={`inline-flex items-center ${isMobile ? 'px-2 py-1' : 'px-1 pt-1'} text-gray-400`}
-          >
-            <ServiceBellIcon className="w-4 h-4" />
-            {!isMobile && (
-              <>
-                <span className="ml-2">Services</span>
-                <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-                  Soon
-                </span>
-              </>
-            )}
-          </div>
-
           <div className="border-l border-gray-200 h-6 mx-1"></div>
 
           <Link
@@ -223,15 +198,27 @@ export function TopBar() {
             <ChipIcon className="w-4 h-4" />
             {!isMobile && <span>Infra</span>}
           </Link>
+
+          <Link
+            href="/users"
+            className={getLinkClasses('/users')}
+            prefetch={false}
+          >
+            <UsersIcon className="w-4 h-4" />
+            {!isMobile && <span>Users</span>}
+          </Link>
         </div>
 
         {/* User email display */}
         <div className="ml-auto flex items-center space-x-2">
-          {userEmail && (
+          {userEmail && !showDefaultTitle && (
             <Link href="/users" className="flex items-center space-x-2 text-gray-700 hover:text-blue-600">
               <UserCircleIcon className="w-5 h-5" />
-              <span className="text-sm">{userEmail}</span>
+              {!isMobile && <span className="text-sm">{userEmail}</span>}
             </Link>
+          )}
+          {showDefaultTitle && !isMobile && (
+            <span className="text-sm font-semibold text-gray-700">SkyPilot Dashboard</span>
           )}
         </div>
       </div>
