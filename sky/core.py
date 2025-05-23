@@ -1018,7 +1018,7 @@ def enabled_clouds(expand: bool = False) -> List[str]:
     enabled_k8s_infras = []
     enabled_cloud_infras = []
     for cloud in cached_clouds:
-        cloud_infra = cloud.get_infras()
+        cloud_infra = cloud.expand_infras()
         if isinstance(cloud, clouds.SSH):
             enabled_ssh_infras.extend(cloud_infra)
         elif isinstance(cloud, clouds.Kubernetes):

@@ -137,8 +137,7 @@ def enabled_clouds(expand: bool = False) -> server_common.RequestId:
     """Gets the enabled clouds.
 
     Args:
-        expand: If True, expand kubernetes to detailed context and ssh node
-            pool to independent pools.
+        expand: Whether to expand Kubernetes and SSH to list of resource pools.
 
     Returns:
         The request ID of the enabled clouds request.
