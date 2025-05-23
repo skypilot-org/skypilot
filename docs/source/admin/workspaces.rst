@@ -47,18 +47,18 @@ The above is achieved by configuring the following section in the config file:
    .. code-block:: yaml
 
       workspaces:
-         # Workspace 'default' is created by SkyPilot and is used if no workspaces
-         # are defined. Admins can optionally override settings for this workspace.
-         default: {}
+        # Workspace 'default' is created by SkyPilot and is used if no workspaces
+        # are defined. Admins can optionally override settings for this workspace.
+        default: {}
 
-         <workspace name>:
-            <infra name>:  # aws, gcp, ...; ssh; k8s
-               disabled: false  # Disable an infra provider for this workspace (default: false)
+        <workspace name>:
+           <infra name>:  # aws, gcp, ...; ssh; k8s
+             disabled: false  # Disable an infra provider for this workspace (default: false)
 
-            # Currently, 'gcp' supports an additional field:
-            gcp:
-               disabled: false
-               project_id: GCP project ID
+           # Currently, 'gcp' supports an additional field:
+           gcp:
+             disabled: false
+             project_id: GCP project ID
 
 To apply the configuration, follow the following steps:
 
