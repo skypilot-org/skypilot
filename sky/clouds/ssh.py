@@ -192,9 +192,9 @@ class SSH(kubernetes.Kubernetes):
         return success, ctx2text
 
     @classmethod
-    def get_infras(cls) -> List[str]:
+    def expand_infras(cls) -> List[str]:
         return [
-            f'{cls._REPR.lower()}/{c.lstrip("ssh-")}'
+            f'{cls.canonical_name()}/{c.lstrip("ssh-")}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 

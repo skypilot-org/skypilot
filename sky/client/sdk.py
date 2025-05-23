@@ -133,8 +133,11 @@ def check(infra_list: Optional[Tuple[str, ...]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def enabled_clouds() -> server_common.RequestId:
+def enabled_clouds(expand: bool = False) -> server_common.RequestId:
     """Gets the enabled clouds.
+
+    Args:
+        expand: Whether to expand Kubernetes and SSH to list of resource pools.
 
     Returns:
         The request ID of the enabled clouds request.
@@ -142,7 +145,8 @@ def enabled_clouds() -> server_common.RequestId:
     Request Returns:
         A list of enabled clouds in string format.
     """
-    response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
+    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds'
+                             f'?expand={expand}'),
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 

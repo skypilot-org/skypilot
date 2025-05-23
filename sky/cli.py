@@ -1781,27 +1781,6 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra():
-    """Show the enabled infrastructure."""
-    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
-             f'{colorama.Style.RESET_ALL} ')
-    enabled_clouds = sdk.get(sdk.enabled_clouds())
-    enabled_ssh_infras = []
-    enabled_k8s_infras = []
-    enabled_cloud_infras = []
-    for cloud in enabled_clouds:
-        cloud_infra = cloud.get_infras()
-        if isinstance(cloud, clouds.SSH):
-            enabled_ssh_infras.extend(cloud_infra)
-        elif isinstance(cloud, clouds.Kubernetes):
-            enabled_k8s_infras.extend(cloud_infra)
-        else:
-            enabled_cloud_infras.extend(cloud_infra)
-    all_infras = sorted(enabled_ssh_infras) + sorted(
-        enabled_k8s_infras) + sorted(enabled_cloud_infras)
-    click.echo(f'{title}{", ".join(all_infras)}\n')
-
-
 @cli.command()
 @config_option(expose_value=False)
 @click.option('--verbose',
@@ -1988,7 +1967,12 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
-        _show_enabled_infra()
+        # Show enabled infras.
+        title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
+                 f'{colorama.Style.RESET_ALL} ')
+        all_infras = sdk.get(sdk.enabled_clouds(expand=True))
+        click.echo(f'{title}{", ".join(all_infras)}\n')
+
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
     query_clusters: Optional[List[str]] = None if not clusters else clusters
@@ -3490,13 +3474,8 @@ def show_gpus(
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = False
-    ssh_is_enabled = False
-    for cloud in enabled_clouds:
-        if isinstance(cloud, clouds.SSH):
-            ssh_is_enabled = True
-        elif isinstance(cloud, clouds.Kubernetes):
-            kubernetes_is_enabled = True
+    kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
+    ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
                               (cloud_name is None or cloud_is_kubernetes))
     query_ssh_realtime_gpu = (ssh_is_enabled and
