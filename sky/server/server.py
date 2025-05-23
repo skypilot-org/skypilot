@@ -263,14 +263,13 @@ async def check(request: fastapi.Request,
 
 
 @app.get('/enabled_clouds')
-async def enabled_clouds(
-        request: fastapi.Request,
-        enabled_clouds_body: payloads.EnabledCloudsBody) -> None:
+async def enabled_clouds(request: fastapi.Request,
+                         expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=enabled_clouds_body,
+        request_body=payloads.EnabledCloudsBody(expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
