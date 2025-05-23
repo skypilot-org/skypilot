@@ -70,18 +70,17 @@ def check_capabilities(
                            sky_cloud.CloudCapability]
         ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
                 str, Dict[str, str]]]]]:
-            with skypilot_config.with_active_workspace(current_workspace_name):
-                cloud_tuple, capability = payload
-                _, cloud = cloud_tuple
-                try:
-                    ok, reason = cloud.check_credentials(capability)
-                except exceptions.NotSupportedError:
-                    return None
-                except Exception:  # pylint: disable=broad-except
-                    ok, reason = False, traceback.format_exc()
-                if not isinstance(reason, dict):
-                    reason = reason.strip() if reason else None
-                return (capability, ok, reason)
+            cloud_tuple, capability = payload
+            _, cloud = cloud_tuple
+            try:
+                ok, reason = cloud.check_credentials(capability)
+            except exceptions.NotSupportedError:
+                return None
+            except Exception:  # pylint: disable=broad-except
+                ok, reason = False, traceback.format_exc()
+            if not isinstance(reason, dict):
+                reason = reason.strip() if reason else None
+            return (capability, ok, reason)
 
         def get_cloud_tuple(
                 cloud_name: str
