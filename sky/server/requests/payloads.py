@@ -16,9 +16,11 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.server.requests import dags as dag_requests
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -128,9 +130,41 @@ class CheckBody(RequestBody):
     verbose: bool = False
 
 
-class DagRequestBody(RequestBody):
-    """Request body base class for endpoints with a dag."""
+class ValidateBody(RequestBody):
+    """The request body for the validate endpoint."""
     dag: str
+    request_options: Optional[admin_policy.RequestOptions]
+    # Whether the dag should be processed with file mounts before
+    # validation. This is needed because only new version of SkyPilot
+    # client will prefill the file mounts mapping before sending the
+    # validation request to the API server.
+    process_mounts: bool = False
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        # Import here to avoid requirement of the whole SkyPilot dependency on
+        # local clients.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import dag_utils
+
+        kwargs = super().to_kwargs()
+        if self.process_mounts:
+            dag = common.process_mounts_in_task_on_api_server(
+                self.dag, self.env_vars, workdir_only=False)
+        else:
+            dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
+        kwargs['dag'] = dag
+        # Remove the process_mounts flag as it is only used in dag parsing
+        # phase.
+        kwargs.pop('process_mounts')
+        return kwargs
+
+
+class OptimizeBody(RequestBody):
+    """The request body for the optimize endpoint."""
+    dag: Optional[str] = None
+    dag_id: Optional[str] = None
+    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
+    request_options: Optional[admin_policy.RequestOptions]
 
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
@@ -140,30 +174,55 @@ class DagRequestBody(RequestBody):
 
         kwargs = super().to_kwargs()
 
-        dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
-        # We should not validate the dag here, as the file mounts are not
-        # processed yet, but we need to validate the resources during the
-        # optimization to make sure the resources are available.
-        kwargs['dag'] = dag
+        if self.dag_id is not None:
+            dag, config = dag_requests.load_dag_and_config(self.dag_id)
+            kwargs['dag'] = dag
+            kwargs['config'] = config
+        else:
+            assert self.dag is not None, 'dag or dag_id must be provided'
+            dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
+            # Backward compatibility: apply the admin policy to the literal dag
+            # before optimization.
+            dag, config = admin_policy_utils.apply(dag, self.request_options)
+            kwargs['dag'] = dag
+            kwargs['config'] = config
+        kwargs.pop('dag_id')
+        kwargs.pop('request_options')
         return kwargs
 
 
-class ValidateBody(DagRequestBody):
-    """The request body for the validate endpoint."""
-    dag: str
-    request_options: Optional[admin_policy.RequestOptions]
+class TaskRequestBody(RequestBody):
+    """Base class for requests that launch a Task of DAG."""
+    task: Optional[str] = None
+    dag_id: Optional[str] = None
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        if self.dag_id is not None:
+            dag, config = dag_requests.load_dag_and_config(self.dag_id)
+            kwargs['task'] = dag
+            kwargs['config'] = config
+        else:
+            assert self.task is not None, 'task or dag_id must be provided'
+            dag = common.process_mounts_in_task_on_api_server(
+                self.task, self.env_vars, workdir_only=False)
+            dag, config = admin_policy_utils.apply(
+                dag,
+                admin_policy.RequestOptions(
+                    cluster_name=self.cluster_name,
+                    idle_minutes_to_autostop=self.idle_minutes_to_autostop,
+                    down=self.down,
+                    dryrun=self.dryrun,
+                ))
+            kwargs['task'] = dag
+            kwargs['config'] = config
+        kwargs.pop('dag_id')
+        return kwargs
 
 
-class OptimizeBody(DagRequestBody):
-    """The request body for the optimize endpoint."""
-    dag: str
-    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: Optional[admin_policy.RequestOptions]
-
-
-class LaunchBody(RequestBody):
+class LaunchBody(TaskRequestBody):
     """The request body for the launch endpoint."""
-    task: str
+    task: Optional[str] = None
     cluster_name: str
     retry_until_up: bool = False
     idle_minutes_to_autostop: Optional[int] = None
@@ -180,17 +239,13 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    dag_id: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
-        kwargs['task'] = dag
         kwargs['backend'] = backend
         kwargs['_quiet_optimizer'] = kwargs.pop('quiet_optimizer')
         kwargs['_is_launched_by_jobs_controller'] = kwargs.pop(
@@ -199,26 +254,25 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        # The admin policy has been applied in the TaskRequestBody.to_kwargs().
+        kwargs['_admin_policy_applied'] = True
         return kwargs
 
 
-class ExecBody(RequestBody):
+class ExecBody(TaskRequestBody):
     """The request body for the exec endpoint."""
-    task: str
+    task: Optional[str] = None
     cluster_name: str
     dryrun: bool = False
     down: bool = False
     backend: Optional[str] = None
+    dag_id: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=True)
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
-        kwargs['task'] = dag
         kwargs['backend'] = backend
         return kwargs
 
@@ -328,15 +382,14 @@ class JobStatusBody(RequestBody):
     job_ids: Optional[List[int]]
 
 
-class JobsLaunchBody(RequestBody):
+class JobsLaunchBody(TaskRequestBody):
     """The request body for the jobs launch endpoint."""
-    task: str
+    task: Optional[str] = None
     name: Optional[str]
+    dag_id: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        kwargs['task'] = common.process_mounts_in_task_on_api_server(
-            self.task, self.env_vars, workdir_only=False)
         return kwargs
 
 
@@ -377,16 +430,11 @@ class RequestStatusBody(pydantic.BaseModel):
     all_status: bool = False
 
 
-class ServeUpBody(RequestBody):
-    """The request body for the serve up endpoint."""
-    task: str
-    service_name: str
+class ServeTaskRequestBody(TaskRequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = kwargs['task']
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -394,22 +442,19 @@ class ServeUpBody(RequestBody):
         return kwargs
 
 
-class ServeUpdateBody(RequestBody):
+class ServeUpBody(ServeTaskRequestBody):
+    """The request body for the serve up endpoint."""
+    task: Optional[str] = None
+    service_name: str
+    dag_id: Optional[str] = None
+
+
+class ServeUpdateBody(ServeTaskRequestBody):
     """The request body for the serve update endpoint."""
-    task: str
+    task: Optional[str] = None
     service_name: str
     mode: serve.UpdateMode
-
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-        assert len(
-            dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                              'a service.', dag)
-        kwargs['task'] = dag.tasks[0]
-        return kwargs
+    dag_id: Optional[str] = None
 
 
 class ServeDownBody(RequestBody):

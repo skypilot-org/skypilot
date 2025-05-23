@@ -212,6 +212,9 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     monkeypatch.setattr(
         'sky.clouds.utils.gcp_utils.list_reservations_for_instance_type_in_zone',
         list_empty_reservations)
+    monkeypatch.setattr(
+        'sky.clouds.utils.aws_utils.list_reservations_for_instance_type',
+        list_empty_reservations)
 
     # Kubernetes mocks
     monkeypatch.setattr('sky.adaptors.kubernetes._load_config', dummy_function)

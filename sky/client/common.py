@@ -10,7 +10,7 @@ import pathlib
 import tempfile
 import time
 import typing
-from typing import Dict, Generator, Iterable
+from typing import Dict, Generator, Iterable, List, Tuple
 import uuid
 import zipfile
 
@@ -234,32 +234,17 @@ def _setup_upload_logger(
         handler.close()
 
 
-def upload_mounts_to_api_server(dag: 'sky.Dag',
-                                workdir_only: bool = False) -> 'dag_lib.Dag':
-    """Upload user files to remote API server.
+def prepare_upload_mounts_to_api_server(
+        dag: 'dag_lib.Dag',
+        workdir_only: bool = False) -> Tuple['dag_lib.Dag', List[str]]:
+    """Prepares the dag for uploading to the API server.
 
-    This function needs to be called after sdk.validate(),
-    as the file paths need to be expanded to keep file_mounts_mapping
-    aligned with the actual task uploaded to SkyPilot API server.
-
-    We don't use FastAPI's built-in multipart upload, as nginx's
-    client_max_body_size can block the request due to large request body, i.e.,
-    even though the multipart upload streams the file to the server, there is
-    only one HTTP request, and a large request body will be blocked by nginx.
-
-    Args:
-        dag: The dag where the file mounts are defined.
-        workdir_only: Whether to only upload the workdir, which is used for
-            `exec`, as it does not need other files/folders in file_mounts.
-
-    Returns:
-        The dag with the file_mounts_mapping updated, which maps the original
-        file paths to the full path, so that on API server, the file paths can
-        be retrieved by adding prefix to the full path.
+    This function needs to be called before sdk.validate(), as the file paths
+    need to be expanded to keep file_mounts_mapping aligned with the actual
+    task uploaded to SkyPilot API server.
     """
-
     if server_common.is_api_server_local():
-        return dag
+        return dag, []
 
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))
@@ -307,6 +292,30 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
             task_.file_mounts_mapping[
                 task_.service.tls_credential.
                 certfile] = task_.service.tls_credential.certfile
+    return dag, upload_list
+
+
+def upload_mounts_to_api_server(upload_list: List[str]) -> None:
+    """Upload user files to remote API server.
+
+    This function takes the result from prepare_upload_mounts_to_api_server()
+    and uploads the files to the API server.
+
+    We don't use FastAPI's built-in multipart upload, as nginx's
+    client_max_body_size can block the request due to large request body, i.e.,
+    even though the multipart upload streams the file to the server, there is
+    only one HTTP request, and a large request body will be blocked by nginx.
+
+    Args:
+        dag: The dag where the file mounts are defined.
+        workdir_only: Whether to only upload the workdir, which is used for
+            `exec`, as it does not need other files/folders in file_mounts.
+
+    Returns:
+        The dag with the file_mounts_mapping updated, which maps the original
+        file paths to the full path, so that on API server, the file paths can
+        be retrieved by adding prefix to the full path.
+    """
 
     if upload_list:
         os.makedirs(os.path.expanduser(FILE_UPLOAD_LOGS_DIR), exist_ok=True)
@@ -354,5 +363,3 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
             ux_utils.finishing_message('Files uploaded',
                                        log_file,
                                        is_local=True))
-
-    return dag

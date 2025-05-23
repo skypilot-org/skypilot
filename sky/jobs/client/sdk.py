@@ -64,20 +64,25 @@ def launch(
     """
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    dag_id = sdk.validate(dag)
+    logger.info(f'DAG ID: {dag_id}')
     if _need_confirmation:
-        request_id = sdk.optimize(dag)
+        if dag_id is not None:
+            request_id = sdk.optimize(dag_id=dag_id)
+        else:
+            request_id = sdk.optimize(dag=dag)
         sdk.stream_and_get(request_id)
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-    body = payloads.JobsLaunchBody(
-        task=dag_str,
-        name=name,
-    )
+    client_common.upload_mounts_to_api_server(upload_list)
+    body = payloads.JobsLaunchBody(name=name,)
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
+        body.task = dag_utils.dump_chain_dag_to_yaml_str(dag)
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/launch',
         json=json.loads(body.model_dump_json()),

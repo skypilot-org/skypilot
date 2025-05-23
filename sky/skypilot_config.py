@@ -539,7 +539,8 @@ def override_skypilot_config(
 
 
 @contextlib.contextmanager
-def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
+def replace_skypilot_config(
+        new_configs: Optional[config_utils.Config]) -> Iterator[None]:
     """Replaces the global config with the new configs.
 
     This function is concurrent safe when it is:
@@ -547,6 +548,9 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
     2. or called in a same process but with different context, refer to
        sky_utils.context for more details.
     """
+    if new_configs is None:
+        yield
+        return
     original_config = _get_loaded_config()
     original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if new_configs != original_config:

@@ -10,10 +10,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import colorama
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -26,6 +28,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -108,6 +111,7 @@ def _get_all_replica_targets(
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
+    config: Optional[config_utils.Config] = None,
 ) -> Tuple[str, str]:
     """Spins up a service.
 
@@ -116,6 +120,8 @@ def up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+        config: a config to replace the current skypilot config for current
+            request, if any.
 
     Returns:
         service_name: str; The name of the service.  Same if passed in as an
@@ -138,11 +144,6 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     serve_utils.validate_service_task(task)
-    # Always apply the policy again here, even though it might have been applied
-    # in the CLI. This is to ensure that we apply the policy to the final DAG
-    # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(task)
-    task = dag.tasks[0]
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
@@ -172,6 +173,10 @@ def up(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
 
+        if config is not None:
+            controller_config = dict(config)
+        else:
+            controller_config = dict(skypilot_config.get_server_config())
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,
@@ -184,7 +189,9 @@ def up(
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
-                local_user_config=mutated_user_config,
+                # Pass the config to controller, currently the config will
+                # not be updated once the controller is launched.
+                local_user_config=controller_config,
             ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
@@ -221,6 +228,14 @@ def up(
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
+            admin_policy_utils.apply(
+                controller_task,
+                admin_policy.RequestOptions(
+                    cluster_name=controller_name,
+                    idle_minutes_to_autostop=None,
+                    down=False,
+                    dryrun=False,
+                ))
             controller_job_id, controller_handle = execution.launch(
                 task=controller_task,
                 cluster_name=controller_name,
@@ -330,10 +345,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(
-        task: 'sky.Task',
-        service_name: str,
-        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
+def update(task: 'sky.Task',
+           service_name: str,
+           mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+           config: Optional[config_utils.Config] = None) -> None:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -342,17 +357,16 @@ def update(
         task: sky.Task to update.
         service_name: Name of the service.
         mode: Update mode.
+        config: a config to replace the current skypilot config for current
+            request, if any.
     """
+    # TODO(cblmemo,zhwu,aylei): If a user sets a new skypilot_config or the
+    # AdminPolicy updates the skypilot_config, the update will not apply
+    # the config.
+    del config
+
     task.validate()
     serve_utils.validate_service_task(task)
-
-    # Always apply the policy again here, even though it might have been applied
-    # in the CLI. This is to ensure that we apply the policy to the final DAG
-    # and get the mutated config.
-    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
-    # will not apply the config.
-    dag, _ = admin_policy_utils.apply(task)
-    task = dag.tasks[0]
 
     assert task.service is not None
     if task.service.tls_credential is not None:
