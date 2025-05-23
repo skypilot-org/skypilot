@@ -1232,6 +1232,7 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                     },
+                    'additionalProperties': False,
                 },
                 'kubernetes': {
                     'type': 'object',
@@ -1247,6 +1248,7 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                     },
+                    'additionalProperties': False,
                 },
             },
         },
