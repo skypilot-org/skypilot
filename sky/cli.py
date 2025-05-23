@@ -212,6 +212,7 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
+        # TODO(zhwu): client side should not rely on global_user_state.
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if not glob_storage:
             click.echo(f'Storage {storage_object} not found.')
@@ -1788,7 +1789,6 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
-
     enabled_clouds = sdk.get(sdk.enabled_clouds())
     enabled_ssh_infras = []
     enabled_k8s_infras = []
@@ -3687,6 +3687,7 @@ def show_gpus(
             yield from total_table.get_string()
 
         ctx_name = 'SSH Node Pool' if is_ssh else 'Context'
+        ctx_column_title = 'NODE_POOL' if is_ssh else 'CONTEXT'
 
         # print individual infos.
         for (ctx, k8s_realtime_table) in k8s_realtime_infos:
@@ -3704,7 +3705,8 @@ def show_gpus(
         if show_node_info:
             yield '\n'
             yield _format_kubernetes_node_info_combined(all_nodes_info,
-                                                        identity)
+                                                        identity,
+                                                        ctx_column_title)
 
     def _possibly_show_k8s_like_realtime(
             is_ssh: bool = False
