@@ -246,15 +246,15 @@ def add_or_update_user(user: models.User):
 def get_user(user_id: str) -> models.User:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(user_table).filter_by(id=user_id).first()
-        if row is None:
-            return models.User(id=user_id)
-        return models.User(id=row.id, name=row.name)
+    if row is None:
+        return models.User(id=user_id)
+    return models.User(id=row.id, name=row.name)
 
 
 def get_all_users() -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
-        return [models.User(id=row.id, name=row.name) for row in rows]
+    return [models.User(id=row.id, name=row.name) for row in rows]
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -493,9 +493,9 @@ def get_handle_from_cluster_name(
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-        if row is None:
-            return None
-        return pickle.loads(row.handle)
+    if row is None:
+        return None
+    return pickle.loads(row.handle)
 
 
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
@@ -512,7 +512,7 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
             raise ValueError('Unsupported database dialect')
         else:
             raise ValueError('Unsupported database dialect')
-        return [row.name for row in rows]
+    return [row.name for row in rows]
 
 
 def set_cluster_status(cluster_name: str,
@@ -525,9 +525,9 @@ def set_cluster_status(cluster_name: str,
                 cluster_table.c.status_updated_at: current_time
             })
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Cluster {cluster_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
@@ -539,25 +539,25 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                 cluster_table.c.to_down: int(to_down)
             })
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Cluster {cluster_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-        if row is None or row.launched_at is None:
-            return None
-        return int(row.launched_at)
+    if row is None or row.launched_at is None:
+        return None
+    return int(row.launched_at)
 
 
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-        if row is None or row.metadata is None:
-            return None
-        return json.loads(row.metadata)
+    if row is None or row.metadata is None:
+        return None
+    return json.loads(row.metadata)
 
 
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
@@ -566,18 +566,18 @@ def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
             name=cluster_name).update(
                 {cluster_table.c.metadata: json.dumps(metadata)})
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Cluster {cluster_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-        if row is None or row.storage_mounts_metadata is None:
-            return None
-        return pickle.loads(row.storage_mounts_metadata)
+    if row is None or row.storage_mounts_metadata is None:
+        return None
+    return pickle.loads(row.storage_mounts_metadata)
 
 
 def set_cluster_storage_mounts_metadata(
@@ -589,9 +589,9 @@ def set_cluster_storage_mounts_metadata(
                     pickle.dumps(storage_mounts_metadata)
             })
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Cluster {cluster_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def _get_cluster_usage_intervals(
@@ -600,11 +600,11 @@ def _get_cluster_usage_intervals(
     if cluster_hash is None:
         return None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_history_table).filter_by(
+        row = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).first()
-        if rows is None or rows.usage_intervals is None:
-            return None
-        return pickle.loads(rows.usage_intervals)
+    if row is None or row.usage_intervals is None:
+        return None
+    return pickle.loads(row.usage_intervals)
 
 
 def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
@@ -643,9 +643,9 @@ def _set_cluster_usage_intervals(
                     pickle.dumps(usage_intervals)
             })
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Cluster hash {cluster_hash} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster hash {cluster_hash} not found.')
 
 
 def set_owner_identity_for_cluster(cluster_name: str,
@@ -658,17 +658,17 @@ def set_owner_identity_for_cluster(cluster_name: str,
             name=cluster_name).update(
                 {cluster_table.c.owner: owner_identity_str})
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Cluster {cluster_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
-        if row is None or row.cluster_hash is None:
-            return None
-        return row.cluster_hash
+    if row is None or row.cluster_hash is None:
+        return None
+    return row.cluster_hash
 
 
 def get_launched_resources_from_cluster_hash(
@@ -676,15 +676,15 @@ def get_launched_resources_from_cluster_hash(
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).first()
-        if row is None:
-            return None
-        num_nodes = row.num_nodes
-        launched_resources = row.launched_resources
+    if row is None:
+        return None
+    num_nodes = row.num_nodes
+    launched_resources = row.launched_resources
 
-        if num_nodes is None or launched_resources is None:
-            return None
-        launched_resources = pickle.loads(launched_resources)
-        return num_nodes, launched_resources
+    if num_nodes is None or launched_resources is None:
+        return None
+    launched_resources = pickle.loads(launched_resources)
+    return num_nodes, launched_resources
 
 
 def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
@@ -719,65 +719,65 @@ def _load_storage_mounts_metadata(
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table).filter_by(name=cluster_name).first()
-        if rows is None:
-            return None
-        user_hash = _get_user_hash_or_current_user(rows.user_hash)
-        # TODO: use namedtuple instead of dict
-        record = {
-            'name': rows.name,
-            'launched_at': rows.launched_at,
-            'handle': pickle.loads(rows.handle),
-            'last_use': rows.last_use,
-            'status': status_lib.ClusterStatus[rows.status],
-            'autostop': rows.autostop,
-            'to_down': bool(rows.to_down),
-            'owner': _load_owner(rows.owner),
-            'metadata': json.loads(rows.metadata),
-            'cluster_hash': rows.cluster_hash,
-            'storage_mounts_metadata': _load_storage_mounts_metadata(
-                rows.storage_mounts_metadata),
-            'cluster_ever_up': bool(rows.cluster_ever_up),
-            'status_updated_at': rows.status_updated_at,
-            'user_hash': user_hash,
-            'user_name': get_user(user_hash).name,
-            'config_hash': rows.config_hash,
-            'workspace': rows.workspace,
-        }
-        return record
+        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    if row is None:
+        return None
+    user_hash = _get_user_hash_or_current_user(row.user_hash)
+    # TODO: use namedtuple instead of dict
+    record = {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'last_use': row.last_use,
+        'status': status_lib.ClusterStatus[row.status],
+        'autostop': row.autostop,
+        'to_down': bool(row.to_down),
+        'owner': _load_owner(row.owner),
+        'metadata': json.loads(row.metadata),
+        'cluster_hash': row.cluster_hash,
+        'storage_mounts_metadata': _load_storage_mounts_metadata(
+            row.storage_mounts_metadata),
+        'cluster_ever_up': bool(row.cluster_ever_up),
+        'status_updated_at': row.status_updated_at,
+        'user_hash': user_hash,
+        'user_name': get_user(user_hash).name,
+        'config_hash': row.config_hash,
+        'workspace': row.workspace,
+    }
+    return record
 
 
 def get_clusters() -> List[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).order_by(
             sqlalchemy.desc(cluster_table.c.launched_at)).all()
-        records = []
-        for row in rows:
-            user_hash = _get_user_hash_or_current_user(row.user_hash)
-            # TODO: use namedtuple instead of dict
-            record = {
-                'name': row.name,
-                'launched_at': row.launched_at,
-                'handle': pickle.loads(row.handle),
-                'last_use': row.last_use,
-                'status': status_lib.ClusterStatus[row.status],
-                'autostop': row.autostop,
-                'to_down': bool(row.to_down),
-                'owner': _load_owner(row.owner),
-                'metadata': json.loads(row.metadata),
-                'cluster_hash': row.cluster_hash,
-                'storage_mounts_metadata': _load_storage_mounts_metadata(
-                    row.storage_mounts_metadata),
-                'cluster_ever_up': bool(row.cluster_ever_up),
-                'status_updated_at': row.status_updated_at,
-                'user_hash': user_hash,
-                'user_name': get_user(user_hash).name,
-                'config_hash': row.config_hash,
-                'workspace': row.workspace,
-            }
+    records = []
+    for row in rows:
+        user_hash = _get_user_hash_or_current_user(row.user_hash)
+        # TODO: use namedtuple instead of dict
+        record = {
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': pickle.loads(row.handle),
+            'last_use': row.last_use,
+            'status': status_lib.ClusterStatus[row.status],
+            'autostop': row.autostop,
+            'to_down': bool(row.to_down),
+            'owner': _load_owner(row.owner),
+            'metadata': json.loads(row.metadata),
+            'cluster_hash': row.cluster_hash,
+            'storage_mounts_metadata': _load_storage_mounts_metadata(
+                row.storage_mounts_metadata),
+            'cluster_ever_up': bool(row.cluster_ever_up),
+            'status_updated_at': row.status_updated_at,
+            'user_hash': user_hash,
+            'user_name': get_user(user_hash).name,
+            'config_hash': row.config_hash,
+            'workspace': row.workspace,
+        }
 
-            records.append(record)
-        return records
+        records.append(record)
+    return records
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
@@ -788,39 +788,39 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
                                        cluster_table.c.cluster_hash,
                                        isouter=True)).all()
 
-        # '(cluster_hash, name, num_nodes, requested_resources, '
-        #         'launched_resources, usage_intervals) '
-        records = []
-        for row in rows:
-            # TODO: use namedtuple instead of dict
-            user_hash = _get_user_hash_or_current_user(row.user_hash)
-            status = row.status
-            if status is not None:
-                status = status_lib.ClusterStatus[status]
-            record = {
-                'name': row.name,
-                'launched_at': _get_cluster_launch_time(row.cluster_hash),
-                'duration': _get_cluster_duration(row.cluster_hash),
-                'num_nodes': row.num_nodes,
-                'resources': pickle.loads(row.launched_resources),
-                'cluster_hash': row.cluster_hash,
-                'usage_intervals': pickle.loads(row.usage_intervals),
-                'status': status,
-                'user_hash': user_hash,
-            }
+    # '(cluster_hash, name, num_nodes, requested_resources, '
+    #         'launched_resources, usage_intervals) '
+    records = []
+    for row in rows:
+        # TODO: use namedtuple instead of dict
+        user_hash = _get_user_hash_or_current_user(row.user_hash)
+        status = row.status
+        if status is not None:
+            status = status_lib.ClusterStatus[status]
+        record = {
+            'name': row.name,
+            'launched_at': _get_cluster_launch_time(row.cluster_hash),
+            'duration': _get_cluster_duration(row.cluster_hash),
+            'num_nodes': row.num_nodes,
+            'resources': pickle.loads(row.launched_resources),
+            'cluster_hash': row.cluster_hash,
+            'usage_intervals': pickle.loads(row.usage_intervals),
+            'status': status,
+            'user_hash': user_hash,
+        }
 
-            records.append(record)
+        records.append(record)
 
-        # sort by launch time, descending in recency
-        records = sorted(records, key=lambda record: -record['launched_at'])
-        return records
+    # sort by launch time, descending in recency
+    records = sorted(records, key=lambda record: -record['launched_at'])
+    return records
 
 
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
-        return [row.name for row in rows]
+    return [row.name for row in rows]
 
 
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
@@ -828,22 +828,22 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(config_table).filter_by(
             key=_get_enabled_clouds_key(cloud_capability, workspace)).first()
-        ret = []
-        if row:
-            ret = json.loads(row.value)
-        enabled_clouds: List['clouds.Cloud'] = []
-        for c in ret:
-            try:
-                cloud = registry.CLOUD_REGISTRY.from_str(c)
-            except ValueError:
-                # Handle the case for the clouds whose support has been
-                # removed from SkyPilot, e.g., 'local' was a cloud in the past
-                # and may be stored in the database for users before #3037.
-                # We should ignore removed clouds and continue.
-                continue
-            if cloud is not None:
-                enabled_clouds.append(cloud)
-        return enabled_clouds
+    ret = []
+    if row:
+        ret = json.loads(row.value)
+    enabled_clouds: List['clouds.Cloud'] = []
+    for c in ret:
+        try:
+            cloud = registry.CLOUD_REGISTRY.from_str(c)
+        except ValueError:
+            # Handle the case for the clouds whose support has been
+            # removed from SkyPilot, e.g., 'local' was a cloud in the past
+            # and may be stored in the database for users before #3037.
+            # We should ignore removed clouds and continue.
+            continue
+        if cloud is not None:
+            enabled_clouds.append(cloud)
+    return enabled_clouds
 
 
 def set_enabled_clouds(enabled_clouds: List[str],
@@ -930,18 +930,18 @@ def set_storage_status(storage_name: str,
         count = session.query(storage_table).filter_by(
             name=storage_name).update({storage_table.c.status: status.value})
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Storage {storage_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Storage {storage_name} not found.')
 
 
 def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert storage_name is not None, 'storage_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(storage_table).filter_by(name=storage_name).first()
-        if row:
-            return status_lib.StorageStatus[row.status]
-        return None
+    if row:
+        return status_lib.StorageStatus[row.status]
+    return None
 
 
 def set_storage_handle(storage_name: str,
@@ -951,9 +951,9 @@ def set_storage_handle(storage_name: str,
             name=storage_name).update(
                 {storage_table.c.handle: pickle.dumps(handle)})
         session.commit()
-        assert count <= 1, count
-        if count == 0:
-            raise ValueError(f'Storage{storage_name} not found.')
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Storage{storage_name} not found.')
 
 
 def get_handle_from_storage_name(
@@ -962,9 +962,9 @@ def get_handle_from_storage_name(
         return None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(storage_table).filter_by(name=storage_name).first()
-        if row:
-            return pickle.loads(row.handle)
-        return None
+    if row:
+        return pickle.loads(row.handle)
+    return None
 
 
 def get_glob_storage_name(storage_name: str) -> List[str]:
@@ -981,27 +981,27 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
             raise ValueError('Unsupported database dialect')
         else:
             raise ValueError('Unsupported database dialect')
-        return [row.name for row in rows]
+    return [row.name for row in rows]
 
 
 def get_storage_names_start_with(starts_with: str) -> List[str]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(storage_table).filter(
             storage_table.c.name.like(f'{starts_with}%')).all()
-        return [row.name for row in rows]
+    return [row.name for row in rows]
 
 
 def get_storage() -> List[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(storage_table).all()
-        records = []
-        for row in rows:
-            # TODO: use namedtuple instead of dict
-            records.append({
-                'name': row.name,
-                'launched_at': row.launched_at,
-                'handle': pickle.loads(row.handle),
-                'last_use': row.last_use,
-                'status': status_lib.StorageStatus[row.status],
-            })
-        return records
+    records = []
+    for row in rows:
+        # TODO: use namedtuple instead of dict
+        records.append({
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': pickle.loads(row.handle),
+            'last_use': row.last_use,
+            'status': status_lib.StorageStatus[row.status],
+        })
+    return records
