@@ -1,12 +1,10 @@
 """SDK functions for cluster/job management."""
-import concurrent.futures
 import os
 import shlex
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
-import filelock
 
 from sky import admin_policy
 from sky import backends
@@ -45,7 +43,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-
 
 # ======================
 # = Cluster Management =
@@ -1229,4 +1226,3 @@ def get_all_contexts() -> List[str]:
     # For now, assuming get_ssh_node_pool_contexts already returns them
     # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
-

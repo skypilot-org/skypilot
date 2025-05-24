@@ -689,5 +689,3 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         overlay_skypilot_config(original_config=_get_loaded_config(),
                                 override_configs=parsed_config))
     return parsed_config
-
-

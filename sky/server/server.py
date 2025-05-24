@@ -37,7 +37,6 @@ from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
-from sky.workspaces import server as workspaces_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -59,6 +58,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -255,7 +255,9 @@ app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
-app.include_router(workspaces_rest.router, prefix='/workspaces', tags=['workspaces'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
 
 
 @app.get('/token')
@@ -322,7 +324,8 @@ async def enabled_clouds(request: fastapi.Request,
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
-    
+
+
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,

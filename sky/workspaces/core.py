@@ -1,18 +1,20 @@
-import os
-from typing import Any, Dict, Callable
+"""Workspace management core."""
+
 import concurrent.futures
+import os
+from typing import Any, Callable, Dict
 
 import filelock
 
-from sky import skypilot_config
-from sky import global_user_state
-from sky.skylet import constants
-from sky import exceptions
 from sky import check as sky_check
-from sky.utils import schemas
-from sky.utils import common_utils
-from sky.usage import usage_lib
+from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
+from sky.skylet import constants
+from sky.usage import usage_lib
+from sky.utils import common_utils
+from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
 
@@ -32,6 +34,7 @@ def _get_workspace_config_lock_path() -> str:
 # = Workspace Management =
 # =========================
 
+
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
@@ -41,8 +44,8 @@ def get_workspaces() -> Dict[str, Any]:
 
 
 def _update_workspaces_config(
-    workspace_modifier_fn: Callable[[Dict[str, Any]], None]
-) -> Dict[str, Any]:
+        workspace_modifier_fn: Callable[[Dict[str, Any]],
+                                        None]) -> Dict[str, Any]:
     """Update the workspaces configuration in the config file.
 
     This function uses file locking to prevent race conditions when multiple
