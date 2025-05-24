@@ -3,8 +3,8 @@ description: Build and publish docker image and Helm charts for SkyPilot.
 
 on:
   schedule:
-    # Set the time to be 20 mins after the pypi nightly build
-    - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
+    # Set the time to be 1 hour after the pypi nightly build
+    - cron: '35 11 * * *' # 11:35am UTC, 3:35am PST, 6:35am EST
   workflow_dispatch:
     inputs:
       package_name:

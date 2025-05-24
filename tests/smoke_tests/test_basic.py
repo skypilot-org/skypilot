@@ -409,7 +409,7 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             if cluster['name'] == name:
                 cluster_exist = True
                 break
-        assert cluster_exist
+        assert cluster_exist, status_response
     finally:
         sky.get(sky.down(name))
 

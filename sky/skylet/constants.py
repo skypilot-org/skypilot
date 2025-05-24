@@ -378,7 +378,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 # we skip the following keys because they are meant to be client-side configs.
 SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
                                                        ('api_server',),
-                                                       ('allowed_clouds',)]
+                                                       ('allowed_clouds',),
+                                                       ('workspaces',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -405,3 +406,5 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
+
+SKYPILOT_DEFAULT_WORKSPACE = 'default'

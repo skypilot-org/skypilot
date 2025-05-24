@@ -389,11 +389,10 @@ def override_sky_config(
         )
 
     if override_sky_config_dict:
-
         temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
         if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
             # Read the original config
-            original_config = skypilot_config.parse_config_file(
+            original_config = skypilot_config.parse_and_validate_config_file(
                 env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
         else:
             original_config = skypilot_config.config_utils.Config()

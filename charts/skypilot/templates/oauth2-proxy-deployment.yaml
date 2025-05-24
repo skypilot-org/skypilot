@@ -40,6 +40,7 @@ spec:
         - --http-address=0.0.0.0:4180
         - --skip-provider-button=true
         - --reverse-proxy=true
+        - --set-xauthrequest
         - --session-store-type={{ index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis" }}
         {{- if not (index .Values.ingress "oauth2-proxy" "use-https" | default false) }}
         - --cookie-secure=false

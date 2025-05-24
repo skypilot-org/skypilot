@@ -1781,9 +1781,13 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra():
+def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     """Show the enabled infrastructure."""
-    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
+    workspace_str = ''
+    if show_workspace:
+        workspace_str = f' (workspace: {active_workspace!r})'
+    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
+             f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
     enabled_clouds = sdk.get(sdk.enabled_clouds())
     enabled_ssh_infras = []
@@ -1954,6 +1958,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         # status query.
         service_status_request_id = serve_lib.status(service_names=None)
 
+    workspace_request_id = None
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -1988,9 +1993,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
-        _show_enabled_infra()
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
+        workspace_request_id = sdk.workspaces()
+
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
     if refresh:
@@ -2013,9 +2017,20 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         else:
             normal_clusters.append(cluster_record)
 
+    if workspace_request_id is not None:
+        all_workspaces = sdk.get(workspace_request_id)
+    else:
+        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
+    active_workspace = skypilot_config.get_active_workspace()
+    show_workspace = len(all_workspaces) > 1
+    _show_enabled_infra(active_workspace, show_workspace)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+               f'{colorama.Style.RESET_ALL}')
+
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users, query_clusters)
+        normal_clusters + controllers, verbose, all_users, query_clusters,
+        show_workspace)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
@@ -3345,9 +3360,16 @@ def _down_or_stop_clusters(
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
+@click.option(
+    '--workspace',
+    '-w',
+    type=str,
+    help='The workspace to check. If None, all workspaces will be checked.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
-def check(infra_list: Tuple[str], verbose: bool):
+def check(infra_list: Tuple[str],
+          verbose: bool,
+          workspace: Optional[str] = None):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3370,7 +3392,9 @@ def check(infra_list: Tuple[str], verbose: bool):
       sky check aws gcp
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
-    request_id = sdk.check(infra_list=infra_arg, verbose=verbose)
+    request_id = sdk.check(infra_list=infra_arg,
+                           verbose=verbose,
+                           workspace=workspace)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()
@@ -4447,7 +4471,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
             f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
-        job_identity_str = (f'managed jobs with IDs {job_id_str}'
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else repr(name))
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
@@ -6169,10 +6194,14 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
+@click.option('--get-token',
+              is_flag=True,
+              default=False,
+              help='Force token-based login.')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str]):
+def api_login(endpoint: Optional[str], get_token: bool):
     """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint)
+    sdk.api_login(endpoint, get_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -6184,6 +6213,10 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    api_server_user = api_server_info.get('user')
+    if api_server_user is not None:
+        user_name = api_server_user['name']
+        user_hash = api_server_user['id']
     dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '

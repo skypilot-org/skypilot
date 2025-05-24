@@ -1,6 +1,8 @@
 export const ENDPOINT = '/internal/dashboard';
 export const BASE_PATH = '/dashboard';
 export const TIMEOUT = 10000;
+export const API_URL = '/api/v1';
+export const WS_API_URL = API_URL.replace(/^http/, 'ws');
 export const CLUSTER_DOES_NOT_EXIST = 'ClusterDoesNotExist';
 export const NOT_SUPPORTED_ERROR = 'NotSupportedError';
 export const CLUSTER_NOT_UP_ERROR = 'ClusterNotUpError';
