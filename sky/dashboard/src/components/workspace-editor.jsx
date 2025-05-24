@@ -1,28 +1,29 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
-import { getWorkspaces, updateWorkspace, createWorkspace, deleteWorkspace, getEnabledClouds } from '@/data/connectors/workspaces';
+import {
+  getWorkspaces,
+  updateWorkspace,
+  createWorkspace,
+  deleteWorkspace,
+  getEnabledClouds,
+} from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
 import Head from 'next/head';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { CircularProgress } from '@mui/material';
-import { 
-  SaveIcon, 
-  TrashIcon, 
+import {
+  SaveIcon,
+  TrashIcon,
   AlertTriangleIcon,
   CheckIcon,
-  RotateCwIcon
+  RotateCwIcon,
 } from 'lucide-react';
 import {
   Dialog,
@@ -60,28 +61,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     totalClusterCount: 0,
     runningClusterCount: 0,
     managedJobsCount: 0,
-    clouds: []
+    clouds: [],
   });
   const [statsLoading, setStatsLoading] = useState(false);
 
-  useEffect(() => {
-    if (!isNewWorkspace) {
-      fetchWorkspaceConfig();
-      fetchWorkspaceStats();
-    } else {
-      setLoading(false);
-      setYamlValue(`${workspaceName}:\n  # New workspace configuration\n  # Leave empty to use all accessible infrastructure\n`);
-    }
-  }, [workspaceName, isNewWorkspace]);
-
-  useEffect(() => {
-    // Check for changes
-    const currentConfigStr = JSON.stringify(workspaceConfig);
-    const originalConfigStr = JSON.stringify(originalConfig);
-    setHasChanges(currentConfigStr !== originalConfigStr);
-  }, [workspaceConfig, originalConfig]);
-
-  const fetchWorkspaceConfig = async () => {
+  const fetchWorkspaceConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -89,19 +73,19 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       const config = allWorkspaces[workspaceName] || {};
       setWorkspaceConfig(config);
       setOriginalConfig(config);
-      
+
       // Format as YAML with workspace name as top-level key
       const fullConfig = { [workspaceName]: config };
       let yamlOutput;
       if (Object.keys(config).length === 0) {
         yamlOutput = `${workspaceName}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
       } else {
-        yamlOutput = yaml.dump(fullConfig, { 
-          indent: 2, 
+        yamlOutput = yaml.dump(fullConfig, {
+          indent: 2,
           lineWidth: -1,
           noRefs: true,
           skipInvalid: true,
-          flowLevel: -1
+          flowLevel: -1,
         });
       }
       setYamlValue(yamlOutput);
@@ -110,32 +94,34 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [workspaceName]);
 
-  const fetchWorkspaceStats = async () => {
+  const fetchWorkspaceStats = useCallback(async () => {
     if (isNewWorkspace) return;
-    
+
     setStatsLoading(true);
     try {
-      const [clustersResponse, managedJobsResponse, enabledClouds] = await Promise.all([
-        getClusters(),
-        getManagedJobs(),
-        getEnabledClouds(workspaceName)
-      ]);
+      const [clustersResponse, managedJobsResponse, enabledClouds] =
+        await Promise.all([
+          getClusters(),
+          getManagedJobs(),
+          getEnabledClouds(workspaceName),
+        ]);
 
       // Filter clusters for this workspace
-      const workspaceClusters = clustersResponse.filter(cluster => 
-        (cluster.workspace || 'default') === workspaceName
+      const workspaceClusters = clustersResponse.filter(
+        (cluster) => (cluster.workspace || 'default') === workspaceName
       );
 
       // Count running clusters
-      const runningClusters = workspaceClusters.filter(cluster => 
-        cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
+      const runningClusters = workspaceClusters.filter(
+        (cluster) =>
+          cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING'
       );
 
       // Map cluster names to workspace for job filtering
       const clusterNameToWorkspace = {};
-      clustersResponse.forEach(c => {
+      clustersResponse.forEach((c) => {
         clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
       });
 
@@ -145,10 +131,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       let managedJobsCount = 0;
 
       jobs.forEach((job) => {
-        const jobClusterName = job.cluster_name || (job.resources && job.resources.cluster_name);
+        const jobClusterName =
+          job.cluster_name || (job.resources && job.resources.cluster_name);
         if (jobClusterName) {
           const jobWorkspace = clusterNameToWorkspace[jobClusterName];
-          if (jobWorkspace === workspaceName && activeJobStatuses.has(job.status)) {
+          if (
+            jobWorkspace === workspaceName &&
+            activeJobStatuses.has(job.status)
+          ) {
             managedJobsCount++;
           }
         }
@@ -158,7 +148,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         totalClusterCount: workspaceClusters.length,
         runningClusterCount: runningClusters.length,
         managedJobsCount: managedJobsCount,
-        clouds: Array.isArray(enabledClouds) ? enabledClouds.sort() : []
+        clouds: Array.isArray(enabledClouds) ? enabledClouds.sort() : [],
       });
     } catch (err) {
       console.error('Failed to fetch workspace stats:', err);
@@ -166,15 +156,39 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     } finally {
       setStatsLoading(false);
     }
-  };
+  }, [workspaceName, isNewWorkspace]);
+
+  useEffect(() => {
+    if (!isNewWorkspace) {
+      fetchWorkspaceConfig();
+      fetchWorkspaceStats();
+    } else {
+      setLoading(false);
+      setYamlValue(
+        `${workspaceName}:\n  # New workspace configuration\n  # Leave empty to use all accessible infrastructure\n`
+      );
+    }
+  }, [
+    workspaceName,
+    isNewWorkspace,
+    fetchWorkspaceConfig,
+    fetchWorkspaceStats,
+  ]);
+
+  useEffect(() => {
+    // Check for changes
+    const currentConfigStr = JSON.stringify(workspaceConfig);
+    const originalConfigStr = JSON.stringify(originalConfig);
+    setHasChanges(currentConfigStr !== originalConfigStr);
+  }, [workspaceConfig, originalConfig]);
 
   const handleYamlChange = (value) => {
     setYamlValue(value);
     setYamlError(null);
-    
+
     try {
       const parsed = yaml.load(value) || {};
-      
+
       // Validate workspace name
       const keys = Object.keys(parsed);
       if (keys.length === 0) {
@@ -183,14 +197,18 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       } else if (keys.length === 1) {
         const parsedWorkspaceName = keys[0];
         if (parsedWorkspaceName !== workspaceName) {
-          setYamlError(`Workspace name cannot be changed. Expected "${workspaceName}" but found "${parsedWorkspaceName}".`);
+          setYamlError(
+            `Workspace name cannot be changed. Expected "${workspaceName}" but found "${parsedWorkspaceName}".`
+          );
           return;
         }
         // Extract the configuration for this workspace
         const config = parsed[workspaceName] || {};
         setWorkspaceConfig(config);
       } else {
-        setYamlError(`Configuration must contain only one workspace. Found: ${keys.join(', ')}`);
+        setYamlError(
+          `Configuration must contain only one workspace. Found: ${keys.join(', ')}`
+        );
       }
     } catch (err) {
       setYamlError(`Invalid YAML: ${err.message}`);
@@ -201,20 +219,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setSaving(true);
     setError(null);
     setSuccess(null);
-    
+
     try {
       // Validate YAML
       if (yamlError) {
         throw new Error('Please fix YAML errors before saving');
       }
-      
+
       // Additional validation: ensure workspace name hasn't been changed in YAML
       const parsed = yaml.load(yamlValue) || {};
       const keys = Object.keys(parsed);
       if (keys.length > 0 && keys[0] !== workspaceName) {
-        throw new Error(`Workspace name cannot be changed. Expected "${workspaceName}".`);
+        throw new Error(
+          `Workspace name cannot be changed. Expected "${workspaceName}".`
+        );
       }
-      
+
       if (isNewWorkspace) {
         await createWorkspace(workspaceName, workspaceConfig);
         setSuccess('Workspace created successfully!');
@@ -239,7 +259,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleDelete = async () => {
     setDeleting(true);
     setError(null);
-    
+
     try {
       await deleteWorkspace(workspaceName);
       setSuccess('Workspace deleted successfully!');
@@ -262,7 +282,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     return <div>Loading...</div>;
   }
 
-  const title = isNewWorkspace 
+  const title = isNewWorkspace
     ? 'Create New Workspace | SkyPilot Dashboard'
     : `Workspace: ${workspaceName} | SkyPilot Dashboard`;
 
@@ -280,7 +300,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             </Link>
             <span className="mx-2 text-gray-500">›</span>
             <Link
-              href={isNewWorkspace ? `/workspaces/new` : `/workspaces/${workspaceName}`}
+              href={
+                isNewWorkspace
+                  ? `/workspaces/new`
+                  : `/workspaces/${workspaceName}`
+              }
               className="text-sky-blue hover:underline"
             >
               {isNewWorkspace ? 'New Workspace' : workspaceName}
@@ -301,7 +325,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 </span>
               </div>
             )}
-            
+
             <div className="flex items-center space-x-4">
               {!isNewWorkspace && (
                 <button
@@ -313,7 +337,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   Refresh
                 </button>
               )}
-              
+
               {!isNewWorkspace && workspaceName !== 'default' && (
                 <button
                   onClick={() => setShowDeleteDialog(true)}
@@ -324,10 +348,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   Delete
                 </button>
               )}
-              
+
               <button
                 onClick={handleSave}
-                disabled={saving || (yamlError) || loading}
+                disabled={saving || yamlError || loading}
                 className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
               >
                 <SaveIcon className="w-4 h-4 mr-1.5" />
@@ -341,7 +365,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         {loading ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">Loading workspace configuration...</span>
+            <span className="text-gray-500">
+              Loading workspace configuration...
+            </span>
           </div>
         ) : (
           <div className="space-y-6">
@@ -352,11 +378,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            
+
             {success && (
               <Alert className="border-green-200 bg-green-50">
                 <CheckIcon className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-800">{success}</AlertDescription>
+                <AlertDescription className="text-green-800">
+                  {success}
+                </AlertDescription>
               </Alert>
             )}
 
@@ -368,7 +396,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   <Card className="h-full">
                     <CardHeader>
                       <CardTitle className="text-base font-normal">
-                        <span className="font-semibold">Workspace:</span> {workspaceName}
+                        <span className="font-semibold">Workspace:</span>{' '}
+                        {workspaceName}
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm pb-2 flex-1">
@@ -378,7 +407,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           <span>Clusters (Running / Total)</span>
                         </div>
                         <span className="font-normal text-gray-800">
-                          {statsLoading ? '...' : `${workspaceStats.runningClusterCount} / ${workspaceStats.totalClusterCount}`}
+                          {statsLoading
+                            ? '...'
+                            : `${workspaceStats.runningClusterCount} / ${workspaceStats.totalClusterCount}`}
                         </span>
                       </div>
                       <div className="py-2 flex items-center justify-between border-t border-gray-100">
@@ -387,7 +418,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           <span>Managed Jobs</span>
                         </div>
                         <span className="font-normal text-gray-800">
-                          {statsLoading ? '...' : workspaceStats.managedJobsCount}
+                          {statsLoading
+                            ? '...'
+                            : workspaceStats.managedJobsCount}
                         </span>
                       </div>
                     </CardContent>
@@ -410,7 +443,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             </div>
                           ))
                         ) : (
-                          <span className="text-gray-500 italic">No enabled infrastructure</span>
+                          <span className="text-gray-500 italic">
+                            No enabled infrastructure
+                          </span>
                         )}
                       </div>
                     </div>
@@ -419,7 +454,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
               )}
 
               {/* Right column - YAML Editor */}
-              <div className={isNewWorkspace ? "lg:col-span-3" : "lg:col-span-2"}>
+              <div
+                className={isNewWorkspace ? 'lg:col-span-3' : 'lg:col-span-2'}
+              >
                 <Card className="h-full flex flex-col">
                   <CardHeader>
                     <CardTitle className="text-base font-normal">
@@ -436,21 +473,33 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       )}
                       <div className="flex-1 flex flex-col">
                         <p className="text-sm text-gray-600 mb-3">
-                          Configure infra-specific settings for this workspace. Leave empty to use all accessible infrastructure. Refer to <a href="https://skypilot.co/docs" target="_blank" rel="noopener noreferrer">SkyPilot Docs</a> for more details.
+                          Configure infra-specific settings for this workspace.
+                          Leave empty to use all accessible infrastructure.
+                          Refer to{' '}
+                          <a
+                            href="https://skypilot.co/docs"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            SkyPilot Docs
+                          </a>{' '}
+                          for more details.
                         </p>
-                        
+
                         {/* Example Configuration */}
                         <div className="mb-4 p-3 bg-gray-50 border rounded-lg">
-                          <h4 className="text-sm font-medium text-gray-700 mb-2">Example Configuration:</h4>
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">
+                            Example Configuration:
+                          </h4>
                           <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
-{`${workspaceName || 'my-workspace'}:
+                            {`${workspaceName || 'my-workspace'}:
   gcp:
     project_id: xxx
   aws:
     disabled: true`}
                           </pre>
                         </div>
-                        
+
                         <Textarea
                           value={yamlValue}
                           onChange={(e) => handleYamlChange(e.target.value)}
@@ -482,15 +531,22 @@ ${workspaceName || 'workspace-name'}:
             <DialogHeader>
               <DialogTitle>Delete Workspace</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete the workspace "{workspaceName}"? 
-                This action cannot be undone.
+                Are you sure you want to delete the workspace &quot;
+                {workspaceName}&quot;? This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteDialog(false)}
+              >
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              <Button
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
                 {deleting ? 'Deleting...' : 'Delete Workspace'}
               </Button>
             </DialogFooter>
@@ -499,4 +555,4 @@ ${workspaceName || 'workspace-name'}:
       </Layout>
     </>
   );
-} 
+}

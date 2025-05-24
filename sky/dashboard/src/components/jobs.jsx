@@ -444,8 +444,8 @@ export function ManagedJobsTable({
     return '';
   };
 
-  // Calculate active and finished counts
-  const counts = React.useMemo(() => {
+  // Calculate summary counts
+  const summaryCounts = React.useMemo(() => {
     const active = data.filter((item) =>
       statusGroups.active.includes(item.status)
     ).length;
@@ -453,7 +453,7 @@ export function ManagedJobsTable({
       statusGroups.finished.includes(item.status)
     ).length;
     return { active, finished };
-  }, [data, statusGroups]);
+  }, [data]);
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -485,14 +485,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    statusGroups,
-    workspaceFilter,
-  ]);
+  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {

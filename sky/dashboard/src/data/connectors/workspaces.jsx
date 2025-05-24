@@ -305,12 +305,14 @@ export async function getEnabledClouds(workspaceName = null) {
 
 // Helper function to poll for task completion
 async function pollForTaskCompletion(requestId, taskName) {
-  console.log(`Polling for ${taskName} task completion with request_id: ${requestId}`);
-  
+  console.log(
+    `Polling for ${taskName} task completion with request_id: ${requestId}`
+  );
+
   const resultResponse = await fetch(
     `${ENDPOINT}/api/get?request_id=${requestId}`
   );
-  
+
   if (!resultResponse.ok) {
     let errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
     try {
@@ -382,14 +384,17 @@ async function pollForTaskCompletion(requestId, taskName) {
 export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
-    
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ config }),
-    });
+
+    const scheduleResponse = await fetch(
+      `${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ config }),
+      }
+    );
 
     if (!scheduleResponse.ok) {
       throw new Error(
@@ -412,14 +417,17 @@ export async function updateWorkspace(workspaceName, config) {
 // Create new workspace
 export const createWorkspace = async (workspaceName, config) => {
   try {
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ config }),
-    });
-    
+    const scheduleResponse = await fetch(
+      `${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ config }),
+      }
+    );
+
     if (!scheduleResponse.ok) {
       const errorText = await scheduleResponse.text();
       throw new Error(
@@ -443,13 +451,16 @@ export const createWorkspace = async (workspaceName, config) => {
 export async function deleteWorkspace(workspaceName) {
   try {
     console.log(`Deleting workspace ${workspaceName}`);
-    
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+
+    const scheduleResponse = await fetch(
+      `${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
     if (!scheduleResponse.ok) {
       throw new Error(

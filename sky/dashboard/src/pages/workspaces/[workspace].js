@@ -12,4 +12,4 @@ export default function WorkspacePage() {
   }
 
   return <WorkspaceEditor workspaceName={workspace} />;
-} 
+}

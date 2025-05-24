@@ -4,7 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getWorkspaces, getEnabledClouds, deleteWorkspace } from '@/data/connectors/workspaces';
+import {
+  getWorkspaces,
+  getEnabledClouds,
+  deleteWorkspace,
+} from '@/data/connectors/workspaces';
 import {
   Card,
   CardContent,
@@ -258,7 +262,7 @@ export function Workspaces() {
 
   const handleConfirmDelete = async () => {
     if (!workspaceToDelete) return;
-    
+
     setDeleting(true);
     try {
       await deleteWorkspace(workspaceToDelete);
@@ -512,7 +516,11 @@ export function Workspaces() {
                   size="sm"
                   onClick={() => handleDeleteWorkspace(ws.name)}
                   disabled={ws.name === 'default'}
-                  title={ws.name === 'default' ? 'Cannot delete default workspace' : 'Delete workspace'}
+                  title={
+                    ws.name === 'default'
+                      ? 'Cannot delete default workspace'
+                      : 'Delete workspace'
+                  }
                   className="text-red-600 hover:text-red-700 hover:bg-red-50"
                 >
                   Delete
@@ -529,7 +537,7 @@ export function Workspaces() {
           ))}
 
           {/* Create New Workspace Card */}
-          <Card 
+          <Card
             key="create-new"
             className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
             onClick={handleCreateNewWorkspace}
@@ -543,7 +551,8 @@ export function Workspaces() {
                   Create New Workspace
                 </h3>
                 <p className="text-sm text-gray-500">
-                  Set up a new workspace with custom infrastructure configurations
+                  Set up a new workspace with custom infrastructure
+                  configurations
                 </p>
               </div>
             </div>
@@ -604,14 +613,23 @@ export function Workspaces() {
           <DialogHeader>
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete workspace "{workspaceToDelete}"? This action cannot be undone.
+              Are you sure you want to delete workspace &quot;
+              {workspaceToDelete}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={handleCancelDelete} disabled={deleting}>
+            <Button
+              variant="outline"
+              onClick={handleCancelDelete}
+              disabled={deleting}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleting}>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+            >
               {deleting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
