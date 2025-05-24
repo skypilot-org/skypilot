@@ -1,7 +1,6 @@
 """Workspace management core."""
 
 import concurrent.futures
-import os
 from typing import Any, Callable, Dict
 
 import filelock
@@ -20,7 +19,6 @@ logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
-
 
 # =========================
 # = Workspace Management =
@@ -57,7 +55,7 @@ def _update_workspaces_config(
                                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
             # Read the current config inside the lock to ensure we have
             # the latest state
-            current_config = dict(skypilot_config.to_dict())
+            current_config = skypilot_config.to_dict()
             current_workspaces = current_config.get('workspaces', {}).copy()
 
             # Apply the modification inside the lock

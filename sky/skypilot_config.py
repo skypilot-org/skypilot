@@ -127,12 +127,12 @@ _global_config_context = ConfigContext()
 
 SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
 
+
 def get_skypilot_config_lock_path() -> str:
     """Get the path for the SkyPilot config lock file."""
     lock_path = os.path.expanduser(SKYPILOT_CONFIG_LOCK_PATH)
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     return lock_path
-
 
 
 def _get_config_context() -> ConfigContext:
@@ -699,9 +699,9 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
                                 override_configs=parsed_config))
     return parsed_config
 
+
 def update_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file."""
     global_config_path = os.path.expanduser(get_user_config_path())
     common_utils.dump_yaml(global_config_path, dict(config))
     _reload_config()
-
