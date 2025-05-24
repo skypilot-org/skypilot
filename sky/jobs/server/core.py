@@ -217,7 +217,7 @@ def launch(
         # show the owner of the controller as whatever user launched it first.
         with common.with_server_user_hash():
             # Always launch the controller in the default workspace.
-            with skypilot_config.with_active_workspace(
+            with skypilot_config.local_active_workspace_ctx(
                     skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
                 # TODO(zhwu): the buckets need to be correctly handled for
                 # a specific workspace. For example, if a job is launched in
@@ -334,7 +334,7 @@ def _maybe_restart_controller(
     rich_utils.force_update_status(
         ux_utils.spinner_message(f'{spinner_message} - restarting '
                                  'controller'))
-    with skypilot_config.with_active_workspace(
+    with skypilot_config.local_active_workspace_ctx(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
         handle = core.start(
             cluster_name=jobs_controller_type.value.cluster_name)

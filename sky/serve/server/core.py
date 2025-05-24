@@ -222,7 +222,7 @@ def up(
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
-            with skypilot_config.with_active_workspace(
+            with skypilot_config.local_active_workspace_ctx(
                     constants.SKYPILOT_DEFAULT_WORKSPACE):
                 controller_job_id, controller_handle = execution.launch(
                     task=controller_task,

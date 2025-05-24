@@ -124,7 +124,7 @@ class ConfigContext:
 _global_config_context = ConfigContext()
 _reload_config_lock = threading.Lock()
 
-_active_workspace_context = None
+_active_workspace_context = threading.local()
 
 
 def _get_config_context() -> ConfigContext:
@@ -302,8 +302,17 @@ def get_workspace_cloud(cloud: str,
 
 
 @contextlib.contextmanager
-def with_active_workspace(workspace: str) -> Iterator[None]:
-    """Temporarily set the active workspace.
+def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
+    """Temporarily set the active workspace IN CURRENT THREAD.
+
+    Note: having this function thread-local is error-prone, as wrapping some
+    operations with this will not have the underlying threads to get the
+    correct active workspace. However, we cannot make it global either, as
+    backend_utils.refresh_cluster_status() will be called in multiple threads,
+    and they may have different active workspaces for different threads.
+
+    # TODO(zhwu): make this function global by default and able to be set
+    # it to thread-local with an argument.
 
     Args:
         workspace: The workspace to set as active.
@@ -316,26 +325,18 @@ def with_active_workspace(workspace: str) -> Iterator[None]:
         # No change, do nothing.
         yield
         return
-
-    if threading.current_thread() is not threading.main_thread():
-        # We prevent the update of the active workspace from a non-main thread.
-        # This is to avoid the race condition when the active workspace is
-        # updated from a non-main thread.
-        raise RuntimeError(
-            'with_active_workspace() must be called from the main thread')
-
-    global _active_workspace_context
-    _active_workspace_context = workspace
+    _active_workspace_context.workspace = workspace
     logger.debug(f'Set context workspace: {workspace}')
     yield
     logger.debug(f'Reset context workspace: {original_workspace}')
-    _active_workspace_context = original_workspace
+    _active_workspace_context.workspace = original_workspace
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
-    if not force_user_workspace and _active_workspace_context is not None:
-        logger.debug(f'Get context workspace: {_active_workspace_context}')
-        return _active_workspace_context
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if not force_user_workspace and context_workspace is not None:
+        logger.debug(f'Get context workspace: {context_workspace}')
+        return context_workspace
     return get_nested(keys=('active_workspace',),
                       default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
@@ -576,7 +577,7 @@ def override_skypilot_config(
     # Initialize the active workspace context to the workspace specified, so
     # that a new request is not affected by the previous request's workspace.
     global _active_workspace_context
-    _active_workspace_context = workspace
+    _active_workspace_context = threading.local()
 
     try:
         common_utils.validate_schema(
