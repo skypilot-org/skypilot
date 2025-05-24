@@ -386,13 +386,16 @@ export async function updateWorkspace(workspaceName, config) {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
 
     const scheduleResponse = await fetch(
-      `${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`,
+      `${ENDPOINT}/workspaces/update`,
       {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ 
+          workspace_name: workspaceName,
+          config: config 
+        }),
       }
     );
 
@@ -418,13 +421,16 @@ export async function updateWorkspace(workspaceName, config) {
 export const createWorkspace = async (workspaceName, config) => {
   try {
     const scheduleResponse = await fetch(
-      `${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`,
+      `${ENDPOINT}/workspaces/create`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ 
+          workspace_name: workspaceName,
+          config: config 
+        }),
       }
     );
 
@@ -453,12 +459,15 @@ export async function deleteWorkspace(workspaceName) {
     console.log(`Deleting workspace ${workspaceName}`);
 
     const scheduleResponse = await fetch(
-      `${ENDPOINT}/workspaces/${encodeURIComponent(workspaceName)}`,
+      `${ENDPOINT}/workspaces/delete`,
       {
-        method: 'DELETE',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ 
+          workspace_name: workspaceName 
+        }),
       }
     );
 

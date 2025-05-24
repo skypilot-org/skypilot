@@ -34,10 +34,10 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
+from sky.workspaces import server as workspaces_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -255,6 +255,7 @@ app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(workspaces_rest.router, prefix='/workspaces', tags=['workspaces'])
 
 
 @app.get('/token')
@@ -321,64 +322,7 @@ async def enabled_clouds(request: fastapi.Request,
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
-
-
-@app.get('/workspaces')
-async def get_workspace_config(request: fastapi.Request) -> None:
-    """Gets workspace config on the server."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='workspaces',
-        request_body=payloads.RequestBody(),
-        func=skypilot_config.get_workspaces,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
-@app.put('/workspaces/{workspace_name}')
-async def update_workspace(
-        request: fastapi.Request, workspace_name: str,
-        workspace_body: payloads.UpdateWorkspaceBody) -> None:
-    """Updates a specific workspace configuration."""
-    workspace_body.workspace_name = workspace_name
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='update_workspace',
-        request_body=workspace_body,
-        func=core.update_workspace,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
-@app.post('/workspaces/{workspace_name}')
-async def create_workspace(
-        request: fastapi.Request, workspace_name: str,
-        workspace_body: payloads.CreateWorkspaceBody) -> None:
-    """Creates a new workspace configuration."""
-    workspace_body.workspace_name = workspace_name
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='create_workspace',
-        request_body=workspace_body,
-        func=core.create_workspace,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
-@app.delete('/workspaces/{workspace_name}')
-async def delete_workspace(request: fastapi.Request,
-                           workspace_name: str) -> None:
-    """Deletes a workspace configuration."""
-    delete_body = payloads.DeleteWorkspaceBody(workspace_name=workspace_name)
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='delete_workspace',
-        request_body=delete_body,
-        func=core.delete_workspace,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
+    
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,

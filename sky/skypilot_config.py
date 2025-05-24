@@ -691,9 +691,3 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def get_workspaces() -> Dict[str, Any]:
-    """Returns the workspace config."""
-    workspaces = get_nested(('workspaces',), default_value={})
-    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
-        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
-    return workspaces
