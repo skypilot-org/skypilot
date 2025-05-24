@@ -6194,10 +6194,14 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
+@click.option('--get-token',
+              is_flag=True,
+              default=False,
+              help='Force token-based login.')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str]):
+def api_login(endpoint: Optional[str], get_token: bool):
     """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint)
+    sdk.api_login(endpoint, get_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -6209,6 +6213,10 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    api_server_user = api_server_info.get('user')
+    if api_server_user is not None:
+        user_name = api_server_user['name']
+        user_hash = api_server_user['id']
     dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '

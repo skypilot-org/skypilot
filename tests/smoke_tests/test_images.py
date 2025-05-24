@@ -379,8 +379,6 @@ def test_gcp_mig():
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env={
             skypilot_config.ENV_VAR_PROJECT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
-            constants.SKY_API_SERVER_URL_ENV_VAR:
-                sky.server.common.get_server_url()
         })
     smoke_tests_utils.run_one_test(test)
 
