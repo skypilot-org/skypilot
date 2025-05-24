@@ -6188,6 +6188,10 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    api_server_user = api_server_info.get('user')
+    if api_server_user is not None:
+        user_name = api_server_user['name']
+        user_hash = api_server_user['id']
     dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
