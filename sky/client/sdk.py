@@ -1887,7 +1887,7 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_login(endpoint: Optional[str] = None) -> None:
+def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -1914,7 +1914,7 @@ def api_login(endpoint: Optional[str] = None) -> None:
         raise click.BadParameter('Endpoint must be a valid URL.')
 
     server_status = server_common.check_server_healthy(endpoint)
-    if server_status == server_common.ApiServerStatus.NEEDS_AUTH:
+    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         parsed_url = urlparse.urlparse(endpoint)
         token_url = f'{endpoint}/token'
@@ -1934,11 +1934,20 @@ def api_login(endpoint: Optional[str] = None) -> None:
             raise ValueError(f'Malformed token: {token}') from e
         logger.debug(f'Token data: {data!r}')
         try:
-            cookie_dict = json.loads(data)
+            json_data = json.loads(data)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             raise ValueError(f'Malformed token data: {data!r}') from e
-        if not isinstance(cookie_dict, dict):
-            raise ValueError(f'Malformed token JSON: {cookie_dict}')
+        if not isinstance(json_data, dict):
+            raise ValueError(f'Malformed token JSON: {json_data}')
+
+        if json_data.get('v') == 1:
+            user_hash = json_data.get('user')
+            cookie_dict = json_data['cookies']
+        elif 'v' not in json_data:
+            user_hash = None
+            cookie_dict = json_data
+        else:
+            raise ValueError(f'Unsupported token version: {json_data.get("v")}')
 
         cookie_jar = cookiejar.MozillaCookieJar()
         for (name, value) in cookie_dict.items():
@@ -1980,6 +1989,15 @@ def api_login(endpoint: Optional[str] = None) -> None:
         cookie_jar_path = os.path.expanduser(
             server_common.get_api_cookie_jar_path())
         cookie_jar.save(cookie_jar_path)
+
+        # If we have a user_hash, save it to the local file
+        if user_hash is not None:
+            if not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            with open(os.path.expanduser('~/.sky/user_hash'),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(user_hash)
 
     # Set the endpoint in the config file
     config_path = pathlib.Path(

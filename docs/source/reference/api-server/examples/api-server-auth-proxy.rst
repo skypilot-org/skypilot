@@ -58,6 +58,13 @@ Copy and paste the token into the terminal to save the auth for the SkyPilot CLI
 
 This will copy the relevant auth cookies from the browser into the CLI.
 
+SkyPilot will use the user info passed by the auth proxy in your SkyPilot API server.
+
+.. image:: ../../../images/client-server/cluster-users.png
+    :alt: User emails in the SkyPilot dashboard
+    :align: center
+    :width: 70%
+
 .. _oauth2-proxy-okta:
 
 Setting up OAuth2 Proxy with Okta
@@ -136,3 +143,5 @@ During the login flow, the token provided by the web login will encode the cooki
 .. note::
 
     If your auth proxy is not automatically detected, try using ``sky api login --cookies`` to force auth proxy mode.
+
+If the `X-Auth-Request-Email` header is set by your auth proxy, SkyPilot will use it as the user name all requests.

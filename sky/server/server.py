@@ -6,6 +6,7 @@ import base64
 import contextlib
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import multiprocessing
@@ -31,6 +32,7 @@ from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -109,6 +111,38 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         response.headers['X-Request-ID'] = request_id
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
+
+
+def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
+    if 'X-Auth-Request-Email' not in request.headers:
+        return None
+    user_name = request.headers['X-Auth-Request-Email']
+    user_hash = hashlib.md5(
+        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    return models.User(id=user_hash, name=user_name)
+
+
+class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle auth proxy."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        auth_user = _get_auth_user_header(request)
+        body = await request.body()
+        if auth_user and body:
+            try:
+                original_json = await request.json()
+            except json.JSONDecodeError as e:
+                logger.error(f'Error parsing request JSON: {e}')
+            else:
+                logger.debug(f'Overriding user for {request.state.request_id}: '
+                             f'{auth_user.name}, {auth_user.id}')
+                if 'env_vars' in original_json:
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
+                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        return await call_next(request)
 
 
 # Default expiration time for upload ids before cleanup.
@@ -218,14 +252,25 @@ app.add_middleware(
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(AuthProxyMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 
 
 @app.get('/token')
 async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
+    # If we have auth info, save this user to the database.
+    user = _get_auth_user_header(request)
+    if user is not None:
+        global_user_state.add_or_update_user(user)
+
+    token_data = {
+        'v': 1,  # Token version number, bump for backwards incompatible.
+        'user': user.id if user is not None else None,
+        'cookies': request.cookies,
+    }
     # Use base64 encoding to avoid having to escape anything in the HTML.
-    json_bytes = json.dumps(request.cookies).encode('utf-8')
+    json_bytes = json.dumps(token_data).encode('utf-8')
     base64_str = base64.b64encode(json_bytes).decode('utf-8')
 
     html_dir = pathlib.Path(__file__).parent / 'html'
@@ -237,8 +282,10 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
 
+    user_info_string = f'Logged in as {user.name}' if user is not None else ''
     html_content = html_content.replace(
-        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER', base64_str)
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
+        base64_str).replace('USER_PLACEHOLDER', user_info_string)
 
     return fastapi.responses.HTMLResponse(
         content=html_content,
