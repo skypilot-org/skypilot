@@ -18,6 +18,7 @@ import uuid
 
 from sky import models
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import db_utils
@@ -70,7 +71,8 @@ def create_table(cursor, conn):
         cluster_ever_up INTEGER DEFAULT 0,
         status_updated_at INTEGER DEFAULT null,
         config_hash TEXT DEFAULT null,
-        user_hash TEXT DEFAULT null)""")
+        user_hash TEXT DEFAULT null,
+        workspace TEXT DEFAULT 'default')""")
 
     # Table for Cluster History
     # usage_intervals: List[Tuple[int, int]]
@@ -164,6 +166,14 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'user_hash',
                                  'TEXT DEFAULT null')
+
+    db_utils.add_column_to_table(
+        cursor,
+        conn,
+        'clusters',
+        'workspace',
+        'TEXT DEFAULT \'default\'',
+        value_to_replace_existing_entries=constants.SKYPILOT_DEFAULT_WORKSPACE)
     conn.commit()
 
 
@@ -209,6 +219,9 @@ def add_or_update_cluster(cluster_name: str,
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
     """
+    # TODO(zhwu): have to be imported here to avoid circular import.
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
+
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -242,6 +255,7 @@ def add_or_update_cluster(cluster_name: str,
         usage_intervals.append((cluster_launched_at, None))
 
     user_hash = common_utils.get_user_hash()
+    active_workspace = skypilot_config.get_active_workspace()
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -252,7 +266,7 @@ def add_or_update_cluster(cluster_name: str,
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner, cluster_hash, '
         'storage_mounts_metadata, cluster_ever_up, status_updated_at, '
-        'config_hash, user_hash) '
+        'config_hash, user_hash, workspace) '
         'VALUES ('
         # name
         '?, '
@@ -295,8 +309,9 @@ def add_or_update_cluster(cluster_name: str,
         # config_hash
         'COALESCE(?, (SELECT config_hash FROM clusters WHERE name=?)),'
         # user_hash: keep original user_hash if it exists
-        'COALESCE('
-        '(SELECT user_hash FROM clusters WHERE name=?), ?)'
+        'COALESCE((SELECT user_hash FROM clusters WHERE name=?), ?),'
+        # keep original workspace if it exists
+        'COALESCE((SELECT workspace FROM clusters WHERE name=?), ?)'
         ')',
         (
             # name
@@ -336,6 +351,9 @@ def add_or_update_cluster(cluster_name: str,
             # user_hash
             cluster_name,
             user_hash,
+            # workspace
+            cluster_name,
+            active_workspace,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -678,7 +696,7 @@ def get_cluster_from_name(
     rows = _DB.cursor.execute(
         'SELECT name, launched_at, handle, last_use, status, autostop, '
         'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
-        'cluster_ever_up, status_updated_at, config_hash, user_hash '
+        'cluster_ever_up, status_updated_at, config_hash, user_hash, workspace '
         'FROM clusters WHERE name=(?)', (cluster_name,)).fetchall()
     for row in rows:
         # Explicitly specify the number of fields to unpack, so that
@@ -686,7 +704,7 @@ def get_cluster_from_name(
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
-         status_updated_at, config_hash, user_hash) = row
+         status_updated_at, config_hash, user_hash, workspace) = row
         user_hash = _get_user_hash_or_current_user(user_hash)
         # TODO: use namedtuple instead of dict
         record = {
@@ -707,6 +725,7 @@ def get_cluster_from_name(
             'user_hash': user_hash,
             'user_name': get_user(user_hash).name,
             'config_hash': config_hash,
+            'workspace': workspace,
         }
         return record
     return None
@@ -716,13 +735,13 @@ def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select name, launched_at, handle, last_use, status, autostop, '
         'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
-        'cluster_ever_up, status_updated_at, config_hash, user_hash '
+        'cluster_ever_up, status_updated_at, config_hash, user_hash, workspace '
         'from clusters order by launched_at desc').fetchall()
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
-         status_updated_at, config_hash, user_hash) = row
+         status_updated_at, config_hash, user_hash, workspace) = row
         user_hash = _get_user_hash_or_current_user(user_hash)
         # TODO: use namedtuple instead of dict
         record = {
@@ -743,6 +762,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'user_hash': user_hash,
             'user_name': get_user(user_hash).name,
             'config_hash': config_hash,
+            'workspace': workspace,
         }
 
         records.append(record)
@@ -804,11 +824,12 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_cached_enabled_clouds(
-        cloud_capability: 'cloud.CloudCapability') -> List['clouds.Cloud']:
-
-    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
-                              (_get_capability_key(cloud_capability),))
+def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
+                              workspace: str) -> List['clouds.Cloud']:
+    # The table contains the cached enabled clouds for each workspace.
+    rows = _DB.cursor.execute(
+        'SELECT value FROM config WHERE key = ?',
+        (_get_enabled_clouds_key(cloud_capability, workspace),))
     ret = []
     for (value,) in rows:
         ret = json.loads(value)
@@ -829,15 +850,17 @@ def get_cached_enabled_clouds(
 
 
 def set_enabled_clouds(enabled_clouds: List[str],
-                       cloud_capability: 'cloud.CloudCapability') -> None:
-    _DB.cursor.execute(
-        'INSERT OR REPLACE INTO config VALUES (?, ?)',
-        (_get_capability_key(cloud_capability), json.dumps(enabled_clouds)))
+                       cloud_capability: 'cloud.CloudCapability',
+                       workspace: str) -> None:
+    _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
+                       (_get_enabled_clouds_key(cloud_capability, workspace),
+                        json.dumps(enabled_clouds)))
     _DB.conn.commit()
 
 
-def _get_capability_key(cloud_capability: 'cloud.CloudCapability') -> str:
-    return _ENABLED_CLOUDS_KEY_PREFIX + cloud_capability.value
+def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
+                            workspace: str) -> str:
+    return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
 
 
 def add_or_update_storage(storage_name: str,

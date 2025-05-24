@@ -13,11 +13,11 @@ import {
   ChipIcon,
   ServerIcon,
   BriefcaseIcon,
-  ServiceBellIcon,
   ExternalLinkIcon,
   GitHubIcon,
   SlackIcon,
   CommentFeedbackIcon,
+  BookDocIcon,
   UsersIcon,
   UserCircleIcon,
 } from '@/components/elements/icons';
@@ -177,7 +177,7 @@ export function TopBar() {
 
         {/* Navigation links - reduce spacing on mobile */}
         <div
-          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-6'} ${isMobile ? 'mr-2' : 'mr-6'}`}
+          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-4'} ${isMobile ? 'mr-2' : 'mr-6'}`}
         >
           <Link
             href="/clusters"
@@ -208,6 +208,15 @@ export function TopBar() {
             {!isMobile && <span>Infra</span>}
           </Link>
 
+          {/* Workspaces Link */}
+          <Link
+            href="/workspaces"
+            className={getLinkClasses('/workspaces')}
+            prefetch={false}
+          >
+            <BookDocIcon className="w-4 h-4" />
+            {!isMobile && <span>Workspaces</span>}
+          </Link>
           <Link
             href="/users"
             className={getLinkClasses('/users')}

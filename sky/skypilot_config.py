@@ -123,6 +123,8 @@ class ConfigContext:
 _global_config_context = ConfigContext()
 _reload_config_lock = threading.Lock()
 
+_active_workspace_context = threading.local()
+
 
 def _get_config_context() -> ConfigContext:
     """Get config context for current context.
@@ -194,8 +196,7 @@ def get_user_config() -> config_utils.Config:
 
     # load the user config file
     if os.path.exists(user_config_path):
-        user_config = parse_config_file(user_config_path)
-        _validate_config(user_config, user_config_path)
+        user_config = parse_and_validate_config_file(user_config_path)
     else:
         user_config = config_utils.Config()
     return user_config
@@ -223,8 +224,7 @@ def _get_project_config() -> config_utils.Config:
 
     # load the project config file
     if os.path.exists(project_config_path):
-        project_config = parse_config_file(project_config_path)
-        _validate_config(project_config, project_config_path)
+        project_config = parse_and_validate_config_file(project_config_path)
     else:
         project_config = config_utils.Config()
     return project_config
@@ -252,8 +252,7 @@ def get_server_config() -> config_utils.Config:
 
     # load the server config file
     if os.path.exists(server_config_path):
-        server_config = parse_config_file(server_config_path)
-        _validate_config(server_config, server_config_path)
+        server_config = parse_and_validate_config_file(server_config_path)
     else:
         server_config = config_utils.Config()
     return server_config
@@ -285,6 +284,60 @@ def get_nested(keys: Tuple[str, ...],
         override_configs,
         allowed_override_keys=constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK,
         disallowed_override_keys=None)
+
+
+def get_workspace_cloud(cloud: str,
+                        workspace: Optional[str] = None) -> config_utils.Config:
+    """Returns the workspace config."""
+    if workspace is None:
+        workspace = get_active_workspace()
+    clouds = get_nested(keys=(
+        'workspaces',
+        workspace,
+    ), default_value=None)
+    if clouds is None:
+        return config_utils.Config()
+    return clouds.get(cloud.lower(), config_utils.Config())
+
+
+@contextlib.contextmanager
+def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
+    """Temporarily set the active workspace IN CURRENT THREAD.
+
+    Note: having this function thread-local is error-prone, as wrapping some
+    operations with this will not have the underlying threads to get the
+    correct active workspace. However, we cannot make it global either, as
+    backend_utils.refresh_cluster_status() will be called in multiple threads,
+    and they may have different active workspaces for different threads.
+
+    # TODO(zhwu): make this function global by default and able to be set
+    # it to thread-local with an argument.
+
+    Args:
+        workspace: The workspace to set as active.
+
+    Raises:
+        RuntimeError: If called from a non-main thread.
+    """
+    original_workspace = get_active_workspace()
+    if original_workspace == workspace:
+        # No change, do nothing.
+        yield
+        return
+    _active_workspace_context.workspace = workspace
+    logger.debug(f'Set context workspace: {workspace}')
+    yield
+    logger.debug(f'Reset context workspace: {original_workspace}')
+    _active_workspace_context.workspace = original_workspace
+
+
+def get_active_workspace(force_user_workspace: bool = False) -> str:
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if not force_user_workspace and context_workspace is not None:
+        logger.debug(f'Get context workspace: {context_workspace}')
+        return context_workspace
+    return get_nested(keys=('active_workspace',),
+                      default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -357,7 +410,7 @@ def _reload_config() -> None:
         _reload_config_as_client()
 
 
-def parse_config_file(config_path: str) -> config_utils.Config:
+def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     config = config_utils.Config()
     try:
         config_dict = common_utils.read_yaml(config_path)
@@ -413,7 +466,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _set_loaded_config(parse_config_file(config_path))
+    _set_loaded_config(parse_and_validate_config_file(config_path))
     _set_loaded_config_path(config_path)
 
 
@@ -512,6 +565,19 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    workspace = config.get_nested(
+        keys=('active_workspace',),
+        default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and workspace
+            not in get_nested(keys=('workspaces',), default_value={})):
+        raise ValueError(f'Workspace {workspace} does not exist. '
+                         'Use `sky check` to see if it is defined on the API '
+                         'server and try again.')
+    # Initialize the active workspace context to the workspace specified, so
+    # that a new request is not affected by the previous request's workspace.
+    global _active_workspace_context
+    _active_workspace_context = threading.local()
+
     try:
         common_utils.validate_schema(
             config,
@@ -592,7 +658,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
                     'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
-            parsed_config = parse_config_file(maybe_config_path)
+            parsed_config = parse_and_validate_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
             parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
@@ -623,3 +689,11 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         overlay_skypilot_config(original_config=_get_loaded_config(),
                                 override_configs=parsed_config))
     return parsed_config
+
+
+def get_workspaces() -> Dict[str, Any]:
+    """Returns the workspace config."""
+    workspaces = get_nested(('workspaces',), default_value={})
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
+        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    return workspaces

@@ -131,6 +131,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         name: job.job_name,
         job_duration: job.job_duration,
         total_duration: total_duration,
+        workspace: job.workspace,
         status: job.status,
         requested_resources: job.resources,
         resources_str: cluster_resources,

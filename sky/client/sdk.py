@@ -94,12 +94,15 @@ def stream_response(request_id: Optional[str],
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def check(infra_list: Optional[Tuple[str, ...]],
-          verbose: bool) -> server_common.RequestId:
+          verbose: bool,
+          workspace: Optional[str] = None) -> server_common.RequestId:
     """Checks the credentials to enable clouds.
 
     Args:
         infra: The infra to check.
         verbose: Whether to show verbose output.
+        workspace: The workspace to check. If None, all workspaces will be
+        checked.
 
     Returns:
         The request ID of the check request.
@@ -123,7 +126,9 @@ def check(infra_list: Optional[Tuple[str, ...]],
                                f'ignoring {region_zone}')
             specified_clouds.append(infra.cloud)
         clouds = tuple(specified_clouds)
-    body = payloads.CheckBody(clouds=clouds, verbose=verbose)
+    body = payloads.CheckBody(clouds=clouds,
+                              verbose=verbose,
+                              workspace=workspace)
     response = requests.post(f'{server_common.get_server_url()}/check',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
@@ -133,8 +138,12 @@ def check(infra_list: Optional[Tuple[str, ...]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def enabled_clouds() -> server_common.RequestId:
+def enabled_clouds(workspace: Optional[str] = None) -> server_common.RequestId:
     """Gets the enabled clouds.
+
+    Args:
+        workspace: The workspace to get the enabled clouds for. If None, the
+        active workspace will be used.
 
     Returns:
         The request ID of the enabled clouds request.
@@ -142,7 +151,10 @@ def enabled_clouds() -> server_common.RequestId:
     Request Returns:
         A list of enabled clouds in string format.
     """
-    response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
+    if workspace is None:
+        workspace = skypilot_config.get_active_workspace()
+    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
+                             f'workspace={workspace}'),
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
@@ -275,6 +287,13 @@ def optimize(
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+def workspaces() -> server_common.RequestId:
+    """Gets the workspaces."""
+    response = requests.get(f'{server_common.get_server_url()}/workspaces',
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 

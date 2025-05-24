@@ -12,6 +12,7 @@ import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
+import { NonCapitalizedTooltip } from '@/components/utils';
 
 function JobDetails() {
   const router = useRouter();
@@ -485,7 +486,27 @@ function JobDetailsContent({
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Infra</div>
-        <div className="text-base mt-1">{jobData.infra || '-'}</div>
+        <div className="text-base mt-1">
+          {jobData.infra ? (
+            <NonCapitalizedTooltip
+              content={jobData.full_infra || jobData.infra}
+              className="text-sm text-muted-foreground"
+            >
+              <span>
+                <Link href="/infra" className="text-blue-600 hover:underline">
+                  {jobData.cloud || jobData.infra.split('(')[0].trim()}
+                </Link>
+                {jobData.infra.includes('(') && (
+                  <span>
+                    {' ' + jobData.infra.substring(jobData.infra.indexOf('('))}
+                  </span>
+                )}
+              </span>
+            </NonCapitalizedTooltip>
+          ) : (
+            '-'
+          )}
+        </div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Resources</div>
