@@ -122,7 +122,7 @@ To make sure it's working, visit your endpoint URL in a browser. You should be r
 
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
 
-Okta Integration FAQ
+Okta integration FAQ
 ~~~~~~~~~~~~~~~~~~~~
 
 * I'm getting a `400 Bad Request error <https://support.okta.com/help/s/article/The-redirect-uri-parameter-must-be-an-absolute-URI?language=en_US>`__  from Okta when I open the endpoint URL in a browser.
