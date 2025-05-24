@@ -256,9 +256,10 @@ class Popen(subprocess.Popen):
         super().__init__(*args, env=env, **kwargs)
 
 
-def initialize():
+def initialize() -> Context:
     """Initialize the current SkyPilot context."""
     _CONTEXT.set(Context())
+    return _CONTEXT.get()
 
 
 class _ContextualStream:
