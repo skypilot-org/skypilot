@@ -405,7 +405,9 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
-    ctx = context.initialize()
+    context.initialize()
+    ctx = context.get()
+    assert ctx is not None
     # TODO(aylei): generalize this to all requests without a db record.
     ctx.override_envs(validate_body.env_vars)
 

@@ -65,6 +65,7 @@ def _api_logging_decorator(logger_src: str, level: int):
 
     return decorated_api
 
+
 def _get_config_file() -> str:
     # Kubernetes load the kubeconfig from the KUBECONFIG env var on
     # package initialization. So we have to reload the KUBECOFNIG env var
@@ -144,6 +145,7 @@ def _load_config(context: Optional[str] = None):
             _load_config_from_kubeconfig()
     else:
         _load_config_from_kubeconfig(context)
+
 
 def list_kube_config_contexts():
     return kubernetes.config.list_kube_config_contexts(_get_config_file())
