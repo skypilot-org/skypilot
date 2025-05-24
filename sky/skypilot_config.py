@@ -123,7 +123,7 @@ class ConfigContext:
 _global_config_context = ConfigContext()
 _reload_config_lock = threading.Lock()
 
-_active_workspace_context = threading.local()
+_active_workspace_context = None
 
 
 def _get_config_context() -> ConfigContext:
@@ -306,20 +306,35 @@ def with_active_workspace(workspace: str) -> Iterator[None]:
 
     Args:
         workspace: The workspace to set as active.
+
+    Raises:
+        RuntimeError: If called from a non-main thread.
     """
     original_workspace = get_active_workspace()
-    _active_workspace_context.workspace = workspace
+    if original_workspace == workspace:
+        # No change, do nothing.
+        yield
+        return
+
+    if threading.current_thread() is not threading.main_thread():
+        # We prevent the update of the active workspace from a non-main thread.
+        # This is to avoid the race condition when the active workspace is
+        # updated from a non-main thread.
+        raise RuntimeError(
+            'with_active_workspace() must be called from the main thread')
+
+    global _active_workspace_context
+    _active_workspace_context = workspace
     logger.debug(f'Set context workspace: {workspace}')
     yield
     logger.debug(f'Reset context workspace: {original_workspace}')
-    _active_workspace_context.workspace = original_workspace
+    _active_workspace_context = original_workspace
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
-    context_workspace = getattr(_active_workspace_context, 'workspace', None)
-    if not force_user_workspace and context_workspace is not None:
-        logger.debug(f'Get context workspace: {context_workspace}')
-        return context_workspace
+    if not force_user_workspace and _active_workspace_context is not None:
+        logger.debug(f'Get context workspace: {_active_workspace_context}')
+        return _active_workspace_context
     return get_nested(keys=('active_workspace',),
                       default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
@@ -559,7 +574,8 @@ def override_skypilot_config(
                          'server and try again.')
     # Initialize the active workspace context to the workspace specified, so
     # that a new request is not affected by the previous request's workspace.
-    _active_workspace_context.workspace = workspace
+    global _active_workspace_context
+    _active_workspace_context = workspace
 
     try:
         common_utils.validate_schema(
