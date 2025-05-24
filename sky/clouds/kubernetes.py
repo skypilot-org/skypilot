@@ -164,14 +164,21 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = set(all_contexts)
 
-        # Exclude contexts starting with `ssh-`
-        # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
-        all_contexts = [
-            ctx for ctx in all_contexts if not ctx.startswith('ssh-')
+        config_allowed_contexts = skypilot_config.get_workspace_cloud(
+            'kubernetes').get('allowed_contexts', None)
+        filter_workspace_allowed = lambda ctxs: [
+            ctx for ctx in ctxs
+            if config_allowed_contexts is None or ctx in config_allowed_contexts
         ]
 
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
+        # Exclude contexts starting with `ssh-`
+        # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
+        all_contexts = filter_workspace_allowed(
+            [ctx for ctx in all_contexts if not ctx.startswith('ssh-')])
+
+        allowed_contexts = filter_workspace_allowed(
+            skypilot_config.get_nested(('kubernetes', 'allowed_contexts'),
+                                       None))
 
         if allowed_contexts is None:
             # Try kubeconfig if present

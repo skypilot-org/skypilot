@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -134,13 +135,21 @@ class SSH(kubernetes.Kubernetes):
 
         all_contexts = set(all_contexts)
 
-        # Filter for SSH contexts (those starting with 'ssh-')
-        ssh_contexts = [
-            context for context in all_contexts if context.startswith('ssh-')
+        # Further filter on allowed_node_pools
+        config_allowed_node_pools = skypilot_config.get_workspace_cloud(
+            'ssh').get('allowed_node_pools', None)
+        filter_workspace_allowed = lambda ctxs: [
+            ctx for ctx in ctxs if config_allowed_node_pools is None or ctx.
+            lstrip('ssh-') in config_allowed_node_pools
         ]
 
+        # Filter for SSH contexts (those starting with 'ssh-')
+        ssh_contexts = filter_workspace_allowed(
+            [context for context in all_contexts if context.startswith('ssh-')])
+
         # Get contexts from SSH node pools file
-        allowed_contexts = cls.get_ssh_node_pool_contexts()
+        allowed_contexts = filter_workspace_allowed(
+            cls.get_ssh_node_pool_contexts())
 
         if allowed_contexts:
             # Only include allowed contexts that exist
