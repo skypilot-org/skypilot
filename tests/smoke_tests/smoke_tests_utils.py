@@ -361,8 +361,6 @@ def override_sky_config(
     test: Test, env_dict: Dict[str, str]
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     if is_postgres_backend_test():
-        # Fail if postgresql is not installed.
-        subprocess.run(['sudo service postgresql start'], check=True)
         env_dict['SKYPILOT_DB_URI'] = 'postgresql://postgres@localhost/skypilot'
 
     override_sky_config_dict = skypilot_config.config_utils.Config()
