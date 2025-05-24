@@ -146,6 +146,12 @@ def pytest_addoption(parser):
         default=None,
         help='Controller cloud to use for tests',
     )
+    parser.addoption(
+        '--ssh',
+        action='store_true',
+        default=False,
+        help='Run tests with SSH node pool',
+    )
 
 
 def pytest_configure(config):
@@ -456,3 +462,15 @@ def setup_controller_cloud_env(request):
     controller_cloud = request.config.getoption('--controller-cloud')
     os.environ['PYTEST_SKYPILOT_CONTROLLER_CLOUD'] = controller_cloud
     yield controller_cloud
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_ssh_env(request):
+    """Setup SSH environment variable if --ssh is specified."""
+    if not request.config.getoption('--ssh'):
+        yield
+        return
+
+    # Set environment variable to indicate we're using remote server
+    os.environ['PYTEST_SKYPILOT_SSH'] = '1'
+    yield
