@@ -41,7 +41,7 @@ There are three ways to mount volumes:
 
         1. Ensure the volume exists
         2. Specify the volume name using ``name: volume-name``
-        3. You must specify the region or zone in the resources section to match the volume's location
+        3. Specify the region or zone in the resources section to match the volume's location
 
         .. code-block:: yaml
 
@@ -52,7 +52,8 @@ There are three ways to mount volumes:
               persistent: true
 
           resources:
-            # Must match the volume's location.
+            # Must specify cloud, and region or zone.
+            # These need to match the volume's location.
             cloud: gcp
             region: us-central1
             # zone: us-central1-a
@@ -63,9 +64,7 @@ There are three ways to mount volumes:
         To create and mount a new network volume:
 
         1. Specify the volume name using ``name: volume-name``
-        2. Specify the desired volume configuration (disk_size, disk_tier, etc.)
-
-        SkyPilot will automatically create and mount the volume to the specified path.
+        2. Specify the desired volume configuration (``disk_size``, ``disk_tier``, etc.)
 
         .. code-block:: yaml
 
@@ -78,20 +77,17 @@ There are three ways to mount volumes:
                 disk_size: 100  # GiB.
 
           resources:
+            # Must specify cloud, and region or zone.
             cloud: gcp
             region: us-central1
             # zone: us-central1-a
 
+        SkyPilot will automatically create and mount the volume to the specified path.
+
     .. tab-item:: Create instance volume
         :sync: new-instance-volume-tab
 
-        To create and mount a new instance volume:
-
-        1. Omit the name field, which will be ignored even if specified
-        2. Specify the desired volume configuration (storage_type, etc.)
-
-        SkyPilot will automatically create and mount the volume to the specified path.
-        Note that instance volumes are temporary and will be lost when the instance is stopped or terminated.
+        To create and mount a new instance volume (temporary disk; will be lost when the cluster is stopped or terminated):
 
         .. code-block:: yaml
 
@@ -100,12 +96,16 @@ There are three ways to mount volumes:
               store: volume
               config:
                 storage_type: instance
-                disk_size: 100  # GiB.
 
           resources:
+            # Must specify cloud.
             cloud: gcp
-            # region: us-central1
-            # zone: us-central1-a
+
+        Note that the ``name`` and ``config.disk_size`` fields are unsupported,
+        and will be ignored even if specified.
+
+        SkyPilot will automatically create and mount the volume to the specified path.
+
 
 Configuration options
 ~~~~~~~~~~~~~~~~~~~~~
@@ -135,7 +135,7 @@ Here's a complete example showing all available configuration options:
       persistent: false
 
       config:
-        # Size of the volume in GiB.
+        # Size of the volume in GiB. Ignored for instance volumes.
         disk_size: 100
 
         # Type of the volume, either 'network' or 'instance'.
