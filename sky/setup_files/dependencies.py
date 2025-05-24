@@ -57,6 +57,7 @@ install_requires = [
     'httpx',
     'setproctitle',
     'sqlalchemy',
+    'psycopg2-binary',
 ]
 
 local_ray = [
