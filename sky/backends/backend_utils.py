@@ -2165,7 +2165,7 @@ def refresh_cluster_record(
     # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
     # using the correct cloud credentials.
     workspace = record.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-    with skypilot_config.with_active_workspace(workspace):
+    with skypilot_config.local_active_workspace_ctx(workspace):
         check_owner_identity(cluster_name)
 
         if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
