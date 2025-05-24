@@ -68,6 +68,7 @@ from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -701,7 +702,15 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
 
 
 def update_config_no_lock(config: config_utils.Config) -> None:
-    """Dumps the new config to a file."""
+    """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
+
+    Args:
+        config: The config to save and sync.
+    """
     global_config_path = os.path.expanduser(get_user_config_path())
     common_utils.dump_yaml(global_config_path, dict(config))
+
+    # Sync to Kubernetes ConfigMap if running in Kubernetes environment
+    config_map_utils.patch_configmap_with_config(config, global_config_path)
+
     _reload_config()

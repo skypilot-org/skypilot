@@ -38,6 +38,8 @@ spec:
         env:
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
+        - name: SKYPILOT_RELEASE_NAME
+          value: {{ .Release.Name | quote }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -63,9 +65,16 @@ spec:
           {{- end }}
           {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
-          echo "Linking config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
-          # The configmap serves as the ground truth for the config.yaml file, read-only
-          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          echo "Setting up config.yaml from ConfigMap \`{{ .Release.Name }}-config\` as authoritative source"
+          # Copy ConfigMap config to PVC location, making ConfigMap the source of truth
+          # This ensures that ConfigMap always overrides any existing config on PVC
+          cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          echo "Config successfully copied from ConfigMap to /root/.sky/config.yaml"
+          {{- else }}
+          mkdir -p /root/.sky
+          echo "No ConfigMap provided, initializing sync from PVC to ConfigMap if needed"
+          # Initialize ConfigMap sync to ensure any existing PVC config becomes the source of truth
+          python3 -c "import os, sys; sys.path.insert(0, '/sky'); from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
           {{- end }}
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
