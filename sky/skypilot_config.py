@@ -57,6 +57,8 @@ import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+import filelock
+
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -120,10 +122,17 @@ class ConfigContext:
 
 
 # The global loaded config.
-_global_config_context = ConfigContext()
-_reload_config_lock = threading.Lock()
-
 _active_workspace_context = threading.local()
+_global_config_context = ConfigContext()
+
+SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
+
+def get_skypilot_config_lock_path() -> str:
+    """Get the path for the SkyPilot config lock file."""
+    lock_path = os.path.expanduser(SKYPILOT_CONFIG_LOCK_PATH)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    return lock_path
+
 
 
 def _get_config_context() -> ConfigContext:
@@ -389,7 +398,7 @@ def overlay_skypilot_config(
 
 def safe_reload_config() -> None:
     """Reloads the config, safe to be called concurrently."""
-    with _reload_config_lock:
+    with filelock.FileLock(get_skypilot_config_lock_path()):
         _reload_config()
 
 
@@ -689,3 +698,10 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         overlay_skypilot_config(original_config=_get_loaded_config(),
                                 override_configs=parsed_config))
     return parsed_config
+
+def update_config_no_lock(config: config_utils.Config) -> None:
+    """Dumps the new config to a file."""
+    global_config_path = os.path.expanduser(get_user_config_path())
+    common_utils.dump_yaml(global_config_path, dict(config))
+    _reload_config()
+

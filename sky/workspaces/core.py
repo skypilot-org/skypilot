@@ -19,15 +19,7 @@ from sky.utils import schemas
 logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
-_WORKSPACE_CONFIG_LOCK_PATH = '~/.sky/locks/.workspace_config.lock'
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
-
-
-def _get_workspace_config_lock_path() -> str:
-    """Get the path for the workspace configuration lock file."""
-    lock_path = os.path.expanduser(_WORKSPACE_CONFIG_LOCK_PATH)
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    return lock_path
 
 
 # =========================
@@ -59,7 +51,7 @@ def _update_workspaces_config(
     Returns:
         The updated workspaces configuration.
     """
-    lock_path = _get_workspace_config_lock_path()
+    lock_path = skypilot_config.get_skypilot_config_lock_path()
     try:
         with filelock.FileLock(lock_path,
                                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
@@ -75,9 +67,7 @@ def _update_workspaces_config(
             current_config['workspaces'] = current_workspaces
 
             # Write the configuration back to the file
-            config_file_path = os.path.expanduser(
-                skypilot_config.get_user_config_path())
-            common_utils.dump_yaml(config_file_path, current_config)
+            skypilot_config.update_config_no_lock(current_config)
 
             return current_workspaces
     except filelock.Timeout as e:
