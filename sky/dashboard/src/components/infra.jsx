@@ -27,6 +27,7 @@ export function InfrastructureSection({
   groupedPerContextGPUs,
   groupedPerNodeGPUs,
   handleContextClick,
+  contextStats = {},
   isSSH = false, // To differentiate between SSH and Kubernetes
 }) {
   if (isLoading && !isDataLoaded) {
@@ -79,16 +80,22 @@ export function InfrastructureSection({
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/3">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                         {isSSH ? 'Node Pool' : 'Context'}
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Clusters
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Jobs
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Nodes
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/3">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                         GPU Types
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         #GPUs
                       </th>
                     </tr>
@@ -103,6 +110,15 @@ export function InfrastructureSection({
                         (sum, gpu) => sum + (gpu.gpu_total || 0),
                         0
                       );
+
+                      // Get cluster and job counts for this context
+                      const contextStatsKey = isSSH
+                        ? `ssh/${context.replace(/^ssh-/, '')}` // Remove ssh- prefix and add ssh/ prefix
+                        : `kubernetes/${context}`; // Add kubernetes/ prefix
+                      const stats = contextStats[contextStatsKey] || {
+                        clusters: 0,
+                        jobs: 0,
+                      };
 
                       // Format GPU types based on context type
                       const gpuTypes = (() => {
@@ -136,6 +152,28 @@ export function InfrastructureSection({
                                   : displayName}
                               </span>
                             </NonCapitalizedTooltip>
+                          </td>
+                          <td className="p-3">
+                            {stats.clusters > 0 ? (
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                {stats.clusters}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                0
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {stats.jobs > 0 ? (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                {stats.jobs}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                0
+                              </span>
+                            )}
                           </td>
                           <td className="p-3">{nodes.length}</td>
                           <td className="p-3">{gpuTypes || '-'}</td>
@@ -373,6 +411,7 @@ export function GPUs() {
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
+  const [contextStats, setContextStats] = useState({});
 
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
@@ -390,12 +429,14 @@ export function GPUs() {
         allGPUs: fetchedAllGPUs,
         perContextGPUs: fetchedPerContextGPUs,
         perNodeGPUs: fetchedPerNodeGPUs,
+        contextStats: fetchedContextStats,
       } = gpusResponse;
 
       setAllKubeContextNames(fetchedAllKubeContextNames || []);
       setAllGPUs(fetchedAllGPUs || []);
       setPerContextGPUs(fetchedPerContextGPUs || []);
       setPerNodeGPUs(fetchedPerNodeGPUs || []);
+      setContextStats(fetchedContextStats || {});
       setKubeDataLoaded(true);
     } catch (err) {
       console.error('Error fetching Kubernetes data:', err);
@@ -403,6 +444,7 @@ export function GPUs() {
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
+      setContextStats({});
     } finally {
       setKubeLoading(false);
     }
@@ -702,6 +744,7 @@ export function GPUs() {
         groupedPerContextGPUs={groupedPerContextGPUs}
         groupedPerNodeGPUs={groupedPerNodeGPUs}
         handleContextClick={handleContextClick}
+        contextStats={contextStats}
         isSSH={false}
       />
     );
@@ -718,6 +761,7 @@ export function GPUs() {
         groupedPerContextGPUs={groupedPerContextGPUs}
         groupedPerNodeGPUs={groupedPerNodeGPUs}
         handleContextClick={handleContextClick}
+        contextStats={contextStats}
         isSSH={true}
       />
     );

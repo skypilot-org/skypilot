@@ -81,6 +81,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         cluster: cluster.name,
         user: cluster.user_name,
         cloud: cluster.cloud,
+        region: cluster.region,
         infra: region_or_zone
           ? cluster.cloud + ' (' + region_or_zone + ')'
           : cluster.cloud,
