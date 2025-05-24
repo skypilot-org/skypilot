@@ -3,9 +3,9 @@
 Using an Auth Proxy with the SkyPilot API Server
 ================================================
 
-You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as Okta.
+You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as :ref:`Okta <oauth2-proxy-okta>`.
 
-The SkyPilot implementation is quite flexible and will generally work behind most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta, see :ref:`oauth2-proxy-okta`.
+The SkyPilot implementation is flexible and will work with most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta, see :ref:`oauth2-proxy-okta`.
 
 .. image:: ../../../images/client-server/auth-proxy-user-flow.svg
     :alt: SkyPilot with auth proxy
@@ -70,32 +70,32 @@ SkyPilot will use the user info passed by the auth proxy in your SkyPilot API se
 Setting up OAuth2 Proxy with Okta
 ---------------------------------
 
-The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup.
+The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup. 
+
+To integrate with Okta, OAuth2 Proxy uses OpenID Connect (OIDC) and follows the `Authorization Code flow <https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/>`__ recommended by Okta.
 
 Here's how to set it up:
 
 Create application in Okta
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-From your Okta admin panel, navigate to **Applications > Applications**, then click the **Create App Integration** button.
+1. From your Okta admin panel, navigate to **Applications > Applications**, then click the **Create App Integration** button.
 
-* For **Sign-in method**, choose **OIDC - OpenID Connect**
-* For **Application type**, chose **Web Application**
+   * **Sign-in method:** ``OIDC - OpenID Connect``
+   * **Application type:** ``Web Application``
 
 .. image:: ../../../images/client-server/okta-setup.png
     :alt: SkyPilot token page
     :align: center
     :width: 80%
 
-Click **Next**.
+2. Configure the application:
+    
+   * **App integration name:** ``SkyPilot API Server`` or any other name.
+   * **Sign-in redirect URIs:** ``<ENDPOINT>/oauth2/callback``, where ``<ENDPOINT>`` is your API server endpoint. e.g. ``http://skypilot.example.com/oauth2/callback``
+   * **Assignments > Controlled access:** ``Allow everyone in your organization to access``, unless you want to limit access to select groups.
 
-Optionally, set a name for the application such as ``SkyPilot API Server``. Then, set the following settings:
-
-* Set the **Sign-in redirect URIs** to ``<ENDPOINT>/oauth2/callback``, where ``<ENDPOINT>`` is your API server endpoint.
-  * e.g. ``http://a.b.c.d/oauth2/callback``
-* Set **Assignments > Controlled access** to **Allow everyone in your organization to access**, unless you want to limit access to select groups.
-
-Click **Save**. You will need the Client ID and a Client Secret in the next step.
+3. Click **Save**. You will need the Client ID and a Client Secret in the next step.
 
 Deploy in Helm
 ~~~~~~~~~~~~~~
@@ -121,6 +121,14 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to Okta to sign in.
 
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
+
+Okta Integration FAQ
+~~~~~~~~~~~~~~~~~~~~
+
+* I'm getting a `400 Bad Request error <https://support.okta.com/help/s/article/The-redirect-uri-parameter-must-be-an-absolute-URI?language=en_US>`__  from Okta when I open the endpoint URL in a browser.
+
+  Your proxy may be configured to redirect to a different URL (e.g., changing the URL from ``http`` to ``https``). Make sure to set the ``Sign-in redirect URIs`` in Okta application settings to all possible URLs that your proxy may redirect to, including HTTP and HTTPS endpoints.
+
 
 .. _auth-proxy-byo:
 

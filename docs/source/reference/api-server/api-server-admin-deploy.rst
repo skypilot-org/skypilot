@@ -44,7 +44,7 @@ Install the SkyPilot Helm chart with the following command:
     NAMESPACE=skypilot
     # RELEASE_NAME is the name of the helm release, must be unique within the namespace
     RELEASE_NAME=skypilot
-    # Replace with your username and password to configure the basic auth credentials for the API server
+    # Set up basic username/password HTTP auth, or use OAuth2 proxy
     WEB_USERNAME=skypilot
     WEB_PASSWORD=yourpassword
     AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
@@ -417,6 +417,15 @@ Following tabs describe how to configure credentials for different clouds on the
         Note that manually configured credentials will not be persisted across API server restarts.
 
         Support for configuring other clouds through secrets is coming soon!
+
+
+Optional: Set up OAuth2 proxy
+-----------------------------
+
+In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2 proxy to securely authenticate users.
+
+Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>`.
+
 
 Upgrade the API server
 -----------------------
