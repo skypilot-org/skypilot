@@ -385,19 +385,16 @@ export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
 
-    const scheduleResponse = await fetch(
-      `${ENDPOINT}/workspaces/update`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          workspace_name: workspaceName,
-          config: config 
-        }),
-      }
-    );
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/update`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        workspace_name: workspaceName,
+        config: config,
+      }),
+    });
 
     if (!scheduleResponse.ok) {
       throw new Error(
@@ -420,19 +417,16 @@ export async function updateWorkspace(workspaceName, config) {
 // Create new workspace
 export const createWorkspace = async (workspaceName, config) => {
   try {
-    const scheduleResponse = await fetch(
-      `${ENDPOINT}/workspaces/create`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          workspace_name: workspaceName,
-          config: config 
-        }),
-      }
-    );
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        workspace_name: workspaceName,
+        config: config,
+      }),
+    });
 
     if (!scheduleResponse.ok) {
       const errorText = await scheduleResponse.text();
@@ -458,18 +452,15 @@ export async function deleteWorkspace(workspaceName) {
   try {
     console.log(`Deleting workspace ${workspaceName}`);
 
-    const scheduleResponse = await fetch(
-      `${ENDPOINT}/workspaces/delete`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          workspace_name: workspaceName 
-        }),
-      }
-    );
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/delete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        workspace_name: workspaceName,
+      }),
+    });
 
     if (!scheduleResponse.ok) {
       throw new Error(
