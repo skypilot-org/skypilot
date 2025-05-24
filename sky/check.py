@@ -70,7 +70,8 @@ def check_capabilities(
                            sky_cloud.CloudCapability]
         ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
                 str, Dict[str, str]]]]]:
-            with skypilot_config.local_active_workspace_ctx(current_workspace_name):
+            with skypilot_config.local_active_workspace_ctx(
+                    current_workspace_name):
                 # Have to override again for specific thread, as the
                 # local_active_workspace_ctx is thread-local.
                 cloud_tuple, capability = payload
