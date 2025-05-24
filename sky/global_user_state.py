@@ -131,7 +131,8 @@ def create_table():
     # https://github.com/microsoft/WSL/issues/2395
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
-    if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE and
+    if (_SQLALCHEMY_ENGINE.dialect.name
+            == db_utils.SQLAlchemyDialect.SQLITE.value and
             not common_utils.is_wsl()):
         try:
             with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -224,8 +225,8 @@ def add_or_update_user(user: models.User):
         return
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_stmnt = sqlite.insert(user_table).values(id=user.id,
                                                             name=user.name)
             do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -233,7 +234,7 @@ def add_or_update_user(user: models.User):
                 set_={user_table.c.name: user.name})
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -349,8 +350,8 @@ def add_or_update_cluster(cluster_name: str,
                 'workspace': active_workspace,
             })
 
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_stmnt = sqlite.insert(cluster_table).values(
                 name=cluster_name,
                 **conditional_values,
@@ -377,7 +378,7 @@ def add_or_update_cluster(cluster_name: str,
                 })
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -389,8 +390,8 @@ def add_or_update_cluster(cluster_name: str,
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
 
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_stmnt = sqlite.insert(cluster_history_table).values(
                 cluster_hash=cluster_hash,
                 name=cluster_name,
@@ -414,7 +415,7 @@ def add_or_update_cluster(cluster_name: str,
                 })
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -501,12 +502,12 @@ def get_handle_from_cluster_name(
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             rows = session.query(cluster_table).filter(
                 cluster_table.c.name.op('GLOB')(cluster_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             # postgres does not support GLOB
             raise ValueError('Unsupported database dialect')
@@ -850,8 +851,8 @@ def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_stmnt = sqlite.insert(config_table).values(
                 key=_get_enabled_clouds_key(cloud_capability, workspace),
                 value=json.dumps(enabled_clouds))
@@ -860,7 +861,7 @@ def set_enabled_clouds(enabled_clouds: List[str],
                 set_={config_table.c.value: json.dumps(enabled_clouds)})
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -889,8 +890,8 @@ def add_or_update_storage(storage_name: str,
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_stmnt = sqlite.insert(storage_table).values(
                 name=storage_name,
                 handle=handle,
@@ -907,7 +908,7 @@ def add_or_update_storage(storage_name: str,
                 })
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -970,12 +971,12 @@ def get_handle_from_storage_name(
 def get_glob_storage_name(storage_name: str) -> List[str]:
     assert storage_name is not None, 'storage_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
-           ):
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
             rows = session.query(storage_table).filter(
                 storage_table.c.name.op('GLOB')(storage_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # TODO(syang) support postgres dialect
             # postgres does not support GLOB
             raise ValueError('Unsupported database dialect')

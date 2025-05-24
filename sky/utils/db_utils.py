@@ -94,7 +94,7 @@ def add_column_to_table_sqlalchemy(
 ):
     """Add a column to a table."""
     dialect = session.bind.dialect
-    if dialect.name == SQLAlchemyDialect.SQLITE:
+    if dialect.name == SQLAlchemyDialect.SQLITE.value:
         try:
             session.execute(
                 sqlalchemy.text(f'ALTER TABLE {table_name} '
@@ -114,7 +114,7 @@ def add_column_to_table_sqlalchemy(
                 pass
             else:
                 raise
-    elif dialect.name == SQLAlchemyDialect.POSTGRESQL:
+    elif dialect.name == SQLAlchemyDialect.POSTGRESQL.value:
         # TODO(syang) support postgres dialect
         session.rollback()
         raise ValueError('Unsupported database dialect')
