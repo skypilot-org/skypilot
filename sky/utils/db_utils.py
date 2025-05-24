@@ -1,12 +1,13 @@
 """Utils for sky databases."""
 import contextlib
+import enum
 import sqlite3
 import threading
 import typing
 from typing import Any, Callable, Optional
 
+import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import text
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -27,11 +28,10 @@ if typing.TYPE_CHECKING:
 # For more info, see the PR description for #4552.
 _DB_TIMEOUT_S = 60
 
-# sqlite dialect
-SQLALCHEMY_DIALECT_SQLITE = 'sqlite'
-# postgresql dialect
-# this dialect is not supported yet.
-SQLALCHEMY_DIALECT_POSTGRESQL = 'postgresql'
+
+class SQLAlchemyDialect(enum.Enum):
+    SQLITE = 'sqlite'
+    POSTGRESQL = 'postgresql'
 
 
 @contextlib.contextmanager
@@ -94,27 +94,27 @@ def add_column_to_table_sqlalchemy(
 ):
     """Add a column to a table."""
     dialect = session.bind.dialect
-    if dialect.name == SQLALCHEMY_DIALECT_SQLITE:
+    if dialect.name == SQLAlchemyDialect.SQLITE:
         try:
             session.execute(
-                text(f'ALTER TABLE {table_name} '
-                     f'ADD COLUMN {column_name} {column_type}'))
+                sqlalchemy.text(f'ALTER TABLE {table_name} '
+                                f'ADD COLUMN {column_name} {column_type}'))
             if copy_from is not None:
                 session.execute(
-                    text(f'UPDATE {table_name} '
-                         f'SET {column_name} = {copy_from}'))
+                    sqlalchemy.text(f'UPDATE {table_name} '
+                                    f'SET {column_name} = {copy_from}'))
             if value_to_replace_existing_entries is not None:
                 session.execute(
-                    text(f'UPDATE {table_name} '
-                         f'SET {column_name} = :replacement_value '
-                         f'WHERE {column_name} IS NULL'),
+                    sqlalchemy.text(f'UPDATE {table_name} '
+                                    f'SET {column_name} = :replacement_value '
+                                    f'WHERE {column_name} IS NULL'),
                     {'replacement_value': value_to_replace_existing_entries})
         except sqlalchemy_exc.OperationalError as e:
             if 'duplicate column name' in str(e):
                 pass
             else:
                 raise
-    elif dialect.name == SQLALCHEMY_DIALECT_POSTGRESQL:
+    elif dialect.name == SQLAlchemyDialect.POSTGRESQL:
         # TODO(syang) support postgres dialect
         session.rollback()
         raise ValueError('Unsupported database dialect')

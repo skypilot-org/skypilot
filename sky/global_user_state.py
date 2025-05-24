@@ -15,18 +15,11 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-from sqlalchemy import Column
-from sqlalchemy import create_engine
-from sqlalchemy import desc
+import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import Table
-from sqlalchemy import text
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session
-from sqlalchemy.types import Integer
-from sqlalchemy.types import LargeBinary
-from sqlalchemy.types import Text
+from sqlalchemy import orm
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import declarative
 
 from sky import models
 from sky import sky_logging
@@ -50,55 +43,60 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
-_SQLALCHEMY_ENGINE = create_engine(f'sqlite:///{_DB_PATH}')
+_SQLALCHEMY_ENGINE = sqlalchemy.create_engine(f'sqlite:///{_DB_PATH}')
 
-Base = declarative_base()
+Base = declarative.declarative_base()
 
-config_table = Table(
+config_table = sqlalchemy.Table(
     'config',
     Base.metadata,
-    Column('key', Text, primary_key=True),
-    Column('value', Text),
+    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('value', sqlalchemy.Text),
 )
 
-user_table = Table(
+user_table = sqlalchemy.Table(
     'users',
     Base.metadata,
-    Column('id', Text, primary_key=True),
-    Column('name', Text),
+    sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
 )
 
-cluster_table = Table(
+cluster_table = sqlalchemy.Table(
     'clusters',
     Base.metadata,
-    Column('name', Text, primary_key=True),
-    Column('launched_at', Integer),
-    Column('handle', LargeBinary),
-    Column('last_use', Text),
-    Column('status', Text),
-    Column('autostop', Integer, server_default='-1'),
-    Column('to_down', Integer, server_default='0'),
-    Column('metadata', Text, server_default='{}'),
-    Column('owner', Text, server_default=None),
-    Column('cluster_hash', Text, server_default=None),
-    Column('storage_mounts_metadata', LargeBinary, server_default=None),
-    Column('cluster_ever_up', Integer, server_default='0'),
-    Column('status_updated_at', Integer, server_default=None),
-    Column('config_hash', Text, server_default=None),
-    Column('user_hash', Text, server_default=None),
-    Column('workspace',
-           Text,
-           server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('last_use', sqlalchemy.Text),
+    sqlalchemy.Column('status', sqlalchemy.Text),
+    sqlalchemy.Column('autostop', sqlalchemy.Integer, server_default='-1'),
+    sqlalchemy.Column('to_down', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
+    sqlalchemy.Column('owner', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('storage_mounts_metadata',
+                      sqlalchemy.LargeBinary,
+                      server_default=None),
+    sqlalchemy.Column('cluster_ever_up', sqlalchemy.Integer,
+                      server_default='0'),
+    sqlalchemy.Column('status_updated_at',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('config_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace',
+                      sqlalchemy.Text,
+                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
 )
 
-storage_table = Table(
+storage_table = sqlalchemy.Table(
     'storage',
     Base.metadata,
-    Column('name', Text, primary_key=True),
-    Column('launched_at', Integer),
-    Column('handle', LargeBinary),
-    Column('last_use', Text),
-    Column('status', Text),
+    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('last_use', sqlalchemy.Text),
+    sqlalchemy.Column('status', sqlalchemy.Text),
 )
 
 # Table for Cluster History
@@ -114,16 +112,16 @@ storage_table = Table(
 #  Actual launched resources fetched from handle for cluster.
 
 # num_nodes: Optional[int] number of nodes launched.
-cluster_history_table = Table(
+cluster_history_table = sqlalchemy.Table(
     'cluster_history',
     Base.metadata,
-    Column('cluster_hash', Text, primary_key=True),
-    Column('name', Text),
-    Column('num_nodes', Integer),
-    Column('requested_resources', LargeBinary),
-    Column('launched_resources', LargeBinary),
-    Column('usage_intervals', LargeBinary),
-    Column('user_hash', Text),
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('num_nodes', sqlalchemy.Integer),
+    sqlalchemy.Column('requested_resources', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text),
 )
 
 
@@ -133,11 +131,11 @@ def create_table():
     # https://github.com/microsoft/WSL/issues/2395
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
-    if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLALCHEMY_DIALECT_SQLITE
-            and not common_utils.is_wsl()):
+    if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE and
+            not common_utils.is_wsl()):
         try:
-            with Session(_SQLALCHEMY_ENGINE) as session:
-                session.execute(text('PRAGMA journal_mode=WAL'))
+            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
                 session.commit()
         except sqlalchemy_exc.OperationalError as e:
             if 'database is locked' not in str(e):
@@ -151,7 +149,7 @@ def create_table():
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Add autostop column to clusters table
         db_utils.add_column_to_table_sqlalchemy(session, 'clusters', 'autostop',
                                                 'INTEGER DEFAULT -1')
@@ -225,17 +223,17 @@ def add_or_update_user(user: models.User):
     if user.name is None:
         return
 
-    with Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
-            insert_stmnt = sqlite_insert(user_table).values(id=user.id,
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
+            insert_stmnt = sqlite.insert(user_table).values(id=user.id,
                                                             name=user.name)
             do_update_stmt = insert_stmnt.on_conflict_do_update(
                 index_elements=[user_table.c.id],
                 set_={user_table.c.name: user.name})
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -246,7 +244,7 @@ def add_or_update_user(user: models.User):
 
 
 def get_user(user_id: str) -> models.User:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(user_table).filter_by(id=user_id).first()
         if row is None:
             return models.User(id=user_id)
@@ -254,7 +252,7 @@ def get_user(user_id: str) -> models.User:
 
 
 def get_all_users() -> List[models.User]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
         return [models.User(id=row.id, name=row.name) for row in rows]
 
@@ -331,7 +329,7 @@ def add_or_update_cluster(cluster_name: str,
             'config_hash': config_hash,
         })
 
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # with_for_update() locks the row until commit() or rollback()
         # is called, or until the code escapes the with block.
         cluster_row = session.query(cluster_table).filter_by(
@@ -351,9 +349,9 @@ def add_or_update_cluster(cluster_name: str,
                 'workspace': active_workspace,
             })
 
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
-            insert_stmnt = sqlite_insert(cluster_table).values(
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
+            insert_stmnt = sqlite.insert(cluster_table).values(
                 name=cluster_name,
                 **conditional_values,
                 handle=handle,
@@ -379,7 +377,7 @@ def add_or_update_cluster(cluster_name: str,
                 })
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -391,9 +389,9 @@ def add_or_update_cluster(cluster_name: str,
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
 
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
-            insert_stmnt = sqlite_insert(cluster_history_table).values(
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
+            insert_stmnt = sqlite.insert(cluster_history_table).values(
                 cluster_hash=cluster_hash,
                 name=cluster_name,
                 num_nodes=launched_nodes,
@@ -416,7 +414,7 @@ def add_or_update_cluster(cluster_name: str,
                 })
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -441,7 +439,7 @@ def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
 def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     handle = pickle.dumps(cluster_handle)
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(cluster_table).filter_by(name=cluster_name).update(
             {cluster_table.c.handle: handle})
         session.commit()
@@ -449,7 +447,7 @@ def update_cluster_handle(cluster_name: str,
 
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(cluster_table).filter_by(name=cluster_name).update(
             {cluster_table.c.last_use: common_utils.get_current_command()})
         session.commit()
@@ -460,7 +458,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # usage_intervals is not None and not empty
         if usage_intervals:
             assert cluster_hash is not None, cluster_name
@@ -493,7 +491,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
         if row is None:
             return None
@@ -502,13 +500,13 @@ def get_handle_from_cluster_name(
 
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
             rows = session.query(cluster_table).filter(
                 cluster_table.c.name.op('GLOB')(cluster_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             # postgres does not support GLOB
             raise ValueError('Unsupported database dialect')
@@ -520,7 +518,7 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
     current_time = int(time.time())
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update({
                 cluster_table.c.status: status.value,
@@ -534,7 +532,7 @@ def set_cluster_status(cluster_name: str,
 
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update({
                 cluster_table.c.autostop: idle_minutes,
@@ -547,7 +545,7 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
 
 
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
         if row is None or row.launched_at is None:
             return None
@@ -555,7 +553,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
 
 
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
         if row is None or row.metadata is None:
             return None
@@ -563,7 +561,7 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 
 
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update(
                 {cluster_table.c.metadata: json.dumps(metadata)})
@@ -575,7 +573,7 @@ def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
 
 def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
         if row is None or row.storage_mounts_metadata is None:
             return None
@@ -584,7 +582,7 @@ def get_cluster_storage_mounts_metadata(
 
 def set_cluster_storage_mounts_metadata(
         cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update({
                 cluster_table.c.storage_mounts_metadata:
@@ -601,7 +599,7 @@ def _get_cluster_usage_intervals(
 ) -> Optional[List[Tuple[int, Optional[int]]]]:
     if cluster_hash is None:
         return None
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).first()
         if rows is None or rows.usage_intervals is None:
@@ -638,7 +636,7 @@ def _get_cluster_duration(cluster_hash: str) -> int:
 def _set_cluster_usage_intervals(
         cluster_hash: str, usage_intervals: List[Tuple[int,
                                                        Optional[int]]]) -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).update({
                 cluster_history_table.c.usage_intervals:
@@ -655,7 +653,7 @@ def set_owner_identity_for_cluster(cluster_name: str,
     if owner_identity is None:
         return
     owner_identity_str = json.dumps(owner_identity)
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update(
                 {cluster_table.c.owner: owner_identity_str})
@@ -666,7 +664,7 @@ def set_owner_identity_for_cluster(cluster_name: str,
 
 
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
         if row is None or row.cluster_hash is None:
             return None
@@ -675,7 +673,7 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
 
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).first()
         if row is None:
@@ -720,7 +718,7 @@ def _load_storage_mounts_metadata(
 @context_utils.cancellation_guard
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).filter_by(name=cluster_name).first()
         if rows is None:
             return None
@@ -750,9 +748,9 @@ def get_cluster_from_name(
 
 
 def get_clusters() -> List[Dict[str, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).order_by(
-            desc(cluster_table.c.launched_at)).all()
+            sqlalchemy.desc(cluster_table.c.launched_at)).all()
         records = []
         for row in rows:
             user_hash = _get_user_hash_or_current_user(row.user_hash)
@@ -783,7 +781,7 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(
             cluster_history_table.join(cluster_table,
                                        cluster_history_table.c.cluster_hash ==
@@ -819,7 +817,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
 
 
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
         return [row.name for row in rows]
@@ -827,7 +825,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(config_table).filter_by(
             key=_get_enabled_clouds_key(cloud_capability, workspace)).first()
         ret = []
@@ -851,10 +849,10 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
 def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
-            insert_stmnt = sqlite_insert(config_table).values(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
+            insert_stmnt = sqlite.insert(config_table).values(
                 key=_get_enabled_clouds_key(cloud_capability, workspace),
                 value=json.dumps(enabled_clouds))
             do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -862,7 +860,7 @@ def set_enabled_clouds(enabled_clouds: List[str],
                 set_={config_table.c.value: json.dumps(enabled_clouds)})
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -890,10 +888,10 @@ def add_or_update_storage(storage_name: str,
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
-    with Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
-            insert_stmnt = sqlite_insert(storage_table).values(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
+            insert_stmnt = sqlite.insert(storage_table).values(
                 name=storage_name,
                 handle=handle,
                 last_use=last_use,
@@ -909,7 +907,7 @@ def add_or_update_storage(storage_name: str,
                 })
             session.execute(do_update_stmt)
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             session.rollback()
             raise ValueError('Unsupported database dialect')
@@ -921,14 +919,14 @@ def add_or_update_storage(storage_name: str,
 
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(storage_table).filter_by(name=storage_name).delete()
         session.commit()
 
 
 def set_storage_status(storage_name: str,
                        status: status_lib.StorageStatus) -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(storage_table).filter_by(
             name=storage_name).update({storage_table.c.status: status.value})
         session.commit()
@@ -939,7 +937,7 @@ def set_storage_status(storage_name: str,
 
 def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert storage_name is not None, 'storage_name cannot be None'
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(storage_table).filter_by(name=storage_name).first()
         if row:
             return status_lib.StorageStatus[row.status]
@@ -948,7 +946,7 @@ def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
 
 def set_storage_handle(storage_name: str,
                        handle: 'Storage.StorageMetadata') -> None:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(storage_table).filter_by(
             name=storage_name).update(
                 {storage_table.c.handle: pickle.dumps(handle)})
@@ -962,7 +960,7 @@ def get_handle_from_storage_name(
         storage_name: Optional[str]) -> Optional['Storage.StorageMetadata']:
     if storage_name is None:
         return None
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(storage_table).filter_by(name=storage_name).first()
         if row:
             return pickle.loads(row.handle)
@@ -971,13 +969,13 @@ def get_handle_from_storage_name(
 
 def get_glob_storage_name(storage_name: str) -> List[str]:
     assert storage_name is not None, 'storage_name cannot be None'
-    with Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLALCHEMY_DIALECT_SQLITE):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name == db_utils.SQLAlchemyDialect.SQLITE
+           ):
             rows = session.query(storage_table).filter(
                 storage_table.c.name.op('GLOB')(storage_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLALCHEMY_DIALECT_POSTGRESQL):
+              db_utils.SQLAlchemyDialect.POSTGRESQL):
             # TODO(syang) support postgres dialect
             # postgres does not support GLOB
             raise ValueError('Unsupported database dialect')
@@ -987,14 +985,14 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 
 
 def get_storage_names_start_with(starts_with: str) -> List[str]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(storage_table).filter(
             storage_table.c.name.like(f'{starts_with}%')).all()
         return [row.name for row in rows]
 
 
 def get_storage() -> List[Dict[str, Any]]:
-    with Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(storage_table).all()
         records = []
         for row in rows:
