@@ -460,7 +460,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                 <Card className="h-full flex flex-col">
                   <CardHeader>
                     <CardTitle className="text-base font-normal">
-                      {isNewWorkspace ? 'New Workspace YAML' : 'Edit Workspace YAML'}
+                      {isNewWorkspace
+                        ? 'New Workspace YAML'
+                        : 'Edit Workspace YAML'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
