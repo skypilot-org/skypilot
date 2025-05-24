@@ -424,7 +424,7 @@ Optional: Set up OAuth2 proxy
 
 In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2 proxy to securely authenticate users.
 
-Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>`.
+Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
 
 Upgrade the API server
