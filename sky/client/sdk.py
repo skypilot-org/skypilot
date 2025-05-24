@@ -1750,7 +1750,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, str]:
+def api_info() -> Dict[str, Any]:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -1763,7 +1763,14 @@ def api_info() -> Dict[str, str]:
                 'api_version': '1',
                 'commit': 'abc1234567890',
                 'version': '1.0.0',
+                'version_on_disk': '1.0.0',
+                'user': {
+                    'name': 'test@example.com',
+                    'id': '12345abcd',
+                },
             }
+
+        Note that user may be None if we are not using an auth proxy.
 
     """
     response = requests.get(f'{server_common.get_server_url()}/api/health',
