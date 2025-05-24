@@ -310,6 +310,13 @@ class Test(NamedTuple):
         message = message.replace('\n', f'\n{prefix} ')
         print(message, file=sys.stderr, flush=True)
 
+    def copy(self, **override: Dict[str, Any]):
+        return Test(name=override.pop('name', self.name),
+                    commands=override.pop('commands', self.commands),
+                    teardown=override.pop('teardown', self.teardown),
+                    timeout=override.pop('timeout', self.timeout),
+                    env=override.pop('env', self.env))
+
 
 def get_timeout(generic_cloud: str,
                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
@@ -360,7 +367,7 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 
 @contextlib.contextmanager
 def override_sky_config(
-        test: Test, env_dict: Dict[str, str]) -> Generator[None, None, None]:
+        test: Test, env_dict: Dict[str, str]) -> Generator[Test, None, None]:
     override_sky_config_dict = skypilot_config.config_utils.Config()
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
@@ -400,19 +407,21 @@ def override_sky_config(
 
     if is_ssh_test():
         ssh_node_pool_commands = parse_ssh_command(test.commands)
-        test.echo(
-            f'ssh_node_pool_commands: {ssh_node_pool_commands}, test.commands: {test.commands}'
-        )
+        # test.echo(
+        #     f'ssh_node_pool_commands: {ssh_node_pool_commands}, test.commands: {test.commands}'
+        # )
         if ssh_node_pool_commands:
             temp_ssh_node_pools_file = tempfile.NamedTemporaryFile(
                 mode='w', suffix='.yaml')
             with open(temp_ssh_node_pools_file.name, 'w') as f:
                 yaml.safe_dump(
                     {
-                        'test-ssh-node-pools': [
-                            f'node_pool_{index}'
-                            for index in range(len(ssh_node_pool_commands))
-                        ]
+                        'test-ssh-node-pools': {
+                            'hosts': [
+                                f'node-pool-{index}'
+                                for index in range(len(ssh_node_pool_commands))
+                            ]
+                        }
                     }, f)
 
             # Launch VMs for ssh node pools
@@ -428,19 +437,20 @@ def override_sky_config(
                     new_test_commands.append(modified_command)
                 else:
                     new_test_commands.append(command)
-            test.echo(f'new_test_commands: {new_test_commands}')
-            test.commands = new_test_commands
+            # test.echo(f'new_test_commands: {new_test_commands}')
             # Teardown ssh node pools
-            teardown_command = 'sky ssh down; sky down \'node_pool_*\''
+            teardown_command = 'sky ssh down; sky down \'node-pool-*\' -y'
+            new_teardown = None
             if test.teardown:
-                test.teardown += f'; {teardown_command}'
+                new_teardown = test.teardown + f'; {teardown_command}'
             else:
-                test.teardown = teardown_command
+                new_teardown = teardown_command
+            test = test.copy(commands=new_test_commands, teardown=new_teardown)
             env_dict[
                 ssh.
                 ENV_VAR_SSH_NODE_POOLS_CONFIG] = temp_ssh_node_pools_file.name
 
-    yield None
+    yield test
 
 
 def run_one_test(test: Test) -> None:
@@ -466,8 +476,8 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict):
-        for command in test.commands:
+    with override_sky_config(test, env_dict) as new_test:
+        for command in new_test.commands:
             write(f'+ {command}\n')
             flush()
             proc = subprocess.Popen(
@@ -479,12 +489,12 @@ def run_one_test(test: Test) -> None:
                 env=env_dict,
             )
             try:
-                proc.wait(timeout=test.timeout)
+                proc.wait(timeout=new_test.timeout)
             except subprocess.TimeoutExpired as e:
                 flush()
-                test.echo(f'Timeout after {test.timeout} seconds.')
-                test.echo(str(e))
-                write(f'Timeout after {test.timeout} seconds.\n')
+                new_test.echo(f'Timeout after {new_test.timeout} seconds.')
+                new_test.echo(str(e))
+                write(f'Timeout after {new_test.timeout} seconds.\n')
                 flush()
                 # Kill the current process.
                 proc.terminate()
@@ -503,16 +513,16 @@ def run_one_test(test: Test) -> None:
         msg = (f'{outcome}.'
                f'{reason}')
         if log_to_stdout:
-            test.echo(msg)
+            new_test.echo(msg)
         else:
             msg += f'\nLog: less -r {log_file.name}\n'
-            test.echo(msg)
+            new_test.echo(msg)
             write(msg)
 
         if (proc.returncode == 0 or
-                pytest.terminate_on_failure) and test.teardown is not None:
+                pytest.terminate_on_failure) and new_test.teardown is not None:
             subprocess_utils.run(
-                test.teardown,
+                new_test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
                 timeout=10 * 60,  # 10 mins
@@ -802,7 +812,7 @@ def parse_ssh_command(commands: List[str]) -> List[str]:
                 normal_node_cmd_parts.extend(['--cloud', cloud_val])
 
             normal_node_cmd_parts.extend(
-                ['-c', f'node_pool_{len(ssh_node_pool_commands)}', '-y'])
+                ['-c', f'node-pool-{len(ssh_node_pool_commands)}', '-y'])
             ssh_node_pool_commands.append(' '.join(normal_node_cmd_parts))
 
             # --- Handle job/service specific nodes based on YAML ---
@@ -848,7 +858,7 @@ def parse_ssh_command(commands: List[str]) -> List[str]:
                     final_job_node_cmd_parts = list(
                         job_node_base_cmd_parts)  # Start fresh for each node
                     final_job_node_cmd_parts.extend([
-                        '-c', f'node_pool_{len(ssh_node_pool_commands)}', '-y'
+                        '-c', f'node-pool-{len(ssh_node_pool_commands)}', '-y'
                     ])
                     ssh_node_pool_commands.append(
                         ' '.join(final_job_node_cmd_parts))
