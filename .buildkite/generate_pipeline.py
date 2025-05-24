@@ -122,7 +122,7 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument('--controller-cloud')
 
-    parser.add_argument('--ssh')
+    parser.add_argument('--ssh', action="store_true")
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
