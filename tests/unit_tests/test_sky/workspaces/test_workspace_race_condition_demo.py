@@ -2,13 +2,12 @@
 import concurrent.futures
 import os
 import tempfile
-import threading
 import time
 import unittest
 from unittest import mock
 
-from sky import core
 from sky.utils import common_utils
+from sky.workspaces import core
 
 
 class TestWorkspaceRaceConditionDemo(unittest.TestCase):
@@ -21,8 +20,16 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
         self.temp_config_file = os.path.join(self.temp_config_dir,
                                              'config.yaml')
 
-        # Initial config with just default workspace
-        self.initial_config = {'workspaces': {'default': {'clouds': ['aws']}}}
+        # Initial config with just default workspace using valid schema
+        self.initial_config = {
+            'workspaces': {
+                'default': {
+                    'aws': {
+                        'disabled': False
+                    }
+                }
+            }
+        }
         common_utils.dump_yaml(self.temp_config_file, self.initial_config)
 
         # Patch the config path to use our temporary file
@@ -78,14 +85,21 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
             return core._update_workspaces_config(modifier_fn)
 
         # Create two threads that update different workspaces simultaneously
+        # Using valid workspace configurations
         workspace_configs = [
             ('workspace_alpha', {
-                'clouds': ['gcp'],
-                'description': 'Alpha workspace'
+                'gcp': {
+                    'project_id': 'alpha-project',
+                    'disabled': False
+                }
             }),
             ('workspace_beta', {
-                'clouds': ['azure'],
-                'description': 'Beta workspace'
+                'azure': {
+                    'disabled': False
+                },
+                'aws': {
+                    'disabled': True
+                }
             }),
         ]
 
@@ -111,36 +125,56 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
 
         # Verify all workspaces exist with correct configurations
         self.assertIn('default', final_workspaces)
-        self.assertEqual(final_workspaces['default'], {'clouds': ['aws']})
+        self.assertEqual(final_workspaces['default'],
+                         {'aws': {
+                             'disabled': False
+                         }})
 
         self.assertIn('workspace_alpha', final_workspaces)
-        self.assertEqual(final_workspaces['workspace_alpha'], {
-            'clouds': ['gcp'],
-            'description': 'Alpha workspace'
-        })
+        self.assertEqual(
+            final_workspaces['workspace_alpha'],
+            {'gcp': {
+                'project_id': 'alpha-project',
+                'disabled': False
+            }})
 
         self.assertIn('workspace_beta', final_workspaces)
         self.assertEqual(final_workspaces['workspace_beta'], {
-            'clouds': ['azure'],
-            'description': 'Beta workspace'
+            'azure': {
+                'disabled': False
+            },
+            'aws': {
+                'disabled': True
+            }
         })
 
     def test_mixed_operations_concurrent_safety(self):
         """Test that mixed create/update/delete operations are safe concurrently."""
 
-        # First, create some initial workspaces
+        # First, create some initial workspaces using valid schema
         initial_workspaces = {
             'default': {
-                'clouds': ['aws']
+                'aws': {
+                    'disabled': False
+                }
             },
             'workspace_1': {
-                'clouds': ['gcp']
+                'gcp': {
+                    'project_id': 'workspace1-project'
+                }
             },
             'workspace_2': {
-                'clouds': ['azure']
+                'azure': {
+                    'disabled': False
+                }
             },
             'workspace_3': {
-                'clouds': ['aws', 'gcp']
+                'aws': {
+                    'disabled': False
+                },
+                'gcp': {
+                    'project_id': 'workspace3-project'
+                }
             },
         }
 
@@ -154,7 +188,11 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
         def create_workspace():
 
             def modifier(workspaces):
-                workspaces['new_workspace'] = {'clouds': ['kubernetes']}
+                workspaces['new_workspace'] = {
+                    'kubernetes': {
+                        'disabled': False
+                    }
+                }
 
             return core._update_workspaces_config(modifier)
 
@@ -162,7 +200,14 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
 
             def modifier(workspaces):
                 if 'workspace_1' in workspaces:
-                    workspaces['workspace_1']['clouds'] = ['gcp', 'aws']
+                    workspaces['workspace_1'] = {
+                        'gcp': {
+                            'project_id': 'updated-project'
+                        },
+                        'aws': {
+                            'disabled': False
+                        }
+                    }
 
             return core._update_workspaces_config(modifier)
 
@@ -200,13 +245,21 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
         self.assertIn('new_workspace', final_workspaces)
         self.assertNotIn('workspace_3', final_workspaces)
 
-        # Verify the update operation worked
-        self.assertEqual(final_workspaces['workspace_1']['clouds'],
-                         ['gcp', 'aws'])
+        # Verify the content of updated workspace
+        self.assertEqual(final_workspaces['workspace_1'], {
+            'gcp': {
+                'project_id': 'updated-project'
+            },
+            'aws': {
+                'disabled': False
+            }
+        })
 
-        # Verify the create operation worked
-        self.assertEqual(final_workspaces['new_workspace']['clouds'],
-                         ['kubernetes'])
+        # Verify the new workspace
+        self.assertEqual(final_workspaces['new_workspace'],
+                         {'kubernetes': {
+                             'disabled': False
+                         }})
 
 
 if __name__ == '__main__':

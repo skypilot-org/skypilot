@@ -10,9 +10,9 @@ from unittest import mock
 import filelock
 import pytest
 
-from sky import core
 from sky import skypilot_config
 from sky.utils import common_utils
+from sky.workspaces import core
 
 
 class TestWorkspaceConfigConcurrency(unittest.TestCase):
@@ -25,14 +25,14 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         self.temp_config_file = os.path.join(self.temp_config_dir,
                                              'config.yaml')
 
-        # Initial config
+        # Initial config with valid workspace schema
         self.initial_config = {
             'workspaces': {
-                'default': {
-                    'clouds': ['aws']
-                },
+                'default': {},
                 'test': {
-                    'clouds': ['gcp']
+                    'gcp': {
+                        'project_id': 'test-project'
+                    }
                 }
             }
         }
@@ -71,11 +71,11 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
             def modifier_fn(workspaces):
                 workspaces.update({
-                    'default': {
-                        'clouds': ['aws']
-                    },
+                    'default': {},
                     'test': {
-                        'clouds': ['gcp']
+                        'gcp': {
+                            'project_id': 'test-project'
+                        }
                     },
                     workspace_name: config
                 })
@@ -90,7 +90,15 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         def worker(thread_id):
             try:
                 workspace_name = f'workspace_{thread_id}'
-                config = {'clouds': [f'cloud_{thread_id}']}
+                # Use valid workspace config according to schema
+                config = {
+                    'aws': {
+                        'disabled': False
+                    },
+                    'gcp': {
+                        'project_id': f'project-{thread_id}'
+                    }
+                }
                 result = update_workspace(workspace_name, config)
                 results.append((thread_id, result))
             except Exception as e:
@@ -128,7 +136,14 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         for i in range(num_threads):
             workspace_name = f'workspace_{i}'
             self.assertIn(workspace_name, final_workspaces)
-            expected_config = {'clouds': [f'cloud_{i}']}
+            expected_config = {
+                'aws': {
+                    'disabled': False
+                },
+                'gcp': {
+                    'project_id': f'project-{i}'
+                }
+            }
             self.assertEqual(final_workspaces[workspace_name], expected_config)
 
     def test_lock_timeout_handling(self):
@@ -143,7 +158,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
             mock_filelock.return_value = mock_context
 
             def modifier_fn(workspaces):
-                workspaces['test'] = {'clouds': ['aws']}
+                workspaces['test'] = {'aws': {'disabled': True}}
 
             with self.assertRaises(RuntimeError) as context:
                 core._update_workspaces_config(modifier_fn)
@@ -154,12 +169,12 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
     def test_lock_file_creation(self):
         """Test that lock file and directory are created properly."""
         # Get the lock path
-        lock_path = core._get_workspace_config_lock_path()
+        lock_path = skypilot_config.get_skypilot_config_lock_path()
 
         # Verify the path is expanded and directory exists
         self.assertTrue(os.path.isabs(lock_path))
         self.assertTrue(os.path.exists(os.path.dirname(lock_path)))
-        self.assertTrue(lock_path.endswith('.workspace_config.lock'))
+        self.assertTrue(lock_path.endswith('.skypilot_config.lock'))
 
     def test_sequential_updates_preserve_data(self):
         """Test that sequential workspace updates preserve existing data."""
@@ -168,21 +183,21 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         def first_modifier(workspaces):
             workspaces.clear()
             workspaces.update({
-                'default': {
-                    'clouds': ['aws']
-                },
+                'default': {},
                 'workspace1': {
-                    'clouds': ['gcp']
+                    'gcp': {
+                        'project_id': 'project-1'
+                    }
                 }
             })
 
         result1 = core._update_workspaces_config(first_modifier)
         expected_workspaces1 = {
-            'default': {
-                'clouds': ['aws']
-            },
+            'default': {},
             'workspace1': {
-                'clouds': ['gcp']
+                'gcp': {
+                    'project_id': 'project-1'
+                }
             }
         }
         self.assertEqual(result1, expected_workspaces1)
@@ -193,7 +208,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
         # Second update (should preserve workspace1)
         def second_modifier(workspaces):
-            workspaces['workspace2'] = {'clouds': ['azure']}
+            workspaces['workspace2'] = {'azure': {'disabled': False}}
 
         result2 = core._update_workspaces_config(second_modifier)
 
@@ -201,8 +216,14 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         config_after_second = common_utils.read_yaml(self.temp_config_file)
         final_workspaces = config_after_second['workspaces']
         self.assertEqual(len(final_workspaces), 3)
-        self.assertEqual(final_workspaces['workspace1'], {'clouds': ['gcp']})
-        self.assertEqual(final_workspaces['workspace2'], {'clouds': ['azure']})
+        self.assertEqual(final_workspaces['workspace1'],
+                         {'gcp': {
+                             'project_id': 'project-1'
+                         }})
+        self.assertEqual(final_workspaces['workspace2'],
+                         {'azure': {
+                             'disabled': False
+                         }})
 
     def test_process_level_concurrency_simulation(self):
         """Test simulated process-level concurrency using ProcessPoolExecutor."""
@@ -214,11 +235,11 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
             def modifier_fn(workspaces):
                 workspaces.update({
-                    'default': {
-                        'clouds': ['aws']
-                    },
+                    'default': {},
                     'test': {
-                        'clouds': ['gcp']
+                        'gcp': {
+                            'project_id': 'test-project'
+                        }
                     },
                     workspace_name: config
                 })
@@ -237,9 +258,14 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
                                 side_effect=mock_to_dict):
                     return core._update_workspaces_config(modifier_fn)
 
-        # Create test data for multiple "processes"
+        # Create test data for multiple "processes" with valid configs
         workspace_configs = [(f'proc_workspace_{i}', {
-            'clouds': [f'proc_cloud_{i}']
+            'kubernetes': {
+                'disabled': False
+            },
+            'gcp': {
+                'project_id': f'proc-project-{i}'
+            }
         }) for i in range(3)]
 
         # Use ThreadPoolExecutor instead of ProcessPoolExecutor for testing
