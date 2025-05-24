@@ -88,6 +88,11 @@ class RequestBody(pydantic.BaseModel):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
 
+    # Allow extra fields in the request body, which is useful for backward
+    # compatibility, i.e., we can add new fields to the request body without
+    # breaking the existing old API server.
+    model_config = pydantic.ConfigDict(extra='allow')
+
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
         usage_lib_entrypoint = usage_lib.messages.usage.entrypoint
@@ -126,6 +131,7 @@ class CheckBody(RequestBody):
     """The request body for the check endpoint."""
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
+    workspace: Optional[str] = None
 
 
 class DagRequestBody(RequestBody):
@@ -525,3 +531,8 @@ class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
+
+
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None

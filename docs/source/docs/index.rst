@@ -306,6 +306,7 @@ Read the research:
    :caption: Administrator Guides
 
    ../reference/api-server/api-server
+   ../admin/workspaces
    ../cloud-setup/cloud-permissions/index
    Admin Policies <../cloud-setup/policy>
 

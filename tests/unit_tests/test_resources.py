@@ -10,6 +10,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
+from sky.skylet import constants
 from sky.utils import resources_utils
 
 GLOBAL_VALID_LABELS = {
@@ -100,7 +101,8 @@ def test_kubernetes_labels_resources():
 
 def test_no_cloud_labels_resources():
     global_user_state.set_enabled_clouds(['aws', 'gcp'],
-                                         sky_cloud.CloudCapability.COMPUTE)
+                                         sky_cloud.CloudCapability.COMPUTE,
+                                         constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -114,7 +116,8 @@ def test_no_cloud_labels_resources():
 
 def test_no_cloud_labels_resources_single_enabled_cloud():
     global_user_state.set_enabled_clouds(['aws'],
-                                         sky_cloud.CloudCapability.COMPUTE)
+                                         sky_cloud.CloudCapability.COMPUTE,
+                                         constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS
@@ -123,7 +126,7 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
         **GLOBAL_INVALID_LABELS,
         'aws:cannotstartwithaws': 'value',
     }
-    _run_label_test(allowed_labels, invalid_labels)
+    _run_label_test(allowed_labels, invalid_labels, cloud=clouds.AWS())
 
 
 @mock.patch('sky.clouds.service_catalog.instance_type_exists',

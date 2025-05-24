@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
         { selector: '.toctree-l1 > a', text: 'Examples' },
+        { selector: '.toctree-l1 > a', text: 'Workspaces: Isolating Teams' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

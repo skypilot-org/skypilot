@@ -48,7 +48,8 @@ class StatusColumn:
 def show_status_table(cluster_records: List[_ClusterRecord],
                       show_all: bool,
                       show_user: bool,
-                      query_clusters: Optional[List[str]] = None) -> int:
+                      query_clusters: Optional[List[str]] = None,
+                      show_workspaces: bool = False) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -56,7 +57,6 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         STOPPED.
     """
     # TODO(zhwu): Update the information for autostop clusters.
-
     status_columns = [
         StatusColumn('NAME', _get_name),
     ]
@@ -66,6 +66,9 @@ def show_status_table(cluster_records: List[_ClusterRecord],
             StatusColumn('USER_ID', _get_user_hash, show_by_default=False))
 
     status_columns += [
+        StatusColumn('WORKSPACE',
+                     _get_workspace,
+                     show_by_default=show_workspaces),
         StatusColumn('INFRA', _get_infra, truncate=not show_all),
         StatusColumn('RESOURCES', _get_resources, truncate=not show_all),
         StatusColumn('STATUS', _get_status_colored),
@@ -106,12 +109,13 @@ def show_status_table(cluster_records: List[_ClusterRecord],
             for cluster in query_clusters
             if cluster not in cluster_names
         ]
-        cluster_str = 'Cluster'
-        if len(not_found_clusters) > 1:
-            cluster_str += 's'
-        cluster_str += ' '
-        cluster_str += ', '.join(not_found_clusters)
-        click.echo(f'{cluster_str} not found.')
+        if not_found_clusters:
+            cluster_str = 'Cluster'
+            if len(not_found_clusters) > 1:
+                cluster_str += 's'
+            cluster_str += ' '
+            cluster_str += ', '.join(not_found_clusters)
+            click.echo(f'{cluster_str} not found.')
     elif not cluster_records:
         click.echo('No existing clusters.')
     return num_pending_autostop
@@ -241,6 +245,12 @@ def _get_status(cluster_record: _ClusterRecord,
                 truncate: bool = True) -> status_lib.ClusterStatus:
     del truncate
     return cluster_record['status']
+
+
+def _get_workspace(cluster_record: _ClusterRecord,
+                   truncate: bool = True) -> str:
+    del truncate
+    return cluster_record['workspace']
 
 
 def _get_status_colored(cluster_record: _ClusterRecord,

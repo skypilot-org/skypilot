@@ -17,6 +17,7 @@ from sky import execution
 from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -207,7 +208,7 @@ def launch(
 
         controller_task.managed_job_dag = dag
 
-        sky_logging.print(
+        logger.info(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
@@ -215,12 +216,20 @@ def launch(
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
         with common.with_server_user_hash():
-            return execution.launch(task=controller_task,
-                                    cluster_name=controller_name,
-                                    stream_logs=stream_logs,
-                                    retry_until_up=True,
-                                    fast=True,
-                                    _disable_controller_check=True)
+            # Always launch the controller in the default workspace.
+            with skypilot_config.local_active_workspace_ctx(
+                    skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+                # TODO(zhwu): the buckets need to be correctly handled for
+                # a specific workspace. For example, if a job is launched in
+                # workspace A, but the controller is in workspace B, the
+                # intermediate bucket and newly created bucket should be in
+                # workspace A.
+                return execution.launch(task=controller_task,
+                                        cluster_name=controller_name,
+                                        stream_logs=stream_logs,
+                                        retry_until_up=True,
+                                        fast=True,
+                                        _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -318,14 +327,17 @@ def _maybe_restart_controller(
     if handle is not None:
         return handle
 
-    sky_logging.print(f'{colorama.Fore.YELLOW}'
-                      f'Restarting {jobs_controller_type.value.name}...'
-                      f'{colorama.Style.RESET_ALL}')
+    logger.info(f'{colorama.Fore.YELLOW}'
+                f'Restarting {jobs_controller_type.value.name}...'
+                f'{colorama.Style.RESET_ALL}')
 
     rich_utils.force_update_status(
         ux_utils.spinner_message(f'{spinner_message} - restarting '
                                  'controller'))
-    handle = core.start(cluster_name=jobs_controller_type.value.cluster_name)
+    with skypilot_config.local_active_workspace_ctx(
+            skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+        handle = core.start(
+            cluster_name=jobs_controller_type.value.cluster_name)
     # Make sure the dashboard is running when the controller is restarted.
     # We should not directly use execution.launch() and have the dashboard cmd
     # in the task setup because since we are using detached_setup, it will
@@ -440,52 +452,56 @@ def cancel(name: Optional[str] = None,
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
-    job_ids = [] if job_ids is None else job_ids
-    handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message='All managed jobs should have finished.')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Cancelling managed jobs')):
+        job_ids = [] if job_ids is None else job_ids
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            stopped_message='All managed jobs should have finished.')
 
-    job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
-        arguments = []
-        arguments += [f'job_ids={job_id_str}'] if job_ids else []
-        arguments += [f'name={name}'] if name is not None else []
-        arguments += ['all'] if all else []
-        arguments += ['all_users'] if all_users else []
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Can only specify one of JOB_IDS, name, or all/'
-                             f'all_users. Provided {" ".join(arguments)!r}.')
+        job_id_str = ','.join(map(str, job_ids))
+        if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+            arguments = []
+            arguments += [f'job_ids={job_id_str}'] if job_ids else []
+            arguments += [f'name={name}'] if name is not None else []
+            arguments += ['all'] if all else []
+            arguments += ['all_users'] if all_users else []
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Can only specify one of JOB_IDS, name, or all/'
+                    f'all_users. Provided {" ".join(arguments)!r}.')
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    if all_users:
-        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-            None, all_users=True)
-    elif all:
-        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
-    elif job_ids:
-        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
-    else:
-        assert name is not None, (job_ids, name, all)
-        code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
-    # The stderr is redirected to stdout
-    returncode, stdout, _ = backend.run_on_head(handle,
-                                                code,
-                                                require_outputs=True,
-                                                stream_logs=False)
-    try:
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to cancel managed job',
-                                           stdout)
-    except exceptions.CommandError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(e.error_msg) from e
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        if all_users:
+            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+                None, all_users=True)
+        elif all:
+            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
+        elif job_ids:
+            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+                job_ids)
+        else:
+            assert name is not None, (job_ids, name, all)
+            code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
+        # The stderr is redirected to stdout
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                         code,
+                                                         require_outputs=True,
+                                                         stream_logs=False)
+        try:
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to cancel managed job',
+                                               stdout + stderr)
+        except exceptions.CommandError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(e.error_msg) from e
 
-    sky_logging.print(stdout)
-    if 'Multiple jobs found with name' in stdout:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                'Please specify the job ID instead of the job name.')
+        logger.info(stdout)
+        if 'Multiple jobs found with name' in stdout:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Please specify the job ID instead of the job name.')
 
 
 @usage_lib.entrypoint

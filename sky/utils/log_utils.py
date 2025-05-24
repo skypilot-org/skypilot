@@ -497,6 +497,10 @@ class SkySSHUpLineProcessor(LineProcessor):
                 f'✗ Failed to setup TCP forwarding on head node {node_name}.'
                 f'{colorama.Style.RESET_ALL}')
 
+        if 'Error in deploying SSH Target' in log_line:
+            logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.RED}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
+
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
                  traceback: Optional[types.TracebackType]) -> None:
