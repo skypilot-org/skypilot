@@ -285,6 +285,7 @@ Read the research:
    :caption: Data
 
    ../reference/storage
+   ../reference/volumes
    ../examples/syncing-code-artifacts
 
 .. toctree::
@@ -307,7 +308,6 @@ Read the research:
    ../reference/api-server/api-server
    ../admin/workspaces
    ../cloud-setup/cloud-permissions/index
-   ../cloud-setup/quota
    Admin Policies <../cloud-setup/policy>
 
 .. toctree::
