@@ -523,6 +523,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           onChange={(e) => handleYamlChange(e.target.value)}
                           className="font-mono text-sm flex-1 resize-none"
                           style={{ minHeight: '400px' }}
+                          spellCheck={false}
                           placeholder={`# Enter workspace configuration in YAML format
 # Example:
 ${workspaceName || 'workspace-name'}:
