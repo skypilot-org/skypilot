@@ -49,6 +49,81 @@ const SuccessDisplay = ({ message }) => {
   );
 };
 
+// Workspace configuration description component
+const WorkspaceConfigDescription = ({ workspaceName, config }) => {
+  if (!config) return null;
+
+  const isDefault = workspaceName === 'default';
+  const isEmptyConfig = Object.keys(config).length === 0;
+
+  if (isDefault && isEmptyConfig) {
+    return (
+      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+        Workspace &apos;default&apos; can use all accessible infrastructure.
+      </div>
+    );
+  }
+
+  const enabledDescriptions = [];
+  const disabledClouds = [];
+
+  Object.entries(config).forEach(([cloud, cloudConfig]) => {
+
+    if (cloudConfig?.disabled === true) {
+      disabledClouds.push(cloud);
+    } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
+      let detail = '';
+      if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
+        detail = ` (Project ID: ${cloudConfig.project_id})`;
+      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
+        detail = ` (Region: ${cloudConfig.region})`;
+      }
+      enabledDescriptions.push(
+        <span key={`${cloud}-enabled`} className="block">
+          {cloud}
+          {detail} is enabled.
+        </span>
+      );
+    } else {
+      enabledDescriptions.push(
+        <span key={`${cloud}-default-enabled`} className="block">
+          {cloud} is enabled (using default settings).
+        </span>
+      );
+    }
+  });
+
+  const finalDescriptions = [];
+  if (disabledClouds.length > 0) {
+    const disabledString = disabledClouds.join(' and ');
+    finalDescriptions.push(
+      <span key="disabled-clouds" className="block">
+        {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'} explicitly
+        disabled.
+      </span>
+    );
+  }
+  finalDescriptions.push(...enabledDescriptions);
+
+  if (finalDescriptions.length > 0) {
+    return (
+      <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
+        {finalDescriptions}
+      </div>
+    );
+  }
+
+  if (!isDefault && isEmptyConfig) {
+    return (
+      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+        This workspace has no specific cloud resource configurations and can use
+        all accessible infrastructure.
+      </div>
+    );
+  }
+  return null;
+};
+
 export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
   const [workspaceConfig, setWorkspaceConfig] = useState({});
@@ -405,7 +480,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         ) : (
           <div className="space-y-6">
             {/* Alerts */}
-            <ErrorDisplay error={error} title="Error" />
+            <ErrorDisplay 
+              error={error} 
+              title="Error" 
+              onDismiss={() => setError(null)} 
+            />
             <SuccessDisplay message={success} />
 
             {/* Two-column layout */}
@@ -468,6 +547,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </span>
                         )}
                       </div>
+                      
+                      {/* Configuration hints */}
+                      <div className="mt-4">
+                        <WorkspaceConfigDescription 
+                          workspaceName={workspaceName} 
+                          config={workspaceConfig} 
+                        />
+                      </div>
                     </div>
                   </Card>
                 </div>
@@ -487,7 +574,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
                     <div className="space-y-4 flex-1 flex flex-col">
-                      {yamlError && <ErrorDisplay error={yamlError} />}
+                      {yamlError && (
+                        <ErrorDisplay 
+                          error={yamlError} 
+                          onDismiss={() => setYamlError(null)} 
+                        />
+                      )}
                       <div className="flex-1 flex flex-col">
                         <p className="text-sm text-gray-600 mb-3">
                           Configure infra-specific settings for this workspace.
@@ -547,7 +639,7 @@ ${workspaceName || 'workspace-name'}:
         {/* Delete Confirmation Dialog */}
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent className="sm:max-w-md">
-            <DialogHeader>
+            <DialogHeader className="">
               <DialogTitle>Delete Workspace</DialogTitle>
               <DialogDescription>
                 Are you sure you want to delete workspace &quot;
@@ -557,10 +649,14 @@ ${workspaceName || 'workspace-name'}:
 
             {/* Error Message Display */}
             {deleteState.error && (
-              <ErrorDisplay error={deleteState.error} title="Deletion Failed" />
+              <ErrorDisplay 
+                error={deleteState.error} 
+                title="Deletion Failed" 
+                onDismiss={() => setDeleteState(prev => ({ ...prev, error: null }))} 
+              />
             )}
 
-            <DialogFooter>
+            <DialogFooter className="">
               <Button
                 variant="outline"
                 onClick={handleCancelDelete}
