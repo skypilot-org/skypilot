@@ -26,40 +26,276 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose,
 } from '@/components/ui/dialog';
 import {
   ServerIcon,
   BriefcaseIcon,
-  CloudIcon,
   BookDocIcon,
   TickIcon,
 } from '@/components/elements/icons';
-import { RotateCwIcon, DollarSign } from 'lucide-react';
+import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
-import { statusGroups } from './jobs'; // Import statusGroups
+import { statusGroups } from './jobs';
+
+// Helper function to clean error messages
+const cleanErrorMessage = (error) => {
+  if (!error?.message) return 'An unexpected error occurred.';
+  
+  return error.message
+    .replace(/^deleteWorkspace failed:\s*/i, '')
+    .replace(/^Error fetching deleteWorkspace data for request ID [^:]+:\s*/i, '')
+    .replace(/^Cannot delete workspace\s*/i, '')
+    .replace(/^[a-z]/, (char) => char.toUpperCase());
+};
+
+// Workspace configuration description component
+const WorkspaceConfigDescription = ({ workspaceName, config }) => {
+  if (!config) return null;
+
+  const isDefault = workspaceName === 'default';
+  const isEmptyConfig = Object.keys(config).length === 0;
+
+  if (isDefault && isEmptyConfig) {
+    return (
+      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+        Workspace 'default' can use all accessible infrastructure.
+      </div>
+    );
+  }
+
+  const enabledDescriptions = [];
+  const disabledClouds = [];
+
+  Object.entries(config).forEach(([cloud, cloudConfig]) => {
+    const cloudNameUpper = cloud.toUpperCase();
+
+    if (cloudConfig?.disabled === true) {
+      disabledClouds.push(cloudNameUpper);
+    } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
+      let detail = '';
+      if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
+        detail = ` (Project ID: ${cloudConfig.project_id})`;
+      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
+        detail = ` (Region: ${cloudConfig.region})`;
+      }
+      enabledDescriptions.push(
+        <span key={`${cloud}-enabled`} className="block">
+          {cloudNameUpper}{detail} is enabled.
+        </span>
+      );
+    } else {
+      enabledDescriptions.push(
+        <span key={`${cloud}-default-enabled`} className="block">
+          {cloudNameUpper} is enabled (using default settings).
+        </span>
+      );
+    }
+  });
+
+  const finalDescriptions = [];
+  if (disabledClouds.length > 0) {
+    const disabledString = disabledClouds.join(' and ');
+    finalDescriptions.push(
+      <span key="disabled-clouds" className="block">
+        {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'} explicitly disabled.
+      </span>
+    );
+  }
+  finalDescriptions.push(...enabledDescriptions);
+
+  if (finalDescriptions.length > 0) {
+    return (
+      <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
+        {finalDescriptions}
+        <p className="mt-2 text-gray-500">
+          Other accessible infrastructure are enabled. See{' '}
+          <code className="text-sky-blue">Enabled Infra</code>.
+        </p>
+      </div>
+    );
+  }
+
+  if (!isDefault && isEmptyConfig) {
+    return (
+      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+        This workspace has no specific cloud resource configurations and can
+        use all accessible infrastructure.
+      </div>
+    );
+  }
+  return null;
+};
+
+// Error display component
+const ErrorDisplay = ({ error, title = "Error" }) => {
+  if (!error) return null;
+
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+      <div className="flex">
+        <div className="flex-shrink-0">
+          <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <div className="ml-3">
+          <h3 className="text-sm font-medium text-red-800">{title}</h3>
+          <div className="mt-2 text-sm text-red-700">
+            <p>{error}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Workspace card component
+const WorkspaceCard = ({ workspace, onDelete, onEdit }) => (
+  <Card key={workspace.name}>
+    <CardHeader>
+      <CardTitle className="text-base font-normal">
+        <span className="font-semibold">Workspace:</span> {workspace.name}
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="text-sm pb-2">
+      <div className="py-2 flex items-center justify-between">
+        <div className="flex items-center text-gray-600">
+          <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+          <span>Clusters (Running / Total)</span>
+        </div>
+        <span className="font-normal text-gray-800">
+          {workspace.runningClusterCount} / {workspace.totalClusterCount}
+        </span>
+      </div>
+      <div className="py-2 flex items-center justify-between border-t border-gray-100">
+        <div className="flex items-center text-gray-600">
+          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+          <span>Managed Jobs</span>
+        </div>
+        <span className="font-normal text-gray-800">
+          {workspace.managedJobsCount}
+        </span>
+      </div>
+    </CardContent>
+
+    <div className="px-6 pb-3 text-sm pt-3">
+      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">Enabled Infra</h4>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {workspace.clouds.map((cloud) => (
+          <div key={cloud} className="flex items-center text-gray-700">
+            <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+            <span>{cloud}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <CardFooter className="flex justify-end pt-3 gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onDelete(workspace.name)}
+        disabled={workspace.name === 'default'}
+        title={
+          workspace.name === 'default'
+            ? 'Cannot delete default workspace'
+            : 'Delete workspace'
+        }
+        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+      >
+        Delete
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onEdit(workspace.name)}
+      >
+        Edit
+      </Button>
+    </CardFooter>
+  </Card>
+);
+
+// Create new workspace card component
+const CreateWorkspaceCard = ({ onClick }) => (
+  <Card
+    key="create-new"
+    className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
+    onClick={onClick}
+  >
+    <div className="flex-1 flex items-center justify-center p-6">
+      <div className="text-center">
+        <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
+          <span className="text-3xl text-sky-600">+</span>
+        </div>
+        <h3 className="text-lg font-medium text-sky-700 mb-2">
+          Create New Workspace
+        </h3>
+        <p className="text-sm text-gray-500">
+          Set up a new workspace with custom infrastructure configurations
+        </p>
+      </div>
+    </div>
+  </Card>
+);
+
+// Statistics summary component
+const StatsSummary = ({ workspaceCount, runningClusters, totalClusters, managedJobs }) => (
+  <div className="bg-sky-50 p-4 rounded-lg shadow mb-6">
+    <div className="flex flex-col sm:flex-row justify-around items-center">
+      <div className="p-2">
+        <div className="flex items-center">
+          <BookDocIcon className="w-5 h-5 mr-2 text-sky-600" />
+          <span className="text-sm text-gray-600">Workspaces:</span>
+          <span className="ml-1 text-xl font-semibold text-sky-700">
+            {workspaceCount}
+          </span>
+        </div>
+      </div>
+      <div className="p-2">
+        <div className="flex items-center">
+          <ServerIcon className="w-5 h-5 mr-2 text-sky-600" />
+          <span className="text-sm text-gray-600">Clusters (Running / Total):</span>
+          <span className="ml-1 text-xl font-semibold text-sky-700">
+            {runningClusters} / {totalClusters}
+          </span>
+        </div>
+      </div>
+      <div className="p-2">
+        <div className="flex items-center">
+          <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600" />
+          <span className="text-sm text-gray-600">Managed Jobs:</span>
+          <span className="ml-1 text-xl font-semibold text-sky-700">
+            {managedJobs}
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
-  const [globalRunningClusters, setGlobalRunningClusters] = useState(0);
-  const [globalTotalClusters, setGlobalTotalClusters] = useState(0);
-  const [globalManagedJobs, setGlobalManagedJobs] = useState(0);
-  const [globalHourlyCost, setGlobalHourlyCost] = useState(0);
+  const [globalStats, setGlobalStats] = useState({
+    runningClusters: 0,
+    totalClusters: 0,
+    managedJobs: 0,
+  });
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
-
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedWorkspaceConfig, setSelectedWorkspaceConfig] = useState(null);
-  const [modalDisplayTitleName, setModalDisplayTitleName] = useState('');
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+  
+  // Modal states
+  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] = useState(false);
+  
+  // Delete confirmation states
+  const [deleteState, setDeleteState] = useState({
+    confirmOpen: false,
+    workspaceToDelete: null,
+    deleting: false,
+    error: null,
+  });
 
-  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =
-    useState(false);
-
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [workspaceToDelete, setWorkspaceToDelete] = useState(null);
-  const [deleting, setDeleting] = useState(false);
-
+  const router = useRouter();
   const isMobile = useMobile();
 
   const fetchData = async () => {
@@ -68,81 +304,48 @@ export function Workspaces() {
       const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
         await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
 
-      console.log(
-        '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
-        fetchedWorkspacesConfig
-      );
       setRawWorkspacesData(fetchedWorkspacesConfig);
-
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-      console.log(
-        '[Workspaces Debug] configuredWorkspaceNames:',
-        configuredWorkspaceNames
+
+      // Fetch enabled clouds for all workspaces
+      const enabledCloudsArray = await Promise.all(
+        configuredWorkspaceNames.map((wsName) => getEnabledClouds(wsName))
+      );
+      const enabledCloudsMap = Object.fromEntries(
+        configuredWorkspaceNames.map((wsName, index) => [
+          wsName,
+          enabledCloudsArray[index],
+        ])
       );
 
-      const enabledCloudsPromises = configuredWorkspaceNames.map((wsName) =>
-        getEnabledClouds(wsName)
-      );
-      const enabledCloudsForAllWorkspacesArray = await Promise.all(
-        enabledCloudsPromises
+      // Build cluster to workspace mapping
+      const clusterNameToWorkspace = Object.fromEntries(
+        clustersResponse.map((c) => [c.cluster, c.workspace || 'default'])
       );
 
-      const enabledCloudsMap = {};
-      configuredWorkspaceNames.forEach((wsName, index) => {
-        enabledCloudsMap[wsName] = enabledCloudsForAllWorkspacesArray[index];
-      });
-
-      console.log(
-        '[Workspaces Debug] Enabled clouds by workspace:',
-        enabledCloudsMap
-      );
-
-      const clusterNameToWorkspace = {};
-      clustersResponse.forEach((c) => {
-        clusterNameToWorkspace[c.cluster] = c.workspace || 'default';
-      });
-
-      let totalRunningClusters = 0;
-      let totalGlobalHourlyCost = 0;
+      // Initialize workspace stats
       const workspaceStatsAggregator = {};
+      configuredWorkspaceNames.forEach((wsName) => {
+        workspaceStatsAggregator[wsName] = {
+          name: wsName,
+          totalClusterCount: 0,
+          runningClusterCount: 0,
+          managedJobsCount: 0,
+          clouds: new Set(),
+        };
+      });
 
-      if (configuredWorkspaceNames.length > 0) {
-        configuredWorkspaceNames.forEach((wsName) => {
-          workspaceStatsAggregator[wsName] = {
-            name: wsName,
-            totalClusterCount: 0,
-            runningClusterCount: 0,
-            managedJobsCount: 0,
-            clouds: new Set(),
-            hourlyCost: 0,
-          };
-        });
-      }
-
+      // Process clusters
+      let totalRunningClusters = 0;
       clustersResponse.forEach((cluster) => {
         const wsName = cluster.workspace || 'default';
-        if (
-          configuredWorkspaceNames.length > 0 &&
-          !workspaceStatsAggregator[wsName]
-        ) {
-          if (!workspaceStatsAggregator[wsName]) {
-            workspaceStatsAggregator[wsName] = {
-              name: wsName,
-              totalClusterCount: 0,
-              runningClusterCount: 0,
-              managedJobsCount: 0,
-              clouds: new Set(),
-              hourlyCost: 0,
-            };
-          }
-        } else if (!workspaceStatsAggregator[wsName]) {
+        if (!workspaceStatsAggregator[wsName]) {
           workspaceStatsAggregator[wsName] = {
             name: wsName,
             totalClusterCount: 0,
             runningClusterCount: 0,
             managedJobsCount: 0,
             clouds: new Set(),
-            hourlyCost: 0,
           };
         }
 
@@ -156,12 +359,9 @@ export function Workspaces() {
         }
       });
 
-      setGlobalTotalClusters(clustersResponse.length);
-      setGlobalRunningClusters(totalRunningClusters);
-
+      // Process managed jobs
       const jobs = managedJobsResponse.jobs || [];
       const activeJobStatuses = new Set(statusGroups.active);
-
       let activeGlobalManagedJobs = 0;
 
       jobs.forEach((job) => {
@@ -169,54 +369,36 @@ export function Workspaces() {
           job.cluster_name || (job.resources && job.resources.cluster_name);
         if (jobClusterName) {
           const wsName = clusterNameToWorkspace[jobClusterName];
-          if (wsName && workspaceStatsAggregator[wsName]) {
-            // Only count active jobs for the workspace
-            if (activeJobStatuses.has(job.status)) {
-              workspaceStatsAggregator[wsName].managedJobsCount++;
-            }
+          if (wsName && workspaceStatsAggregator[wsName] && activeJobStatuses.has(job.status)) {
+            workspaceStatsAggregator[wsName].managedJobsCount++;
           }
         }
-        // Count all active jobs for the global count
         if (activeJobStatuses.has(job.status)) {
           activeGlobalManagedJobs++;
         }
       });
 
-      setGlobalManagedJobs(activeGlobalManagedJobs);
-
-      let finalWorkspaceDetails = Object.values(workspaceStatsAggregator).map(
-        (ws) => {
-          const workspaceSpecificEnabledClouds =
-            enabledCloudsMap[ws.name] || [];
-          return {
-            ...ws,
-            clouds: Array.isArray(workspaceSpecificEnabledClouds)
-              ? workspaceSpecificEnabledClouds.sort()
-              : [],
-          };
-        }
-      );
-
-      if (configuredWorkspaceNames.length > 0) {
-        finalWorkspaceDetails = finalWorkspaceDetails.filter((ws) =>
-          configuredWorkspaceNames.includes(ws.name)
-        );
-      }
-
-      finalWorkspaceDetails.sort((a, b) => a.name.localeCompare(b.name));
-
-      console.log(
-        '[Workspaces Debug] finalWorkspaceDetails before setting state:',
-        finalWorkspaceDetails
-      );
+      // Finalize workspace details
+      const finalWorkspaceDetails = Object.values(workspaceStatsAggregator)
+        .filter((ws) => configuredWorkspaceNames.includes(ws.name))
+        .map((ws) => ({
+          ...ws,
+          clouds: Array.isArray(enabledCloudsMap[ws.name])
+            ? enabledCloudsMap[ws.name].sort()
+            : [],
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
 
       setWorkspaceDetails(finalWorkspaceDetails);
+      setGlobalStats({
+        runningClusters: totalRunningClusters,
+        totalClusters: clustersResponse.length,
+        managedJobs: activeGlobalManagedJobs,
+      });
     } catch (error) {
-      console.error('Error fetching comprehensive workspace data:', error);
+      console.error('Error fetching workspace data:', error);
       setWorkspaceDetails([]);
-      setGlobalRunningClusters(0);
-      setGlobalTotalClusters(0);
-      setGlobalManagedJobs(0);
+      setGlobalStats({ runningClusters: 0, totalClusters: 0, managedJobs: 0 });
     }
     setLoading(false);
   };
@@ -225,62 +407,45 @@ export function Workspaces() {
     fetchData();
   }, []);
 
-  const handleShowWorkspaceDetails = (workspaceName) => {
-    router.push(`/workspace/${workspaceName}`);
-  };
-
-  const handleCreateNewWorkspace = () => {
-    router.push('/workspaces/new');
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedWorkspaceConfig(null);
-    setModalDisplayTitleName('');
-  };
-
-  const handleShowAllWorkspacesConfig = () => {
-    if (rawWorkspacesData && Object.keys(rawWorkspacesData).length > 0) {
-      setIsAllWorkspacesModalOpen(true);
-    } else {
-      console.warn('Raw workspaces data is not available or empty.');
-    }
-  };
-
-  const handleCloseAllWorkspacesModal = () => {
-    setIsAllWorkspacesModalOpen(false);
-  };
-
-  const handleRefresh = () => {
-    fetchData();
-  };
-
   const handleDeleteWorkspace = (workspaceName) => {
-    setWorkspaceToDelete(workspaceName);
-    setDeleteConfirmOpen(true);
+    setDeleteState({
+      confirmOpen: true,
+      workspaceToDelete: workspaceName,
+      deleting: false,
+      error: null,
+    });
   };
 
   const handleConfirmDelete = async () => {
-    if (!workspaceToDelete) return;
+    if (!deleteState.workspaceToDelete) return;
 
-    setDeleting(true);
+    setDeleteState(prev => ({ ...prev, deleting: true, error: null }));
     try {
-      await deleteWorkspace(workspaceToDelete);
-      setDeleteConfirmOpen(false);
-      setWorkspaceToDelete(null);
-      // Refresh the data after successful deletion
+      await deleteWorkspace(deleteState.workspaceToDelete);
+      setDeleteState({
+        confirmOpen: false,
+        workspaceToDelete: null,
+        deleting: false,
+        error: null,
+      });
       await fetchData();
     } catch (error) {
       console.error('Error deleting workspace:', error);
-      // You might want to show an error message to the user here
-    } finally {
-      setDeleting(false);
+      setDeleteState(prev => ({
+        ...prev,
+        deleting: false,
+        error: cleanErrorMessage(error),
+      }));
     }
   };
 
   const handleCancelDelete = () => {
-    setDeleteConfirmOpen(false);
-    setWorkspaceToDelete(null);
+    setDeleteState({
+      confirmOpen: false,
+      workspaceToDelete: null,
+      deleting: false,
+      error: null,
+    });
   };
 
   const preStyle = {
@@ -290,88 +455,6 @@ export function Workspaces() {
     overflowX: 'auto',
     whiteSpace: 'pre',
     wordBreak: 'normal',
-  };
-
-  // Define the description component here
-  const WorkspaceConfigDescription = ({ workspaceName, config }) => {
-    // config is an object like { gcp: { disabled: true } } or { gcp: { project_id: '...' } } or {}
-    if (!config) return null;
-
-    const isDefault = workspaceName === 'default';
-    const isEmptyConfig = Object.keys(config).length === 0;
-
-    if (isDefault && isEmptyConfig) {
-      return (
-        <p className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
-          Workspace &apos;default&apos; can use all accessible infrastructure.
-        </p>
-      );
-    }
-
-    const enabledDescriptions = [];
-    const disabledClouds = [];
-
-    for (const cloud in config) {
-      const cloudConfig = config[cloud];
-      const cloudNameUpper = cloud.toUpperCase();
-
-      if (cloudConfig && cloudConfig.disabled === true) {
-        disabledClouds.push(cloudNameUpper);
-      } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
-        let detail = '';
-        if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
-          detail = ` (Project ID: ${cloudConfig.project_id})`;
-        } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
-          detail = ` (Region: ${cloudConfig.region})`;
-        }
-        enabledDescriptions.push(
-          <span key={`${cloud}-enabled`} className="block">
-            {cloudNameUpper}
-            {detail} is enabled.
-          </span>
-        );
-      } else if (cloudConfig && Object.keys(cloudConfig).length === 0) {
-        enabledDescriptions.push(
-          <span key={`${cloud}-default-enabled`} className="block">
-            {cloudNameUpper} is enabled (using default settings).
-          </span>
-        );
-      }
-    }
-
-    const finalDescriptions = [];
-    if (disabledClouds.length > 0) {
-      const disabledString = disabledClouds.join(' and ');
-      finalDescriptions.push(
-        <span key="disabled-clouds" className="block">
-          {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'}{' '}
-          explicitly disabled.
-        </span>
-      );
-    }
-    finalDescriptions.push(...enabledDescriptions);
-
-    if (finalDescriptions.length > 0) {
-      return (
-        <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
-          {finalDescriptions}
-          <p className="mt-2 text-gray-500">
-            Other accessible infrastructure are enabled. See{' '}
-            <code className="text-sky-blue">Enabled Infra</code>.
-          </p>
-        </div>
-      );
-    }
-
-    if (!isDefault && isEmptyConfig) {
-      return (
-        <p className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
-          This workspace has no specific cloud resource configurations and can
-          use all accessible infrastructure.
-        </p>
-      );
-    }
-    return null;
   };
 
   if (loading && workspaceDetails.length === 0) {
@@ -385,19 +468,16 @@ export function Workspaces() {
 
   return (
     <div>
+      {/* Header */}
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <span className="text-sky-blue leading-none">Workspaces</span>
           <Button
             variant="outline"
             size="sm"
-            onClick={handleShowAllWorkspacesConfig}
+            onClick={() => setIsAllWorkspacesModalOpen(true)}
             className="ml-4 px-2 py-1 text-xs"
-            disabled={
-              loading ||
-              !rawWorkspacesData ||
-              Object.keys(rawWorkspacesData).length === 0
-            }
+            disabled={loading || !rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0}
           >
             View All Configs
           </Button>
@@ -411,7 +491,7 @@ export function Workspaces() {
           )}
           <Button
             variant="ghost"
-            onClick={handleRefresh}
+            onClick={fetchData}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
@@ -421,40 +501,15 @@ export function Workspaces() {
         </div>
       </div>
 
-      <div className="bg-sky-50 p-4 rounded-lg shadow mb-6">
-        <div className="flex flex-col sm:flex-row justify-around items-center">
-          <div className="p-2">
-            <div className="flex items-center">
-              <BookDocIcon className="w-5 h-5 mr-2 text-sky-600" />
-              <span className="text-sm text-gray-600">Workspaces:</span>
-              <span className="ml-1 text-xl font-semibold text-sky-700">
-                {workspaceDetails.length}
-              </span>
-            </div>
-          </div>
-          <div className="p-2">
-            <div className="flex items-center">
-              <ServerIcon className="w-5 h-5 mr-2 text-sky-600" />
-              <span className="text-sm text-gray-600">
-                Clusters (Running / Total):
-              </span>
-              <span className="ml-1 text-xl font-semibold text-sky-700">
-                {globalRunningClusters} / {globalTotalClusters}
-              </span>
-            </div>
-          </div>
-          <div className="p-2">
-            <div className="flex items-center">
-              <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600" />
-              <span className="text-sm text-gray-600">Managed Jobs:</span>
-              <span className="ml-1 text-xl font-semibold text-sky-700">
-                {globalManagedJobs}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Statistics Summary */}
+      <StatsSummary
+        workspaceCount={workspaceDetails.length}
+        runningClusters={globalStats.runningClusters}
+        totalClusters={globalStats.totalClusters}
+        managedJobs={globalStats.managedJobs}
+      />
 
+      {/* Workspace Cards */}
       {workspaceDetails.length === 0 && !loading ? (
         <div className="text-center py-10">
           <p className="text-lg text-gray-600">No workspaces found.</p>
@@ -465,137 +520,26 @@ export function Workspaces() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {workspaceDetails.map((ws) => (
-            <Card key={ws.name}>
-              <CardHeader>
-                <CardTitle className="text-base font-normal">
-                  <span className="font-semibold">Workspace:</span> {ws.name}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm pb-2">
-                <div className="py-2 flex items-center justify-between">
-                  <div className="flex items-center text-gray-600">
-                    <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
-                    <span>Clusters (Running / Total)</span>
-                  </div>
-                  <span className="font-normal text-gray-800">
-                    {ws.runningClusterCount} / {ws.totalClusterCount}
-                  </span>
-                </div>
-                <div className="py-2 flex items-center justify-between border-t border-gray-100">
-                  <div className="flex items-center text-gray-600">
-                    <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
-                    <span>Managed Jobs</span>
-                  </div>
-                  <span className="font-normal text-gray-800">
-                    {ws.managedJobsCount}
-                  </span>
-                </div>
-              </CardContent>
-
-              <div className="px-6 pb-3 text-sm pt-3">
-                <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
-                  Enabled Infra
-                </h4>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {ws.clouds.map((cloud) => (
-                    <div
-                      key={cloud}
-                      className="flex items-center text-gray-700"
-                    >
-                      <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
-                      <span>{cloud}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <CardFooter className="flex justify-end pt-3 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDeleteWorkspace(ws.name)}
-                  disabled={ws.name === 'default'}
-                  title={
-                    ws.name === 'default'
-                      ? 'Cannot delete default workspace'
-                      : 'Delete workspace'
-                  }
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  Delete
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleShowWorkspaceDetails(ws.name)}
-                >
-                  Edit
-                </Button>
-              </CardFooter>
-            </Card>
+            <WorkspaceCard
+              key={ws.name}
+              workspace={ws}
+              onDelete={handleDeleteWorkspace}
+              onEdit={(name) => router.push(`/workspace/${name}`)}
+            />
           ))}
-
-          {/* Create New Workspace Card */}
-          <Card
-            key="create-new"
-            className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
-            onClick={handleCreateNewWorkspace}
-          >
-            <div className="flex-1 flex items-center justify-center p-6">
-              <div className="text-center">
-                <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
-                  <span className="text-3xl text-sky-600">+</span>
-                </div>
-                <h3 className="text-lg font-medium text-sky-700 mb-2">
-                  Create New Workspace
-                </h3>
-                <p className="text-sm text-gray-500">
-                  Set up a new workspace with custom infrastructure
-                  configurations
-                </p>
-              </div>
-            </div>
-          </Card>
+          <CreateWorkspaceCard onClick={() => router.push('/workspaces/new')} />
         </div>
       )}
 
-      {selectedWorkspaceConfig && (
-        <Dialog open={isModalOpen} onOpenChange={handleCloseModal}>
-          <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl w-full max-h-[90vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle className="pr-10">
-                Workspace:
-                <span className="font-normal"> {modalDisplayTitleName}</span>
-              </DialogTitle>
-            </DialogHeader>
-            <div className="flex-grow overflow-y-auto py-4">
-              {selectedWorkspaceConfig &&
-                modalDisplayTitleName &&
-                rawWorkspacesData &&
-                rawWorkspacesData[modalDisplayTitleName] && (
-                  <WorkspaceConfigDescription
-                    workspaceName={modalDisplayTitleName}
-                    config={rawWorkspacesData[modalDisplayTitleName]}
-                  />
-                )}
-              <pre style={preStyle}>
-                {yaml.dump(selectedWorkspaceConfig, { indent: 2 })}
-              </pre>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
+      {/* All Workspaces Config Modal */}
       {rawWorkspacesData && (
         <Dialog
           open={isAllWorkspacesModalOpen}
-          onOpenChange={handleCloseAllWorkspacesModal}
+          onOpenChange={setIsAllWorkspacesModalOpen}
         >
           <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl w-full max-h-[90vh] flex flex-col">
             <DialogHeader>
-              <DialogTitle className="pr-10">
-                All Workspaces Configuration
-              </DialogTitle>
+              <DialogTitle className="pr-10">All Workspaces Configuration</DialogTitle>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto py-4">
               <pre style={preStyle}>
@@ -607,29 +551,32 @@ export function Workspaces() {
       )}
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+      <Dialog open={deleteState.confirmOpen} onOpenChange={handleCancelDelete}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete workspace &quot;
-              {workspaceToDelete}&quot;? This action cannot be undone.
+              Are you sure you want to delete workspace "{deleteState.workspaceToDelete}"? 
+              This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
+          
+          <ErrorDisplay error={deleteState.error} title="Deletion Failed" />
+          
           <DialogFooter>
             <Button
               variant="outline"
               onClick={handleCancelDelete}
-              disabled={deleting}
+              disabled={deleteState.deleting}
             >
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={handleConfirmDelete}
-              disabled={deleting}
+              disabled={deleteState.deleting}
             >
-              {deleting ? 'Deleting...' : 'Delete'}
+              {deleteState.deleting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

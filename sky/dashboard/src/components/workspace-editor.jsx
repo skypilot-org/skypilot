@@ -42,6 +42,45 @@ import {
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 
+// Helper function to clean error messages
+const cleanErrorMessage = (error) => {
+  if (!error?.message) return 'An unexpected error occurred.';
+  
+  return error.message
+    .replace(/^(createWorkspace|updateWorkspace|deleteWorkspace) failed:\s*/i, '')
+    .replace(/^Error fetching (createWorkspace|updateWorkspace|deleteWorkspace) data for request ID [^:]+:\s*/i, '')
+    .replace(/^Cannot (create|update|delete) workspace\s*/i, '')
+    .replace(/^[a-z]/, (char) => char.toUpperCase());
+};
+
+// Error display component
+const ErrorDisplay = ({ error, title = "Error" }) => {
+  if (!error) return null;
+
+  return (
+    <Alert variant="destructive">
+      <AlertTriangleIcon className="h-4 w-4" />
+      <AlertDescription>
+        <strong>{title}:</strong> {error}
+      </AlertDescription>
+    </Alert>
+  );
+};
+
+// Success display component
+const SuccessDisplay = ({ message }) => {
+  if (!message) return null;
+
+  return (
+    <Alert className="border-green-200 bg-green-50">
+      <CheckIcon className="h-4 w-4 text-green-600" />
+      <AlertDescription className="text-green-800">
+        {message}
+      </AlertDescription>
+    </Alert>
+  );
+};
+
 export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
   const [workspaceConfig, setWorkspaceConfig] = useState({});
@@ -49,12 +88,17 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [yamlValue, setYamlValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [yamlError, setYamlError] = useState(null);
+
+  // Delete state
+  const [deleteState, setDeleteState] = useState({
+    showDialog: false,
+    deleting: false,
+    error: null,
+  });
 
   // Workspace statistics
   const [workspaceStats, setWorkspaceStats] = useState({
@@ -90,7 +134,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       }
       setYamlValue(yamlOutput);
     } catch (err) {
-      setError(`Failed to load workspace: ${err.message}`);
+      console.error('Error fetching workspace config:', err);
+      setError(cleanErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -250,15 +295,23 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         fetchWorkspaceStats();
       }
     } catch (err) {
-      setError(`Failed to save workspace: ${err.message}`);
+      console.error('Error saving workspace:', err);
+      setError(cleanErrorMessage(err));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async () => {
-    setDeleting(true);
-    setError(null);
+  const handleDeleteWorkspace = () => {
+    setDeleteState({
+      showDialog: true,
+      deleting: false,
+      error: null,
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleteState(prev => ({ ...prev, deleting: true, error: null }));
 
     try {
       await deleteWorkspace(workspaceName);
@@ -267,11 +320,21 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         router.push('/workspaces');
       }, 1500);
     } catch (err) {
-      setError(`Failed to delete workspace: ${err.message}`);
-    } finally {
-      setDeleting(false);
-      setShowDeleteDialog(false);
+      console.error('Error deleting workspace:', err);
+      setDeleteState(prev => ({
+        ...prev,
+        deleting: false,
+        error: cleanErrorMessage(err),
+      }));
     }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteState({
+      showDialog: false,
+      deleting: false,
+      error: null,
+    });
   };
 
   const handleRefresh = async () => {
@@ -340,8 +403,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
               {!isNewWorkspace && workspaceName !== 'default' && (
                 <button
-                  onClick={() => setShowDeleteDialog(true)}
-                  disabled={deleting || saving}
+                  onClick={() => setDeleteState({ ...deleteState, showDialog: true })}
+                  disabled={deleteState.deleting || saving}
                   className="text-red-600 hover:text-red-700 font-medium inline-flex items-center"
                 >
                   <TrashIcon className="w-4 h-4 mr-1.5" />
@@ -372,21 +435,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         ) : (
           <div className="space-y-6">
             {/* Alerts */}
-            {error && (
-              <Alert variant="destructive">
-                <AlertTriangleIcon className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {success && (
-              <Alert className="border-green-200 bg-green-50">
-                <CheckIcon className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-800">
-                  {success}
-                </AlertDescription>
-              </Alert>
-            )}
+            <ErrorDisplay error={error} title="Error" />
+            <SuccessDisplay message={success} />
 
             {/* Two-column layout */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -468,10 +518,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   <CardContent className="flex-1 flex flex-col">
                     <div className="space-y-4 flex-1 flex flex-col">
                       {yamlError && (
-                        <Alert variant="destructive">
-                          <AlertTriangleIcon className="h-4 w-4" />
-                          <AlertDescription>{yamlError}</AlertDescription>
-                        </Alert>
+                        <ErrorDisplay error={yamlError} />
                       )}
                       <div className="flex-1 flex flex-col">
                         <p className="text-sm text-gray-600 mb-3">
@@ -528,7 +575,7 @@ ${workspaceName || 'workspace-name'}:
         )}
 
         {/* Delete Confirmation Dialog */}
-        <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete Workspace</DialogTitle>
@@ -537,19 +584,26 @@ ${workspaceName || 'workspace-name'}:
                 {workspaceName}&quot;? This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
+            
+            {/* Error Message Display */}
+            {deleteState.error && (
+              <ErrorDisplay error={deleteState.error} title="Deletion Failed" />
+            )}
+            
             <DialogFooter>
               <Button
                 variant="outline"
-                onClick={() => setShowDeleteDialog(false)}
+                onClick={handleCancelDelete}
+                disabled={deleteState.deleting}
               >
                 Cancel
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleDelete}
-                disabled={deleting}
+                onClick={handleConfirmDelete}
+                disabled={deleteState.deleting}
               >
-                {deleting ? 'Deleting...' : 'Delete Workspace'}
+                {deleteState.deleting ? 'Deleting...' : 'Delete Workspace'}
               </Button>
             </DialogFooter>
           </DialogContent>
