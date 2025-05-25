@@ -45,20 +45,20 @@ import yaml from 'js-yaml';
 // Helper function to clean error messages
 const cleanErrorMessage = (error) => {
   if (!error?.message) return 'An unexpected error occurred.';
-  
+
   let message = error.message;
-  
+
   // Split on 'failed:' and take the part after it
   if (message.includes('failed:')) {
     message = message.split('failed:')[1].trim();
   }
-  
+
   // Capitalize first letter and return
   return message.charAt(0).toUpperCase() + message.slice(1);
 };
 
 // Error display component
-const ErrorDisplay = ({ error, title = "Error" }) => {
+const ErrorDisplay = ({ error, title = 'Error' }) => {
   if (!error) return null;
 
   return (
@@ -84,9 +84,7 @@ const SuccessDisplay = ({ message }) => {
   return (
     <Alert className="border-green-200 bg-green-50">
       <CheckIcon className="h-4 w-4 text-green-600" />
-      <AlertDescription className="text-green-800">
-        {message}
-      </AlertDescription>
+      <AlertDescription className="text-green-800">{message}</AlertDescription>
     </Alert>
   );
 };
@@ -295,7 +293,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         setSuccess('Workspace created successfully!');
         // Navigate to the created workspace
         setTimeout(() => {
-          router.push(`/workspace/${workspaceName}`);
+          router.push(`/workspaces/${workspaceName}`);
         }, 1500);
       } else {
         await updateWorkspace(workspaceName, workspaceConfig);
@@ -321,7 +319,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   };
 
   const handleConfirmDelete = async () => {
-    setDeleteState(prev => ({ ...prev, deleting: true, error: null }));
+    setDeleteState((prev) => ({ ...prev, deleting: true, error: null }));
 
     try {
       await deleteWorkspace(workspaceName);
@@ -331,7 +329,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       }, 1500);
     } catch (err) {
       console.error('Error deleting workspace:', err);
-      setDeleteState(prev => ({
+      setDeleteState((prev) => ({
         ...prev,
         deleting: false,
         error: cleanErrorMessage(err),
@@ -375,8 +373,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             <Link
               href={
                 isNewWorkspace
-                  ? `/workspaces/new`
-                  : `/workspace/${workspaceName}`
+                  ? `/workspace/new`
+                  : `/workspaces/${workspaceName}`
               }
               className="text-sky-blue hover:underline"
             >
@@ -413,7 +411,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
               {!isNewWorkspace && workspaceName !== 'default' && (
                 <button
-                  onClick={() => setDeleteState({ ...deleteState, showDialog: true })}
+                  onClick={() =>
+                    setDeleteState({ ...deleteState, showDialog: true })
+                  }
                   disabled={deleteState.deleting || saving}
                   className="text-red-600 hover:text-red-700 font-medium inline-flex items-center"
                 >
@@ -527,9 +527,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
                     <div className="space-y-4 flex-1 flex flex-col">
-                      {yamlError && (
-                        <ErrorDisplay error={yamlError} />
-                      )}
+                      {yamlError && <ErrorDisplay error={yamlError} />}
                       <div className="flex-1 flex flex-col">
                         <p className="text-sm text-gray-600 mb-3">
                           Configure infra-specific settings for this workspace.
@@ -594,12 +592,12 @@ ${workspaceName || 'workspace-name'}:
                 {workspaceName}&quot;? This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
-            
+
             {/* Error Message Display */}
             {deleteState.error && (
               <ErrorDisplay error={deleteState.error} title="Deletion Failed" />
             )}
-            
+
             <DialogFooter>
               <Button
                 variant="outline"

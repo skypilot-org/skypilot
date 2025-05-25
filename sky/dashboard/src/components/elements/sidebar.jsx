@@ -136,6 +136,10 @@ export function TopBar() {
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
+    // Special case: highlight workspaces for both /workspaces and /workspace paths
+    if (path === '/workspaces') {
+      return router.pathname.startsWith('/workspaces') || router.pathname.startsWith('/workspace');
+    }
     return router.pathname.startsWith(path);
   };
 

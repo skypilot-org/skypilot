@@ -24,9 +24,8 @@ async def get(request: fastapi.Request) -> None:
 
 
 @router.post('/update')
-async def update(
-        request: fastapi.Request,
-        update_workspace_body: payloads.UpdateWorkspaceBody) -> None:
+async def update(request: fastapi.Request,
+                 update_workspace_body: payloads.UpdateWorkspaceBody) -> None:
     """Updates a specific workspace configuration."""
     executor.schedule_request(
         request_id=request.state.request_id,
@@ -38,9 +37,8 @@ async def update(
 
 
 @router.post('/create')
-async def create(
-        request: fastapi.Request,
-        create_workspace_body: payloads.CreateWorkspaceBody) -> None:
+async def create(request: fastapi.Request,
+                 create_workspace_body: payloads.CreateWorkspaceBody) -> None:
     """Creates a new workspace configuration."""
     executor.schedule_request(
         request_id=request.state.request_id,
@@ -52,9 +50,8 @@ async def create(
 
 
 @router.post('/delete')
-async def delete(
-        request: fastapi.Request,
-        delete_workspace_body: payloads.DeleteWorkspaceBody) -> None:
+async def delete(request: fastapi.Request,
+                 delete_workspace_body: payloads.DeleteWorkspaceBody) -> None:
     """Deletes a workspace configuration."""
     executor.schedule_request(
         request_id=request.state.request_id,

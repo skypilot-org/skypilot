@@ -97,43 +97,51 @@ export async function getWorkspaces() {
     // Step 4: Check task status and return the actual workspace data
     if (resultData.status === 'FAILED') {
       let errorMessage = `Unknown error during task execution`;
-      
+
       // Try to extract error message from various possible locations
       if (resultData.error) {
         if (typeof resultData.error === 'string') {
           errorMessage = resultData.error;
         } else if (typeof resultData.error === 'object') {
           // Handle case where error is an object
-          errorMessage = resultData.error.message || 
-                       resultData.error.detail || 
-                       JSON.stringify(resultData.error);
+          errorMessage =
+            resultData.error.message ||
+            resultData.error.detail ||
+            JSON.stringify(resultData.error);
         }
       } else if (resultData.result && resultData.result.error) {
         if (typeof resultData.result.error === 'string') {
           errorMessage = resultData.result.error;
         } else if (typeof resultData.result.error === 'object') {
           // Handle case where error is an object
-          errorMessage = resultData.result.error.message || 
-                       resultData.result.error.detail || 
-                       JSON.stringify(resultData.result.error);
+          errorMessage =
+            resultData.result.error.message ||
+            resultData.result.error.detail ||
+            JSON.stringify(resultData.result.error);
         }
       } else if (resultData.return_value) {
         // Sometimes the error might be in return_value as a JSON string
         try {
           const parsed = JSON.parse(resultData.return_value);
           if (parsed.error) {
-            errorMessage = typeof parsed.error === 'string' ? 
-                          parsed.error : 
-                          (parsed.error.message || parsed.error.detail || JSON.stringify(parsed.error));
+            errorMessage =
+              typeof parsed.error === 'string'
+                ? parsed.error
+                : parsed.error.message ||
+                  parsed.error.detail ||
+                  JSON.stringify(parsed.error);
           }
         } catch (parseErr) {
           // If return_value is not JSON, use it as is if it looks like an error
-          if (resultData.return_value.includes('Error') || resultData.return_value.includes('Cannot')) {
+          if (
+            resultData.return_value.includes('Error') ||
+            resultData.return_value.includes('Cannot')
+          ) {
             errorMessage = resultData.return_value;
           }
         }
       }
-      
+
       throw new Error(errorMessage);
     }
 
@@ -349,8 +357,11 @@ async function pollForTaskCompletion(requestId, taskName) {
     let errorDetail = `Error fetching ${taskName} data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
     try {
       const errorData = await resultResponse.json();
-      console.error(`[Error Debug] ${taskName} HTTP error response:`, JSON.stringify(errorData, null, 2));
-      
+      console.error(
+        `[Error Debug] ${taskName} HTTP error response:`,
+        JSON.stringify(errorData, null, 2)
+      );
+
       if (errorData && errorData.detail) {
         // When the request fails, the server returns a 500 error with the entire
         // encoded request object in the detail field. The actual error message
@@ -376,18 +387,26 @@ async function pollForTaskCompletion(requestId, taskName) {
         } else {
           // Fallback: try to find any error-like content in the detail object
           const searchForError = (obj, path = '') => {
-            if (typeof obj === 'string' && (obj.includes('Cannot') || obj.includes('Error') || obj.includes('Failed'))) {
+            if (
+              typeof obj === 'string' &&
+              (obj.includes('Cannot') ||
+                obj.includes('Error') ||
+                obj.includes('Failed'))
+            ) {
               return obj;
             }
             if (typeof obj === 'object' && obj !== null) {
               for (const [key, value] of Object.entries(obj)) {
-                const found = searchForError(value, path ? `${path}.${key}` : key);
+                const found = searchForError(
+                  value,
+                  path ? `${path}.${key}` : key
+                );
                 if (found) return found;
               }
             }
             return null;
           };
-          
+
           const foundError = searchForError(errorData.detail);
           if (foundError) {
             errorDetail = `${taskName} failed: ${foundError}`;
@@ -406,54 +425,74 @@ async function pollForTaskCompletion(requestId, taskName) {
 
   if (resultData.status === 'FAILED') {
     // Add detailed logging for debugging error structure
-    console.error(`[Error Debug] ${taskName} failed. Full resultData:`, JSON.stringify(resultData, null, 2));
+    console.error(
+      `[Error Debug] ${taskName} failed. Full resultData:`,
+      JSON.stringify(resultData, null, 2)
+    );
     console.error(`[Error Debug] resultData.error:`, resultData.error);
     console.error(`[Error Debug] resultData.result:`, resultData.result);
-    console.error(`[Error Debug] resultData.return_value:`, resultData.return_value);
-    
+    console.error(
+      `[Error Debug] resultData.return_value:`,
+      resultData.return_value
+    );
+
     let errorMessage = `Unknown error during ${taskName} task execution`;
-    
+
     // Try to extract error message from various possible locations
     if (resultData.error) {
       if (typeof resultData.error === 'string') {
         errorMessage = resultData.error;
       } else if (typeof resultData.error === 'object') {
         // Handle case where error is an object
-        errorMessage = resultData.error.message || 
-                     resultData.error.detail || 
-                     JSON.stringify(resultData.error);
+        errorMessage =
+          resultData.error.message ||
+          resultData.error.detail ||
+          JSON.stringify(resultData.error);
       }
     } else if (resultData.result && resultData.result.error) {
       if (typeof resultData.result.error === 'string') {
         errorMessage = resultData.result.error;
       } else if (typeof resultData.result.error === 'object') {
         // Handle case where error is an object
-        errorMessage = resultData.result.error.message || 
-                     resultData.result.error.detail || 
-                     JSON.stringify(resultData.result.error);
+        errorMessage =
+          resultData.result.error.message ||
+          resultData.result.error.detail ||
+          JSON.stringify(resultData.result.error);
       }
     } else if (resultData.return_value) {
       // Sometimes the error might be in return_value as a JSON string
       try {
         const parsed = JSON.parse(resultData.return_value);
         if (parsed.error) {
-          errorMessage = typeof parsed.error === 'string' ? 
-                        parsed.error : 
-                        (parsed.error.message || parsed.error.detail || JSON.stringify(parsed.error));
+          errorMessage =
+            typeof parsed.error === 'string'
+              ? parsed.error
+              : parsed.error.message ||
+                parsed.error.detail ||
+                JSON.stringify(parsed.error);
         }
       } catch (parseErr) {
         // If return_value is not JSON, use it as is if it looks like an error
-        if (resultData.return_value && (resultData.return_value.includes('Error') || resultData.return_value.includes('Cannot'))) {
+        if (
+          resultData.return_value &&
+          (resultData.return_value.includes('Error') ||
+            resultData.return_value.includes('Cannot'))
+        ) {
           errorMessage = resultData.return_value;
         }
       }
     }
-    
+
     // Additional check: if we still have a generic message, try to extract from any nested structures
     if (errorMessage === `Unknown error during ${taskName} task execution`) {
       // Check if there's any string in the resultData that looks like an error message
       const searchForError = (obj, path = '') => {
-        if (typeof obj === 'string' && (obj.includes('Cannot') || obj.includes('Error') || obj.includes('Failed'))) {
+        if (
+          typeof obj === 'string' &&
+          (obj.includes('Cannot') ||
+            obj.includes('Error') ||
+            obj.includes('Failed'))
+        ) {
           return obj;
         }
         if (typeof obj === 'object' && obj !== null) {
@@ -464,13 +503,13 @@ async function pollForTaskCompletion(requestId, taskName) {
         }
         return null;
       };
-      
+
       const foundError = searchForError(resultData);
       if (foundError) {
         errorMessage = foundError;
       }
     }
-    
+
     throw new Error(errorMessage);
   }
 
@@ -593,14 +632,22 @@ export async function deleteWorkspace(workspaceName) {
       throw new Error('Failed to obtain request ID for deleteWorkspace');
     }
 
-    console.log(`[Delete Debug] Got request ID for deleteWorkspace: ${requestId}`);
-    
+    console.log(
+      `[Delete Debug] Got request ID for deleteWorkspace: ${requestId}`
+    );
+
     try {
       const result = await pollForTaskCompletion(requestId, 'deleteWorkspace');
-      console.log(`[Delete Debug] deleteWorkspace completed successfully:`, result);
+      console.log(
+        `[Delete Debug] deleteWorkspace completed successfully:`,
+        result
+      );
       return result;
     } catch (pollError) {
-      console.error(`[Delete Debug] deleteWorkspace failed with error:`, pollError);
+      console.error(
+        `[Delete Debug] deleteWorkspace failed with error:`,
+        pollError
+      );
       console.error(`[Delete Debug] Error message:`, pollError.message);
       throw pollError;
     }

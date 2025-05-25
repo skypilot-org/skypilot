@@ -40,14 +40,14 @@ import { statusGroups } from './jobs';
 // Helper function to clean error messages
 const cleanErrorMessage = (error) => {
   if (!error?.message) return 'An unexpected error occurred.';
-  
+
   let message = error.message;
-  
+
   // Split on 'failed:' and take the part after it
   if (message.includes('failed:')) {
     message = message.split('failed:')[1].trim();
   }
-  
+
   // Capitalize first letter and return
   return message.charAt(0).toUpperCase() + message.slice(1);
 };
@@ -62,7 +62,7 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   if (isDefault && isEmptyConfig) {
     return (
       <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
-        Workspace 'default' can use all accessible infrastructure.
+        Workspace &apos;default&apos; can use all accessible infrastructure.
       </div>
     );
   }
@@ -84,7 +84,8 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
       }
       enabledDescriptions.push(
         <span key={`${cloud}-enabled`} className="block">
-          {cloudNameUpper}{detail} is enabled.
+          {cloudNameUpper}
+          {detail} is enabled.
         </span>
       );
     } else {
@@ -101,7 +102,8 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
     const disabledString = disabledClouds.join(' and ');
     finalDescriptions.push(
       <span key="disabled-clouds" className="block">
-        {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'} explicitly disabled.
+        {disabledString} {disabledClouds.length === 1 ? 'is' : 'are'} explicitly
+        disabled.
       </span>
     );
   }
@@ -122,8 +124,8 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   if (!isDefault && isEmptyConfig) {
     return (
       <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
-        This workspace has no specific cloud resource configurations and can
-        use all accessible infrastructure.
+        This workspace has no specific cloud resource configurations and can use
+        all accessible infrastructure.
       </div>
     );
   }
@@ -131,15 +133,23 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 };
 
 // Error display component
-const ErrorDisplay = ({ error, title = "Error" }) => {
+const ErrorDisplay = ({ error, title = 'Error' }) => {
   if (!error) return null;
 
   return (
     <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
       <div className="flex">
         <div className="flex-shrink-0">
-          <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          <svg
+            className="h-5 w-5 text-red-400"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+              clipRule="evenodd"
+            />
           </svg>
         </div>
         <div className="ml-3">
@@ -183,7 +193,9 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit }) => (
     </CardContent>
 
     <div className="px-6 pb-3 text-sm pt-3">
-      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">Enabled Infra</h4>
+      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+        Enabled Infra
+      </h4>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         {workspace.clouds.map((cloud) => (
           <div key={cloud} className="flex items-center text-gray-700">
@@ -244,7 +256,12 @@ const CreateWorkspaceCard = ({ onClick }) => (
 );
 
 // Statistics summary component
-const StatsSummary = ({ workspaceCount, runningClusters, totalClusters, managedJobs }) => (
+const StatsSummary = ({
+  workspaceCount,
+  runningClusters,
+  totalClusters,
+  managedJobs,
+}) => (
   <div className="bg-sky-50 p-4 rounded-lg shadow mb-6">
     <div className="flex flex-col sm:flex-row justify-around items-center">
       <div className="p-2">
@@ -259,7 +276,9 @@ const StatsSummary = ({ workspaceCount, runningClusters, totalClusters, managedJ
       <div className="p-2">
         <div className="flex items-center">
           <ServerIcon className="w-5 h-5 mr-2 text-sky-600" />
-          <span className="text-sm text-gray-600">Clusters (Running / Total):</span>
+          <span className="text-sm text-gray-600">
+            Clusters (Running / Total):
+          </span>
           <span className="ml-1 text-xl font-semibold text-sky-700">
             {runningClusters} / {totalClusters}
           </span>
@@ -287,10 +306,11 @@ export function Workspaces() {
   });
   const [loading, setLoading] = useState(true);
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
-  
+
   // Modal states
-  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] = useState(false);
-  
+  const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =
+    useState(false);
+
   // Delete confirmation states
   const [deleteState, setDeleteState] = useState({
     confirmOpen: false,
@@ -373,7 +393,11 @@ export function Workspaces() {
           job.cluster_name || (job.resources && job.resources.cluster_name);
         if (jobClusterName) {
           const wsName = clusterNameToWorkspace[jobClusterName];
-          if (wsName && workspaceStatsAggregator[wsName] && activeJobStatuses.has(job.status)) {
+          if (
+            wsName &&
+            workspaceStatsAggregator[wsName] &&
+            activeJobStatuses.has(job.status)
+          ) {
             workspaceStatsAggregator[wsName].managedJobsCount++;
           }
         }
@@ -423,7 +447,7 @@ export function Workspaces() {
   const handleConfirmDelete = async () => {
     if (!deleteState.workspaceToDelete) return;
 
-    setDeleteState(prev => ({ ...prev, deleting: true, error: null }));
+    setDeleteState((prev) => ({ ...prev, deleting: true, error: null }));
     try {
       await deleteWorkspace(deleteState.workspaceToDelete);
       setDeleteState({
@@ -435,7 +459,7 @@ export function Workspaces() {
       await fetchData();
     } catch (error) {
       console.error('Error deleting workspace:', error);
-      setDeleteState(prev => ({
+      setDeleteState((prev) => ({
         ...prev,
         deleting: false,
         error: cleanErrorMessage(error),
@@ -481,7 +505,11 @@ export function Workspaces() {
             size="sm"
             onClick={() => setIsAllWorkspacesModalOpen(true)}
             className="ml-4 px-2 py-1 text-xs"
-            disabled={loading || !rawWorkspacesData || Object.keys(rawWorkspacesData).length === 0}
+            disabled={
+              loading ||
+              !rawWorkspacesData ||
+              Object.keys(rawWorkspacesData).length === 0
+            }
           >
             View All Configs
           </Button>
@@ -528,10 +556,10 @@ export function Workspaces() {
               key={ws.name}
               workspace={ws}
               onDelete={handleDeleteWorkspace}
-              onEdit={(name) => router.push(`/workspace/${name}`)}
+              onEdit={(name) => router.push(`/workspaces/${name}`)}
             />
           ))}
-          <CreateWorkspaceCard onClick={() => router.push('/workspaces/new')} />
+          <CreateWorkspaceCard onClick={() => router.push('/workspace/new')} />
         </div>
       )}
 
@@ -543,7 +571,9 @@ export function Workspaces() {
         >
           <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl w-full max-h-[90vh] flex flex-col">
             <DialogHeader>
-              <DialogTitle className="pr-10">All Workspaces Configuration</DialogTitle>
+              <DialogTitle className="pr-10">
+                All Workspaces Configuration
+              </DialogTitle>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto py-4">
               <pre style={preStyle}>
@@ -560,13 +590,14 @@ export function Workspaces() {
           <DialogHeader>
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete workspace "{deleteState.workspaceToDelete}"? 
-              This action cannot be undone.
+              Are you sure you want to delete workspace &quot;
+              {deleteState.workspaceToDelete}&quot;? This action cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
-          
+
           <ErrorDisplay error={deleteState.error} title="Deletion Failed" />
-          
+
           <DialogFooter>
             <Button
               variant="outline"
