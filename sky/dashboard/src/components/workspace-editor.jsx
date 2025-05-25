@@ -36,6 +36,7 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
+import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -68,8 +69,9 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   const disabledClouds = [];
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
+    const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()];
     if (cloudConfig?.disabled === true) {
-      disabledClouds.push(cloud);
+      disabledClouds.push(cloudName);
     } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
       let detail = '';
       if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
@@ -79,14 +81,14 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
       }
       enabledDescriptions.push(
         <span key={`${cloud}-enabled`} className="block">
-          {cloud}
+          {cloudName}
           {detail} is enabled.
         </span>
       );
     } else {
       enabledDescriptions.push(
         <span key={`${cloud}-default-enabled`} className="block">
-          {cloud} is enabled (using default settings).
+          {cloudName} is enabled (using default settings).
         </span>
       );
     }
@@ -639,25 +641,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                         {/* Action buttons */}
                         <div className="flex justify-end space-x-3 pt-3 border-gray-200">
-                          {!isNewWorkspace && (
-                            <Button
-                              variant="outline"
-                              onClick={handleDiscard}
-                              disabled={saving || loading || !hasChanges}
-                              className="inline-flex items-center"
-                            >
-                              <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                              Discard
-                            </Button>
-                          )}
-
                           <Button
                             onClick={handleSave}
                             disabled={saving || yamlError || loading}
                             className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
                           >
                             <SaveIcon className="w-4 h-4 mr-1.5" />
-                            {saving ? 'Saving...' : 'Save and Apply'}
+                            {saving ? 'Applying...' : 'Apply'}
                           </Button>
                         </div>
                       </div>
