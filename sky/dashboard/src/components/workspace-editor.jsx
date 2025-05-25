@@ -380,6 +380,32 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     });
   };
 
+  const handleDiscard = () => {
+    // Reset to original configuration
+    setWorkspaceConfig(originalConfig);
+    
+    // Reset YAML value to original
+    const fullConfig = { [workspaceName]: originalConfig };
+    let yamlOutput;
+    if (Object.keys(originalConfig).length === 0) {
+      yamlOutput = `${workspaceName}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
+    } else {
+      yamlOutput = yaml.dump(fullConfig, {
+        indent: 2,
+        lineWidth: -1,
+        noRefs: true,
+        skipInvalid: true,
+        flowLevel: -1,
+      });
+    }
+    setYamlValue(yamlOutput);
+    
+    // Clear any errors
+    setYamlError(null);
+    setError(null);
+    setSuccess(null);
+  };
+
   const handleRefresh = async () => {
     await Promise.all([fetchWorkspaceConfig(), fetchWorkspaceStats()]);
   };
@@ -456,15 +482,6 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   Delete
                 </button>
               )}
-
-              <button
-                onClick={handleSave}
-                disabled={saving || yamlError || loading}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
-              >
-                <SaveIcon className="w-4 h-4 mr-1.5" />
-                {saving ? 'Saving...' : 'Save and apply'}
-              </button>
             </div>
           </div>
         </div>
@@ -552,7 +569,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       <div className="mt-4">
                         <WorkspaceConfigDescription 
                           workspaceName={workspaceName} 
-                          config={workspaceConfig} 
+                          config={originalConfig} 
                         />
                       </div>
                     </div>
@@ -596,37 +613,54 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           for more details.
                         </p>
 
-                        {/* Example Configuration */}
-                        <div className="mb-4 p-3 bg-gray-50 border rounded-lg">
+                        {/* Example Configuration Section */}
+                        <div className="mb-4">
                           <h4 className="text-sm font-medium text-gray-700 mb-2">
-                            Example Configuration:
+                            Example configuration:
                           </h4>
-                          <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
-                            {`${workspaceName || 'my-workspace'}:
+                          <div className="p-3 bg-gray-50 border rounded-lg">
+                            <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
+                              {`${workspaceName || 'my-workspace'}:
   gcp:
     project_id: xxx
   aws:
     disabled: true`}
-                          </pre>
+                            </pre>
+                          </div>
                         </div>
 
                         <Textarea
                           value={yamlValue}
                           onChange={(e) => handleYamlChange(e.target.value)}
                           className="font-mono text-sm flex-1 resize-none"
-                          style={{ minHeight: '400px' }}
+                          style={{ minHeight: '350px' }}
                           spellCheck={false}
-                          placeholder={`# Enter workspace configuration in YAML format
-# Example:
-${workspaceName || 'workspace-name'}:
-  gcp:
-    project_id: my-project-123
-  aws:
-    region: us-west-2
-    disabled: false
-  azure:
-    disabled: true`}
+                          placeholder={`# Enter workspace configuration in YAML format`}
                         />
+                        
+                        {/* Action buttons */}
+                        <div className="flex justify-end space-x-3 pt-3 border-gray-200">
+                          {!isNewWorkspace && (
+                            <Button
+                              variant="outline"
+                              onClick={handleDiscard}
+                              disabled={saving || loading || !hasChanges}
+                              className="inline-flex items-center"
+                            >
+                              <RotateCwIcon className="w-4 h-4 mr-1.5" />
+                              Discard
+                            </Button>
+                          )}
+                          
+                          <Button
+                            onClick={handleSave}
+                            disabled={saving || yamlError || loading}
+                            className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
+                          >
+                            <SaveIcon className="w-4 h-4 mr-1.5" />
+                            {saving ? 'Saving...' : 'Save and Apply'}
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
