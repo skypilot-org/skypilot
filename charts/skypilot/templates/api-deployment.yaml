@@ -71,12 +71,12 @@ spec:
             rm /root/.sky/config.yaml
           fi
           # Check if ConfigMap config exists and set up accordingly
-          if [ ! -s /root/.sky/config.yaml ]; then
-            echo "initializing sync from PVC to ConfigMap"
-            # Initialize ConfigMap sync to ensure any existing PVC config becomes the source of truth
+          if [ -s /root/.sky/config.yaml ]; then
+            # If the config.yaml is not empty, sync the PVC config to ConfigMap
             python3 -c "import os; from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
           else
-            # Initial sync of ConfigMap config to PVC location
+            # If the config.yaml is empty, we initialize the config on PVC with
+            # user specified config.
             cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
           fi
           {{- if .Values.apiService.sshNodePools }}

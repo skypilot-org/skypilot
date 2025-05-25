@@ -1,14 +1,29 @@
 # Developer Guide
 
-## SkyPilot config persistency
+## SkyPilot Config Persistency
 
-Helm deployed API server has some limitation for config persistency. It is intentionally decided to use PVC/external storage for config persistency, instead
-of configMap, as configMap is not fully persisted across Kuberenetes cluster.
+**Design Decision:** Use PVC as the source of truth for SkyPilot configuration.
 
-SkyPilot will still sync the config back to configMap for user convenience, but
-there are some scenarios where the configMap is not fully in sync with the PVC:
+**Drawback:** Helm upgrades cannot directly change the SkyPilot config for 
+the API server. Instead, we provide instructions for updating config 
+(see: https://skypilot.readthedocs.io/en/latest/reference/api-server/api-server-admin-deploy.html#optional-update-skypilot-configuration).
 
-* When the API server is upgraded and the configMap is ignored (no `forceConfigOverride` set), it will only be synced back to configMap when any
-config change is made through workspace API.
+### Why PVC?
+- **Fast:** Immediate reflection of config changes
+- **Unified:** Consistent with non-Kubernetes deployments  
+- **Future-proof:** Enables migration to external storage sources
 
-TODO: SkyPilot should provide API to get config from API server, to avoid the dependency on configMap.
+### Why Not ConfigMap?
+- **Slow updates:** Changes take 2-3 seconds to reflect in mounted files, 
+  making SkyPilot unresponsive (known Kubernetes issue with no planned fix: 
+  [kubernetes/kubernetes#50345](https://github.com/kubernetes/kubernetes/issues/50345#issuecomment-585344794))
+- **Poor persistence:** Config is not persisted across Kubernetes clusters 
+  and backing up is difficult
+
+**Note:** SkyPilot syncs config back to ConfigMap for user convenience, but 
+ConfigMap may not always be in sync with PVC (e.g., after upgrades without 
+`forceConfigOverride`). Sync occurs when config changes are made through 
+the workspace API.
+
+**TODO:** Provide API to get config directly from API server to eliminate 
+ConfigMap dependency.
