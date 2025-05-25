@@ -234,7 +234,7 @@ def check_capabilities(
                 enabled_clouds_for_capability)
 
         if disallowed_explicit_check_message:
-                echo(f'\n{disallowed_explicit_check_message}')
+            echo(f'\n{disallowed_explicit_check_message}')
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,
                              current_workspace_name, hide_workspace_str,
