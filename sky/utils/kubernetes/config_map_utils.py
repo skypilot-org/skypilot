@@ -141,7 +141,8 @@ def patch_configmap_with_config(config: config_utils.Config) -> None:
         config_file_path: Path to the config file for fallback sync.
     """
     if not is_running_in_kubernetes():
-        raise RuntimeError('Cannot patch ConfigMap when not running in Kubernetes')
+        raise RuntimeError(
+            'Cannot patch ConfigMap when not running in Kubernetes')
 
     try:
         namespace = get_kubernetes_namespace()
@@ -161,7 +162,7 @@ def patch_configmap_with_config(config: config_utils.Config) -> None:
             _request_timeout=_CONFIGMAP_SYNC_TIMEOUT)
 
         logger.debug(f'Successfully synced config to ConfigMap '
-                        f'{configmap_name} in namespace {namespace}')
+                     f'{configmap_name} in namespace {namespace}')
 
     except ImportError:
         # Kubernetes client not available, skip silently
@@ -209,4 +210,5 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to initialize ConfigMap sync: {e}')
     else:
-        logger.debug('No PVC config file exists, skipping ConfigMap sync initialization')
+        logger.debug(
+            'No PVC config file exists, skipping ConfigMap sync initialization')

@@ -708,11 +708,11 @@ def update_config_no_lock(config: config_utils.Config) -> None:
         config: The config to save and sync.
     """
     global_config_path = os.path.expanduser(get_user_config_path())
-    
+
     # Import here to avoid circular imports
     # pylint: disable=import-outside-toplevel
     from sky.utils.kubernetes import config_map_utils
-    
+
     if config_map_utils.is_running_in_kubernetes():
         # In Kubernetes, config file is symlinked to ConfigMap
         # Only update the ConfigMap, which will be reflected in the symlinked file

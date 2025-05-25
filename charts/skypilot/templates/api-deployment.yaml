@@ -125,10 +125,8 @@ spec:
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
         {{- end }}
-        {{- if .Values.apiService.config }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
-        {{- end }}
         {{- if .Values.apiService.sshNodePools }}
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
@@ -346,11 +344,10 @@ spec:
         secret:
           secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
       {{- end }}
-      {{- if .Values.apiService.config }}
       - name: skypilot-config
         configMap:
           name: {{ .Release.Name }}-config
-      {{- end }}
+          optional: true
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:
