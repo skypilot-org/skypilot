@@ -347,7 +347,6 @@ spec:
       - name: skypilot-config
         configMap:
           name: {{ .Release.Name }}-config
-          optional: true
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:
