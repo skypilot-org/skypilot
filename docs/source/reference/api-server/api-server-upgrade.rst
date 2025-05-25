@@ -92,19 +92,24 @@ The upgraded API server is ready to serve requests after the pod becomes running
 
     **Safe Configuration Update Process**
 
-    1. **Retrieve the current configuration**:
+    1. Retrieve the current configuration:
 
     .. code-block:: bash
 
         kubectl get configmap $RELEASE_NAME-config -n $NAMESPACE -o jsonpath='{.data.config\.yaml}' > current-config.yaml
 
-    2. **Edit the configuration file** with your desired changes:
+    .. note::
+
+        If you just :ref:`migrated to a new Kubernetes cluster <api-server-persistence>`, you can deploy API server without setting ``apiService.config`` first to have the persisted configuration take
+        effect first, and use the command above to retrieve the persisted configuration.
+
+    2. Edit the configuration file with your desired changes:
 
     .. code-block:: bash
 
         vim current-config.yaml
 
-    3. **Upgrade with the updated configuration**:
+    3. Upgrade with the updated configuration:
 
     .. code-block:: bash
 
