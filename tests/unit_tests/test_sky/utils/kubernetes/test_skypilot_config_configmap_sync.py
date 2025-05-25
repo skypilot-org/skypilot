@@ -68,13 +68,12 @@ class TestConfigMapSync(unittest.TestCase):
         # Should not raise any exceptions
         config_map_utils.patch_configmap_with_config(config, '/fake/path')
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
-    @mock.patch('sky.utils.kubernetes.config_map_utils.get_kubernetes_namespace'
-               )
+    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.get_kubernetes_namespace')
     @mock.patch('sky.utils.kubernetes.config_map_utils.get_configmap_name')
     @mock.patch('sky.utils.common_utils.dump_yaml_str')
-    def test_patch_configmap_success(self, mock_dump_yaml, mock_get_name, 
+    @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
+    def test_patch_configmap_success(self, mock_k8s, mock_dump_yaml, mock_get_name, 
                                      mock_get_ns, mock_is_k8s):
         """Test successful ConfigMap patching."""
         mock_is_k8s.return_value = True
@@ -82,31 +81,30 @@ class TestConfigMapSync(unittest.TestCase):
         mock_get_name.return_value = 'test-configmap'
         mock_dump_yaml.return_value = 'workspaces:\n  test:\n    aws: {}'
 
-        with mock.patch('sky.adaptors.kubernetes') as mock_k8s:
-            mock_core_api = mock.MagicMock()
-            mock_k8s.core_api.return_value = mock_core_api
-            
-            # Ensure the exception types are properly mocked
-            class MockApiException(Exception):
-                def __init__(self, status=404):
-                    self.status = status
-            
-            mock_k8s.kubernetes.client.rest.ApiException = MockApiException
-            
-            # Mock successful patch (no exception raised)
-            mock_core_api.patch_namespaced_config_map.return_value = None
+        mock_core_api = mock.MagicMock()
+        mock_k8s.core_api.return_value = mock_core_api
+        
+        # Ensure the exception types are properly mocked
+        class MockApiException(Exception):
+            def __init__(self, status=404):
+                self.status = status
+        
+        mock_k8s.kubernetes.client.rest.ApiException = MockApiException
+        
+        # Mock successful patch (no exception raised)
+        mock_core_api.patch_namespaced_config_map.return_value = None
 
-            config = config_utils.Config({'workspaces': {'test': {'aws': {}}}})
-            config_map_utils.patch_configmap_with_config(config, '/fake/path')
+        config = config_utils.Config({'workspaces': {'test': {'aws': {}}}})
+        config_map_utils.patch_configmap_with_config(config, '/fake/path')
 
-            # Verify the ConfigMap patch was called
-            mock_core_api.patch_namespaced_config_map.assert_called_once()
-            call_args = mock_core_api.patch_namespaced_config_map.call_args
+        # Verify the ConfigMap patch was called
+        mock_core_api.patch_namespaced_config_map.assert_called_once()
+        call_args = mock_core_api.patch_namespaced_config_map.call_args
 
-            self.assertEqual(call_args[1]['name'], 'test-configmap')
-            self.assertEqual(call_args[1]['namespace'], 'test-namespace')
-            self.assertIn('data', call_args[1]['body'])
-            self.assertIn('config.yaml', call_args[1]['body']['data'])
+        self.assertEqual(call_args[1]['name'], 'test-configmap')
+        self.assertEqual(call_args[1]['namespace'], 'test-namespace')
+        self.assertIn('data', call_args[1]['body'])
+        self.assertIn('config.yaml', call_args[1]['body']['data'])
 
     @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
                )
@@ -121,37 +119,66 @@ class TestConfigMapSync(unittest.TestCase):
 
     @mock.patch(
         'sky.utils.kubernetes.config_map_utils.patch_configmap_with_config')
-    def test_update_config_no_lock_calls_patch(self, mock_patch):
-        """Test that update_config_no_lock calls ConfigMap patching."""
+    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes')
+    def test_update_config_no_lock_calls_patch_in_kubernetes(self, mock_is_k8s, mock_patch):
+        """Test that update_config_no_lock calls ConfigMap patching in Kubernetes."""
+        mock_is_k8s.return_value = True
+        
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             config_path = f.name
 
         from sky import skypilot_config
         with mock.patch.object(skypilot_config, 'get_user_config_path', return_value=config_path), \
-             mock.patch('sky.utils.common_utils.dump_yaml'), \
+             mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
              mock.patch('sky.skypilot_config._reload_config'):
 
             config = config_utils.Config({'test': 'value'})
             skypilot_config.update_config_no_lock(config)
 
-            # Verify ConfigMap patching was called
+            # In Kubernetes, should call ConfigMap patching but not dump_yaml
             mock_patch.assert_called_once_with(config, config_path)
+            mock_dump_yaml.assert_not_called()
 
         os.unlink(config_path)
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
-    @mock.patch('sky.utils.kubernetes.config_map_utils.get_kubernetes_namespace'
-               )
+    @mock.patch(
+        'sky.utils.kubernetes.config_map_utils.patch_configmap_with_config')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes')
+    def test_update_config_no_lock_calls_dump_yaml_non_kubernetes(self, mock_is_k8s, mock_patch):
+        """Test that update_config_no_lock calls dump_yaml in non-Kubernetes environments."""
+        mock_is_k8s.return_value = False
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            config_path = f.name
+
+        from sky import skypilot_config
+        with mock.patch.object(skypilot_config, 'get_user_config_path', return_value=config_path), \
+             mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
+             mock.patch('sky.skypilot_config._reload_config'):
+
+            config = config_utils.Config({'test': 'value'})
+            skypilot_config.update_config_no_lock(config)
+
+            # In non-Kubernetes, should call dump_yaml but not ConfigMap patching
+            mock_dump_yaml.assert_called_once_with(config_path, dict(config))
+            mock_patch.assert_not_called()
+
+        os.unlink(config_path)
+
+    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.get_kubernetes_namespace')
     @mock.patch('sky.utils.kubernetes.config_map_utils.get_configmap_name')
     @mock.patch('sky.skypilot_config.parse_and_validate_config_file')
-    def test_sync_pvc_config_to_configmap(self, mock_parse_config,
+    @mock.patch('sky.utils.common_utils.dump_yaml_str')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
+    def test_sync_pvc_config_to_configmap(self, mock_k8s, mock_dump_yaml, mock_parse_config,
                                           mock_get_name, mock_get_ns,
                                           mock_is_k8s):
         """Test syncing PVC config to ConfigMap."""
         mock_is_k8s.return_value = True
         mock_get_ns.return_value = 'test-namespace'
         mock_get_name.return_value = 'test-configmap'
+        mock_dump_yaml.return_value = 'test:\n  value: 123'
         mock_parse_config.return_value = config_utils.Config(
             {'test': {
                 'value': 123
@@ -162,24 +189,23 @@ class TestConfigMapSync(unittest.TestCase):
             f.flush()
             config_path = f.name
 
-        with mock.patch('sky.adaptors.kubernetes') as mock_k8s:
-            mock_core_api = mock.MagicMock()
-            mock_k8s.core_api.return_value = mock_core_api
+        mock_core_api = mock.MagicMock()
+        mock_k8s.core_api.return_value = mock_core_api
 
-            # Create a proper ApiException mock for 404 error
-            from unittest.mock import Mock
-            api_exception = Mock()
-            api_exception.status = 404
-            mock_k8s.kubernetes.client.rest.ApiException = type(api_exception)
-            mock_core_api.read_namespaced_config_map.side_effect = api_exception
+        # Create a simple exception that has status = 404
+        class SimpleApiException(Exception):
+            status = 404
+        
+        mock_k8s.kubernetes.client.rest.ApiException = SimpleApiException
+        mock_core_api.read_namespaced_config_map.side_effect = SimpleApiException()
 
-            # Mock successful creation
-            mock_core_api.create_namespaced_config_map.return_value = None
+        # Mock successful creation
+        mock_core_api.create_namespaced_config_map.return_value = None
 
-            config_map_utils.sync_pvc_config_to_configmap(config_path)
+        config_map_utils.sync_pvc_config_to_configmap(config_path)
 
-            # Verify ConfigMap creation was called
-            mock_core_api.create_namespaced_config_map.assert_called_once()
+        # Verify ConfigMap creation was called
+        mock_core_api.create_namespaced_config_map.assert_called_once()
 
         os.unlink(config_path)
 

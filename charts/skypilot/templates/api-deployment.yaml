@@ -66,10 +66,10 @@ spec:
           {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
           echo "Setting up config.yaml from ConfigMap \`{{ .Release.Name }}-config\` as authoritative source"
-          # Copy ConfigMap config to PVC location, making ConfigMap the source of truth
-          # This ensures that ConfigMap always overrides any existing config on PVC
-          cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
-          echo "Config successfully copied from ConfigMap to /root/.sky/config.yaml"
+          # Symlink ConfigMap config directly to config location, making ConfigMap the direct source of truth
+          # This ensures that any reads from /root/.sky/config.yaml directly access the ConfigMap
+          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          echo "Config successfully symlinked from ConfigMap to /root/.sky/config.yaml"
           {{- else }}
           mkdir -p /root/.sky
           echo "No ConfigMap provided, initializing sync from PVC to ConfigMap if needed"
