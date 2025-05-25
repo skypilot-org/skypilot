@@ -2000,7 +2000,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             # TODO(zhwu): remove this after 0.12.0.
             logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
                            'in an old version, and may miss some features. '
-                           'Update API server with: sky api stop; sky api start'
+                           'Update with: sky api stop; sky api start'
                            f'{colorama.Style.RESET_ALL}')
             workspace_request_id = None
 
