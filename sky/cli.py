@@ -353,12 +353,12 @@ _TASK_OPTIONS = [
         type=str,
         help='Infrastructure to use. '
         'Format: cloud, cloud/region, cloud/region/zone, '
-        'or kubernetes/context-name. '
+        'k8s/context-name, or ssh/node-pool-name. '
         'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
         # TODO(zhwu): we have to use `\*` to make sure the docs build
         # not complaining about the `*`, but this will cause `--help`
         # to show `\*` instead of `*`.
-        'aws/\\*/us-east-1a, kubernetes/my-cluster-context.'),
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'),
     click.option(
         '--cloud',
         required=False,
