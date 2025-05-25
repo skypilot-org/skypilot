@@ -92,7 +92,7 @@ export default function NewWorkspacePage() {
                 <p className="text-sm text-gray-500 mt-1">
                   Workspace &quot;{workspaceName}&quot; already exists.{' '}
                   <Link
-                    href={`/workspaces/${workspaceName}`}
+                    href={`/workspace/${workspaceName}`}
                     className="text-blue-600 hover:underline"
                   >
                     View the workspace

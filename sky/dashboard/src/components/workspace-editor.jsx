@@ -240,7 +240,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         setSuccess('Workspace created successfully!');
         // Navigate to the created workspace
         setTimeout(() => {
-          router.push(`/workspaces/${workspaceName}`);
+          router.push(`/workspace/${workspaceName}`);
         }, 1500);
       } else {
         await updateWorkspace(workspaceName, workspaceConfig);
@@ -303,7 +303,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
               href={
                 isNewWorkspace
                   ? `/workspaces/new`
-                  : `/workspaces/${workspaceName}`
+                  : `/workspace/${workspaceName}`
               }
               className="text-sky-blue hover:underline"
             >

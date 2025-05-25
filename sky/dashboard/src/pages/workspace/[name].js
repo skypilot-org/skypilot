@@ -4,12 +4,12 @@ import { WorkspaceEditor } from '@/components/workspace-editor';
 
 export default function WorkspacePage() {
   const router = useRouter();
-  const { workspace } = router.query;
+  const { name } = router.query;
 
-  // Show loading while router is not ready or workspace param is not available
-  if (!router.isReady || !workspace) {
+  // Show loading while router is not ready or name param is not available
+  if (!router.isReady || !name) {
     return <div>Loading...</div>;
   }
 
-  return <WorkspaceEditor workspaceName={workspace} />;
+  return <WorkspaceEditor workspaceName={name} />;
 }

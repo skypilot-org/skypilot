@@ -226,7 +226,7 @@ export function Workspaces() {
   }, []);
 
   const handleShowWorkspaceDetails = (workspaceName) => {
-    router.push(`/workspaces/${workspaceName}`);
+    router.push(`/workspace/${workspaceName}`);
   };
 
   const handleCreateNewWorkspace = () => {
