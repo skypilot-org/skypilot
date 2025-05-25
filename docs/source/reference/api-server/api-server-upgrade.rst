@@ -64,6 +64,10 @@ Upgrade the API server:
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
+.. note::
+
+    **Configuration Override Warning**: If you attempt to set ``apiService.config`` during an upgrade, SkyPilot will display a warning to prevent accidental configuration overwrites. See :ref:`handling-config-overrides` for details on how to safely update configurations during upgrades.
+
 Optionally, you can watch the upgrade progress with:
 
 .. code-block:: console
@@ -77,6 +81,37 @@ Optionally, you can watch the upgrade progress with:
     skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
 
 The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. If the API server was cordoned previously, the cordon will be removed automatically after the upgrade.
+
+.. dropdown:: Handling Configuration Overrides During Upgrades
+    :class-title: sd-text-primary
+    :class-body: sd-font-weight-light
+
+    .. _handling-config-overrides:
+
+    The Helm chart prevents accidental configuration overwrites during upgrades. If you need to update the configuration, follow these steps:
+
+    **Safe Configuration Update Process**
+
+    1. **Retrieve the current configuration**:
+
+    .. code-block:: bash
+
+        kubectl get configmap $RELEASE_NAME-config -n $NAMESPACE -o jsonpath='{.data.config\.yaml}' > current-config.yaml
+
+    2. **Edit the configuration file** with your desired changes:
+
+    .. code-block:: bash
+
+        vim current-config.yaml
+
+    3. **Upgrade with the updated configuration**:
+
+    .. code-block:: bash
+
+        helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+          --set apiService.image=${IMAGE_REPO}:${VERSION} \
+          --set-file apiService.config=current-config.yaml \
+          --set apiService.confirmConfigOverride=true
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
