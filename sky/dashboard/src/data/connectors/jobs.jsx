@@ -143,6 +143,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         recoveries: job.recovery_count,
         details: job.failure_reason,
         user: job.user_name,
+        user_hash: job.user_hash,
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,

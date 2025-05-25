@@ -301,13 +301,29 @@ def get_workspace_cloud(cloud: str,
 
 
 @contextlib.contextmanager
-def with_active_workspace(workspace: str) -> Iterator[None]:
-    """Temporarily set the active workspace.
+def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
+    """Temporarily set the active workspace IN CURRENT THREAD.
+
+    Note: having this function thread-local is error-prone, as wrapping some
+    operations with this will not have the underlying threads to get the
+    correct active workspace. However, we cannot make it global either, as
+    backend_utils.refresh_cluster_status() will be called in multiple threads,
+    and they may have different active workspaces for different threads.
+
+    # TODO(zhwu): make this function global by default and able to be set
+    # it to thread-local with an argument.
 
     Args:
         workspace: The workspace to set as active.
+
+    Raises:
+        RuntimeError: If called from a non-main thread.
     """
     original_workspace = get_active_workspace()
+    if original_workspace == workspace:
+        # No change, do nothing.
+        yield
+        return
     _active_workspace_context.workspace = workspace
     logger.debug(f'Set context workspace: {workspace}')
     yield
@@ -559,7 +575,8 @@ def override_skypilot_config(
                          'server and try again.')
     # Initialize the active workspace context to the workspace specified, so
     # that a new request is not affected by the previous request's workspace.
-    _active_workspace_context.workspace = workspace
+    global _active_workspace_context
+    _active_workspace_context = threading.local()
 
     try:
         common_utils.validate_schema(
