@@ -198,10 +198,6 @@ def create_table():
                                                 'config_hash',
                                                 'TEXT DEFAULT null')
 
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters',
-                                                'config_hash',
-                                                'TEXT DEFAULT null')
-
         db_utils.add_column_to_table_sqlalchemy(session, 'cluster_history',
                                                 'user_hash',
                                                 'TEXT DEFAULT null')
