@@ -46,11 +46,15 @@ import yaml from 'js-yaml';
 const cleanErrorMessage = (error) => {
   if (!error?.message) return 'An unexpected error occurred.';
   
-  return error.message
-    .replace(/^(createWorkspace|updateWorkspace|deleteWorkspace) failed:\s*/i, '')
-    .replace(/^Error fetching (createWorkspace|updateWorkspace|deleteWorkspace) data for request ID [^:]+:\s*/i, '')
-    .replace(/^Cannot (create|update|delete) workspace\s*/i, '')
-    .replace(/^[a-z]/, (char) => char.toUpperCase());
+  let message = error.message;
+  
+  // Split on 'failed:' and take the part after it
+  if (message.includes('failed:')) {
+    message = message.split('failed:')[1].trim();
+  }
+  
+  // Capitalize first letter and return
+  return message.charAt(0).toUpperCase() + message.slice(1);
 };
 
 // Error display component
@@ -58,12 +62,18 @@ const ErrorDisplay = ({ error, title = "Error" }) => {
   if (!error) return null;
 
   return (
-    <Alert variant="destructive">
-      <AlertTriangleIcon className="h-4 w-4" />
-      <AlertDescription>
-        <strong>{title}:</strong> {error}
-      </AlertDescription>
-    </Alert>
+    <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+      <div className="flex items-center">
+        <div className="flex-shrink-0">
+          <AlertTriangleIcon className="h-5 w-5 text-red-400" />
+        </div>
+        <div className="ml-3">
+          <div className="text-sm text-red-800">
+            <strong>{title}:</strong> {error}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 

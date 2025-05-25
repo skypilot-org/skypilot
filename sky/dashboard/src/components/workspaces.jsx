@@ -41,11 +41,15 @@ import { statusGroups } from './jobs';
 const cleanErrorMessage = (error) => {
   if (!error?.message) return 'An unexpected error occurred.';
   
-  return error.message
-    .replace(/^deleteWorkspace failed:\s*/i, '')
-    .replace(/^Error fetching deleteWorkspace data for request ID [^:]+:\s*/i, '')
-    .replace(/^Cannot delete workspace\s*/i, '')
-    .replace(/^[a-z]/, (char) => char.toUpperCase());
+  let message = error.message;
+  
+  // Split on 'failed:' and take the part after it
+  if (message.includes('failed:')) {
+    message = message.split('failed:')[1].trim();
+  }
+  
+  // Capitalize first letter and return
+  return message.charAt(0).toUpperCase() + message.slice(1);
 };
 
 // Workspace configuration description component

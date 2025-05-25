@@ -11,11 +11,12 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def get_workspace_config(request: fastapi.Request) -> None:
+# pylint: disable=redefined-builtin
+async def get(request: fastapi.Request) -> None:
     """Gets workspace config on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='workspaces',
+        request_name='workspaces.get',
         request_body=payloads.RequestBody(),
         func=core.get_workspaces,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -23,13 +24,13 @@ async def get_workspace_config(request: fastapi.Request) -> None:
 
 
 @router.post('/update')
-async def update_workspace(
+async def update(
         request: fastapi.Request,
         update_workspace_body: payloads.UpdateWorkspaceBody) -> None:
     """Updates a specific workspace configuration."""
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='update_workspace',
+        request_name='workspaces.update',
         request_body=update_workspace_body,
         func=core.update_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -37,13 +38,13 @@ async def update_workspace(
 
 
 @router.post('/create')
-async def create_workspace(
+async def create(
         request: fastapi.Request,
         create_workspace_body: payloads.CreateWorkspaceBody) -> None:
     """Creates a new workspace configuration."""
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='create_workspace',
+        request_name='workspaces.create',
         request_body=create_workspace_body,
         func=core.create_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
@@ -51,13 +52,13 @@ async def create_workspace(
 
 
 @router.post('/delete')
-async def delete_workspace(
+async def delete(
         request: fastapi.Request,
         delete_workspace_body: payloads.DeleteWorkspaceBody) -> None:
     """Deletes a workspace configuration."""
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='delete_workspace',
+        request_name='workspaces.delete',
         request_body=delete_workspace_body,
         func=core.delete_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
