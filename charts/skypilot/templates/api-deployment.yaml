@@ -64,6 +64,12 @@ spec:
           {{ .Values.apiService.preDeployHook | nindent 10 }}
           {{- end }}
           mkdir -p /root/.sky
+          # Check if config.yaml is a symlink to ConfigMap config. If so, delete
+          # the symlink and copy the ConfigMap config to PVC location.
+          if [ -L /root/.sky/config.yaml ]; then
+            echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
+            rm /root/.sky/config.yaml
+          fi
           # Check if ConfigMap config exists and set up accordingly
           if [ -f /var/skypilot/config/config.yaml ]; then
             # Check if PVC config already exists and forceConfigOverride setting
