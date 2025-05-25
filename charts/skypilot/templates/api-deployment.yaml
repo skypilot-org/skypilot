@@ -64,16 +64,18 @@ spec:
           {{ .Values.apiService.preDeployHook | nindent 10 }}
           {{- end }}
           mkdir -p /root/.sky
-          # Check if config.yaml is a symlink to ConfigMap config. If so, delete
-          # the symlink and copy the ConfigMap config to PVC location.
+          # When the config.yaml is a symlink, it should be from the old API
+          # server code. We remove the symlink and copy the ConfigMap config to
+          # PVC location for backward compatibility.
+          # TODO(zhwu): remove this after 0.12.0.
           if [ -L /root/.sky/config.yaml ]; then
             echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
             rm /root/.sky/config.yaml
           fi
-          # Check if ConfigMap config exists and set up accordingly
+          # Initialize the SkyPilot config.
           if [ -s /root/.sky/config.yaml ]; then
             # If the config.yaml is not empty, sync the PVC config to ConfigMap
-            python3 -c "import os; from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
+            python3 -c "from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup('~/.sky/config.yaml')"
           else
             # If the config.yaml is empty, we initialize the config on PVC with
             # user specified config.
