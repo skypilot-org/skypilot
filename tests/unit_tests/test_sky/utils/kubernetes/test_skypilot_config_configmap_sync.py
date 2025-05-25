@@ -31,9 +31,11 @@ class TestConfigMapSync(unittest.TestCase):
             f.write('test-namespace')
             f.flush()
 
-            with mock.patch.object(config_map_utils, '_KUBE_NAMESPACE_FILE',
-                                   f.name):
-                namespace = config_map_utils.get_kubernetes_namespace()
+            with mock.patch('os.path.exists') as mock_exists, \
+                 mock.patch('builtins.open',
+                            mock.mock_open(read_data='test-namespace')):
+                mock_exists.return_value = True
+                namespace = config_map_utils._get_kubernetes_namespace()
                 self.assertEqual(namespace, 'test-namespace')
 
             os.unlink(f.name)
@@ -42,24 +44,24 @@ class TestConfigMapSync(unittest.TestCase):
         """Test fallback to default namespace when file doesn't exist."""
         with mock.patch('os.path.exists') as mock_exists:
             mock_exists.return_value = False
-            namespace = config_map_utils.get_kubernetes_namespace()
+            namespace = config_map_utils._get_kubernetes_namespace()
             self.assertEqual(namespace, 'default')
 
     def test_get_configmap_name_from_env(self):
         """Test ConfigMap name detection from environment variables."""
         with mock.patch.dict(os.environ,
                              {'SKYPILOT_RELEASE_NAME': 'my-release'}):
-            configmap_name = config_map_utils.get_configmap_name()
+            configmap_name = config_map_utils._get_configmap_name()
             self.assertEqual(configmap_name, 'my-release-config')
 
     def test_get_configmap_name_default(self):
         """Test ConfigMap name fallback to default."""
         with mock.patch.dict(os.environ, {}, clear=True):
-            configmap_name = config_map_utils.get_configmap_name()
+            configmap_name = config_map_utils._get_configmap_name()
             self.assertEqual(configmap_name, 'skypilot-config')
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
     def test_patch_configmap_not_in_kubernetes(self, mock_is_k8s):
         """Test that ConfigMap patching returns early when not in Kubernetes."""
         mock_is_k8s.return_value = False
@@ -75,11 +77,11 @@ class TestConfigMapSync(unittest.TestCase):
         finally:
             os.unlink(config_path)
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
-    @mock.patch('sky.utils.kubernetes.config_map_utils.get_kubernetes_namespace'
-               )
-    @mock.patch('sky.utils.kubernetes.config_map_utils.get_configmap_name')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                '_get_kubernetes_namespace')
+    @mock.patch('sky.utils.kubernetes.config_map_utils._get_configmap_name')
     @mock.patch('sky.utils.common_utils.dump_yaml_str')
     @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
     def test_patch_configmap_success(self, mock_k8s, mock_dump_yaml,
@@ -97,6 +99,7 @@ class TestConfigMapSync(unittest.TestCase):
         class MockApiException(Exception):
 
             def __init__(self, status=404):
+                super().__init__()
                 self.status = status
 
         mock_k8s.kubernetes.client.rest.ApiException = MockApiException
@@ -122,8 +125,8 @@ class TestConfigMapSync(unittest.TestCase):
         self.assertIn('data', call_args[1]['body'])
         self.assertIn('config.yaml', call_args[1]['body']['data'])
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
     def test_patch_configmap_import_error(self, mock_is_k8s):
         """Test handling of import error for Kubernetes client."""
         mock_is_k8s.return_value = True
@@ -140,20 +143,21 @@ class TestConfigMapSync(unittest.TestCase):
             finally:
                 os.unlink(config_path)
 
-    @mock.patch(
-        'sky.utils.kubernetes.config_map_utils.patch_configmap_with_config')
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'patch_configmap_with_config')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
     def test_update_config_no_lock_calls_patch_in_kubernetes(
             self, mock_is_k8s, mock_patch):
-        """Test that update_config_no_lock calls ConfigMap patching in Kubernetes."""
+        """Test that update_config_no_lock calls ConfigMap patching in K8s."""
         mock_is_k8s.return_value = True
 
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             config_path = f.name
 
         from sky import skypilot_config
-        with mock.patch.object(skypilot_config, 'get_user_config_path', return_value=config_path), \
+        with mock.patch.object(skypilot_config, 'get_user_config_path',
+                               return_value=config_path), \
              mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
              mock.patch('sky.skypilot_config._reload_config'):
 
@@ -166,44 +170,45 @@ class TestConfigMapSync(unittest.TestCase):
 
         os.unlink(config_path)
 
-    @mock.patch(
-        'sky.utils.kubernetes.config_map_utils.patch_configmap_with_config')
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'patch_configmap_with_config')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
     def test_update_config_no_lock_calls_dump_yaml_non_kubernetes(
             self, mock_is_k8s, mock_patch):
-        """Test that update_config_no_lock calls dump_yaml in non-Kubernetes environments."""
+        """Test that update_config_no_lock calls dump_yaml in non-K8s envs."""
         mock_is_k8s.return_value = False
 
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             config_path = f.name
 
         from sky import skypilot_config
-        with mock.patch.object(skypilot_config, 'get_user_config_path', return_value=config_path), \
+        with mock.patch.object(skypilot_config, 'get_user_config_path',
+                               return_value=config_path), \
              mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
              mock.patch('sky.skypilot_config._reload_config'):
 
             config = config_utils.Config({'test': 'value'})
             skypilot_config.update_config_no_lock(config)
 
-            # In non-Kubernetes, should call dump_yaml but not ConfigMap patching
+            # In non-Kubernetes, should call dump_yaml but not ConfigMap patch
             mock_dump_yaml.assert_called_once_with(config_path, dict(config))
             mock_patch.assert_not_called()
 
         os.unlink(config_path)
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
-    @mock.patch('sky.utils.kubernetes.config_map_utils.get_kubernetes_namespace'
-               )
-    @mock.patch('sky.utils.kubernetes.config_map_utils.get_configmap_name')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                '_get_kubernetes_namespace')
+    @mock.patch('sky.utils.kubernetes.config_map_utils._get_configmap_name')
     @mock.patch('sky.skypilot_config.parse_and_validate_config_file')
     @mock.patch('sky.utils.common_utils.dump_yaml_str')
     @mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes')
-    def test_sync_pvc_config_to_configmap(self, mock_k8s, mock_dump_yaml,
-                                          mock_parse_config, mock_get_name,
-                                          mock_get_ns, mock_is_k8s):
-        """Test syncing PVC config to ConfigMap."""
+    def test_initialize_configmap_sync_on_startup_creates_configmap(
+            self, mock_k8s, mock_dump_yaml, mock_parse_config, mock_get_name,
+            mock_get_ns, mock_is_k8s):
+        """Test that initialize_configmap_sync_on_startup creates ConfigMap."""
         mock_is_k8s.return_value = True
         mock_get_ns.return_value = 'test-namespace'
         mock_get_name.return_value = 'test-configmap'
@@ -226,59 +231,40 @@ class TestConfigMapSync(unittest.TestCase):
             status = 404
 
         mock_k8s.kubernetes.client.rest.ApiException = SimpleApiException
-        mock_core_api.read_namespaced_config_map.side_effect = SimpleApiException(
-        )
+        mock_core_api.read_namespaced_config_map.side_effect = (
+            SimpleApiException())
 
         # Mock successful creation
         mock_core_api.create_namespaced_config_map.return_value = None
 
-        config_map_utils.sync_pvc_config_to_configmap(config_path)
+        config_map_utils.initialize_configmap_sync_on_startup(config_path)
 
         # Verify ConfigMap creation was called
         mock_core_api.create_namespaced_config_map.assert_called_once()
 
         os.unlink(config_path)
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
-    def test_initialize_configmap_sync_on_startup(self, mock_is_k8s):
-        """Test ConfigMap sync initialization on startup."""
-        mock_is_k8s.return_value = True
-
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
-            f.write('test:\n  value: 123\n')
-            f.flush()
-            config_path = f.name
-
-        with mock.patch(
-                'sky.utils.kubernetes.config_map_utils.sync_pvc_config_to_configmap'
-        ) as mock_sync:
-            config_map_utils.initialize_configmap_sync_on_startup(config_path)
-            mock_sync.assert_called_once_with(config_path)
-
-        os.unlink(config_path)
-
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
-    def test_initialize_configmap_sync_no_pvc_config(self, mock_is_k8s):
-        """Test ConfigMap sync initialization when no PVC config exists."""
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
+    def test_initialize_configmap_sync_on_startup_no_config_file(
+            self, mock_is_k8s):
+        """Test initialize_configmap_sync_on_startup when no config exists."""
         mock_is_k8s.return_value = True
 
         # Use a non-existent file path
         non_existent_path = '/tmp/non_existent_config.yaml'
 
-        with mock.patch(
-                'sky.utils.kubernetes.config_map_utils.sync_pvc_config_to_configmap'
-        ) as mock_sync:
+        with mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes') \
+                as mock_k8s_module:
             config_map_utils.initialize_configmap_sync_on_startup(
                 non_existent_path)
-            # Should not call sync when no PVC config exists
-            mock_sync.assert_not_called()
+            # Should not call any kubernetes operations when no config exists
+            mock_k8s_module.core_api.assert_not_called()
 
-    @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
-               )
+    @mock.patch('sky.utils.kubernetes.config_map_utils.'
+                'is_running_in_kubernetes')
     def test_initialize_configmap_sync_not_in_kubernetes(self, mock_is_k8s):
-        """Test ConfigMap sync initialization when not running in Kubernetes."""
+        """Test initialize_configmap_sync_on_startup when not in K8s."""
         mock_is_k8s.return_value = False
 
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -286,12 +272,11 @@ class TestConfigMapSync(unittest.TestCase):
             f.flush()
             config_path = f.name
 
-        with mock.patch(
-                'sky.utils.kubernetes.config_map_utils.sync_pvc_config_to_configmap'
-        ) as mock_sync:
+        with mock.patch('sky.utils.kubernetes.config_map_utils.kubernetes') \
+                as mock_k8s_module:
             config_map_utils.initialize_configmap_sync_on_startup(config_path)
-            # Should not call sync when not running in Kubernetes
-            mock_sync.assert_not_called()
+            # Should not call any kubernetes operations when not in K8s
+            mock_k8s_module.core_api.assert_not_called()
 
         os.unlink(config_path)
 
