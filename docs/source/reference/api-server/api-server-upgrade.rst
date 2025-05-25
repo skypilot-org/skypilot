@@ -81,7 +81,7 @@ The upgraded API server is ready to serve requests after the pod becomes running
 
 .. note::
 
-    If you attempt to set ``apiService.config`` or ``--reuse-values`` during an upgrade, SkyPilot will display a warning to prevent accidental configuration overwrites. To proceed, set ``--set apiService.confirmConfigOverride=true`` to confirm the override.
+    If you attempt to set ``apiService.config`` during an upgrade, SkyPilot will display a warning. By default, existing PVC configuration takes precedence and ConfigMap config will be ignored. To force ConfigMap to override existing configuration, set ``--set apiService.forceConfigOverride=true``.
     
     See below for how to safely update configurations during upgrades.
 
@@ -101,8 +101,7 @@ The upgraded API server is ready to serve requests after the pod becomes running
 
        .. note::
 
-           If you just :ref:`migrated to a new Kubernetes cluster <api-server-persistence>`, you can deploy API server without setting ``apiService.config`` first to have the persisted configuration take
-           effect first, and use the command above to retrieve the persisted configuration.
+           The ConfigMap contains a mirror of the configuration stored in the persistent volume for easy access. The persistent volume is the authoritative source of truth, ensuring configuration persists across cluster migrations and upgrades.
 
     2. Edit the configuration file ``current-config.yaml`` with your desired changes.
 
@@ -113,7 +112,7 @@ The upgraded API server is ready to serve requests after the pod becomes running
            helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
              --set apiService.image=${IMAGE_REPO}:${VERSION} \
              --set-file apiService.config=current-config.yaml \
-             --set apiService.confirmConfigOverride=true
+             --set apiService.forceConfigOverride=true
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
