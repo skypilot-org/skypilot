@@ -143,7 +143,7 @@ def _check_workspace_has_no_active_resources(workspace_name: str,
         raise ValueError(
             f'Cannot {operation} workspace {workspace_name!r} because it has '
             f'{len(workspace_clusters)} active cluster(s): {cluster_list}. '
-            f'Please stop or terminate these clusters first.')
+            f'Please terminate these clusters first.')
 
     if workspace_active_jobs:
         job_names = [job['job_id'] for job in workspace_active_jobs]

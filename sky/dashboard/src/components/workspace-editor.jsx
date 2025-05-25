@@ -18,13 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { CircularProgress } from '@mui/material';
-import {
-  SaveIcon,
-  TrashIcon,
-  AlertTriangleIcon,
-  CheckIcon,
-  RotateCwIcon,
-} from 'lucide-react';
+import { SaveIcon, TrashIcon, CheckIcon, RotateCwIcon } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -39,43 +33,9 @@ import {
   BriefcaseIcon,
   TickIcon,
 } from '@/components/elements/icons';
+import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
-
-// Helper function to clean error messages
-const cleanErrorMessage = (error) => {
-  if (!error?.message) return 'An unexpected error occurred.';
-
-  let message = error.message;
-
-  // Split on 'failed:' and take the part after it
-  if (message.includes('failed:')) {
-    message = message.split('failed:')[1].trim();
-  }
-
-  // Capitalize first letter and return
-  return message.charAt(0).toUpperCase() + message.slice(1);
-};
-
-// Error display component
-const ErrorDisplay = ({ error, title = 'Error' }) => {
-  if (!error) return null;
-
-  return (
-    <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
-      <div className="flex items-center">
-        <div className="flex-shrink-0">
-          <AlertTriangleIcon className="h-5 w-5 text-red-400" />
-        </div>
-        <div className="ml-3">
-          <div className="text-sm text-red-800">
-            <strong>{title}:</strong> {error}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -143,7 +103,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       setYamlValue(yamlOutput);
     } catch (err) {
       console.error('Error fetching workspace config:', err);
-      setError(cleanErrorMessage(err));
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -304,7 +264,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       }
     } catch (err) {
       console.error('Error saving workspace:', err);
-      setError(cleanErrorMessage(err));
+      setError(err);
     } finally {
       setSaving(false);
     }
@@ -332,7 +292,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       setDeleteState((prev) => ({
         ...prev,
         deleting: false,
-        error: cleanErrorMessage(err),
+        error: err,
       }));
     }
   };
@@ -584,11 +544,11 @@ ${workspaceName || 'workspace-name'}:
 
         {/* Delete Confirmation Dialog */}
         <Dialog open={deleteState.showDialog} onOpenChange={handleCancelDelete}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Delete Workspace</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete the workspace &quot;
+                Are you sure you want to delete workspace &quot;
                 {workspaceName}&quot;? This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
@@ -611,7 +571,7 @@ ${workspaceName || 'workspace-name'}:
                 onClick={handleConfirmDelete}
                 disabled={deleteState.deleting}
               >
-                {deleteState.deleting ? 'Deleting...' : 'Delete Workspace'}
+                {deleteState.deleting ? 'Deleting...' : 'Delete'}
               </Button>
             </DialogFooter>
           </DialogContent>
