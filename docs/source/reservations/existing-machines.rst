@@ -159,7 +159,7 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
          --reuse-values \
          --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
       
-      If your `ssh_node_pools.yaml` requires SSH keys, you can create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
+      If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
 
       .. code-block:: bash
 
@@ -170,6 +170,7 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
             --from-file=id_rsa=/path/to/id_rsa \
             --from-file=other_id_rsa=/path/to/other_id_rsa
 
+         # Keys will be mounted to ~/.ssh/ (e.g., ~/.ssh/id_rsa, ~/.ssh/other_id_rsa)
          helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
             --namespace $NAMESPACE \
             --reuse-values \
@@ -177,7 +178,7 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
       
       .. note::
 
-         SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys or password in the `ssh_node_pools.yaml` file for helm deployment.
+         SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
    
    .. tab-item:: VM Deployment
 
