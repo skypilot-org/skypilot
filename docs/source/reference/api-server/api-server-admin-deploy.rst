@@ -436,7 +436,7 @@ Refer to :ref:`sky-api-server-upgrade` for how to upgrade the API server.
 .. _update-sky-config:
 
 Optional: Update SkyPilot configuration
---------------------------------------
+----------------------------------------
 
 ``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config:
 
