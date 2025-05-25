@@ -68,7 +68,7 @@ class TestConfigMapSync(unittest.TestCase):
         # Should return early without raising exceptions when not in Kubernetes
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             config_path = f.name
-        
+
         try:
             # Should not raise any exceptions, just return early
             config_map_utils.patch_configmap_with_config(config, config_path)
@@ -107,7 +107,7 @@ class TestConfigMapSync(unittest.TestCase):
         config = config_utils.Config({'workspaces': {'test': {'aws': {}}}})
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             config_path = f.name
-        
+
         try:
             config_map_utils.patch_configmap_with_config(config, config_path)
         finally:
@@ -132,10 +132,11 @@ class TestConfigMapSync(unittest.TestCase):
             config = config_utils.Config({'test': 'value'})
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
                 config_path = f.name
-            
+
             try:
                 # Should not raise exceptions, just log and continue
-                config_map_utils.patch_configmap_with_config(config, config_path)
+                config_map_utils.patch_configmap_with_config(
+                    config, config_path)
             finally:
                 os.unlink(config_path)
 
