@@ -33,46 +33,7 @@
 
 {{- end -}} 
 
-{{/*
-Check for config override and warn user
-*/}}
-{{- define "skypilot.checkConfigOverride" -}}
-{{- if .Values.apiService.config -}}
-{{- $isUpgrade := eq .Release.Revision 1 | not -}}
-{{- if $isUpgrade -}}
-{{- if not .Values.apiService.forceConfigOverride -}}
-⚠️  CONFIG OVERRIDE WARNING ⚠️
 
-You are upgrading the SkyPilot API server with 'apiService.config' set.
-By default, the existing configuration in the persistent volume will be preserved and your ConfigMap config will be IGNORED.
-
-If you want to override the existing configuration:
-1. Get the current SkyPilot config:
-   kubectl get configmap {{ .Release.Name }}-config -n {{ .Release.Namespace }} -o jsonpath='{.data.config\.yaml}' > current-config.yaml
-2. Edit current-config.yaml with your desired changes
-3. Run the upgrade command with:
-   helm upgrade {{ .Release.Name }} --set-file apiService.config=current-config.yaml --set apiService.forceConfigOverride=true
-
-For more information, see: https://docs.skypilot.co/en/latest/reference/api-server/api-server-upgrade.html
-
-{{- end -}}
-{{- else -}}
-{{- if not .Values.apiService.forceConfigOverride -}}
-⚠️  CONFIG OVERRIDE WARNING ⚠️
-
-You are installing SkyPilot API server with 'apiService.config' set.
-By default, if there is existing configuration in the persistent volume, your ConfigMap config will be IGNORED.
-
-If you want to force the ConfigMap to override any existing configuration, add:
-  --set apiService.forceConfigOverride=true
-
-For more information about configuration management, see:
-https://docs.skypilot.co/en/latest/reference/config.html
-
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
 {{/*
 Create the name of the service account to use
 */}}

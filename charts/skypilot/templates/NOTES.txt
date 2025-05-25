@@ -1,4 +1,3 @@
-{{- include "skypilot.checkConfigOverride" . }}
 {{- if not .Values.apiService.skipResourceCheck }}
 {{- include "skypilot.checkResources" . }}
 {{- end }}
