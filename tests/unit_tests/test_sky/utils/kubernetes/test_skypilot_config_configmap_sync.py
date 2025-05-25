@@ -61,16 +61,19 @@ class TestConfigMapSync(unittest.TestCase):
     @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
                )
     def test_patch_configmap_not_in_kubernetes(self, mock_is_k8s):
-        """Test that ConfigMap patching raises RuntimeError when not in Kubernetes."""
+        """Test that ConfigMap patching returns early when not in Kubernetes."""
         mock_is_k8s.return_value = False
 
         config = config_utils.Config({'test': 'value'})
-        # Should raise RuntimeError when not running in Kubernetes
-        with self.assertRaises(RuntimeError) as context:
-            config_map_utils.patch_configmap_with_config(config)
-
-        self.assertIn('Cannot patch ConfigMap when not running in Kubernetes',
-                      str(context.exception))
+        # Should return early without raising exceptions when not in Kubernetes
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            config_path = f.name
+        
+        try:
+            # Should not raise any exceptions, just return early
+            config_map_utils.patch_configmap_with_config(config, config_path)
+        finally:
+            os.unlink(config_path)
 
     @mock.patch('sky.utils.kubernetes.config_map_utils.is_running_in_kubernetes'
                )
@@ -102,7 +105,13 @@ class TestConfigMapSync(unittest.TestCase):
         mock_core_api.patch_namespaced_config_map.return_value = None
 
         config = config_utils.Config({'workspaces': {'test': {'aws': {}}}})
-        config_map_utils.patch_configmap_with_config(config)
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            config_path = f.name
+        
+        try:
+            config_map_utils.patch_configmap_with_config(config, config_path)
+        finally:
+            os.unlink(config_path)
 
         # Verify the ConfigMap patch was called
         mock_core_api.patch_namespaced_config_map.assert_called_once()
@@ -121,8 +130,14 @@ class TestConfigMapSync(unittest.TestCase):
 
         with mock.patch('sky.adaptors.kubernetes', side_effect=ImportError()):
             config = config_utils.Config({'test': 'value'})
-            # Should not raise exceptions, just log and continue
-            config_map_utils.patch_configmap_with_config(config)
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                config_path = f.name
+            
+            try:
+                # Should not raise exceptions, just log and continue
+                config_map_utils.patch_configmap_with_config(config, config_path)
+            finally:
+                os.unlink(config_path)
 
     @mock.patch(
         'sky.utils.kubernetes.config_map_utils.patch_configmap_with_config')
@@ -144,9 +159,9 @@ class TestConfigMapSync(unittest.TestCase):
             config = config_utils.Config({'test': 'value'})
             skypilot_config.update_config_no_lock(config)
 
-            # In Kubernetes, should call ConfigMap patching but not dump_yaml
-            mock_patch.assert_called_once_with(config)
-            mock_dump_yaml.assert_not_called()
+            # In Kubernetes, should call both dump_yaml and ConfigMap patching
+            mock_patch.assert_called_once_with(config, config_path)
+            mock_dump_yaml.assert_called_once_with(config_path, dict(config))
 
         os.unlink(config_path)
 
