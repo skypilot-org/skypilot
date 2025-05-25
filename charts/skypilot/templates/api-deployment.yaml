@@ -74,7 +74,7 @@ spec:
           mkdir -p /root/.sky
           echo "No ConfigMap provided, initializing sync from PVC to ConfigMap if needed"
           # Initialize ConfigMap sync to ensure any existing PVC config becomes the source of truth
-          python3 -c "import os, sys; sys.path.insert(0, '/sky'); from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
+          python3 -c "import os; from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
           {{- end }}
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky

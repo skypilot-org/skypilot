@@ -190,11 +190,18 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
     """Initialize ConfigMap sync on API server startup.
 
     This function should be called during API server startup to:
-    1. Sync any existing PVC config to ConfigMap if ConfigMap doesn't exist
+    1. Only sync existing PVC config to ConfigMap if ConfigMap doesn't exist
     2. Ensure ConfigMap becomes the source of truth going forward
 
     This handles the upgrade scenario where an existing deployment has
-    workspace configs on PVC but no ConfigMap.
+    workspace configs on PVC but no ConfigMap exists. It will NOT overwrite
+    an existing ConfigMap that was provided via Helm values.
+
+    Behavior:
+    - If ConfigMap exists (provided via Helm): Do nothing, use the provided
+      ConfigMap (guaranteed by Helm chart, see api-deployment.yaml)
+    - If ConfigMap doesn't exist: Sync PVC config to create ConfigMap (if PVC
+      config exists)
 
     Args:
         config_file_path: Path to the config file to sync.
@@ -204,10 +211,13 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
 
     logger.debug('Initializing ConfigMap sync on startup')
 
-    # Check if we need to sync PVC config to ConfigMap
+    # Only proceed if there's a config file on PVC to sync
     if os.path.exists(config_file_path):
         try:
-            # This will create the ConfigMap if it doesn't exist
+            # sync_pvc_config_to_configmap will check if ConfigMap exists
+            # and only create it if it doesn't exist
             sync_pvc_config_to_configmap(config_file_path)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to initialize ConfigMap sync: {e}')
+    else:
+        logger.debug('No PVC config file exists, skipping ConfigMap sync initialization')
