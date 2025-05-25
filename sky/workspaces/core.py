@@ -167,8 +167,9 @@ def update_workspace(workspace_name: str, config: Dict[str,
         The updated workspaces configuration.
 
     Raises:
-        ValueError: If the workspace configuration is invalid, or if there are
-                   active clusters or managed jobs in the workspace.
+        exceptions.InvalidSkyPilotConfigError: If the workspace configuration
+            is invalid, or if there are active clusters or managed jobs in the
+            workspace.
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
     """
@@ -178,13 +179,9 @@ def update_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace configuration
     workspace_schema = schemas.get_config_schema(
     )['properties']['workspaces']['additionalProperties']
-    try:
-        common_utils.validate_schema(
-            config, workspace_schema,
-            f'Invalid configuration for workspace {workspace_name}: ')
-    except exceptions.InvalidSkyPilotConfigError as e:
-        raise ValueError(
-            f'Invalid configuration for workspace {workspace_name}: {e}') from e
+    common_utils.validate_schema(
+        config, workspace_schema,
+        f'Invalid configuration for workspace {workspace_name!r}: ')
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
@@ -228,13 +225,9 @@ def create_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace configuration
     workspace_schema = schemas.get_config_schema(
     )['properties']['workspaces']['additionalProperties']
-    try:
-        common_utils.validate_schema(
-            config, workspace_schema,
-            f'Invalid configuration for workspace {workspace_name}: ')
-    except exceptions.InvalidSkyPilotConfigError as e:
-        raise ValueError(
-            f'Invalid configuration for workspace {workspace_name}: {e}') from e
+    common_utils.validate_schema(
+        config, workspace_schema,
+        f'Invalid configuration for workspace {workspace_name!r}: ')
 
     def create_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to create workspace inside the lock."""

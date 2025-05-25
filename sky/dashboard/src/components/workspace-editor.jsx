@@ -494,9 +494,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           Leave empty to use all accessible infrastructure.
                           Refer to{' '}
                           <a
-                            href="https://skypilot.co/docs"
+                            href="https://docs.skypilot.co/en/latest/admin/workspaces.html#configuration"
                             target="_blank"
                             rel="noopener noreferrer"
+                            className="text-blue-600"
                           >
                             SkyPilot Docs
                           </a>{' '}
