@@ -154,6 +154,23 @@ def _check_workspace_has_no_active_resources(workspace_name: str,
             f'{job_list}. Please cancel these jobs first.')
 
 
+def _validate_workspace_config(workspace_name: str,
+                               workspace_config: Dict[str, Any]) -> None:
+    """Validate the workspace configuration.
+    """
+    workspace_schema = schemas.get_config_schema(
+    )['properties']['workspaces']['additionalProperties']
+    try:
+        common_utils.validate_schema(
+            workspace_config, workspace_schema,
+            f'Invalid configuration for workspace {workspace_name!r}: ')
+    except exceptions.InvalidSkyPilotConfigError as e:
+        # We need to replace this exception with a ValueError because: a) it is
+        # more user-friendly and b) it will not be caught by the try-except by
+        # the caller the may cause confusion.
+        raise ValueError(str(e)) from e
+
+
 @usage_lib.entrypoint
 def update_workspace(workspace_name: str, config: Dict[str,
                                                        Any]) -> Dict[str, Any]:
@@ -167,21 +184,15 @@ def update_workspace(workspace_name: str, config: Dict[str,
         The updated workspaces configuration.
 
     Raises:
-        exceptions.InvalidSkyPilotConfigError: If the workspace configuration
-            is invalid, or if there are active clusters or managed jobs in the
-            workspace.
+        ValueError: If the workspace configuration is invalid, or if there are
+            active clusters or managed jobs in the workspace.
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
     """
     # Check for active clusters and managed jobs in the workspace
     _check_workspace_has_no_active_resources(workspace_name, 'update')
 
-    # Validate the workspace configuration
-    workspace_schema = schemas.get_config_schema(
-    )['properties']['workspaces']['additionalProperties']
-    common_utils.validate_schema(
-        config, workspace_schema,
-        f'Invalid configuration for workspace {workspace_name!r}: ')
+    _validate_workspace_config(workspace_name, config)
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
@@ -222,12 +233,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
     if not workspace_name or not isinstance(workspace_name, str):
         raise ValueError('Workspace name must be a non-empty string.')
 
-    # Validate the workspace configuration
-    workspace_schema = schemas.get_config_schema(
-    )['properties']['workspaces']['additionalProperties']
-    common_utils.validate_schema(
-        config, workspace_schema,
-        f'Invalid configuration for workspace {workspace_name!r}: ')
+    _validate_workspace_config(workspace_name, config)
 
     def create_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to create workspace inside the lock."""
