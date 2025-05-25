@@ -39,6 +39,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
+_ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
@@ -874,6 +875,27 @@ def set_enabled_clouds(enabled_clouds: List[str],
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
     return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
+
+
+def get_allowed_clouds(workspace: str) -> List[str]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_table).filter_by(
+            key=_get_allowed_clouds_key(workspace)).first()
+    if row:
+        return json.loads(row.value)
+    return []
+
+
+def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(config_table).filter_by(
+            key=_get_allowed_clouds_key(workspace)).update(
+                {config_table.c.value: json.dumps(allowed_clouds)})
+        session.commit()
+
+
+def _get_allowed_clouds_key(workspace: str) -> str:
+    return _ALLOWED_CLOUDS_KEY_PREFIX + workspace
 
 
 def add_or_update_storage(storage_name: str,
