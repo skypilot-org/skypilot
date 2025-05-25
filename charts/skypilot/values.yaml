@@ -35,6 +35,11 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Confirm config override when apiService.config is set
+  # This prevents accidental overriding of existing configurations during upgrades
+  # Set to true to bypass the config override warning
+  confirmConfigOverride: false
+
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
   # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/ssh_node_pools.yaml`
