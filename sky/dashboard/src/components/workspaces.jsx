@@ -4,7 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
+import {
+  getWorkspaces,
+  getEnabledClouds,
+  deleteWorkspace,
+} from '@/data/connectors/workspaces';
 import {
   Card,
   CardContent,
@@ -51,6 +55,10 @@ export function Workspaces() {
 
   const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =
     useState(false);
+
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [workspaceToDelete, setWorkspaceToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const isMobile = useMobile();
 
@@ -218,15 +226,11 @@ export function Workspaces() {
   }, []);
 
   const handleShowWorkspaceDetails = (workspaceName) => {
-    if (rawWorkspacesData && rawWorkspacesData[workspaceName]) {
-      setSelectedWorkspaceConfig({
-        [workspaceName]: rawWorkspacesData[workspaceName],
-      });
-      setModalDisplayTitleName(workspaceName);
-      setIsModalOpen(true);
-    } else {
-      console.error(`Configuration not found for workspace: ${workspaceName}`);
-    }
+    router.push(`/workspaces/${workspaceName}`);
+  };
+
+  const handleCreateNewWorkspace = () => {
+    router.push('/workspaces/new');
   };
 
   const handleCloseModal = () => {
@@ -249,6 +253,34 @@ export function Workspaces() {
 
   const handleRefresh = () => {
     fetchData();
+  };
+
+  const handleDeleteWorkspace = (workspaceName) => {
+    setWorkspaceToDelete(workspaceName);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!workspaceToDelete) return;
+
+    setDeleting(true);
+    try {
+      await deleteWorkspace(workspaceToDelete);
+      setDeleteConfirmOpen(false);
+      setWorkspaceToDelete(null);
+      // Refresh the data after successful deletion
+      await fetchData();
+    } catch (error) {
+      console.error('Error deleting workspace:', error);
+      // You might want to show an error message to the user here
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteConfirmOpen(false);
+    setWorkspaceToDelete(null);
   };
 
   const preStyle = {
@@ -477,17 +509,53 @@ export function Workspaces() {
                 </div>
               </div>
 
-              <CardFooter className="flex justify-end pt-3">
+              <CardFooter className="flex justify-end pt-3 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeleteWorkspace(ws.name)}
+                  disabled={ws.name === 'default'}
+                  title={
+                    ws.name === 'default'
+                      ? 'Cannot delete default workspace'
+                      : 'Delete workspace'
+                  }
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  Delete
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => handleShowWorkspaceDetails(ws.name)}
                 >
-                  Details
+                  Edit
                 </Button>
               </CardFooter>
             </Card>
           ))}
+
+          {/* Create New Workspace Card */}
+          <Card
+            key="create-new"
+            className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
+            onClick={handleCreateNewWorkspace}
+          >
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="text-center">
+                <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
+                  <span className="text-3xl text-sky-600">+</span>
+                </div>
+                <h3 className="text-lg font-medium text-sky-700 mb-2">
+                  Create New Workspace
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Set up a new workspace with custom infrastructure
+                  configurations
+                </p>
+              </div>
+            </div>
+          </Card>
         </div>
       )}
 
@@ -537,6 +605,35 @@ export function Workspaces() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Workspace</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete workspace &quot;
+              {workspaceToDelete}&quot;? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={handleCancelDelete}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -18,8 +18,8 @@ import {
   SlackIcon,
   CommentFeedbackIcon,
   BookDocIcon,
-  UsersIcon,
   UserCircleIcon,
+  UsersIcon,
 } from '@/components/elements/icons';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';

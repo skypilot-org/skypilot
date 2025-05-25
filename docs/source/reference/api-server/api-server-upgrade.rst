@@ -64,19 +64,55 @@ Upgrade the API server:
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
+
 Optionally, you can watch the upgrade progress with:
 
 .. code-block:: console
 
     $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
-    NAME                                       READY   STATUS     RESTARTS   AGE
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2   0          7s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2   0          24s
+    NAME                                       READY   STATUS            RESTARTS   AGE
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2          0          7s
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2          0          24s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     PodInitializing   0          26s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
     skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
 
 The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. If the API server was cordoned previously, the cordon will be removed automatically after the upgrade.
+
+.. note::
+
+    If you attempt to set ``apiService.config`` during an upgrade, SkyPilot will display a warning. By default, existing PVC configuration takes precedence and ConfigMap config will be ignored. To force ConfigMap to override existing configuration, set ``--set apiService.forceConfigOverride=true``.
+    
+    See below for how to safely update configurations during upgrades.
+
+
+.. dropdown:: Handling configuration overrides during upgrades
+
+    The Helm chart prevents accidental configuration overwrites during upgrades. If you need to update the configuration, follow these steps:
+
+    **Safe Configuration Update Process**
+
+    1. Retrieve the current configuration:
+
+       .. code-block:: bash
+
+           kubectl get configmap $RELEASE_NAME-config -n $NAMESPACE \
+             -o jsonpath='{.data.config\.yaml}' > current-config.yaml
+
+       .. note::
+
+           The ConfigMap contains a mirror of the configuration stored in the persistent volume for easy access. The persistent volume is the authoritative source of truth, ensuring configuration persists across cluster migrations and upgrades.
+
+    2. Edit the configuration file ``current-config.yaml`` with your desired changes.
+
+    3. Upgrade with the updated configuration:
+
+       .. code-block:: bash
+
+           helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+             --set apiService.image=${IMAGE_REPO}:${VERSION} \
+             --set-file apiService.config=current-config.yaml \
+             --set apiService.forceConfigOverride=true
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

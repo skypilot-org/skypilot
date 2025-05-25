@@ -453,7 +453,7 @@ export function ManagedJobsTable({
       statusGroups.finished.includes(item.status)
     ).length;
     return { active, finished };
-  }, [data, statusGroups]);
+  }, [data]);
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
