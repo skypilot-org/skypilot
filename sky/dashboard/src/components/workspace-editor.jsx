@@ -68,7 +68,6 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   const disabledClouds = [];
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
-
     if (cloudConfig?.disabled === true) {
       disabledClouds.push(cloud);
     } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
@@ -383,7 +382,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const handleDiscard = () => {
     // Reset to original configuration
     setWorkspaceConfig(originalConfig);
-    
+
     // Reset YAML value to original
     const fullConfig = { [workspaceName]: originalConfig };
     let yamlOutput;
@@ -399,7 +398,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       });
     }
     setYamlValue(yamlOutput);
-    
+
     // Clear any errors
     setYamlError(null);
     setError(null);
@@ -497,10 +496,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         ) : (
           <div className="space-y-6">
             {/* Alerts */}
-            <ErrorDisplay 
-              error={error} 
-              title="Error" 
-              onDismiss={() => setError(null)} 
+            <ErrorDisplay
+              error={error}
+              title="Error"
+              onDismiss={() => setError(null)}
             />
             <SuccessDisplay message={success} />
 
@@ -564,12 +563,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </span>
                         )}
                       </div>
-                      
+
                       {/* Configuration hints */}
                       <div className="mt-4">
-                        <WorkspaceConfigDescription 
-                          workspaceName={workspaceName} 
-                          config={originalConfig} 
+                        <WorkspaceConfigDescription
+                          workspaceName={workspaceName}
+                          config={originalConfig}
                         />
                       </div>
                     </div>
@@ -592,9 +591,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   <CardContent className="flex-1 flex flex-col">
                     <div className="space-y-4 flex-1 flex flex-col">
                       {yamlError && (
-                        <ErrorDisplay 
-                          error={yamlError} 
-                          onDismiss={() => setYamlError(null)} 
+                        <ErrorDisplay
+                          error={yamlError}
+                          onDismiss={() => setYamlError(null)}
                         />
                       )}
                       <div className="flex-1 flex flex-col">
@@ -637,7 +636,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           spellCheck={false}
                           placeholder={`# Enter workspace configuration in YAML format`}
                         />
-                        
+
                         {/* Action buttons */}
                         <div className="flex justify-end space-x-3 pt-3 border-gray-200">
                           {!isNewWorkspace && (
@@ -651,7 +650,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                               Discard
                             </Button>
                           )}
-                          
+
                           <Button
                             onClick={handleSave}
                             disabled={saving || yamlError || loading}
@@ -683,10 +682,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
             {/* Error Message Display */}
             {deleteState.error && (
-              <ErrorDisplay 
-                error={deleteState.error} 
-                title="Deletion Failed" 
-                onDismiss={() => setDeleteState(prev => ({ ...prev, error: null }))} 
+              <ErrorDisplay
+                error={deleteState.error}
+                title="Deletion Failed"
+                onDismiss={() =>
+                  setDeleteState((prev) => ({ ...prev, error: null }))
+                }
               />
             )}
 
