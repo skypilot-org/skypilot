@@ -444,7 +444,7 @@ export function Workspaces() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500">Loading workspace data...</span>
+        <span className="ml-2 text-gray-500">Loading workspaces...</span>
       </div>
     );
   }
