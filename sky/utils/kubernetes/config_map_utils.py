@@ -129,7 +129,8 @@ def sync_pvc_config_to_configmap(config_file_path: str) -> None:
                        'Continuing with local config.')
 
 
-def patch_configmap_with_config(config: config_utils.Config) -> None:
+def patch_configmap_with_config(config: config_utils.Config,
+                                config_file_path: str) -> None:
     """Patch the Kubernetes ConfigMap with the updated config.
 
     This function updates the ConfigMap that was originally created by Helm
@@ -141,8 +142,7 @@ def patch_configmap_with_config(config: config_utils.Config) -> None:
         config_file_path: Path to the config file for fallback sync.
     """
     if not is_running_in_kubernetes():
-        raise RuntimeError(
-            'Cannot patch ConfigMap when not running in Kubernetes')
+        return
 
     try:
         namespace = get_kubernetes_namespace()
@@ -154,15 +154,25 @@ def patch_configmap_with_config(config: config_utils.Config) -> None:
         # Create the patch body
         patch_body = {'data': {'config.yaml': config_yaml}}
 
-        # Patch the ConfigMap
-        kubernetes.core_api().patch_namespaced_config_map(
-            name=configmap_name,
-            namespace=namespace,
-            body=patch_body,
-            _request_timeout=_CONFIGMAP_SYNC_TIMEOUT)
+        try:
+            # Patch the ConfigMap
+            kubernetes.core_api().patch_namespaced_config_map(
+                name=configmap_name,
+                namespace=namespace,
+                body=patch_body,
+                _request_timeout=_CONFIGMAP_SYNC_TIMEOUT)
 
-        logger.debug(f'Successfully synced config to ConfigMap '
-                     f'{configmap_name} in namespace {namespace}')
+            logger.debug(f'Successfully synced config to ConfigMap '
+                         f'{configmap_name} in namespace {namespace}')
+
+        except kubernetes.kubernetes.client.rest.ApiException as e:
+            if e.status == 404:
+                # ConfigMap doesn't exist, sync PVC config to create it
+                logger.info(f'ConfigMap {configmap_name} not found, '
+                            'syncing current config to new ConfigMap')
+                sync_pvc_config_to_configmap(config_file_path)
+            else:
+                raise
 
     except ImportError:
         # Kubernetes client not available, skip silently

@@ -60,12 +60,8 @@ Upgrade the API server:
 
 .. code-block:: bash
 
-    # Get the current config from the API server
-    kubectl get configmap $RELEASE_NAME-config -n $NAMESPACE -o jsonpath='{.data.config\.yaml}' > current-config.yaml
     # --reuse-values is critical to keep the values set in the previous installation steps.
-    # apiService.config is critical to keep the existing configuration on the API server.
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-      --set-file apiService.config=current-config.yaml \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
 
@@ -83,34 +79,10 @@ Optionally, you can watch the upgrade progress with:
 
 The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. If the API server was cordoned previously, the cordon will be removed automatically after the upgrade.
 
-.. warning::
+.. note::
 
-    If you use ``--reuse-values`` or set ``apiService.config`` to a new config during an upgrade, the SkyPilot config on API server will be OVERWRITTEN, including the workspace configurations.
-    
-    See below for how to safely update configurations with workspace configurations preserved during upgrades.
+    ``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, see :ref:`here <update-sky-config>`.
 
-
-.. dropdown:: Safely update configurations during upgrades
-
-    If you need to update the configuration, follow these steps:
-
-    1. Retrieve the current configuration:
-
-       .. code-block:: bash
-
-           kubectl get configmap $RELEASE_NAME-config -n $NAMESPACE \
-             -o jsonpath='{.data.config\.yaml}' > current-config.yaml
-
-    2. Edit the configuration file ``current-config.yaml`` with your desired changes.
-
-    3. Upgrade with the updated configuration:
-
-       .. code-block:: bash
-
-           helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-             --set apiService.image=${IMAGE_REPO}:${VERSION} \
-             --set-file apiService.config=current-config.yaml \
-             --set apiService.confirmConfigOverride=true
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -63,19 +63,22 @@ spec:
           {{- if .Values.apiService.preDeployHook }}
           {{ .Values.apiService.preDeployHook | nindent 10 }}
           {{- end }}
-          {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
-          echo "Setting up config.yaml from ConfigMap \`{{ .Release.Name }}-config\` as authoritative source"
-          # Symlink ConfigMap config directly to config location, making ConfigMap the direct source of truth
-          # This ensures that any reads from /root/.sky/config.yaml directly access the ConfigMap
-          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
-          echo "Config successfully symlinked from ConfigMap to /root/.sky/config.yaml"
-          {{- else }}
-          mkdir -p /root/.sky
-          echo "No ConfigMap provided, initializing sync from PVC to ConfigMap if needed"
-          # Initialize ConfigMap sync to ensure any existing PVC config becomes the source of truth
-          python3 -c "import os; from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
-          {{- end }}
+          # Check if config.yaml is a symlink to ConfigMap config. If so, delete
+          # the symlink and copy the ConfigMap config to PVC location.
+          if [ -L /root/.sky/config.yaml ]; then
+            echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
+            rm /root/.sky/config.yaml
+          fi
+          # Check if ConfigMap config exists and set up accordingly
+          if [ ! -s /root/.sky/config.yaml ]; then
+            echo "initializing sync from PVC to ConfigMap"
+            # Initialize ConfigMap sync to ensure any existing PVC config becomes the source of truth
+            python3 -c "import os; from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup(os.path.expanduser('~/.sky/config.yaml'))"
+          else
+            # Initial sync of ConfigMap config to PVC location
+            cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          fi
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
           echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"

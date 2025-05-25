@@ -427,10 +427,37 @@ In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2
 Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
 
+
 Upgrade the API server
 -----------------------
 
 Refer to :ref:`sky-api-server-upgrade` for how to upgrade the API server.
+
+.. _update-sky-config:
+
+Optional: Update SkyPilot configuration
+--------------------------------------
+
+``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config:
+
+1. Fetch the latest config from the API server:
+
+   .. code-block:: bash
+
+     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+     # Make sure the pod is running
+     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" || exit 1
+     # Fetch the config
+     kubectl exec -it $POD_NAME -n $NAMESPACE -- cat /root/.sky/config.yaml > current-config.yaml
+
+2. Edit the configuration file ``current-config.yaml`` with your desired changes.
+3. Upload the updated config to the API server:
+
+   .. code-block:: bash
+
+     kubectl cp current-config.yaml $POD_NAME:/root/.sky/config.yaml -n $NAMESPACE
+
+
 
 Uninstall
 ---------
@@ -442,6 +469,7 @@ To uninstall the API server, run:
     helm uninstall $RELEASE_NAME --namespace $NAMESPACE
 
 This will delete the API server and all associated resources.
+
 
 Other notes
 -----------
