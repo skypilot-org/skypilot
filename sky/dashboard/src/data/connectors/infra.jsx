@@ -273,6 +273,92 @@ async function getKubernetesPerNodeGPUs(context) {
   }
 }
 
+export async function getContextClustersAndJobs() {
+  try {
+    // Use existing data connectors
+    const [clustersData, jobsData] = await Promise.all([
+      getClusters(),
+      getManagedJobs(),
+    ]);
+
+    const clusters = clustersData || [];
+    const jobs = jobsData?.jobs || [];
+
+    // Count clusters and jobs per k8s context/ssh node pool
+    const contextStats = {};
+
+    clusters.forEach((cluster) => {
+      let contextKey = null;
+
+      // Check if it's a Kubernetes cluster
+      if (cluster.cloud === 'Kubernetes') {
+        // For Kubernetes clusters, the context name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          contextKey = `kubernetes/${contextKey}`;
+        }
+      }
+      // Check if it's an SSH Node Pool cluster
+      else if (cluster.cloud === 'SSH') {
+        // For SSH clusters, the node pool name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          // Remove 'ssh-' prefix if present for display
+          const poolName = contextKey.startsWith('ssh-')
+            ? contextKey.substring(4)
+            : contextKey;
+          contextKey = `ssh/${poolName}`;
+        }
+      }
+
+      if (contextKey) {
+        if (!contextStats[contextKey]) {
+          contextStats[contextKey] = { clusters: 0, jobs: 0 };
+        }
+        contextStats[contextKey].clusters += 1;
+      }
+    });
+
+    // Process jobs
+    jobs.forEach((job) => {
+      let contextKey = null;
+
+      // Check if it's a Kubernetes job
+      if (job.cloud === 'Kubernetes') {
+        // For Kubernetes jobs, the context name is in job.region
+        contextKey = job.region;
+        if (contextKey) {
+          contextKey = `kubernetes/${contextKey}`;
+        }
+      }
+      // Check if it's an SSH Node Pool job
+      else if (job.cloud === 'SSH') {
+        // For SSH jobs, the node pool name is in job.region
+        contextKey = job.region;
+        if (contextKey) {
+          // Remove 'ssh-' prefix if present for display
+          const poolName = contextKey.startsWith('ssh-')
+            ? contextKey.substring(4)
+            : contextKey;
+          contextKey = `ssh/${poolName}`;
+        }
+      }
+
+      if (contextKey) {
+        if (!contextStats[contextKey]) {
+          contextStats[contextKey] = { clusters: 0, jobs: 0 };
+        }
+        contextStats[contextKey].jobs += 1;
+      }
+    });
+
+    return contextStats;
+  } catch (error) {
+    console.error('=== Error in getContextClustersAndJobs ===', error);
+    return {};
+  }
+}
+
 async function getKubernetesGPUs() {
   try {
     // 1. Fetch all context names (Kubernetes + SSH)
@@ -285,10 +371,14 @@ async function getKubernetesGPUs() {
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
+        contextStats: {},
       };
     }
 
-    // 2. Fetch GPU availability information (this might not include all contexts)
+    // 2. Fetch cluster and job counts per context
+    const contextStats = await getContextClustersAndJobs();
+
+    // 3. Fetch GPU availability information
     const contextGPUAvailability = await getKubernetesContextGPUs();
     const gpuAvailabilityMap = new Map();
     if (contextGPUAvailability) {
@@ -301,7 +391,7 @@ async function getKubernetesGPUs() {
     const perContextGPUsData = {};
     const perNodeGPUs_dict = {};
 
-    // 3. Iterate through all_available_context_names and fetch node info for each
+    // 4. Iterate through all_available_context_names and fetch node info for each
     for (const context of allAvailableContextNames) {
       if (!perContextGPUsData[context]) {
         perContextGPUsData[context] = [];
@@ -423,6 +513,7 @@ async function getKubernetesGPUs() {
           a.node_name.localeCompare(b.node_name) ||
           a.gpu_name.localeCompare(b.gpu_name)
       ),
+      contextStats: contextStats,
     };
     return result;
   } catch (error) {
@@ -432,6 +523,7 @@ async function getKubernetesGPUs() {
       allGPUs: [],
       perContextGPUs: [],
       perNodeGPUs: [],
+      contextStats: {},
     };
   }
 }
