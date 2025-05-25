@@ -53,16 +53,16 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
    var replayTimeout;
    var isPaused = false;
    var isEnded = false;
-   
+
    function pauseAndReplay(video) {
      // Clear any existing timeout first
      clearTimeout(replayTimeout);
-     
+
      // Mark the video as ended
      isEnded = true;
      // Update the pause button to show replay
      updatePauseButton();
-     
+
      replayTimeout = setTimeout(function() {
         replayVideo(video);
      }, 10000); // 10 second gap
@@ -87,7 +87,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
       isPaused = false;
       updatePauseButton();
    }
-   
+
    function togglePlayPause(video) {
       if (isEnded) {
          // If video has ended, replay it
@@ -106,7 +106,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
          updatePauseButton();
       }
    }
-   
+
    function updatePauseButton() {
       var pauseBtn = document.getElementById('pause-btn');
       if (isEnded) {
@@ -142,11 +142,11 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
        transition: opacity 0.3s;
        font-size: 18px;
      }
-     
+
      .video-control-btn:hover {
        opacity: 1;
      }
-     
+
      .video-control-btn::after {
        content: attr(data-tooltip);
        position: absolute;
@@ -162,7 +162,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
        visibility: hidden;
        transition: opacity 0.3s;
      }
-     
+
      .video-control-btn:hover::after {
        opacity: 1;
        visibility: visible;
@@ -285,6 +285,7 @@ Read the research:
    :caption: Data
 
    ../reference/storage
+   ../reference/volumes
    ../examples/syncing-code-artifacts
 
 .. toctree::
@@ -305,8 +306,8 @@ Read the research:
    :caption: Administrator Guides
 
    ../reference/api-server/api-server
+   ../admin/workspaces
    ../cloud-setup/cloud-permissions/index
-   ../cloud-setup/quota
    Admin Policies <../cloud-setup/policy>
 
 .. toctree::

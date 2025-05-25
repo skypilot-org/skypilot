@@ -4,6 +4,8 @@ import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
+import colorama
+
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -138,7 +140,7 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def existing_allowed_contexts(cls) -> List[str]:
+    def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts.
 
         If None is returned in the list, it means that we are running in a pod
@@ -150,6 +152,12 @@ class Kubernetes(clouds.Cloud):
             return []
 
         all_contexts = set(all_contexts)
+
+        # Exclude contexts starting with `ssh-`
+        # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
+        all_contexts = [
+            ctx for ctx in all_contexts if not ctx.startswith('ssh-')
+        ]
 
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
@@ -172,8 +180,12 @@ class Kubernetes(clouds.Cloud):
             if context in all_contexts:
                 existing_contexts.append(context)
             else:
+                # Skip SSH Node Pool contexts
+                if context.startswith('ssh-'):
+                    continue
                 skipped_contexts.append(context)
-        cls._log_skipped_contexts_once(tuple(skipped_contexts))
+        if not silent:
+            cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
 
     @classmethod
@@ -403,8 +415,9 @@ class Kubernetes(clouds.Cloud):
             context = region.name
         assert context is not None, 'No context found in kubeconfig'
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -634,7 +647,7 @@ class Kubernetes(clouds.Cloud):
             resource_list = []
             for instance_type in instance_list:
                 r = resources.copy(
-                    cloud=Kubernetes(),
+                    cloud=self.__class__(),
                     instance_type=instance_type,
                     accelerators=None,
                 )
@@ -686,7 +699,43 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_single_context(cls, context: str) -> Tuple[bool, str]:
+        """Check if the user has access credentials to a single SSH context."""
+
+        def _red_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTRED_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _dim_color(str_to_format: str) -> str:
+            return (f'{colorama.Style.DIM}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _bright_green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.GREEN}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        try:
+            check_result = kubernetes_utils.check_credentials(
+                context, run_optional_checks=True)
+            if check_result[0]:
+                if check_result[1] is not None:
+                    return True, (_bright_green_color('enabled.') +
+                                  _dim_color(f' Note: {check_result[1]}'))
+                else:
+                    return True, _bright_green_color('enabled.')
+            else:
+                assert check_result[1] is not None
+                return False, (_red_color('disabled.') +
+                               _dim_color(f' Reason: {check_result[1]}'))
+        except Exception as e:  # pylint: disable=broad-except
+            return False, _red_color(str(e))
+
+    @classmethod
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Kubernetes."""
         # Check for port forward dependencies
@@ -713,26 +762,15 @@ class Kubernetes(clouds.Cloud):
             return (False, 'No available context found in kubeconfig. '
                     'Check if you have a valid kubeconfig file' +
                     check_skypilot_config_msg)
-        reasons = []
-        hints = []
+
+        ctx2text = {}
         success = False
         for context in existing_allowed_contexts:
-            try:
-                check_result = kubernetes_utils.check_credentials(
-                    context, run_optional_checks=True)
-                if check_result[0]:
-                    success = True
-                    if check_result[1] is not None:
-                        hints.append(f'Context {context}: {check_result[1]}')
-                else:
-                    reasons.append(f'Context {context}: {check_result[1]}')
-            except Exception as e:  # pylint: disable=broad-except
-                return (False, f'Credential check failed for {context}: '
-                        f'{common_utils.format_exception(e)}')
-        if success:
-            return (True, cls._format_credential_check_results(hints, reasons))
-        return (False, 'Failed to find available context with working '
-                'credentials. Details:\n' + '\n'.join(reasons))
+            suc, text = cls._check_single_context(context)
+            success = success or suc
+            ctx2text[context] = text
+
+        return success, ctx2text
 
     @classmethod
     def _format_credential_check_results(cls, hints: List[str],
@@ -853,3 +891,10 @@ class Kubernetes(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def get_infras(cls) -> List[str]:
+        return [
+            f'{cls._REPR.lower()}/{c}'
+            for c in cls.existing_allowed_contexts(silent=True)
+        ]

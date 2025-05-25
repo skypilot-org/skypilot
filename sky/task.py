@@ -165,7 +165,8 @@ def _with_docker_login_config(
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
         # Already checked in extract_docker_image
-        assert len(resources.image_id) == 1, resources.image_id
+        assert resources.image_id is not None and len(
+            resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
@@ -511,6 +512,7 @@ class Task:
         # storage objects with the storage/storage_mount objects.
         fm_storages = []
         file_mounts = config.pop('file_mounts', None)
+        volumes = []
         if file_mounts is not None:
             copy_mounts = {}
             for dst_path, src in file_mounts.items():
@@ -520,7 +522,27 @@ class Task:
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
                 elif isinstance(src, dict):
-                    fm_storages.append((dst_path, src))
+                    if (src.get('store') ==
+                            storage_lib.StoreType.VOLUME.value.lower()):
+                        # Build the volumes config for resources.
+                        volume_config = {
+                            'path': dst_path,
+                        }
+                        if src.get('name'):
+                            volume_config['name'] = src.get('name')
+                        persistent = src.get('persistent', False)
+                        volume_config['auto_delete'] = not persistent
+                        volume_config_detail = src.get('config', {})
+                        volume_config.update(volume_config_detail)
+                        volumes.append(volume_config)
+                        source_path = src.get('source')
+                        if source_path:
+                            # For volume, copy the source path to the
+                            # data directory of the volume mount point.
+                            copy_mounts[
+                                f'{dst_path.rstrip("/")}/data'] = source_path
+                    else:
+                        fm_storages.append((dst_path, src))
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unable to parse file_mount '
@@ -598,6 +620,8 @@ class Task:
                 'experimental.config_overrides')
             resources_config[
                 '_cluster_config_overrides'] = cluster_config_override
+        if volumes:
+            resources_config['volumes'] = volumes
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
@@ -775,7 +799,7 @@ class Task:
         for _, storage_obj in self.storage_mounts.items():
             if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 for r in self.resources:
-                    r.requires_fuse = True
+                    r.set_requires_fuse(True)
                 break
 
         return self
@@ -931,7 +955,7 @@ class Task:
             self.storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
             for r in self.resources:
-                r.requires_fuse = False
+                r.set_requires_fuse(False)
             return self
         for target, storage_obj in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
@@ -956,7 +980,7 @@ class Task:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:
-                    r.requires_fuse = True
+                    r.set_requires_fuse(True)
         # Storage source validation is done in Storage object
         self.storage_mounts = storage_mounts
         return self
@@ -1234,13 +1258,14 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config = {}
+        tmp_resource_config: Union[Dict[str, Union[str, int]],
+                                   Dict[str, List[Dict[str, Union[str, int]]]]]
         if len(self.resources) > 1:
             resource_list = []
             for r in self.resources:
                 resource_list.append(r.to_yaml_config())
             key = 'ordered' if isinstance(self.resources, list) else 'any_of'
-            tmp_resource_config[key] = resource_list
+            tmp_resource_config = {key: resource_list}
         else:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 

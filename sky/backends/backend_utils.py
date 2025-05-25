@@ -606,7 +606,7 @@ def write_cluster_config(
     # other cases, we exclude the cloud from credential file uploads after
     # running required checks.
     assert cluster_name is not None
-    excluded_clouds = set()
+    excluded_clouds: Set[clouds.Cloud] = set()
     remote_identity_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
@@ -1556,8 +1556,19 @@ def check_owner_identity(cluster_name: str) -> None:
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
+    active_workspace = skypilot_config.get_active_workspace()
+    cluster_workspace = record.get('workspace',
+                                   constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if active_workspace != cluster_workspace:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{colorama.Fore.YELLOW}'
+                f'The cluster {cluster_name!r} is in workspace '
+                f'{cluster_workspace!r}, but the active workspace is '
+                f'{active_workspace!r}.{colorama.Fore.RESET}')
 
-    cloud = handle.launched_resources.cloud
+    launched_resources = handle.launched_resources.assert_launchable()
+    cloud = launched_resources.cloud
     user_identities = cloud.get_user_identities()
     owner_identity = record['owner']
     if user_identities is None:
@@ -1721,12 +1732,12 @@ def check_can_clone_disk_and_override_task(
                     'a new target cluster name.')
 
     new_task_resources = []
-    original_cloud = handle.launched_resources.cloud
+    launched_resources = handle.launched_resources.assert_launchable()
+    original_cloud = launched_resources.cloud
     original_cloud.check_features_are_supported(
-        handle.launched_resources,
+        launched_resources,
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    assert original_cloud is not None, handle.launched_resources
     has_override = False
     has_disk_size_met = False
     has_cloud_met = False
@@ -1740,7 +1751,7 @@ def check_can_clone_disk_and_override_task(
             continue
         has_cloud_met = True
 
-        override_param = {}
+        override_param: Dict[str, Any] = {}
         if task_resources.cloud is None:
             override_param['cloud'] = original_cloud
         if task_resources.region is None:
@@ -1934,8 +1945,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
-
-    if (not node_statuses and handle.launched_resources.cloud.STATUS_VERSION >=
+    launched_resources = handle.launched_resources.assert_launchable()
+    if (not node_statuses and launched_resources.cloud.STATUS_VERSION >=
             clouds.StatusVersion.SKYPILOT):
         # Note: launched_at is set during sky launch, even on an existing
         # cluster. This will catch the case where the cluster was terminated on
@@ -2151,57 +2162,64 @@ def refresh_cluster_record(
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
-    check_owner_identity(cluster_name)
+    # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
+    # using the correct cloud credentials.
+    workspace = record.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+    with skypilot_config.local_active_workspace_ctx(workspace):
+        check_owner_identity(cluster_name)
 
-    if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
-        return record
-
-    # The loop logic allows us to notice if the status was updated in the
-    # global_user_state by another process and stop trying to get the lock.
-    # The core loop logic is adapted from FileLock's implementation.
-    lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
-    start_time = time.perf_counter()
-
-    # Loop until we have an up-to-date status or until we acquire the lock.
-    while True:
-        # Check to see if we can return the cached status.
-        if not _must_refresh_cluster_status(record, force_refresh_statuses):
+        if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
             return record
 
-        if not acquire_per_cluster_status_lock:
-            return _update_cluster_status(cluster_name)
+        # The loop logic allows us to notice if the status was updated in the
+        # global_user_state by another process and stop trying to get the lock.
+        # The core loop logic is adapted from FileLock's implementation.
+        lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+        start_time = time.perf_counter()
 
-        # Try to acquire the lock so we can fetch the status.
-        try:
-            with lock.acquire(blocking=False):
-                # Check the cluster status again, since it could have been
-                # updated between our last check and acquiring the lock.
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                if record is None or not _must_refresh_cluster_status(
-                        record, force_refresh_statuses):
-                    return record
-                # Update and return the cluster status.
+        # Loop until we have an up-to-date status or until we acquire the lock.
+        while True:
+            # Check to see if we can return the cached status.
+            if not _must_refresh_cluster_status(record, force_refresh_statuses):
+                return record
+
+            if not acquire_per_cluster_status_lock:
                 return _update_cluster_status(cluster_name)
-        except filelock.Timeout:
-            # lock.acquire() will throw a Timeout exception if the lock is not
-            # available and we have blocking=False.
-            pass
 
-        # Logic adapted from FileLock.acquire().
-        # If cluster_status_lock_time is <0, we will never hit this. No timeout.
-        # Otherwise, if we have timed out, return the cached status. This has
-        # the potential to cause correctness issues, but if so it is the
-        # caller's responsibility to set the timeout to -1.
-        if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
-            logger.debug('Refreshing status: Failed get the lock for cluster '
-                         f'{cluster_name!r}. Using the cached status.')
-            return record
-        time.sleep(0.05)
+            # Try to acquire the lock so we can fetch the status.
+            try:
+                with lock.acquire(blocking=False):
+                    # Check the cluster status again, since it could have been
+                    # updated between our last check and acquiring the lock.
+                    record = global_user_state.get_cluster_from_name(
+                        cluster_name)
+                    if record is None or not _must_refresh_cluster_status(
+                            record, force_refresh_statuses):
+                        return record
+                    # Update and return the cluster status.
+                    return _update_cluster_status(cluster_name)
+            except filelock.Timeout:
+                # lock.acquire() will throw a Timeout exception if the lock is not
+                # available and we have blocking=False.
+                pass
 
-        # Refresh for next loop iteration.
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is None:
-            return None
+            # Logic adapted from FileLock.acquire().
+            # If cluster_status_lock_time is <0, we will never hit this. No timeout.
+            # Otherwise, if we have timed out, return the cached status. This has
+            # the potential to cause correctness issues, but if so it is the
+            # caller's responsibility to set the timeout to -1.
+            if 0 <= cluster_status_lock_timeout < time.perf_counter(
+            ) - start_time:
+                logger.debug(
+                    'Refreshing status: Failed get the lock for cluster '
+                    f'{cluster_name!r}. Using the cached status.')
+                return record
+            time.sleep(0.05)
+
+            # Refresh for next loop iteration.
+            record = global_user_state.get_cluster_from_name(cluster_name)
+            if record is None:
+                return None
 
 
 @timeline.event
@@ -2470,7 +2488,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -2569,7 +2587,10 @@ def get_clusters(
         if handle is None:
             return
         record['resources_str'] = resources_utils.get_readable_resources_repr(
-            handle)
+            handle, simplify=True)
+        record[
+            'resources_str_full'] = resources_utils.get_readable_resources_repr(
+                handle, simplify=False)
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
@@ -2968,7 +2989,7 @@ def get_endpoints(cluster: str,
                              f'for cluster {cluster!r} with backend '
                              f'{get_backend_from_handle(handle).NAME}.')
 
-    launched_resources = handle.launched_resources
+    launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
     try:
         cloud.check_features_are_supported(
@@ -2985,11 +3006,11 @@ def get_endpoints(cluster: str,
                                              head_ip=handle.head_ip,
                                              provider_config=config['provider'])
 
+    launched_resources = handle.launched_resources.assert_launchable()
     # Validation before returning the endpoints
     if port is not None:
         # If the requested endpoint was not to be exposed
-        port_set = resources_utils.port_ranges_to_set(
-            handle.launched_resources.ports)
+        port_set = resources_utils.port_ranges_to_set(launched_resources.ports)
         if port not in port_set:
             logger.warning(f'Port {port} is not exposed on '
                            f'cluster {cluster!r}.')
@@ -2998,8 +3019,7 @@ def get_endpoints(cluster: str,
         if port not in port_details:
             error_msg = (f'Port {port} not exposed yet. '
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
-            if handle.launched_resources.cloud.is_same_cloud(
-                    clouds.Kubernetes()):
+            if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
                 error_msg += (kubernetes_utils.get_endpoint_debug_message())
             logger.warning(error_msg)
@@ -3008,7 +3028,7 @@ def get_endpoints(cluster: str,
     else:
         if not port_details:
             # If cluster had no ports to be exposed
-            if handle.launched_resources.ports is None:
+            if launched_resources.ports is None:
                 logger.warning(f'Cluster {cluster!r} does not have any '
                                'ports to be exposed.')
                 return {}
@@ -3017,8 +3037,7 @@ def get_endpoints(cluster: str,
             else:
                 error_msg = (f'No endpoints exposed yet. '
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                if handle.launched_resources.cloud.is_same_cloud(
-                        clouds.Kubernetes()):
+                if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                     # Add Kubernetes specific debugging info
                     error_msg += \
                         kubernetes_utils.get_endpoint_debug_message()

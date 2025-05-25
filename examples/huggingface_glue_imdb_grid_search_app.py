@@ -1,7 +1,7 @@
 """Grid search version of huggingface_glue_imdb_app.py."""
 import sky
 
-resources_to_launch = sky.Resources(sky.AWS(), accelerators={'V100': 4})
+resources_to_launch = sky.Resources(infra='aws', accelerators={'V100': 4})
 with sky.Dag() as dag:
     # Setup command, run once (pip, download dataset).
     common_setup = """\

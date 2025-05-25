@@ -1,8 +1,7 @@
 name: cpu-task1
 
 resources:
-  cloud: oci
-  region: us-sanjose-1
+  infra: oci/us-sanjose-1
   cpus: 2
   disk_size: 256
   disk_tier: medium

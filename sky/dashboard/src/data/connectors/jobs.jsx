@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   ENDPOINT,
-  NotSupportedError,
-  ClusterDoesNotExist,
-  ClusterNotUpError,
+  CLUSTER_NOT_UP_ERROR,
+  CLUSTER_DOES_NOT_EXIST,
+  NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 
 export async function getManagedJobs({ allUsers = true } = {}) {
@@ -27,7 +27,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           try {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
-            if (error.type && error.type === ClusterNotUpError) {
+            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], controllerStopped: true };
             }
           } catch (jsonError) {
@@ -82,19 +82,67 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
       const total_duration = endTime - job.submitted_at;
 
+      // Extract cloud name if not available (backward compatibility)
+      // TODO(zhwu): remove this after 0.12.0
+      let cloud = job.cloud;
+      let cluster_resources = job.cluster_resources;
+      if (!cloud) {
+        // Backward compatibility for old jobs controller without cloud info
+        // Similar to the logic in sky/jobs/utils.py
+        if (job.cluster_resources && job.cluster_resources !== '-') {
+          try {
+            cloud = job.cluster_resources.split('(')[0].split('x').pop().trim();
+            cluster_resources = job.cluster_resources
+              .replace(`${cloud}(`, '(')
+              .replace('x ', 'x');
+          } catch (error) {
+            // If parsing fails, set a default value
+            cloud = 'Unknown';
+          }
+        } else {
+          cloud = 'Unknown';
+        }
+      }
+
+      let region_or_zone = '';
+      if (job.zone) {
+        region_or_zone = job.zone;
+      } else {
+        region_or_zone = job.region;
+      }
+
+      const full_region_or_zone = region_or_zone;
+      if (region_or_zone && region_or_zone.length > 15) {
+        region_or_zone = region_or_zone.substring(0, 15) + '...';
+      }
+
+      let infra = cloud + ' (' + region_or_zone + ')';
+      if (region_or_zone === '-') {
+        infra = cloud;
+      }
+      let full_infra = cloud + ' (' + full_region_or_zone + ')';
+      if (full_region_or_zone === '-') {
+        full_infra = cloud;
+      }
+
       return {
         id: job.job_id,
         task: job.task_name,
         name: job.job_name,
         job_duration: job.job_duration,
         total_duration: total_duration,
+        workspace: job.workspace,
         status: job.status,
-        resources: job.resources,
-        cluster: job.cluster_resources,
-        region: job.region,
+        requested_resources: job.resources,
+        resources_str: cluster_resources,
+        resources_str_full: job.cluster_resources_full || cluster_resources,
+        cloud: cloud,
+        infra: infra,
+        full_infra: full_infra,
         recoveries: job.recovery_count,
         details: job.failure_reason,
         user: job.user_name,
+        user_hash: job.user_hash,
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,
@@ -246,15 +294,18 @@ export async function handleJobAction(action, jobId, cluster) {
                 const error = JSON.parse(data.detail.error);
 
                 // Handle specific error types
-                if (error.type && error.type === NotSupportedError) {
+                if (error.type && error.type === NOT_SUPPORTED_ERROR) {
                   showToast(
                     `${logStarter} job ${jobId} is not supported!`,
                     'error',
                     10000
                   );
-                } else if (error.type && error.type === ClusterDoesNotExist) {
+                } else if (
+                  error.type &&
+                  error.type === CLUSTER_DOES_NOT_EXIST
+                ) {
                   showToast(`Cluster ${cluster} does not exist.`, 'error');
-                } else if (error.type && error.type === ClusterNotUpError) {
+                } else if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
                   showToast(`Cluster ${cluster} is not up.`, 'error');
                 } else {
                   showToast(

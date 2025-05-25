@@ -20,8 +20,6 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 """
 import asyncio
 import contextlib
-import contextvars
-import functools
 import multiprocessing
 import os
 import queue as queue_lib
@@ -34,6 +32,7 @@ from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
 import setproctitle
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -51,6 +50,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -228,6 +228,7 @@ def override_request_env_and_config(
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
     os.environ.update(request_body.env_vars)
+    # Note: may be overridden by AuthProxyMiddleware.
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                        name=request_body.env_vars[constants.USER_ENV_VAR])
     global_user_state.add_or_update_user(user)
@@ -367,10 +368,8 @@ async def execute_request_coroutine(request: api_requests.Request):
     # 1. skypilot config is not contextual
     # 2. envs that read directly from os.environ are not contextual
     ctx.override_envs(request_body.env_vars)
-    loop = asyncio.get_running_loop()
-    pyctx = contextvars.copy_context()
-    func_call = functools.partial(pyctx.run, func, **request_body.to_kwargs())
-    fut: asyncio.Future = loop.run_in_executor(None, func_call)
+    fut: asyncio.Future = context_utils.to_thread(func,
+                                                  **request_body.to_kwargs())
 
     async def poll_task(request_id: str) -> bool:
         request = api_requests.get_request(request_id)
@@ -446,7 +445,8 @@ def prepare_request(
                                    cluster_name=request_cluster_name)
 
     if not api_requests.create_if_not_exists(request):
-        raise RuntimeError(f'Request {request_id} already exists.')
+        raise exceptions.RequestAlreadyExistsError(
+            f'Request {request_id} already exists.')
 
     request.log_path.touch()
     return request

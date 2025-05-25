@@ -5,9 +5,13 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+  REFRESH_INTERVAL,
+} from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -20,6 +24,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { getClusters } from '@/data/connectors/clusters';
+import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -30,6 +35,24 @@ import {
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
+// Helper function to format cost (copied from workspaces.jsx)
+// const formatCost = (cost) => { // Cost function removed
+//   if (cost >= 10) {
+//     // Use the user-updated threshold of 10
+//     return cost.toFixed(1);
+//   }
+//   return cost.toFixed(2);
+// };
+
+const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
 
 export function Clusters() {
   const [loading, setLoading] = useState(false);
@@ -37,7 +60,49 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
+  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE); // Default to ALL_WORKSPACES_VALUE
+  const [workspaces, setWorkspaces] = useState([]);
   const isMobile = useMobile();
+
+  useEffect(() => {
+    const fetchFilterData = async () => {
+      try {
+        // Fetch configured workspaces for the filter dropdown
+        const fetchedWorkspacesConfig = await getWorkspaces();
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+
+        // Fetch all clusters to see if 'default' workspace is implicitly used
+        const allClusters = await getClusters();
+        const uniqueClusterWorkspaces = [
+          ...new Set(
+            allClusters
+              .map((cluster) => cluster.workspace || 'default')
+              .filter((ws) => ws)
+          ),
+        ];
+
+        // Combine configured workspaces with any actively used 'default' workspace
+        const finalWorkspaces = new Set(configuredWorkspaceNames);
+        if (
+          uniqueClusterWorkspaces.includes('default') &&
+          !finalWorkspaces.has('default')
+        ) {
+          // Add 'default' if it's used by clusters but not in configured list
+          // This ensures 'default' appears if relevant, even if not explicitly in skypilot config
+        }
+        // Ensure all unique cluster workspaces are in the list, especially 'default'
+        uniqueClusterWorkspaces.forEach((wsName) =>
+          finalWorkspaces.add(wsName)
+        );
+
+        setWorkspaces(Array.from(finalWorkspaces).sort());
+      } catch (error) {
+        console.error('Error fetching data for workspace filter:', error);
+        setWorkspaces(['default']); // Fallback or error state
+      }
+    };
+    fetchFilterData();
+  }, []);
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
@@ -48,13 +113,32 @@ export function Clusters() {
   return (
     <Layout highlighted="clusters">
       <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
+        <div className="text-base flex items-center">
           <Link
             href="/clusters"
             className="text-sky-blue hover:underline leading-none"
           >
             Sky Clusters
           </Link>
+          <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
+            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by workspace...">
+                {workspaceFilter === ALL_WORKSPACES_VALUE
+                  ? 'All Workspaces'
+                  : workspaceFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_WORKSPACES_VALUE}>
+                All Workspaces
+              </SelectItem>
+              {workspaces.map((ws) => (
+                <SelectItem key={ws} value={ws}>
+                  {ws}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center">
           {loading && (
@@ -75,9 +159,10 @@ export function Clusters() {
         </div>
       </div>
       <ClusterTable
-        refreshInterval={10000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        workspaceFilter={workspaceFilter}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -108,6 +193,7 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  workspaceFilter,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -133,8 +219,16 @@ export function ClusterTable({
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    let filteredData = data;
+    // Filter if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
+    if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
+      filteredData = data.filter((item) => {
+        const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
+        return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
+      });
+    }
+    return sortData(filteredData, sortConfig.key, sortConfig.direction);
+  }, [data, sortConfig, workspaceFilter]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -228,15 +322,21 @@ export function ClusterTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
+                onClick={() => requestSort('workspace')}
               >
-                Resources{getSortDirection('resources_str')}
+                Workspace{getSortDirection('workspace')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
+                onClick={() => requestSort('infra')}
               >
-                Region{getSortDirection('region')}
+                Infra{getSortDirection('infra')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('resources_str')}
+              >
+                Resources{getSortDirection('resources_str')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -277,8 +377,43 @@ export function ClusterTable({
                       </Link>
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
-                    <TableCell>{item.resources_str}</TableCell>
-                    <TableCell>{item.region}</TableCell>
+                    <TableCell>
+                      <Link
+                        href="/workspaces"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.workspace || 'default'}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <NonCapitalizedTooltip
+                        content={item.full_infra || item.infra}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>
+                          <Link
+                            href="/infra"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {item.cloud}
+                          </Link>
+                          {item.infra.includes('(') && (
+                            <span>
+                              {' ' +
+                                item.infra.substring(item.infra.indexOf('('))}
+                            </span>
+                          )}
+                        </span>
+                      </NonCapitalizedTooltip>
+                    </TableCell>
+                    <TableCell>
+                      <NonCapitalizedTooltip
+                        content={item.resources_str_full || item.resources_str}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>{item.resources_str}</span>
+                      </NonCapitalizedTooltip>
+                    </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
                     <TableCell className="text-left">
                       <Status2Actions

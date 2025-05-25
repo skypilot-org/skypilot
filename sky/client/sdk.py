@@ -10,14 +10,19 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
+import base64
+import binascii
 import getpass
+from http import cookiejar
 import json
 import logging
 import os
 import pathlib
 import subprocess
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib import parse as urlparse
 import webbrowser
 
 import click
@@ -42,6 +47,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -87,13 +93,16 @@ def stream_response(request_id: Optional[str],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def check(clouds: Optional[Tuple[str]],
-          verbose: bool) -> server_common.RequestId:
+def check(infra_list: Optional[Tuple[str, ...]],
+          verbose: bool,
+          workspace: Optional[str] = None) -> server_common.RequestId:
     """Checks the credentials to enable clouds.
 
     Args:
-        clouds: The clouds to check.
+        infra: The infra to check.
         verbose: Whether to show verbose output.
+        workspace: The workspace to check. If None, all workspaces will be
+        checked.
 
     Returns:
         The request ID of the check request.
@@ -101,7 +110,25 @@ def check(clouds: Optional[Tuple[str]],
     Request Returns:
         None
     """
-    body = payloads.CheckBody(clouds=clouds, verbose=verbose)
+    if infra_list is None:
+        clouds = None
+    else:
+        specified_clouds = []
+        for infra_str in infra_list:
+            infra = infra_utils.InfraInfo.from_str(infra_str)
+            if infra.cloud is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid infra to check: {infra_str}')
+            if infra.region is not None or infra.zone is not None:
+                region_zone = infra_str.partition('/')[-1]
+                logger.warning(f'Infra {infra_str} is specified, but `check` '
+                               f'only supports checking {infra.cloud}, '
+                               f'ignoring {region_zone}')
+            specified_clouds.append(infra.cloud)
+        clouds = tuple(specified_clouds)
+    body = payloads.CheckBody(clouds=clouds,
+                              verbose=verbose,
+                              workspace=workspace)
     response = requests.post(f'{server_common.get_server_url()}/check',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
@@ -111,8 +138,12 @@ def check(clouds: Optional[Tuple[str]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def enabled_clouds() -> server_common.RequestId:
+def enabled_clouds(workspace: Optional[str] = None) -> server_common.RequestId:
     """Gets the enabled clouds.
+
+    Args:
+        workspace: The workspace to get the enabled clouds for. If None, the
+        active workspace will be used.
 
     Returns:
         The request ID of the enabled clouds request.
@@ -120,7 +151,10 @@ def enabled_clouds() -> server_common.RequestId:
     Request Returns:
         A list of enabled clouds in string format.
     """
-    response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
+    if workspace is None:
+        workspace = skypilot_config.get_active_workspace()
+    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
+                             f'workspace={workspace}'),
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
@@ -203,7 +237,7 @@ def list_accelerator_counts(
             accelerator names mapped to a list of available counts. See usage
             in cli.py.
     """
-    body = payloads.ListAcceleratorsBody(
+    body = payloads.ListAcceleratorCountsBody(
         gpus_only=gpus_only,
         name_filter=name_filter,
         region_filter=region_filter,
@@ -253,6 +287,13 @@ def optimize(
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+def workspaces() -> server_common.RequestId:
+    """Gets the workspaces."""
+    response = requests.get(f'{server_common.get_server_url()}/workspaces',
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -344,7 +385,7 @@ def launch(
             import sky
             task = sky.Task(run='echo hello SkyPilot')
             task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+                sky.Resources(infra='aws', accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
 
@@ -1377,10 +1418,57 @@ def local_down() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
+    """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
+
+    Args:
+        infra: Name of the cluster configuration in ssh_targets.yaml.
+            If None, the first cluster in the file is used.
+
+    Returns:
+        request_id: The request ID of the SSH cluster deployment request.
+    """
+    body = payloads.SSHUpBody(
+        infra=infra,
+        cleanup=False,
+    )
+    response = requests.post(f'{server_common.get_server_url()}/ssh_up',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
+    """Tears down a Kubernetes cluster on SSH targets.
+
+    Args:
+        infra: Name of the cluster configuration in ssh_targets.yaml.
+            If None, the first cluster in the file is used.
+
+    Returns:
+        request_id: The request ID of the SSH cluster teardown request.
+    """
+    body = payloads.SSHUpBody(
+        infra=infra,
+        cleanup=True,
+    )
+    response = requests.post(f'{server_common.get_server_url()}/ssh_down',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def realtime_kubernetes_gpu_availability(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None) -> server_common.RequestId:
+        quantity_filter: Optional[int] = None,
+        is_ssh: Optional[bool] = None) -> server_common.RequestId:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
@@ -1390,6 +1478,7 @@ def realtime_kubernetes_gpu_availability(
         context=context,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
+        is_ssh=is_ssh,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/'
@@ -1661,7 +1750,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, str]:
+def api_info() -> Dict[str, Any]:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -1674,7 +1763,14 @@ def api_info() -> Dict[str, str]:
                 'api_version': '1',
                 'commit': 'abc1234567890',
                 'version': '1.0.0',
+                'version_on_disk': '1.0.0',
+                'user': {
+                    'name': 'test@example.com',
+                    'id': '12345abcd',
+                },
             }
+
+        Note that user may be None if we are not using an auth proxy.
 
     """
     response = requests.get(f'{server_common.get_server_url()}/api/health',
@@ -1798,7 +1894,7 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_login(endpoint: Optional[str] = None) -> None:
+def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -1824,7 +1920,91 @@ def api_login(endpoint: Optional[str] = None) -> None:
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
 
-    server_common.check_server_healthy(endpoint)
+    server_status = server_common.check_server_healthy(endpoint)
+    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
+        # We detected an auth proxy, so go through the auth proxy cookie flow.
+        parsed_url = urlparse.urlparse(endpoint)
+        token_url = f'{endpoint}/token'
+        click.echo('Authentication is needed. Please visit this URL setup up '
+                   f'the token:{colorama.Style.BRIGHT}\n\n{token_url}'
+                   f'\n{colorama.Style.RESET_ALL}')
+        if webbrowser.open(token_url):
+            click.echo('Opening browser...')
+        token: str = click.prompt('Paste the token')
+
+        # Parse the token.
+        # b64decode will ignore invalid characters, but does some length and
+        # padding checks.
+        try:
+            data = base64.b64decode(token)
+        except binascii.Error as e:
+            raise ValueError(f'Malformed token: {token}') from e
+        logger.debug(f'Token data: {data!r}')
+        try:
+            json_data = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ValueError(f'Malformed token data: {data!r}') from e
+        if not isinstance(json_data, dict):
+            raise ValueError(f'Malformed token JSON: {json_data}')
+
+        if json_data.get('v') == 1:
+            user_hash = json_data.get('user')
+            cookie_dict = json_data['cookies']
+        elif 'v' not in json_data:
+            user_hash = None
+            cookie_dict = json_data
+        else:
+            raise ValueError(f'Unsupported token version: {json_data.get("v")}')
+
+        cookie_jar = cookiejar.MozillaCookieJar()
+        for (name, value) in cookie_dict.items():
+            # dict keys in JSON must be strings
+            assert isinstance(name, str)
+            if not isinstance(value, str):
+                raise ValueError('Malformed token - bad key/value: '
+                                 f'{name}: {value}')
+
+            # See CookieJar._cookie_from_cookie_tuple
+            # oauth2proxy default is Max-Age 604800
+            expires = int(time.time()) + 604800
+            domain = str(parsed_url.hostname)
+            domain_initial_dot = domain.startswith('.')
+            if not domain_initial_dot:
+                domain = '.' + domain
+
+            cookie_jar.set_cookie(
+                cookiejar.Cookie(
+                    version=0,
+                    name=name,
+                    value=value,
+                    port=None,
+                    port_specified=False,
+                    domain=domain,
+                    domain_specified=True,
+                    domain_initial_dot=domain_initial_dot,
+                    path='',
+                    path_specified=False,
+                    secure=False,
+                    expires=expires,
+                    discard=False,
+                    comment=None,
+                    comment_url=None,
+                    rest=dict(),
+                ))
+
+        # Now that the cookies are parsed, save them to the cookie jar.
+        cookie_jar_path = os.path.expanduser(
+            server_common.get_api_cookie_jar_path())
+        cookie_jar.save(cookie_jar_path)
+
+        # If we have a user_hash, save it to the local file
+        if user_hash is not None:
+            if not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            with open(os.path.expanduser('~/.sky/user_hash'),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(user_hash)
 
     # Set the endpoint in the config file
     config_path = pathlib.Path(

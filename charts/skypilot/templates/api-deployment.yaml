@@ -63,9 +63,25 @@ spec:
           {{- end }}
           {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
-          echo "Copying config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
+          echo "Linking config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
           # The configmap serves as the ground truth for the config.yaml file, read-only
           ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          {{- end }}
+          {{- if .Values.apiService.sshNodePools }}
+          mkdir -p /root/.sky
+          echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
+          # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
+          ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          {{- end }}
+          {{- if .Values.apiService.sshKeySecret }}
+          mkdir -p /root/.ssh
+          echo "Linking ssh keys to /root/.ssh"
+          for file in /var/skypilot/ssh_keys/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ln -sf "$file" "/root/.ssh/$filename"
+            fi
+          done
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
@@ -104,6 +120,14 @@ spec:
         - name: skypilot-config
           mountPath: /var/skypilot/config
         {{- end }}
+        {{- if .Values.apiService.sshNodePools }}
+        - name: skypilot-ssh-node-pools
+          mountPath: /var/skypilot/ssh_node_pool
+        {{- end }}
+        {{- if .Values.apiService.sshKeySecret }}
+        - name: skypilot-ssh-identity
+          mountPath: /var/skypilot/ssh_keys
+        {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-config
           mountPath: /root/.aws
@@ -123,6 +147,16 @@ spec:
         {{- if .Values.runpodCredentials.enabled }}
         - name: runpod-config
           mountPath: /root/.runpod
+          readOnly: true
+        {{- end }}
+        {{- if .Values.lambdaCredentials.enabled }}
+        - name: lambda-config
+          mountPath: /root/.lambda_cloud
+          readOnly: true
+        {{- end }}
+        {{- if .Values.nebiusCredentials.enabled }}
+        - name: nebius-config
+          mountPath: /root/.nebius
           readOnly: true
         {{- end }}
       initContainers:
@@ -213,6 +247,56 @@ spec:
         - name: runpod-config
           mountPath: /root/.runpod
       {{- end }}
+      {{- if .Values.lambdaCredentials.enabled }}
+      - name: create-lambda-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up Lambda credentials..."
+          if [ -n "$LAMBDA_API_KEY" ]; then
+            echo "Lambda credentials found in environment variable."
+            mkdir -p /root/.lambda_cloud
+            echo "api_key = $LAMBDA_API_KEY" > /root/.lambda_cloud/lambda_keys
+          else
+            echo "Lambda credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: LAMBDA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.lambdaCredentials.lambdaSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: lambda-config
+          mountPath: /root/.lambda_cloud
+      {{- end }}
+      {{- if .Values.nebiusCredentials.enabled }}
+      - name: create-nebius-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up Nebius credentials..."
+          mkdir -p /root/.nebius
+          cp /root/.nebius_cloud/credentials.json /root/.nebius/credentials.json
+          echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
+        volumeMounts:
+        - name: nebius-config
+          mountPath: /root/.nebius
+        - name: nebius-credentials
+          mountPath: /root/.nebius_cloud/credentials.json
+          subPath: credentials.json
+      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -237,6 +321,17 @@ spec:
       - name: runpod-config
         emptyDir: {}
       {{- end }}
+      {{- if .Values.lambdaCredentials.enabled }}
+      - name: lambda-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.nebiusCredentials.enabled }}
+      - name: nebius-config
+        emptyDir: {}
+      - name: nebius-credentials
+        secret:
+          secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
+      {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
@@ -246,4 +341,15 @@ spec:
       - name: skypilot-config
         configMap:
           name: {{ .Release.Name }}-config
+      {{- end }}
+      {{- if .Values.apiService.sshNodePools }}
+      - name: skypilot-ssh-node-pools
+        secret:
+          secretName: {{ .Release.Name }}-ssh-node-pools
+      {{- end }}
+      {{- if .Values.apiService.sshKeySecret }}
+      - name: skypilot-ssh-identity
+        secret:
+          secretName: {{ .Values.apiService.sshKeySecret }}
+          defaultMode: 0600 
       {{- end }}

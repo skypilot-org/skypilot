@@ -1,0 +1,52 @@
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") (eq (index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis") "redis") (not (index .Values.ingress "oauth2-proxy" "redis-url")) -}}
+{{- $redis := index .Values.ingress "oauth2-proxy" "redis" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-oauth2-proxy-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-oauth2-proxy-redis
+    skypilot.co/component: oauth2-proxy-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-oauth2-proxy-redis
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-oauth2-proxy-redis
+        skypilot.co/component: oauth2-proxy-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-oauth2-proxy-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-oauth2-proxy-redis
+    skypilot.co/component: oauth2-proxy-redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+    name: redis
+  selector:
+    app: {{ .Release.Name }}-oauth2-proxy-redis
+{{- end -}}

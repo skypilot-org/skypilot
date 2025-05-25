@@ -11,7 +11,8 @@ import collections
 import enum
 import math
 import typing
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
+                    Union)
 
 from typing_extensions import assert_never
 
@@ -302,7 +303,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -456,12 +457,14 @@ class Cloud:
 
     @classmethod
     def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        cls, cloud_capability: CloudCapability
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud.
 
-        Returns a boolean of whether the user can access this cloud, and a
-        string describing the reason if the user cannot access.
+        Returns a boolean of whether the user can access this cloud, and:
+          - For SSH and Kubernetes, a dictionary that maps context names to
+            the status of the context.
+          - For others, a string describing the reason if cannot access.
 
         Raises NotSupportedError if the capability is
         not supported by this cloud.
@@ -473,18 +476,29 @@ class Cloud:
         assert_never(cloud_capability)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's compute service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's storage service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
+
+    @classmethod
+    def get_infras(cls) -> List[str]:
+        """Returns a list of enabled infrastructures for this cloud.
+
+        For Kubernetes and SSH, return a list of resource pools.
+        For all other clouds, return self.
+        """
+        return [cls._REPR.lower()]
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
@@ -721,7 +735,7 @@ class Cloud:
         Raises:
             ResourcesMismatchError: If the accelerator is not supported.
         """
-        assert resources.is_launchable(), resources
+        resources = resources.assert_launchable()
 
         def _equal_accelerators(
             acc_requested: Optional[Dict[str, Union[int, float]]],
@@ -877,6 +891,11 @@ class Cloud:
     def canonical_name(cls) -> str:
         return cls.__name__.lower()
 
+    @classmethod
+    def display_name(cls) -> str:
+        """Name of the cloud used in messages displayed to the user."""
+        return cls.canonical_name()
+
     def __repr__(self):
         return self._REPR
 
@@ -885,6 +904,12 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+class DummyCloud(Cloud):
+    """A dummy Cloud that has zero egress cost from/to for optimization
+    purpose."""
+    pass
 
 
 # === Helper functions ===

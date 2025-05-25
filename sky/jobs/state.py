@@ -13,6 +13,7 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -118,7 +119,8 @@ def create_table(cursor, conn):
         controller_pid INTEGER DEFAULT NULL,
         dag_yaml_path TEXT,
         env_file_path TEXT,
-        user_hash TEXT)""")
+        user_hash TEXT,
+        workspace TEXT DEFAULT NULL)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -134,6 +136,12 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'user_hash', 'TEXT')
 
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'job_info',
+                                 'workspace',
+                                 'TEXT DEFAULT NULL',
+                                 value_to_replace_existing_entries='default')
     conn.commit()
 
 
@@ -190,6 +198,7 @@ columns = [
     'dag_yaml_path',
     'env_file_path',
     'user_hash',
+    'workspace',
 ]
 
 
@@ -380,14 +389,14 @@ class ManagedJobScheduleState(enum.Enum):
 
 
 # === Status transition functions ===
-def set_job_info(job_id: int, name: str):
+def set_job_info(job_id: int, name: str, workspace: str):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO job_info
-            (spot_job_id, name, schedule_state)
-            VALUES (?, ?, ?)""",
-            (job_id, name, ManagedJobScheduleState.INACTIVE.value))
+            (spot_job_id, name, schedule_state, workspace)
+            VALUES (?, ?, ?, ?)""",
+            (job_id, name, ManagedJobScheduleState.INACTIVE.value, workspace))
 
 
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
@@ -1116,3 +1125,15 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
             'dag_yaml_path': row[2],
             'env_file_path': row[3],
         } if row is not None else None
+
+
+def get_workspace(job_id: int) -> str:
+    """Get the workspace of a job."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        workspace = cursor.execute(
+            'SELECT workspace FROM job_info WHERE spot_job_id = (?)',
+            (job_id,)).fetchone()
+        job_workspace = workspace[0] if workspace else None
+        if job_workspace is None:
+            return constants.SKYPILOT_DEFAULT_WORKSPACE
+        return job_workspace

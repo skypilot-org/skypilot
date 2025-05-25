@@ -17,6 +17,7 @@ from sky import clouds
 from sky import exceptions
 from sky import provision
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_common
@@ -228,9 +229,9 @@ def _ssh_probe_command(ip: str,
                        ssh_port: int,
                        ssh_user: str,
                        ssh_private_key: str,
+                       ssh_probe_timeout: int,
                        ssh_proxy_command: Optional[str] = None) -> List[str]:
-    # NOTE: Ray uses 'uptime' command and 10s timeout, we use the same
-    # setting here.
+    # NOTE: Ray uses 'uptime' command, we use the same setting here.
     command = [
         'ssh',
         '-T',
@@ -244,7 +245,7 @@ def _ssh_probe_command(ip: str,
         '-o',
         'PasswordAuthentication=no',
         '-o',
-        'ConnectTimeout=10s',
+        f'ConnectTimeout={ssh_probe_timeout}s',
         '-o',
         f'UserKnownHostsFile={os.devnull}',
         '-o',
@@ -277,6 +278,7 @@ def _wait_ssh_connection_direct(ip: str,
                                 ssh_port: int,
                                 ssh_user: str,
                                 ssh_private_key: str,
+                                ssh_probe_timeout: int,
                                 ssh_control_name: Optional[str] = None,
                                 ssh_proxy_command: Optional[str] = None,
                                 **kwargs) -> Tuple[bool, str]:
@@ -305,6 +307,7 @@ def _wait_ssh_connection_direct(ip: str,
         if success:
             return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
                                                  ssh_private_key,
+                                                 ssh_probe_timeout,
                                                  ssh_control_name,
                                                  ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
@@ -312,7 +315,7 @@ def _wait_ssh_connection_direct(ip: str,
     except Exception as e:  # pylint: disable=broad-except
         stderr = f'Error: {common_utils.format_exception(e)}'
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
-                                 ssh_proxy_command)
+                                 ssh_probe_timeout, ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
                  f'{_shlex_join(command)}. '
                  f'{stderr}')
@@ -323,6 +326,7 @@ def _wait_ssh_connection_indirect(ip: str,
                                   ssh_port: int,
                                   ssh_user: str,
                                   ssh_private_key: str,
+                                  ssh_probe_timeout: int,
                                   ssh_control_name: Optional[str] = None,
                                   ssh_proxy_command: Optional[str] = None,
                                   **kwargs) -> Tuple[bool, str]:
@@ -333,14 +337,14 @@ def _wait_ssh_connection_indirect(ip: str,
     """
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
-                                 ssh_proxy_command)
+                                 ssh_probe_timeout, ssh_proxy_command)
     message = f'Waiting for SSH using command: {_shlex_join(command)}'
     logger.debug(message)
     try:
         proc = subprocess.run(command,
                               shell=False,
                               check=False,
-                              timeout=10,
+                              timeout=ssh_probe_timeout,
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
@@ -383,8 +387,13 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     def _retry_ssh_thread(ip_ssh_port: Tuple[str, int]):
         ip, ssh_port = ip_ssh_port
         success = False
+        ssh_probe_timeout = skypilot_config.get_nested(
+            ('provision', 'ssh_timeout'), 10)
         while not success:
-            success, stderr = waiter(ip, ssh_port, **ssh_credentials)
+            success, stderr = waiter(ip,
+                                     ssh_port,
+                                     **ssh_credentials,
+                                     ssh_probe_timeout=ssh_probe_timeout)
             if not success and time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(

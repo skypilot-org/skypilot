@@ -1,9 +1,10 @@
 """ Nebius Cloud. """
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.clouds import service_catalog
 from sky.utils import annotations
@@ -191,12 +192,13 @@ class Nebius(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Any]:
         del dryrun, cluster_name
         assert zones is None, ('Nebius does not support zones', zones)
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
         platform, _ = resources.instance_type.split('_')
@@ -209,13 +211,26 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        resources_vars = {
+        config_fs = skypilot_config.get_nested(
+            ('nebius', region.name, 'filesystems'), [])
+        resources_vars_fs = []
+        for i, fs in enumerate(config_fs):
+            resources_vars_fs.append({
+                'filesystem_id': fs['filesystem_id'],
+                'filesystem_attach_mode': fs.get('attach_mode', 'READ_WRITE'),
+                'filesystem_mount_path': fs.get(
+                    'mount_path', f'/mnt/filesystem-skypilot-{i+1}'),
+                'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
+            })
+
+        resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
+            'filesystems': resources_vars_fs
         }
 
         if acc_dict is not None:
@@ -282,7 +297,8 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     @annotations.lru_cache(scope='request')
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
         token_cred_msg = (
@@ -313,7 +329,8 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     @annotations.lru_cache(scope='request')
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to Nebius Object Storage.
 
         Returns:

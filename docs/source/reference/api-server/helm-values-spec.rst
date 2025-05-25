@@ -19,7 +19,7 @@ The SkyPilot API server helm chart provides typical `helm values <https://helm.s
 * ``--set``: Specify overrides on the command line.
 
   .. code-block:: bash
-      
+
       helm install $RELEASE_NAME skypilot/skypilot-nightly --set apiService.image="berkeleyskypilot/skypilot:0.9.1"
 
 Values
@@ -46,6 +46,8 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
+    :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
     :ref:`resources <helm-values-apiService-resources>`:
       requests:
@@ -69,6 +71,20 @@ Below is the available helm value keys and the default value of each key:
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: "username:$apr1$encrypted_password"
     :ref:`path <helm-values-ingress-path>`: '/'
+    :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
+      :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
+      # Required when enabled:
+      :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: null
+      :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
+      :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
+      # Optional settings:
+      :ref:`image <helm-values-ingress-oauth2-proxy-image>`: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+      :ref:`use-https <helm-values-ingress-oauth2-proxy-use-https>`: false
+      :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
+      :ref:`session-store-type <helm-values-ingress-oauth2-proxy-session-store-type>`: "redis"
+      :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
+      :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
+      :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -218,6 +234,54 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-sshNodePools:
+
+``apiService.sshNodePools``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the ``~/.sky/ssh_node_pools.yaml`` to set on the API server. Set to ``null`` to use an empty ssh node pools. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sshNodePools: |-
+      my-cluster:
+        hosts:
+          - 1.2.3.4
+          - 1.2.3.5
+
+      my-box:
+        hosts:
+          - hostname_in_ssh_config
+
+.. _helm-values-apiService-sshKeySecret:
+
+``apiService.sshKeySecret``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Optional secret that contains SSH identity files to the API server to use, all the entries in the secret will be mounted to ``~/.ssh/`` directory in the API server. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sshKeySecret: my-ssh-key-secret
+
+The content of the secret should be like:
+
+.. code-block:: yaml
+
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: my-ssh-key-secret
+  data:
+    id_rsa: <secret-content>
+
 
 .. _helm-values-apiService-skipResourceCheck:
 
@@ -380,9 +444,9 @@ Default: ``true``
 ``ingress.authSecret``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Name of the Kubernetes secret containing basic auth credentials for ingress. If not specified, a new secret will be created using ``authCredentials``.
+Name of the Kubernetes secret containing basic auth credentials for ingress. If not specified, a new secret will be created using ``authCredentials``. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set.
+One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
 Default: ``null``
 
@@ -396,9 +460,9 @@ Default: ``null``
 ``ingress.authCredentials``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Basic auth credentials in the format ``username:encrypted_password``. Used only if ``authSecret`` is not set.
+Basic auth credentials in the format ``username:encrypted_password``. Used only if ``authSecret`` is not set. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set.
+One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
 Default: ``"username:$apr1$encrypted_password"``
 
@@ -420,6 +484,200 @@ Default: ``'/'``
 
   ingress:
     path: '/'
+
+.. _helm-values-ingress-oauth2-proxy:
+
+``ingress.oauth2-proxy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for the OAuth2 Proxy authentication for the API server. This enables SSO providers like Okta.
+
+If enabled, ``ingress.authSecret`` and ``ingress.authCredentials`` are ignored.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      enabled: false
+      # Required when enabled:
+      oidc-issuer-url: null
+      client-id: ""
+      client-secret: ""
+      # Optional settings:
+      image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+      use-https: false
+      email-domain: "*"
+      session-store-type: "redis"
+      redis-url: null
+      cookie-refresh: null
+      cookie-expire: null
+
+.. _helm-values-ingress-oauth2-proxy-enabled:
+
+``ingress.oauth2-proxy.enabled``
+''''''''''''''''''''''''''''''''''''
+
+Enable OAuth2 Proxy for authentication. When enabled, this will deploy an OAuth2 Proxy component and configure the ingress to use it for authentication instead of basic auth.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      enabled: true
+
+.. _helm-values-ingress-oauth2-proxy-oidc-issuer-url:
+
+``ingress.oauth2-proxy.oidc-issuer-url``
+''''''''''''''''''''''''''''''''''''''''
+
+The URL of the OIDC issuer (e.g., your Okta domain). Required when oauth2-proxy is enabled.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      oidc-issuer-url: "https://mycompany.okta.com"
+
+.. _helm-values-ingress-oauth2-proxy-client-id:
+
+``ingress.oauth2-proxy.client-id``
+''''''''''''''''''''''''''''''''''
+
+The OAuth client ID from your OIDC provider (e.g., Okta). Required when oauth2-proxy is enabled.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-id: "0abc123def456"
+
+.. _helm-values-ingress-oauth2-proxy-client-secret:
+
+``ingress.oauth2-proxy.client-secret``
+'''''''''''''''''''''''''''''''''''''''''
+
+The OAuth client secret from your OIDC provider (e.g., Okta). Required when oauth2-proxy is enabled.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-secret: "abcdef123456"
+
+.. _helm-values-ingress-oauth2-proxy-image:
+
+``ingress.oauth2-proxy.image``
+''''''''''''''''''''''''''''''
+
+Docker image for the OAuth2 Proxy component.
+
+Default: ``"quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+
+.. _helm-values-ingress-oauth2-proxy-use-https:
+
+``ingress.oauth2-proxy.use-https``
+''''''''''''''''''''''''''''''''''
+
+Set to ``true`` when using HTTPS for the API server endpoint. When set to ``false``, secure cookies are disabled, which is required for HTTP endpoints.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      use-https: true
+
+.. _helm-values-ingress-oauth2-proxy-email-domain:
+
+``ingress.oauth2-proxy.email-domain``
+'''''''''''''''''''''''''''''''''''''''
+
+Email domains to allow for authentication. Use ``"*"`` to allow all email domains.
+
+Default: ``"*"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      email-domain: "mycompany.com"
+
+.. _helm-values-ingress-oauth2-proxy-session-store-type:
+
+``ingress.oauth2-proxy.session-store-type``
+'''''''''''''''''''''''''''''''''''''''''''
+
+Session storage type for OAuth2 Proxy. Can be set to ``"cookie"`` or ``"redis"``. Using Redis as a session store results in smaller cookies and better performance for large-scale deployments.
+
+Default: ``"redis"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      session-store-type: "redis"
+
+.. _helm-values-ingress-oauth2-proxy-redis-url:
+
+``ingress.oauth2-proxy.redis-url``
+''''''''''''''''''''''''''''''''''
+
+URL to connect to an external Redis instance for session storage. If set to ``null`` and ``session-store-type`` is ``"redis"``, a Redis instance will be automatically deployed. Format: ``redis://host[:port][/db-number]``
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      redis-url: "redis://redis-host:6379/0"
+
+.. _helm-values-ingress-oauth2-proxy-cookie-refresh:
+
+``ingress.oauth2-proxy.cookie-refresh``
+'''''''''''''''''''''''''''''''''''''''
+
+Duration in seconds after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      cookie-refresh: 3540  # 59 minutes (for a 60-minute access token)
+
+.. _helm-values-ingress-oauth2-proxy-cookie-expire:
+
+``ingress.oauth2-proxy.cookie-expire``
+''''''''''''''''''''''''''''''''''''''
+
+Expiration time for cookies in seconds. Should match the refresh token lifespan from your OIDC provider.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      cookie-expire: 86400  # 24 hours
 
 .. _helm-values-ingress-nginx:
 

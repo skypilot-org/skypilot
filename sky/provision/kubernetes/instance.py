@@ -67,6 +67,9 @@ def is_high_availability_cluster_by_kubectl(
         namespace: Optional[str] = None) -> bool:
     """Check if a cluster is a high availability controller by calling
     `kubectl get deployment`.
+
+    The deployment must have the label `skypilot-cluster-name` set to
+    `cluster_name`.
     """
     try:
         deployment_list = kubernetes.apps_api(
@@ -896,6 +899,9 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
+            # Propagate the labels to the deployment for identification.
+            deployment_spec['metadata']['labels'] = pod_spec_copy['metadata'][
+                'labels']
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(
@@ -1259,6 +1265,8 @@ def query_instances(
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
+    is_ssh = context.startswith('ssh-') if context else False
+    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
 
     # Get all the pods with the label skypilot-cluster: <cluster_name>
     try:
@@ -1268,15 +1276,24 @@ def query_instances(
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
-            ctx = kubernetes_utils.get_current_kube_config_context_name()
+            if is_ssh:
+                node_pool = context.lstrip('ssh-') if context else ''
+                msg = (
+                    f'Cannot connect to SSH Node Pool {node_pool}. '
+                    'Please check if the SSH Node Pool is up and accessible. '
+                    'To debug, run `sky check ssh` to check the status of '
+                    'the SSH Node Pool.')
+            else:
+                ctx = kubernetes_utils.get_current_kube_config_context_name()
+                msg = (f'Network error - check if the {identity} in '
+                       f'context {ctx} is up and accessible.')
             raise exceptions.ClusterStatusFetchingError(
-                f'Failed to query cluster {cluster_name_on_cloud!r} status. '
-                'Network error - check if the Kubernetes cluster in '
-                f'context {ctx} is up and accessible.') from None
+                f'Failed to query cluster {cluster_name_on_cloud!r} status. ' +
+                msg) from None
     except Exception as e:  # pylint: disable=broad-except
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
-                f'Failed to query Kubernetes cluster {cluster_name_on_cloud!r} '
+                f'Failed to query {identity} {cluster_name_on_cloud!r} '
                 f'status: {common_utils.format_exception(e)}')
 
     # Check if the pods are running or pending

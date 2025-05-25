@@ -217,7 +217,7 @@ You can also check the GPUs available on your nodes by running:
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud k8s
+    $ sky show-gpus --infra k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     L4    1, 2, 4                   12 of 12 free
