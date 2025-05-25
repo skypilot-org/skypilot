@@ -1147,7 +1147,8 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     schedule_state and will be ignored by this SQL query.
     """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        # Get the highest priority (numerically smallest) LAUNCHING job's priority
+        # Get the highest priority (numerically smallest) LAUNCHING or
+        # ALIVE_BACKOFF job's priority.
         hp_launching_job_row = cursor.execute(
             'SELECT priority FROM job_info '
             'WHERE schedule_state IN (?, ?) '
@@ -1155,12 +1156,14 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
             (ManagedJobScheduleState.LAUNCHING.value,
              ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()
 
-        effective_min_priority_to_consider = 1000  # Max priority value (lowest actual priority)
+        # Max priority value (that is, lowest possible priority)
+        effective_max_priority_to_consider = 1000
         if hp_launching_job_row:
-            effective_min_priority_to_consider = hp_launching_job_row[0]
+            effective_max_priority_to_consider = hp_launching_job_row[0]
 
-        # Select the highest-priority (lowest numerical value) WAITING or ALIVE_WAITING job
-        # whose priority is less than or equal to effective_min_priority_to_consider.
+        # Select the highest-priority (lowest numerical value) WAITING or
+        # ALIVE_WAITING job whose priority value is less than or equal to
+        # effective_min_priority_to_consider.
         waiting_job_row = cursor.execute(
             'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
@@ -1168,7 +1171,7 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
             'ORDER BY priority ASC, spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
              ManagedJobScheduleState.ALIVE_WAITING.value,
-             effective_min_priority_to_consider)).fetchone()
+             effective_max_priority_to_consider)).fetchone()
 
         if waiting_job_row is None:
             return None

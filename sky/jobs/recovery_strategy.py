@@ -367,18 +367,18 @@ class StrategyExecutor:
                         # Retry forever if max_retry is None.
                         if raise_on_failure:
                             with ux_utils.print_exception_no_traceback():
-                                raise exceptions.ManagedJobReachedMaxRetriesError(
-                                    'Resources unavailable: failed to launch '
-                                    f'clusters after {max_retry} retries.')
+                                raise (
+                                    exceptions.ManagedJobReachedMaxRetriesError(
+                                        'Resources unavailable: failed to '
+                                        f'launch clusters after {max_retry} '
+                                        'retries.'))
                         else:
                             return None
 
                     # Raise NoClusterLaunchedError to indicate that the job is
                     # in retry backoff. This will trigger special handling in
                     # scheduler.schedule_launched().
-                    e = exceptions.NoClusterLaunchedError()
-                    logger.info(f'Raising {e}')
-                    raise e
+                    raise exceptions.NoClusterLaunchedError()
 
             except exceptions.NoClusterLaunchedError:
                 logger.info('NoClusterLaunchedError')
@@ -392,7 +392,7 @@ class StrategyExecutor:
                 continue
             else:
                 logger.info('Unreachable')
-                
+
                 # The inner loop should either return or throw
                 # NoClusterLaunchedError.
                 assert False, 'Unreachable'
