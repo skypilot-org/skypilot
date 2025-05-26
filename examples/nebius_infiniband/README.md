@@ -4,7 +4,9 @@ To accelerate ML, AI and high-performance computing (HPC) workloads that you run
 
 ## TL;DR: Use inifiband on managed Nebius Kubernetes cluster with SkyPilot
 
-Set the following config in your SkyPilot task YAML to enable InfiniBand:
+With Nebius Kubernetes cluster, you can use SkyPilot to run your jobs with InfiniBand enabled:
+
+1. Set the following config in your SkyPilot task YAML to enable InfiniBand:
 
 ```yaml
 config:
@@ -14,11 +16,15 @@ config:
         containers:
         - securityContext:
             privileged: true
-        - env:
-          - name: NCCL_IB_HCA
-            value: mlx5
-          - name: UCX_NET_DEVICES
-            value: mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+```
+
+2. Configure the environment variables in your task:
+
+```bash
+run: |
+  export NCCL_IB_HCA=mlx5
+  export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+  ... your own run script ...
 ```
 
 Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_high_performance_network/nccl.yaml)
