@@ -405,26 +405,24 @@ def override_sky_config(
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
 
     if is_ssh_test():
-        ssh_node_pool_commands = parse_ssh_command(test.commands)
-        # test.echo(
-        #     f'ssh_node_pool_commands: {ssh_node_pool_commands}, test.commands: {test.commands}'
-        # )
-        if ssh_node_pool_commands:
+        ssh_node_pool_command, node_pool_size = parse_ssh_command(test.commands)
+        test.echo(
+            f'ssh_node_pool_command: {ssh_node_pool_command}, test.commands: {test.commands}, node_pool_size: {node_pool_size}'
+        )
+        if ssh_node_pool_command:
+            node_pool_hosts = ['ssh-node-pool']
+            for index in range(node_pool_size - 1):
+                node_pool_hosts.append(f'ssh-node-pool-worker{index + 1}')
             temp_ssh_node_pools_file = tempfile.NamedTemporaryFile(
                 mode='w', suffix='.yaml')
             with open(temp_ssh_node_pools_file.name, 'w') as f:
                 yaml.safe_dump(
-                    {
-                        'test-ssh-node-pools': {
-                            'hosts': [
-                                f'node-pool-{index}'
-                                for index in range(len(ssh_node_pool_commands))
-                            ]
-                        }
-                    }, f)
+                    {'test-ssh-node-pools': {
+                        'hosts': node_pool_hosts
+                    }}, f)
 
             # Launch VMs for ssh node pools
-            new_test_commands = [command for command in ssh_node_pool_commands]
+            new_test_commands = [ssh_node_pool_command]
             # Setup ssh node pools
             new_test_commands += ['sky ssh up', 'sky check ssh']
             # Replace the cloud and infra flags with the ssh node pools
@@ -436,9 +434,9 @@ def override_sky_config(
                     new_test_commands.append(modified_command)
                 else:
                     new_test_commands.append(command)
-            # test.echo(f'new_test_commands: {new_test_commands}')
+            test.echo(f'new_test_commands: {new_test_commands}')
             # Teardown ssh node pools
-            teardown_command = 'sky ssh down; sky down \'node-pool-*\' -y'
+            teardown_command = 'sky ssh down; sky down ssh-node-pool -y'
             new_teardown = None
             if test.teardown:
                 new_teardown = test.teardown + f'; {teardown_command}'
@@ -747,47 +745,50 @@ def is_ssh_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_SSH', None) is not None
 
 
-def parse_ssh_command(commands: List[str]) -> List[str]:
+def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
     """Parse the SSH command to get a list of commands to launch a node pool."""
-    ssh_node_pool_commands = []
+    gpus_val, infra_val, instance_type_val, yaml_path_val = None, None, None, None
+    ssh_node_pool_size = 0
 
     for original_command_str in commands:
-        # Check if the command is a relevant SkyPilot launch command
-        is_sky_launch_type = False
         if 'sky launch' in original_command_str or \
            'sky jobs launch' in original_command_str or \
            'sky serve up' in original_command_str:
             # Basic check passed, now try to identify the core sky command part
             # to ensure we're not matching substrings in other contexts.
-            if re.search(r'\bsky\s+(?:launch|jobs\s+launch|serve\s+up)\b',
-                         original_command_str):
-                is_sky_launch_type = True
+            if not re.search(r'\bsky\s+(?:launch|jobs\s+launch|serve\s+up)\b',
+                             original_command_str):
+                continue
 
-        if is_sky_launch_type:
-            # --- Argument extraction for the main/controller SSH node pool VM ---
-            # Search for each argument type independently
-            gpus_val, infra_val, instance_type_val, cloud_val, yaml_path_val = None, None, None, None, None
+        # --- Argument extraction for the main/controller SSH node pool VM ---
+        # Search for each argument type independently
+        # TODO: (zeping) Use optimizer to compare the best parameters instead of
+        # using latest parameters.
+        gpus_match = re.search(r'--gpus\s+(\S+)', original_command_str)
+        if gpus_match:
+            gpus_val = gpus_match.group(1)
 
-            gpus_match = re.search(r'--gpus\s+(\S+)', original_command_str)
-            if gpus_match:
-                gpus_val = gpus_match.group(1)
+        infra_match = re.search(r'--infra\s+(\S+)', original_command_str)
+        if infra_match:
+            infra_val = infra_match.group(1)
+            if 'kubernetes' in infra_val:  # Specific handling for kubernetes
+                infra_val = 'aws'
 
-            infra_match = re.search(r'--infra\s+(\S+)', original_command_str)
-            if infra_match:
-                infra_val = infra_match.group(1)
-                if 'kubernetes' in infra_val:  # Specific handling for kubernetes
-                    infra_val = 'aws'
+        # Handle both --instance-type and -t
+        it_match = re.search(r'(?:--instance-type|-t)\s+(\S+)',
+                             original_command_str)
+        if it_match:
+            instance_type_val = it_match.group(1)
 
-            # Handle both --instance-type and -t
-            it_match = re.search(r'(?:--instance-type|-t)\s+(\S+)',
-                                 original_command_str)
-            if it_match:
-                instance_type_val = it_match.group(1)
+        num_nodes_match = re.search(r'--num-nodes\s+(\d+)',
+                                    original_command_str)
+        num_nodes_val = int(num_nodes_match.group(1)) if num_nodes_match else 1
 
-            cloud_match = re.search(r'--cloud\s+(\S+)', original_command_str)
-            if cloud_match:
-                cloud_val = cloud_match.group(1)
+        if ssh_node_pool_size < num_nodes_val:
+            ssh_node_pool_size = num_nodes_val
 
+        # --- Handle job/service specific nodes based on YAML ---
+        if 'sky jobs launch' in original_command_str or 'sky serve up' in original_command_str:
             # General YAML path from the command for jobs/serve task definition
             # This can be a positional argument or part of other structures.
             # Regex looks for a path-like string ending in .yaml
@@ -797,72 +798,46 @@ def parse_ssh_command(commands: List[str]) -> List[str]:
                 yaml_path_val = yaml_path_match.group(
                     1)  # group(1) because of the parens
 
-            # --- Construct command for the SSH node pool VM (controller/head) ---
-            # This VM uses the arguments found above.
-            normal_node_cmd_parts = ['sky', 'launch']
-            if gpus_val:
-                normal_node_cmd_parts.extend(['--gpus', gpus_val])
-            if infra_val:  # Already adjusted for kubernetes if needed
-                normal_node_cmd_parts.extend(['--infra', infra_val])
-            if instance_type_val:
-                normal_node_cmd_parts.extend(
-                    ['--instance-type', instance_type_val])
-            if cloud_val:
-                normal_node_cmd_parts.extend(['--cloud', cloud_val])
+            if yaml_path_val:  # Use the YAML found in the original command
+                with open(yaml_path_val, 'r') as f:
+                    task_config = yaml.safe_load(f)
 
-            normal_node_cmd_parts.extend(
-                ['-c', f'node-pool-{len(ssh_node_pool_commands)}', '-y'])
-            ssh_node_pool_commands.append(' '.join(normal_node_cmd_parts))
+                # Resources for job nodes from YAML
+                if 'resources' in task_config:
+                    resources = task_config['resources']
+                    if 'infra' in resources:
+                        infra_val = resources['infra']
+                        if 'kubernetes' in infra_val:
+                            infra_val = 'aws'
+                    if 'accelerators' in resources:
+                        gpus_val = resources['accelerators']
+                        if isinstance(gpus_val, dict):
+                            gpus_val = next(iter(gpus_val.keys()), '')
+                        elif isinstance(gpus_val, list):
+                            gpus_val = gpus_val[0] if gpus_val else ''
+                    if 'instance_type' in resources:
+                        instance_type_val = resources['instance_type']
 
-            # --- Handle job/service specific nodes based on YAML ---
-            if 'sky jobs launch' in original_command_str or 'sky serve up' in original_command_str:
-                num_nodes_for_job = 1
-                job_node_base_cmd_parts = [
-                    'sky', 'launch'
-                ]  # Base for job/service replica nodes
+                if 'num_nodes' in task_config:
+                    # One extra for controller node
+                    node_size_required = int(task_config['num_nodes']) + 1
+                    if ssh_node_pool_size < node_size_required:
+                        ssh_node_pool_size = node_size_required
 
-                if yaml_path_val:  # Use the YAML found in the original command
-                    with open(yaml_path_val, 'r') as f:
-                        task_config = yaml.safe_load(f)
+    if ssh_node_pool_size > 0:
+        ssh_node_pool_command = [
+            'sky', 'launch', '-c', f'ssh-node-pool', '-y', '--num-nodes',
+            str(ssh_node_pool_size)
+        ]
+        if infra_val:
+            ssh_node_pool_command.extend(['--infra', infra_val])
+        if instance_type_val:
+            ssh_node_pool_command.extend(['--instance-type', instance_type_val])
+        if gpus_val:
+            ssh_node_pool_command.extend(['--gpus', gpus_val])
+        ssh_node_pool_command = ' '.join(ssh_node_pool_command)
 
-                    # Resources for job nodes from YAML
-                    if 'resources' in task_config:
-                        resources = task_config['resources']
-                        if 'infra' in resources:
-                            job_infra = resources['infra']
-                            if 'kubernetes' in job_infra:
-                                job_infra = 'aws'
-                            job_node_base_cmd_parts.extend(
-                                ['--infra', job_infra])
-                        if 'accelerators' in resources:
-                            accel_val = resources['accelerators']
-                            if isinstance(accel_val, dict):
-                                accel_val = next(iter(accel_val.keys()), '')
-                            elif isinstance(accel_val, list):
-                                accel_val = accel_val[0] if accel_val else ''
-                            if accel_val:
-                                job_node_base_cmd_parts.extend(
-                                    ['--gpus', str(accel_val)])
-                        if 'instance_type' in resources:
-                            job_node_base_cmd_parts.extend(
-                                ['--instance-type', resources['instance_type']])
-                        if 'cloud' in resources:
-                            job_node_base_cmd_parts.extend(
-                                ['--cloud', resources['cloud']])
-
-                    if 'num_nodes' in task_config:
-                        num_nodes_for_job = int(task_config['num_nodes'])
-
-                for _ in range(num_nodes_for_job):
-                    final_job_node_cmd_parts = list(
-                        job_node_base_cmd_parts)  # Start fresh for each node
-                    final_job_node_cmd_parts.extend([
-                        '-c', f'node-pool-{len(ssh_node_pool_commands)}', '-y'
-                    ])
-                    ssh_node_pool_commands.append(
-                        ' '.join(final_job_node_cmd_parts))
-
-    return ssh_node_pool_commands
+    return ssh_node_pool_command, ssh_node_pool_size
 
 
 def get_api_server_url() -> str:
