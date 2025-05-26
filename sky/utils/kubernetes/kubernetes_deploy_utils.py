@@ -81,9 +81,9 @@ def deploy_ssh_cluster(cleanup: bool = False,
             cmd=deploy_command,
             log_path=log_path,
             require_outputs=True,
-            stream_logs=False,  # TODO: Fixme to False after we fix the logging
+            stream_logs=False,
             line_processor=log_utils.SkySSHUpLineProcessor(log_path=log_path,
-                                                           is_local=True),
+                                                           is_local=False),
             cwd=cwd,
             env=env)
 
@@ -91,9 +91,9 @@ def deploy_ssh_cluster(cleanup: bool = False,
         success = True
     else:
         with ux_utils.print_exception_no_traceback():
-            log_hint = ux_utils.log_path_hint(log_path, is_local=True)
-            raise RuntimeError('Failed to deploy SkyPilot on SSH targets. '
-                               f'Full log: {log_hint}'
+            log_hint = ux_utils.log_path_hint(log_path, is_local=False)
+            raise RuntimeError('Failed to deploy SkyPilot on some Node Pools. '
+                               f'{log_hint}'
                                f'\nError: {stderr}')
 
     if success:
