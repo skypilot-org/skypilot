@@ -24,13 +24,13 @@ from sky import serve
 from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
-from sky.clouds import ssh
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils.kubernetes import deploy_remote_cluster
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
@@ -448,7 +448,7 @@ def override_sky_config(
                       f'{new_teardown or ""}')
             test = test.copy(commands=new_test_commands, teardown=new_teardown)
             env_dict[
-                ssh.
+                deploy_remote_cluster.
                 ENV_VAR_SSH_NODE_POOLS_CONFIG] = temp_ssh_node_pools_file.name
     yield test
 
