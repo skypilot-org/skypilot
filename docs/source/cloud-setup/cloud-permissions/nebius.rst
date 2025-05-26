@@ -9,30 +9,19 @@ Service account
 To use *Service Account* authentication, follow these steps:
 
 1. **Create a Service Account** using the Nebius web console.
-2. **Generate PEM Keys**:
+2. **Generate Service Account Credentials**:
+
+Run the following command to generate the service account credentials:
 
 .. code-block:: shell
 
-   openssl genrsa -out private.pem 4096
-   openssl rsa -in private.pem -outform PEM -pubout -out public.pem
+   nebius iam auth-public-key generate \
+   --service-account-id $SA_ID \
+   --output ~/.nebius/credentials.json
 
-3.  **Generate and Save the Credentials File**:
+The following script saves the service account credentials to `~/.nebius/credentials.json`:
 
-* Save the file as `~/.nebius/credentials.json`.
-* Ensure the file matches the expected format below:
-
-.. code-block:: json
-
-     {
-         "subject-credentials": {
-             "alg": "RS256",
-             "private-key": "PKCS#8 PEM with new lines escaped as \n",
-             "kid": "public-key-id",
-             "iss": "service-account-id",
-             "sub": "service-account-id"
-         }
-     }
-
+See `Nebius documentation <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for more details.
 
 **Important Notes:**
 
