@@ -663,3 +663,60 @@ export async function deleteWorkspace(workspaceName) {
     throw error;
   }
 }
+
+// Get entire SkyPilot configuration
+export async function getConfig() {
+  try {
+    console.log('Getting entire SkyPilot configuration');
+
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/config`);
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling getConfig: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('Failed to obtain request ID for getConfig');
+    }
+
+    return await pollForTaskCompletion(requestId, 'getConfig');
+  } catch (error) {
+    console.error('Failed to get config:', error);
+    throw error;
+  }
+}
+
+// Update entire SkyPilot configuration
+export async function updateConfig(config) {
+  try {
+    console.log('Updating entire SkyPilot configuration with config:', config);
+
+    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        config: config,
+      }),
+    });
+
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling updateConfig: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('Failed to obtain request ID for updateConfig');
+    }
+
+    return await pollForTaskCompletion(requestId, 'updateConfig');
+  } catch (error) {
+    console.error('Failed to update config:', error);
+    throw error;
+  }
+}

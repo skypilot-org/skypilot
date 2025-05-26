@@ -554,3 +554,13 @@ class CreateWorkspaceBody(RequestBody):
 class DeleteWorkspaceBody(RequestBody):
     """The request body for deleting a workspace."""
     workspace_name: str
+
+
+class UpdateConfigBody(RequestBody):
+    """The request body for updating the entire SkyPilot configuration."""
+    config: Dict[str, Any]
+
+
+class GetConfigBody(RequestBody):
+    """The request body for getting the entire SkyPilot configuration."""
+    pass

@@ -13,6 +13,7 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
@@ -293,3 +294,68 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
 
     # Use the internal helper function to save
     return _update_workspaces_config(delete_workspace_fn)
+
+
+# =========================
+# = Config Management =
+# =========================
+
+
+@usage_lib.entrypoint
+def get_config() -> Dict[str, Any]:
+    """Returns the entire SkyPilot configuration.
+
+    Returns:
+        The complete SkyPilot configuration as a dictionary.
+    """
+    return skypilot_config.to_dict()
+
+
+@usage_lib.entrypoint
+def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Updates the entire SkyPilot configuration.
+
+    Args:
+        config: The new configuration to save.
+
+    Returns:
+        The updated configuration.
+
+    Raises:
+        ValueError: If the configuration is invalid.
+        FileNotFoundError: If the config file cannot be found.
+        PermissionError: If the config file cannot be written.
+    """
+    # Validate the configuration using the schema
+    try:
+        common_utils.validate_schema(
+            config, schemas.get_config_schema(),
+            'Invalid SkyPilot configuration: ')
+    except exceptions.InvalidSkyPilotConfigError as e:
+        raise ValueError(str(e)) from e
+
+    # Use file locking to prevent race conditions
+    lock_path = skypilot_config.get_skypilot_config_lock_path()
+    try:
+        with filelock.FileLock(lock_path,
+                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            # Convert to config_utils.Config and save
+            config_obj = config_utils.Config.from_dict(config)
+            skypilot_config.update_config_no_lock(config_obj)
+    except filelock.Timeout as e:
+        raise RuntimeError(
+            f'Failed to update configuration due to a timeout '
+            f'when trying to acquire the lock at {lock_path}. This may '
+            'indicate another SkyPilot process is currently updating the '
+            'configuration. Please try again or manually remove the lock '
+            f'file if you believe it is stale.') from e
+
+        # Validate the workspace by running sky check for it
+    try:
+        sky_check.check(quiet=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Configuration saved but '
+                       f'validation check failed: {e}')
+        # Don't fail the update if the check fails, just warn
+
+    return config
