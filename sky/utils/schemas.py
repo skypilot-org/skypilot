@@ -1269,19 +1269,6 @@ def get_config_schema():
                     },
                     'additionalProperties': False,
                 },
-                'lambda_cloud': {
-                    'type': 'object',
-                    'required': [],
-                    'properties': {
-                        'profile': {
-                            'type': 'string',
-                        },
-                        'disabled': {
-                            'type': 'boolean'
-                        },
-                    },
-                    'additionalProperties': False,
-                },
             },
         },
     }
