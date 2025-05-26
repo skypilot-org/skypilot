@@ -619,31 +619,31 @@ In helm deployment, a set of default permissions are granted to the API server t
 
 * Reduce the RBAC permissions by using ``kubernetes.remote_identity``: by default, the API server creates a service account and RBAC roles to grant permissions to SkyPilot task Pods. This in turn requires the API server to have permissions to manipulate RBAC roles and service accounts. You can disable this by the following steps:
 
-    1. Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` to set ``kubernetes.remote_identity`` to the service account of API server, which already has the necessary permissions:
+  1. Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` to set ``kubernetes.remote_identity`` to the service account of API server, which already has the necessary permissions:
 
-    .. code-block:: yaml
+     .. code-block:: yaml
 
         # TODO: replace ${RELEASE_NAME} with the actual release name in deployment step
         kubernetes:
           remote_identity: ${RELEASE_NAME}-api-sa
 
-    .. note::
+     .. note::
 
         If you also grant external Kubernetes cluster permissions to the API server via ``kubernetesCredentials.useKubeconfig``, the same service account with enough permissions must be prepared in these Kubernetes clusters manually.
 
-    2. Set ``rbac.manageRbacPolicies=false`` in helm valuesto disable the RBAC policies:
+  2. Set ``rbac.manageRbacPolicies=false`` in helm valuesto disable the RBAC policies:
 
-    .. code-block:: bash
+     .. code-block:: bash
 
         helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
           --set rbac.manageRbacPolicies=false
 
 * If your use case does not require object storage mounting, you can disable the permissions to manage SkyPilot system components by setting ``rbac.manageSystemComponents=false``:
 
-    .. code-block:: bash
+  .. code-block:: bash
 
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
-          --set rbac.manageSystemComponents=false
+      helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+        --set rbac.manageSystemComponents=false
 
 If you want to use an existing service account and permissions that meet the :ref:`minimum permissions required for SkyPilot<k8s-permissions>` instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
 
