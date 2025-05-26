@@ -12,17 +12,13 @@ from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import registry
+from sky.utils.kubernetes import deploy_remote_cluster
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-
-ENV_VAR_SSH_NODE_POOLS_CONFIG = 'SKYPILOT_SSH_NODE_POOLS_CONFIG'
-SSH_NODE_POOLS_PATH = os.path.expanduser(
-    os.environ.get(ENV_VAR_SSH_NODE_POOLS_CONFIG) or
-    '~/.sky/ssh_node_pools.yaml')
 
 
 @registry.CLOUD_REGISTRY.register()
@@ -64,9 +60,10 @@ class SSH(kubernetes.Kubernetes):
         """
         contexts = []
 
-        if os.path.exists(SSH_NODE_POOLS_PATH):
+        ssh_node_pools_path = deploy_remote_cluster.get_ssh_node_pools_path()
+        if os.path.exists(ssh_node_pools_path):
             try:
-                with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
+                with open(ssh_node_pools_path, 'r', encoding='utf-8') as f:
                     ssh_config = yaml.safe_load(f)
                     if ssh_config:
                         # Get cluster names and prepend 'ssh-' to match
@@ -110,13 +107,14 @@ class SSH(kubernetes.Kubernetes):
         We don't directly cache the result of _filter_existing_allowed_contexts
         as the admin policy may update the allowed contexts.
         """
+        ssh_node_pools_path = deploy_remote_cluster.get_ssh_node_pools_path()
         if skipped_contexts:
             count = len(set(skipped_contexts))
             is_singular = count == 1
             logger.warning(
                 f'SSH Node {("Pool" if is_singular else "Pools")} '
                 f'{set(skipped_contexts)!r} specified in '
-                f'{SSH_NODE_POOLS_PATH} {("has" if is_singular else "have")} '
+                f'{ssh_node_pools_path} {("has" if is_singular else "have")} '
                 'not been set up. Skipping '
                 f'{("that pool" if is_singular else "those pools")}. '
                 'Run `sky ssh up` to set up.')
@@ -180,9 +178,11 @@ class SSH(kubernetes.Kubernetes):
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
         if not existing_allowed_contexts:
+            ssh_node_pools_path = deploy_remote_cluster.get_ssh_node_pools_path(
+            )
             return (False,
                     'No SSH Node Pools are up. Run `sky ssh up` to set up '
-                    f'Node Pools from {SSH_NODE_POOLS_PATH}.')
+                    f'Node Pools from {ssh_node_pools_path}.')
 
         # Check credentials for each context
         ctx2text = {}
