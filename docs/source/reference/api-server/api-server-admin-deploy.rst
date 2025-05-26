@@ -216,6 +216,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
             Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
 
+            The specific cloud's credential for the exec-based authentication also needs to be configured. For example, to enable exec-based authentication for GKE, you also need to setup :ref:`GCP credentials <gcp-creds-tab>`.
+
         To use multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config. An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
 
         .. code-block:: yaml
