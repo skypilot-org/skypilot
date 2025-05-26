@@ -444,11 +444,10 @@ Optional: Update SkyPilot configuration
 
    .. code-block:: bash
 
-     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
-     # Make sure the pod is running
-     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" || exit 1
-     # Fetch the config
-     kubectl exec -it $POD_NAME -n $NAMESPACE -- cat /root/.sky/config.yaml > current-config.yaml
+     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -n $NAMESPACE -o jsonpath='{.items[0].metadata.name}')
+     # Make sure the pod is running and download the config
+     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" && \
+     kubectl cp $POD_NAME:/root/.sky/config.yaml current-config.yaml -n $NAMESPACE --no-preserve
 
 2. Edit the configuration file ``current-config.yaml`` with your desired changes.
 3. Upload the updated config to the API server:
