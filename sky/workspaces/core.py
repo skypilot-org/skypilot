@@ -367,8 +367,16 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     except exceptions.InvalidSkyPilotConfigError as e:
         raise ValueError(str(e)) from e
 
-    # Check for workspace changes and validate them
+    # Check for API server changes and validate them
     current_config = skypilot_config.to_dict()
+
+    current_endpoint = current_config.get('api_server', {}).get('endpoint')
+    new_endpoint = config.get('api_server', {}).get('endpoint')
+    if current_endpoint != new_endpoint:
+        raise ValueError('API server endpoint should not be changed to avoid '
+                         'unexpected behavior.')
+
+    # Check for workspace changes and validate them
     current_workspaces = current_config.get('workspaces', {})
     new_workspaces = config.get('workspaces', {})
 
