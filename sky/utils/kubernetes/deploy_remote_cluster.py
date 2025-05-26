@@ -624,6 +624,8 @@ def main():
     kubeconfig_path = os.path.expanduser(args.kubeconfig_path)
     global_use_ssh_config = args.use_ssh_config
 
+    failed_clusters = []
+
     # Print cleanup mode marker if applicable
     if args.cleanup:
         print('SKYPILOT_CLEANUP_MODE: Cleanup mode activated')
@@ -794,9 +796,17 @@ def main():
                     f'{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}'
                 )
             except Exception as e:  # pylint: disable=broad-except
+                reason = str(e)
+                failed_clusters.append((cluster_name, reason))
                 print(
-                    f'{RED}Error deploying SSH Node Pool {cluster_name}: {e}{NC}'
-                )
+                    f'{RED}Error deploying SSH Node Pool {cluster_name}: {reason}{NC}'
+                )  # Print for internal logging
+
+    if failed_clusters:
+        msg = f'{RED}Failed to deploy {len(failed_clusters)} clusters: {NC}'
+        for cluster_name, reason in failed_clusters:
+            msg += f'\n  {cluster_name}: {reason}'
+        raise RuntimeError(msg)
 
 
 def deploy_cluster(head_node,
@@ -848,7 +858,7 @@ def deploy_cluster(head_node,
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
-                               f'Please check the SSH configuration.')
+                               f'Please check the SSH configuration and logs for more details.')
 
     # Checking history
     history_exists = (history_worker_nodes is not None and
