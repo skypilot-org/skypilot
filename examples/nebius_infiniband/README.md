@@ -29,7 +29,7 @@ run: |
   ... your own run script ...
 ```
 
-Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_high_performance_network/nccl.yaml)
+Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml)
 
 ## Create a Nebius Kubernetes cluster with InfiniBand enabled
 
@@ -112,7 +112,7 @@ Now you have a Kubernetes cluster that have the GPUs interconnected using Infini
 
 ## Running NCCL test using SkyPilot
 
-Check the [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_high_performance_network/nccl.yaml) for the complete SkyPilot cluster yaml configurations.
+Check the [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml) for the complete SkyPilot cluster yaml configurations.
 
 The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library).
 
