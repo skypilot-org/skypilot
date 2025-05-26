@@ -481,24 +481,9 @@ Refer to :ref:`sky-api-server-upgrade` for how to upgrade the API server.
 Optional: Update SkyPilot configuration
 ----------------------------------------
 
-``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config:
+``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, go to http://<api-server-url>/dashboard/config
 
-1. Fetch the latest config from the API server:
-
-   .. code-block:: bash
-
-     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -n $NAMESPACE -o jsonpath='{.items[0].metadata.name}')
-     # Make sure the pod is running and download the config
-     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" && \
-     kubectl cp $POD_NAME:/root/.sky/config.yaml current-config.yaml -n $NAMESPACE --no-preserve
-
-2. Edit the configuration file ``current-config.yaml`` with your desired changes.
-3. Upload the updated config to the API server:
-
-   .. code-block:: bash
-
-     kubectl cp current-config.yaml $POD_NAME:/root/.sky/config.yaml -n $NAMESPACE
-
+.. image:: ../../images/dashboard/config.png
 
 
 Uninstall
