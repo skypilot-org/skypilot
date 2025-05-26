@@ -1200,7 +1200,7 @@ def get_config_schema():
     # all clouds except gcp, kubernetes, ssh
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'lambda_cloud']
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
