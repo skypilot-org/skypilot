@@ -51,7 +51,11 @@ const SuccessDisplay = ({ message }) => {
 };
 
 // Workspace configuration description component
-const WorkspaceConfigDescription = ({ workspaceName, config, enabledClouds = [] }) => {
+const WorkspaceConfigDescription = ({
+  workspaceName,
+  config,
+  enabledClouds = [],
+}) => {
   if (!config) return null;
 
   const isDefault = workspaceName === 'default';
@@ -70,12 +74,14 @@ const WorkspaceConfigDescription = ({ workspaceName, config, enabledClouds = [] 
   const configuredButNotEnabled = [];
 
   // Convert enabledClouds to a set for faster lookup
-  const enabledCloudsSet = new Set(enabledClouds.map(cloud => cloud.toLowerCase()));
+  const enabledCloudsSet = new Set(
+    enabledClouds.map((cloud) => cloud.toLowerCase())
+  );
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
     const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()];
     const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
-    
+
     if (cloudConfig?.disabled === true) {
       disabledClouds.push(cloudName);
     } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
@@ -85,7 +91,7 @@ const WorkspaceConfigDescription = ({ workspaceName, config, enabledClouds = [] 
       } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
         detail = ` (Region: ${cloudConfig.region})`;
       }
-      
+
       if (isActuallyEnabled) {
         enabledDescriptions.push(
           <span key={`${cloud}-enabled`} className="block">
@@ -95,7 +101,10 @@ const WorkspaceConfigDescription = ({ workspaceName, config, enabledClouds = [] 
         );
       } else {
         configuredButNotEnabled.push(
-          <span key={`${cloud}-configured-not-enabled`} className="block text-amber-700">
+          <span
+            key={`${cloud}-configured-not-enabled`}
+            className="block text-amber-700"
+          >
             {cloudName}
             {detail} is configured but not currently available.
           </span>
@@ -110,7 +119,10 @@ const WorkspaceConfigDescription = ({ workspaceName, config, enabledClouds = [] 
         );
       } else {
         configuredButNotEnabled.push(
-          <span key={`${cloud}-default-not-enabled`} className="block text-amber-700">
+          <span
+            key={`${cloud}-default-not-enabled`}
+            className="block text-amber-700"
+          >
             {cloudName} is configured but not currently available.
           </span>
         );
