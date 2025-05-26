@@ -115,8 +115,7 @@ export default function ConfigPage() {
               >
                 SkyPilot Docs
               </a>{' '}
-              for details.{' '}
-              Click{' '}
+              for details. Click{' '}
               <button
                 onClick={loadConfig}
                 disabled={loading || saving}
