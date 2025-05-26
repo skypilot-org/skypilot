@@ -1,19 +1,41 @@
-# Interconnecting GPUs in Nebius Managed Service for Kubernetes clusters using InfiniBand with SkyPilot
+# Using Infiniband in Nebius Managed Kubernetes clusters with SkyPilot
 
 To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand, a high-throughput, low-latency networking standard.
 
+## TL;DR: Use inifiband on managed Nebius Kubernetes cluster with SkyPilot
 
-## Interconnect GPUs using InfiniBand
+Set the following config in your SkyPilot task YAML to enable InfiniBand:
 
-To interconnect the GPUs, you can group your virtual machines with GPUs into a GPU cluster. The GPU clusters are built with InfiniBand secure high-speed networking. Each GPU cluster is created in one of physical InfiniBand fabrics. This is where GPUs interconnected over InfiniBand are located. When creating a GPU cluster, select an InfiniBand fabric for it. Refer to the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu#fabrics) for how to select the fabric according to the type of GPUs you are going to use.
+```yaml
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            privileged: true
+        - env:
+          - name: NCCL_IB_HCA
+            value: mlx5
+          - name: UCX_NET_DEVICES
+            value: mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+```
 
-Here is an example to create a managed service for Kubernetes cluster with InfiniBand enabled for the node group, for more details, refer to the [Nebius documentation](https://docs.nebius.com/kubernetes/gpu/clusters#enable).
+Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_high_performance_network/nccl.yaml)
+
+## Create a Nebius Kubernetes cluster with InfiniBand enabled
+
+To enable infiniband for a Nebius Kubernetes cluster, you need to create a GPU node group with InfiniBand enabled, for more details, refer to the [Nebius documentation](https://docs.nebius.com/kubernetes/gpu/clusters#enable).
 
 
-1. Create a managed service for Kubernetes cluster.
+1. Create a managed service for Kubernetes cluster or bring in your own Kubernetes cluster.
+
+Create a Nebius Kubernetes cluster</summary>
 
 ```bash
+export PROJECT_ID=your-project-id
 export NB_SUBNET_ID=$(nebius vpc subnet list \
+  --parent-id $PROJECT_ID \
   --format json \
   | jq -r '.items[0].metadata.id')
 
@@ -22,8 +44,26 @@ export NB_K8S_CLUSTER_ID=$(nebius mk8s cluster create \
   --control-plane-version 1.30 \
   --control-plane-subnet-id $NB_SUBNET_ID \
   --control-plane-endpoints-public-endpoint=true \
+  --parent-id=$PROJECT_ID \
   --format json | jq -r '.metadata.id')
 ```
+
+<details>
+<summary>Or, Bring in your own Kubernetes cluster</summary>
+
+Find your Kubernetes cluster ID on the console or using the following command:
+
+```bash
+export PROJECT_ID=your-project-id
+# Use the first cluster in the list
+export NB_K8S_CLUSTER_ID=$(nebius mk8s cluster list \
+  --parent-id $PROJECT_ID \
+  --format json \
+  | jq -r '.items[0].metadata.id')
+```
+
+</details>
+
 
 2. To enable InfiniBand for a node group, you need to create a GPU cluster first, then specify the GPU cluster when creating the node group.
 
@@ -32,6 +72,7 @@ export INFINIBAND_FABRIC=fabric-3
 export NB_GPU_CLUSTER_ID=$(nebius compute gpu-cluster create \
   --name gpu-cluster-name \
   --infiniband-fabric $INFINIBAND_FABRIC \
+  --parent-id $PROJECT_ID \
   --format json \
   | jq -r ".metadata.id")
 
@@ -45,8 +86,15 @@ nebius mk8s node-group create \
   --template-gpu-settings-drivers-preset cuda12
 ```
 
-To create a node group with a GPU cluster, you need to specify a compatible preset (number of GPUs and vCPUs, RAM size). The compatible platforms and presets are as below:
+3. Setup Kubeconfig and setup Nvidia GPUs 
 
+```bash
+nebius mk8s cluster get-credentials --id $NB_K8S_CLUSTER_ID --external
+sky check k8s
+```
+
+> Note: To create a node group with a GPU cluster, you need to specify a compatible preset (number of GPUs and vCPUs, RAM size). The compatible platforms and presets are as below:
+> 
 | Platform | Presets | Regions |
 |---------------|----------|------|
 |NVIDIA® H100 NVLink with Intel Sapphire Rapids (gpu-h100-sxm) | 8gpu-128vcpu-1600gb | eu-north1
@@ -89,7 +137,7 @@ The example result is as below:
 > **NOTE:**
 >
 > To run NCCL tests without InfiniBand, you can create the node group [without the GPU cluster](https://docs.nebius.com/kubernetes/node-groups/manage).
-> Then launch a cluster with `nccl.yaml` by passing an env:
+> Then launch a cluster with `nccl_no_ib.yaml` with the config field removed:
 > ```bash
-> sky launch -c no_infiniband --env USE_IB=false nccl.yaml
+> sky launch -c no_infiniband nccl_no_ib.yaml
 > ```

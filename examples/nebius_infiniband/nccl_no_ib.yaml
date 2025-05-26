@@ -23,6 +23,10 @@ run: |
     nodes=${nodes::-1}
     echo "All nodes: ${nodes}"
 
+    export NCCL_IB_HCA=""
+    export UCX_NET_DEVICES="eth0"
+
+
     mpirun \
       --allow-run-as-root \
       --tag-output \
@@ -50,15 +54,3 @@ run: |
     echo "Worker nodes"
   fi
 
-config:
-  kubernetes:
-    pod_config:
-      spec:
-        containers:
-        - securityContext:
-            privileged: true
-        - env:
-          - name: NCCL_IB_HCA
-            value: mlx5
-          - name: UCX_NET_DEVICES
-            value: mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
