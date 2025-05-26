@@ -25,7 +25,7 @@ export const CLOUDS_LIST = [
 ];
 
 export const CLOUD_CONONICATIONS = Object.fromEntries([
-  ...CLOUDS_LIST.map(cloud => [cloud.toLowerCase(), cloud]),
+  ...CLOUDS_LIST.map((cloud) => [cloud.toLowerCase(), cloud]),
   ['kubernetes', 'Kubernetes'],
   ['ssh', 'SSH Node Pool'],
 ]);

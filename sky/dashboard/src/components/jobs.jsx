@@ -182,6 +182,7 @@ const formatSubmittedTime = (timestamp) => {
 };
 
 export function ManagedJobs() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [confirmationModal, setConfirmationModal] = useState({
@@ -193,6 +194,16 @@ export function ManagedJobs() {
   const isMobile = useMobile();
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
   const [workspaces, setWorkspaces] = useState([]);
+
+  // Handle URL query parameters for workspace filtering
+  useEffect(() => {
+    if (router.isReady && router.query.workspace) {
+      const workspaceParam = Array.isArray(router.query.workspace)
+        ? router.query.workspace[0]
+        : router.query.workspace;
+      setWorkspaceFilter(workspaceParam);
+    }
+  }, [router.isReady, router.query.workspace]);
 
   // Fetch workspaces for filter dropdown
   useEffect(() => {

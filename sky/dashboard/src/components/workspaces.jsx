@@ -119,7 +119,7 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 };
 
 // Workspace card component
-const WorkspaceCard = ({ workspace, onDelete, onEdit }) => (
+const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => (
   <Card key={workspace.name}>
     <CardHeader>
       <CardTitle className="text-base font-normal">
@@ -132,18 +132,34 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit }) => (
           <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
           <span>Clusters (Running / Total)</span>
         </div>
-        <span className="font-normal text-gray-800">
+        <button
+          onClick={() => {
+            router.push({
+              pathname: '/clusters',
+              query: { workspace: workspace.name },
+            });
+          }}
+          className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+        >
           {workspace.runningClusterCount} / {workspace.totalClusterCount}
-        </span>
+        </button>
       </div>
       <div className="py-2 flex items-center justify-between border-t border-gray-100">
         <div className="flex items-center text-gray-600">
           <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
           <span>Managed Jobs</span>
         </div>
-        <span className="font-normal text-gray-800">
+        <button
+          onClick={() => {
+            router.push({
+              pathname: '/jobs',
+              query: { workspace: workspace.name },
+            });
+          }}
+          className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+        >
           {workspace.managedJobsCount}
-        </span>
+        </button>
       </div>
     </CardContent>
 
@@ -216,6 +232,7 @@ const StatsSummary = ({
   runningClusters,
   totalClusters,
   managedJobs,
+  router,
 }) => (
   <div className="bg-sky-50 p-4 rounded-lg shadow mb-6">
     <div className="flex flex-col sm:flex-row justify-around items-center">
@@ -234,18 +251,24 @@ const StatsSummary = ({
           <span className="text-sm text-gray-600">
             Clusters (Running / Total):
           </span>
-          <span className="ml-1 text-xl font-semibold text-sky-700">
+          <button
+            onClick={() => router.push('/clusters')}
+            className="ml-1 text-xl font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+          >
             {runningClusters} / {totalClusters}
-          </span>
+          </button>
         </div>
       </div>
       <div className="p-2">
         <div className="flex items-center">
           <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600" />
           <span className="text-sm text-gray-600">Managed Jobs:</span>
-          <span className="ml-1 text-xl font-semibold text-sky-700">
+          <button
+            onClick={() => router.push('/jobs')}
+            className="ml-1 text-xl font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+          >
             {managedJobs}
-          </span>
+          </button>
         </div>
       </div>
     </div>
@@ -494,6 +517,7 @@ export function Workspaces() {
         runningClusters={globalStats.runningClusters}
         totalClusters={globalStats.totalClusters}
         managedJobs={globalStats.managedJobs}
+        router={router}
       />
 
       {/* Workspace Cards */}
@@ -512,6 +536,7 @@ export function Workspaces() {
               workspace={ws}
               onDelete={handleDeleteWorkspace}
               onEdit={(name) => router.push(`/workspaces/${name}`)}
+              router={router}
             />
           ))}
           <CreateWorkspaceCard onClick={() => router.push('/workspace/new')} />
