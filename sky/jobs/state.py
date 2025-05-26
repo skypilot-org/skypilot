@@ -1133,7 +1133,8 @@ def get_num_alive_jobs() -> int:
             'WHERE schedule_state IN (?, ?, ?)',
             (ManagedJobScheduleState.ALIVE_WAITING.value,
              ManagedJobScheduleState.LAUNCHING.value,
-             ManagedJobScheduleState.ALIVE.value)).fetchone()[0]
+             ManagedJobScheduleState.ALIVE.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()[0]
 
 
 def get_waiting_job() -> Optional[Dict[str, Any]]:
