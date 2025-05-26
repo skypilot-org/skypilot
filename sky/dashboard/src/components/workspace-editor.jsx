@@ -662,12 +662,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                               {`${workspaceName || 'my-workspace'}:
   gcp:
     project_id: xxx
-  aws:
-    disabled: true
+    disabled: false
   kubernetes:
     allowed_contexts:
-      - context-1
-      - context-2`}
+      - context-1`}
                             </pre>
                           </div>
                         </div>
