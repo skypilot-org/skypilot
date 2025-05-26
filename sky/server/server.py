@@ -34,7 +34,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
@@ -59,6 +58,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -255,6 +255,9 @@ app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
 
 
 @app.get('/token')
@@ -319,18 +322,6 @@ async def enabled_clouds(request: fastapi.Request,
         request_name='enabled_clouds',
         request_body=payloads.EnabledCloudsBody(workspace=workspace),
         func=core.enabled_clouds,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
-@app.get('/workspaces')
-async def get_workspace_config(request: fastapi.Request) -> None:
-    """Gets workspace config on the server."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='workspaces',
-        request_body=payloads.RequestBody(),
-        func=skypilot_config.get_workspaces,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 

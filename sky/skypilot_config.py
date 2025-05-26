@@ -57,6 +57,8 @@ import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+import filelock
+
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -66,6 +68,7 @@ from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -120,10 +123,17 @@ class ConfigContext:
 
 
 # The global loaded config.
-_global_config_context = ConfigContext()
-_reload_config_lock = threading.Lock()
-
 _active_workspace_context = threading.local()
+_global_config_context = ConfigContext()
+
+SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
+
+
+def get_skypilot_config_lock_path() -> str:
+    """Get the path for the SkyPilot config lock file."""
+    lock_path = os.path.expanduser(SKYPILOT_CONFIG_LOCK_PATH)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    return lock_path
 
 
 def _get_config_context() -> ConfigContext:
@@ -389,7 +399,7 @@ def overlay_skypilot_config(
 
 def safe_reload_config() -> None:
     """Reloads the config, safe to be called concurrently."""
-    with _reload_config_lock:
+    with filelock.FileLock(get_skypilot_config_lock_path()):
         _reload_config()
 
 
@@ -691,9 +701,21 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def get_workspaces() -> Dict[str, Any]:
-    """Returns the workspace config."""
-    workspaces = get_nested(('workspaces',), default_value={})
-    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
-        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
-    return workspaces
+def update_config_no_lock(config: config_utils.Config) -> None:
+    """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
+
+    Args:
+        config: The config to save and sync.
+    """
+    global_config_path = os.path.expanduser(get_user_config_path())
+
+    # Always save to the local file (PVC in Kubernetes, local file otherwise)
+    common_utils.dump_yaml(global_config_path, dict(config))
+
+    if config_map_utils.is_running_in_kubernetes():
+        # In Kubernetes, sync the PVC config to ConfigMap for user convenience
+        # PVC file is the source of truth, ConfigMap is just a mirror for easy
+        # access
+        config_map_utils.patch_configmap_with_config(config, global_config_path)
+
+    _reload_config()
