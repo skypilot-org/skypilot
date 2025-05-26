@@ -62,7 +62,7 @@ The above is achieved by configuring the following section in the config file:
              project_id: GCP project ID
            kubernetes:
              disabled: false
-             allowed_node_pools:
+             allowed_contexts:
                - node-pool-1
                - node-pool-2
            ssh:
