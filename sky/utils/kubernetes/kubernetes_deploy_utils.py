@@ -25,6 +25,7 @@ logger = sky_logging.init_logger(__name__)
 # Default path for Kubernetes configuration file
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
+
 def check_ssh_cluster_dependencies(
         raise_error: bool = True) -> Optional[List[str]]:
     """Checks if the dependencies for ssh cluster are installed.
@@ -46,9 +47,9 @@ def check_ssh_cluster_dependencies(
     # Ensure jq is installed
     try:
         subprocess.run(['jq', '--version'],
-                      stdout=subprocess.DEVNULL,
-                      stderr=subprocess.DEVNULL,
-                      check=True)
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
         required_binaries.append('jq')
         reasons.append(jq_message)
