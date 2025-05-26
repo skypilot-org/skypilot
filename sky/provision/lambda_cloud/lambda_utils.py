@@ -6,9 +6,9 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
-from sky import skypilot_config
 
 if typing.TYPE_CHECKING:
     import requests

@@ -1044,6 +1044,25 @@ def get_config_schema():
                 },
             }
         },
+        'ssh': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_node_pools': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -1254,7 +1273,7 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {
-                        'profile':{
+                        'profile': {
                             'type': 'string',
                         },
                         'disabled': {
