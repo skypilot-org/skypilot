@@ -24,7 +24,6 @@ WARNING_YELLOW = '\x1b[33m'
 NC = '\033[0m'  # No color
 
 ENV_VAR_SSH_NODE_POOLS_CONFIG = 'SKYPILOT_SSH_NODE_POOLS_CONFIG'
-DEFAULT_SSH_NODE_POOLS_PATH = '~/.sky/ssh_node_pools.yaml'
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
@@ -38,7 +37,7 @@ def get_ssh_node_pools_path():
     # can be overridden by the user.
     return os.path.expanduser(
         os.environ.get(ENV_VAR_SSH_NODE_POOLS_CONFIG) or
-        DEFAULT_SSH_NODE_POOLS_PATH)
+        '~/.sky/ssh_node_pools.yaml')
 
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
@@ -73,9 +72,9 @@ def parse_args():
     parser.add_argument(
         '--ssh-node-pools-file',
         dest='ssh_node_pools_file',
-        default=DEFAULT_SSH_NODE_POOLS_PATH,
+        default=get_ssh_node_pools_path(),
         help=
-        f'Path to SSH node pools YAML file (default: {DEFAULT_SSH_NODE_POOLS_PATH})'
+        f'Path to SSH node pools YAML file (default: {get_ssh_node_pools_path()})'
     )
     parser.add_argument(
         '--kubeconfig-path',
