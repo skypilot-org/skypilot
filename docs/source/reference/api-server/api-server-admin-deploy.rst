@@ -443,7 +443,7 @@ Following tabs describe how to configure credentials for different clouds on the
               --reuse-values \
               --set apiService.sshKeySecret=$SECRET_NAME
         
-        After the API server is deployed, use the :ref:`sky ssh up<sky-ssh>` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
+        After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
 
         .. note::
 
