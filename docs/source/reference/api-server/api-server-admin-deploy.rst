@@ -409,6 +409,47 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
 
+    .. tab-item:: SSH Node Pools
+        :sync: ssh-node-pools-tab
+
+        SkyPilot can configure a set of existing machines to be used as a :ref:`SSH Node Pool <existing-machines>`.
+        
+        To configure SSH node pools for the API server, create your SSH Node Pool :ref:`configuration file <defining-ssh-node-pools>` ``ssh_node_pools.yaml`` and set the :ref:`apiService.sshNodePools <helm-values-apiService-sshNodePools>` to the file path:
+
+        .. code-block:: bash
+
+            # RELEASE_NAME and NAMESPACE are the same as the ones used in the helm deployment
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
+
+        If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
+
+        .. code-block:: bash
+
+            SECRET_NAME=apiserver-ssh-key
+
+            # Create a secret that contains the SSH keys
+            # The NAMESPACE should be consistent with the API server deployment
+            kubectl create secret generic $SECRET_NAME \
+              --namespace $NAMESPACE \
+              --from-file=id_rsa=/path/to/id_rsa \
+              --from-file=other_id_rsa=/path/to/other_id_rsa
+
+            # Keys will be mounted to ~/.ssh/ (e.g., ~/.ssh/id_rsa, ~/.ssh/other_id_rsa)
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set apiService.sshKeySecret=$SECRET_NAME
+        
+        After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
+
+        .. note::
+
+           SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
+   
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
