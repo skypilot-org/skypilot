@@ -60,6 +60,15 @@ The above is achieved by configuring the following section in the config file:
            gcp:
              disabled: false
              project_id: GCP project ID
+           kubernetes:
+             disabled: false
+             allowed_node_pools:
+               - node-pool-1
+               - node-pool-2
+           ssh:
+             disabled: false
+             allowed_node_pools:
+               - node-pool-1
 
 To apply the configuration, follow the following steps:
 

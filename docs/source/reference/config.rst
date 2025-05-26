@@ -76,6 +76,11 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+  
+  :ref: `ssh <config-yaml-ssh>`:
+    :ref: `allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+      - node-pool-1
+      - node-pool-2
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -1062,6 +1067,20 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+``ssh``
+~~~~~~~~~~~~~~~
+
+Advanced SSH node pool configuration (optional).
+
+.. _config-yaml-ssh-allowed-node-pools:
+
+``ssh.allowed_node_pools``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed SSH node pools (optional).
+
+List of names that SkyPilot is allowed to use.
+
 .. _config-yaml-oci:
 
 ``oci``
@@ -1158,6 +1177,7 @@ Example:
               - filesystem_id: computefilesystem-e00ccccc02dddddddd
                 mount_path: /mnt/fsnew2
                 attach_mode: READ_ONLY
+
 
 .. _config-yaml-nebius-use-internal-ips:
 
