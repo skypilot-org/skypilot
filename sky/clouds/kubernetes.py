@@ -503,7 +503,8 @@ class Kubernetes(clouds.Cloud):
 
         if k8s_service_account_name == lc or k8s_service_account_name == sa:
             # Use the default service account if remote identity is not set.
-            # For LOCAL_CREDENTIALS, this is for in-cluster authentication.
+            # For LOCAL_CREDENTIALS, this is for in-cluster authentication
+            # which needs a serviceaccount (specifically for SSH node pools)
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
 
