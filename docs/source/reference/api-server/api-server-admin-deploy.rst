@@ -483,7 +483,7 @@ Optional: Update SkyPilot configuration
 
 ``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, go to http://<api-server-url>/dashboard/config
 
-.. image:: ../../images/dashboard/config.png
+.. image:: ../../images/workspaces/config.png
 
 
 Uninstall
