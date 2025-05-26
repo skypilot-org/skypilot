@@ -138,6 +138,16 @@ All SkyPilot CLI or API calls with ``/monorepo/team-b`` as the PWD will use the 
 
 For team-c, since it has no workspace set, all CLI or API calls there will use the ``default`` workspace.
 
+
+.. tip::
+
+   You can also set the workspace in the CLI using ``--config active_workspace=<workspace>``:
+
+   .. code-block:: console
+
+      sky launch --config active_workspace=team-a ...
+
+
 Viewing workspaces in dashboard
 ------------------------------------
 

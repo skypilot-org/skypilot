@@ -134,6 +134,12 @@ class CheckBody(RequestBody):
     workspace: Optional[str] = None
 
 
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None
+    expand: bool = False
+
+
 class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str
@@ -531,11 +537,6 @@ class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
-
-
-class EnabledCloudsBody(RequestBody):
-    """The request body for the enabled clouds endpoint."""
-    workspace: Optional[str] = None
 
 
 class UpdateWorkspaceBody(RequestBody):
