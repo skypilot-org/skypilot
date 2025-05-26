@@ -15,7 +15,9 @@ config:
       spec:
         containers:
         - securityContext:
-            privileged: true
+            capabilities:
+              add:
+              - IPC_LOCK
 ```
 
 2. Configure the environment variables in your task:
@@ -36,7 +38,7 @@ To enable infiniband for a Nebius Kubernetes cluster, you need to create a GPU n
 
 1. Create a managed service for Kubernetes cluster or bring in your own Kubernetes cluster.
 
-Create a Nebius Kubernetes cluster</summary>
+Create a Nebius Kubernetes cluster:
 
 ```bash
 export PROJECT_ID=your-project-id
@@ -140,10 +142,8 @@ The example result is as below:
 # Avg bus bandwidth    : 450.404
 ```
 
-> **NOTE:**
->
-> To run NCCL tests without InfiniBand, you can create the node group [without the GPU cluster](https://docs.nebius.com/kubernetes/node-groups/manage).
-> Then launch a cluster with `nccl_no_ib.yaml` with the config field removed:
-> ```bash
-> sky launch -c no_infiniband nccl_no_ib.yaml
-> ```
+> **NOTE:** To run NCCL tests without InfiniBand, you can create the node group [without the GPU cluster](https://docs.nebius.com/kubernetes/node-groups/manage). Then launch a cluster with `nccl_no_ib.yaml` with the config field removed:
+
+```bash
+sky launch -c no_infiniband nccl_no_ib.yaml
+```
