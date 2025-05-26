@@ -421,16 +421,21 @@ export function GPUs() {
     setKubeLoading(true);
     setCloudLoading(true);
 
-    // Fetch Kubernetes data
-    try {
-      const gpusResponse = await getGPUs();
+    // Fetch both data sources in parallel
+    const [kubeResult, cloudResult] = await Promise.allSettled([
+      getGPUs(),
+      getCloudInfrastructure(),
+    ]);
+
+    // Handle Kubernetes data result
+    if (kubeResult.status === 'fulfilled') {
       const {
         allContextNames: fetchedAllKubeContextNames,
         allGPUs: fetchedAllGPUs,
         perContextGPUs: fetchedPerContextGPUs,
         perNodeGPUs: fetchedPerNodeGPUs,
         contextStats: fetchedContextStats,
-      } = gpusResponse;
+      } = kubeResult.value;
 
       setAllKubeContextNames(fetchedAllKubeContextNames || []);
       setAllGPUs(fetchedAllGPUs || []);
@@ -438,33 +443,31 @@ export function GPUs() {
       setPerNodeGPUs(fetchedPerNodeGPUs || []);
       setContextStats(fetchedContextStats || {});
       setKubeDataLoaded(true);
-    } catch (err) {
-      console.error('Error fetching Kubernetes data:', err);
+    } else {
+      console.error('Error fetching Kubernetes data:', kubeResult.reason);
       setAllKubeContextNames([]);
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
       setContextStats({});
-    } finally {
-      setKubeLoading(false);
     }
+    setKubeLoading(false);
 
-    // Fetch Cloud infrastructure data
-    try {
-      const cloudInfraResponse = await getCloudInfrastructure();
-      setCloudInfraData(cloudInfraResponse?.clouds || []);
-      setTotalClouds(cloudInfraResponse?.totalClouds || 0);
-      setEnabledClouds(cloudInfraResponse?.enabledClouds || 0);
+    // Handle Cloud infrastructure data result
+    if (cloudResult.status === 'fulfilled') {
+      setCloudInfraData(cloudResult.value?.clouds || []);
+      setTotalClouds(cloudResult.value?.totalClouds || 0);
+      setEnabledClouds(cloudResult.value?.enabledClouds || 0);
       setCloudDataLoaded(true);
-    } catch (err) {
-      console.error('Error fetching cloud infrastructure data:', err);
+    } else {
+      console.error('Error fetching cloud infrastructure data:', cloudResult.reason);
       setCloudInfraData([]);
       setTotalClouds(0);
       setEnabledClouds(0);
-    } finally {
-      setCloudLoading(false);
-      if (isInitialLoad) setIsInitialLoad(false);
     }
+    setCloudLoading(false);
+    
+    if (isInitialLoad) setIsInitialLoad(false);
   }, [isInitialLoad]);
 
   React.useEffect(() => {
