@@ -328,9 +328,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Validate the configuration using the schema
     try:
-        common_utils.validate_schema(
-            config, schemas.get_config_schema(),
-            'Invalid SkyPilot configuration: ')
+        common_utils.validate_schema(config, schemas.get_config_schema(),
+                                     'Invalid SkyPilot configuration: ')
     except exceptions.InvalidSkyPilotConfigError as e:
         raise ValueError(str(e)) from e
 
