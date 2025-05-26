@@ -897,6 +897,9 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                        (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]) +
             _check_service_version(name, "1,2"),
         ]
+        # The two non-spot instances will be in READY or SHUTTING_DOWN status
+        # after autoscale.
+        TWO_NON_SPOT_INSTANCES_STATUS_AFTER_AUTOSCALE = r'READY\|SHUTTING_DOWN'
     else:
         # Check blue green update, it will keep both old on-demand instances
         # running, once there are 4 spot instance ready.
@@ -906,6 +909,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                        (2, False, 'READY')]) +
             _check_service_version(name, "1"),
         ]
+        # The two non-spot instances will be in READY status after autoscale.
+        TWO_NON_SPOT_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
@@ -918,10 +923,11 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             # Wait for update to be registered
             'sleep 90',
             wait_until_no_pending,
-            _check_replica_in_status(
-                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (2, False, 'READY')]),
+            _check_replica_in_status(name, [
+                (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                (2, False, TWO_NON_SPOT_INSTANCES_STATUS_AFTER_AUTOSCALE)
+            ]),
             *update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
