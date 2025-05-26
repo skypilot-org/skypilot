@@ -59,4 +59,6 @@ config:
       spec:
         containers:
         - securityContext:
-            privileged: true
+            capabilities:
+              add:
+              - IPC_LOCK
