@@ -6,4 +6,4 @@ AI Performance
 
    AWS EFA <aws_efa>
    GCP GPUDirect-TCPX <gcp_gpu_direct_tcpx>
-   Nebius Interconnect GPUs Using InfiniBand <nebius_infiniband>
+   Nebius with InfiniBand <nebius_infiniband>
