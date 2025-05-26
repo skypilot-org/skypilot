@@ -60,6 +60,15 @@ The above is achieved by configuring the following section in the config file:
            gcp:
              disabled: false
              project_id: GCP project ID
+           kubernetes:
+             disabled: false
+             allowed_contexts:
+               - node-pool-1
+               - node-pool-2
+           ssh:
+             disabled: false
+             allowed_node_pools:
+               - node-pool-1
 
 To apply the configuration, follow the following steps:
 
@@ -129,6 +138,16 @@ All SkyPilot CLI or API calls with ``/monorepo/team-b`` as the PWD will use the 
 
 For team-c, since it has no workspace set, all CLI or API calls there will use the ``default`` workspace.
 
+
+.. tip::
+
+   You can also set the workspace in the CLI using ``--config active_workspace=<workspace>``:
+
+   .. code-block:: console
+
+      sky launch --config active_workspace=team-a ...
+
+
 Viewing workspaces in dashboard
 ------------------------------------
 
@@ -139,10 +158,10 @@ The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all con
 
 This page shows all workspaces, and for each workspace its current clusters/jobs usage information and enabled infra choices.
 
-To view a workspace's definition, click on a workspace's **Details** button.
+To view or edit a workspace's definition, click on a workspace's **Edit** button.
 
-.. image:: ../images/workspaces/details.png
-   :alt: SkyPilot dashboard workspaces details
+.. image:: ../images/workspaces/edit.png
+   :alt: SkyPilot dashboard workspaces edit
 
 To view all workspaces' definitions (i.e., the one defined at the API server), click on **View All Configs**.
 
