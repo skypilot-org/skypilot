@@ -51,7 +51,7 @@ const SuccessDisplay = ({ message }) => {
 };
 
 // Workspace configuration description component
-const WorkspaceConfigDescription = ({ workspaceName, config }) => {
+const WorkspaceConfigDescription = ({ workspaceName, config, enabledClouds = [] }) => {
   if (!config) return null;
 
   const isDefault = workspaceName === 'default';
@@ -67,9 +67,15 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 
   const enabledDescriptions = [];
   const disabledClouds = [];
+  const configuredButNotEnabled = [];
+
+  // Convert enabledClouds to a set for faster lookup
+  const enabledCloudsSet = new Set(enabledClouds.map(cloud => cloud.toLowerCase()));
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
     const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()];
+    const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
+    
     if (cloudConfig?.disabled === true) {
       disabledClouds.push(cloudName);
     } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
@@ -79,18 +85,36 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
       } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
         detail = ` (Region: ${cloudConfig.region})`;
       }
-      enabledDescriptions.push(
-        <span key={`${cloud}-enabled`} className="block">
-          {cloudName}
-          {detail} is enabled.
-        </span>
-      );
+      
+      if (isActuallyEnabled) {
+        enabledDescriptions.push(
+          <span key={`${cloud}-enabled`} className="block">
+            {cloudName}
+            {detail} is enabled.
+          </span>
+        );
+      } else {
+        configuredButNotEnabled.push(
+          <span key={`${cloud}-configured-not-enabled`} className="block text-amber-700">
+            {cloudName}
+            {detail} is configured but not currently available.
+          </span>
+        );
+      }
     } else {
-      enabledDescriptions.push(
-        <span key={`${cloud}-default-enabled`} className="block">
-          {cloudName} is enabled (using default settings).
-        </span>
-      );
+      if (isActuallyEnabled) {
+        enabledDescriptions.push(
+          <span key={`${cloud}-default-enabled`} className="block">
+            {cloudName} is enabled (using default settings).
+          </span>
+        );
+      } else {
+        configuredButNotEnabled.push(
+          <span key={`${cloud}-default-not-enabled`} className="block text-amber-700">
+            {cloudName} is configured but not currently available.
+          </span>
+        );
+      }
     }
   });
 
@@ -105,6 +129,7 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
     );
   }
   finalDescriptions.push(...enabledDescriptions);
+  finalDescriptions.push(...configuredButNotEnabled);
 
   if (finalDescriptions.length > 0) {
     return (
@@ -571,6 +596,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         <WorkspaceConfigDescription
                           workspaceName={workspaceName}
                           config={originalConfig}
+                          enabledClouds={workspaceStats.clouds}
                         />
                       </div>
                     </div>
