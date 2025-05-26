@@ -406,9 +406,6 @@ def override_sky_config(
 
     if is_ssh_test():
         ssh_node_pool_command, node_pool_size = parse_ssh_command(test.commands)
-        test.echo(
-            f'ssh_node_pool_command: {ssh_node_pool_command}, test.commands: {test.commands}, node_pool_size: {node_pool_size}'
-        )
         if ssh_node_pool_command:
             node_pool_hosts = ['ssh-node-pool']
             for index in range(node_pool_size - 1):
@@ -434,7 +431,6 @@ def override_sky_config(
                     new_test_commands.append(modified_command)
                 else:
                     new_test_commands.append(command)
-            test.echo(f'new_test_commands: {new_test_commands}')
             # Teardown ssh node pools
             teardown_command = 'sky ssh down; sky down ssh-node-pool -y'
             new_teardown = None
@@ -442,11 +438,18 @@ def override_sky_config(
                 new_teardown = test.teardown + f'; {teardown_command}'
             else:
                 new_teardown = teardown_command
+            test.echo(f'{os.linesep}Overriding test commands: {os.linesep}'
+                      f'{os.linesep.join(test.commands)}'
+                      f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
+                      f'{os.linesep.join(new_test_commands)}')
+            test.echo(f'{os.linesep}Overriding test teardown: {os.linesep}'
+                      f'{test.teardown or ""}'
+                      f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
+                      f'{new_teardown or ""}')
             test = test.copy(commands=new_test_commands, teardown=new_teardown)
             env_dict[
                 ssh.
                 ENV_VAR_SSH_NODE_POOLS_CONFIG] = temp_ssh_node_pools_file.name
-
     yield test
 
 
