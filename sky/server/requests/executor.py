@@ -228,6 +228,7 @@ def override_request_env_and_config(
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
     os.environ.update(request_body.env_vars)
+    # Note: may be overridden by AuthProxyMiddleware.
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                        name=request_body.env_vars[constants.USER_ENV_VAR])
     global_user_state.add_or_update_user(user)

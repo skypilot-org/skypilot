@@ -69,6 +69,11 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret
 
+            workspaces:
+                ws-train:
+                    gcp:
+                        project_id: test-project
+
             """))
 
 

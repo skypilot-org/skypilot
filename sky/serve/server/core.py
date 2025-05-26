@@ -14,6 +14,7 @@ from sky import backends
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -221,12 +222,14 @@ def up(
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
-            controller_job_id, controller_handle = execution.launch(
-                task=controller_task,
-                cluster_name=controller_name,
-                retry_until_up=True,
-                _disable_controller_check=True,
-            )
+            with skypilot_config.local_active_workspace_ctx(
+                    constants.SKYPILOT_DEFAULT_WORKSPACE):
+                controller_job_id, controller_handle = execution.launch(
+                    task=controller_task,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    _disable_controller_check=True,
+                )
 
         style = colorama.Style
         fore = colorama.Fore

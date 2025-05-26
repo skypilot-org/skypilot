@@ -10,7 +10,7 @@
    sodipodi:docname="auth-proxy-internals.svg"
    width="950"
    height="450"
-   inkscape:version="1.4.1 (93de688d07, 2025-03-30)"
+   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -27,11 +27,11 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="1.5713484"
-     inkscape:cx="488.75221"
-     inkscape:cy="252.64925"
-     inkscape:window-width="2520"
-     inkscape:window-height="1331"
+     inkscape:zoom="0.9765487"
+     inkscape:cx="375.81331"
+     inkscape:cy="252.93157"
+     inkscape:window-width="1880"
+     inkscape:window-height="1091"
      inkscape:window-x="26"
      inkscape:window-y="23"
      inkscape:window-maximized="0"
@@ -112,7 +112,7 @@
     <path
        fill="#000000"
        fill-opacity="0"
-       d="m 37.312893,284.4965 q 18.99157,-0.99359 37.938786,0"
+       d="m 37.312893,281.01956 q 18.99157,12.91409 37.938786,0"
        fill-rule="evenodd"
        id="path13" />
     <path
@@ -134,7 +134,7 @@
        stroke-width="1"
        stroke-linejoin="round"
        stroke-linecap="butt"
-       d="m 37.312893,284.4965 q 18.99157,-0.99359 37.938786,0"
+       d="m 37.312893,281.01956 q 18.99157,12.91409 37.938786,0"
        fill-rule="evenodd"
        id="path16" />
     <path
