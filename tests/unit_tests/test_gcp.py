@@ -147,7 +147,7 @@ def test_gcp_get_user_identities_workspace_cache_bypass():
         assert result1 == expected1
 
         # Switch to another workspace and call again
-        with skypilot_config.with_active_workspace('other'):
+        with skypilot_config.local_active_workspace_ctx('other'):
             result2 = GCP.get_user_identities()
             expected2 = [['test@example.com [project_id=other-project]']]
             assert result2 == expected2

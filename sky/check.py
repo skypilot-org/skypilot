@@ -70,17 +70,21 @@ def check_capabilities(
                            sky_cloud.CloudCapability]
         ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
                 str, Dict[str, str]]]]]:
-            cloud_tuple, capability = payload
-            _, cloud = cloud_tuple
-            try:
-                ok, reason = cloud.check_credentials(capability)
-            except exceptions.NotSupportedError:
-                return None
-            except Exception:  # pylint: disable=broad-except
-                ok, reason = False, traceback.format_exc()
-            if not isinstance(reason, dict):
-                reason = reason.strip() if reason else None
-            return (capability, ok, reason)
+            with skypilot_config.local_active_workspace_ctx(
+                    current_workspace_name):
+                # Have to override again for specific thread, as the
+                # local_active_workspace_ctx is thread-local.
+                cloud_tuple, capability = payload
+                _, cloud = cloud_tuple
+                try:
+                    ok, reason = cloud.check_credentials(capability)
+                except exceptions.NotSupportedError:
+                    return None
+                except Exception:  # pylint: disable=broad-except
+                    ok, reason = False, traceback.format_exc()
+                if not isinstance(reason, dict):
+                    reason = reason.strip() if reason else None
+                return (capability, ok, reason)
 
         def get_cloud_tuple(
                 cloud_name: str
@@ -239,7 +243,7 @@ def check_capabilities(
 
         # Always show details for single specified check (if verbose)
         hide_per_cloud_details_flag = False
-        with skypilot_config.with_active_workspace(workspace):
+        with skypilot_config.local_active_workspace_ctx(workspace):
             enabled_ws_clouds = _execute_check_logic_for_workspace(
                 workspace, hide_per_cloud_details_flag, hide_workspace_str)
             all_workspaces_results[workspace] = enabled_ws_clouds
@@ -253,7 +257,7 @@ def check_capabilities(
         for ws_name in workspaces_to_check:
             if not hide_workspace_str:
                 echo(f'\nChecking enabled infra for workspace: {ws_name!r}')
-            with skypilot_config.with_active_workspace(ws_name):
+            with skypilot_config.local_active_workspace_ctx(ws_name):
                 enabled_ws_clouds = _execute_check_logic_for_workspace(
                     ws_name, hide_per_cloud_details_flag, hide_workspace_str)
                 all_workspaces_results[ws_name] = enabled_ws_clouds
