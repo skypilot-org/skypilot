@@ -149,37 +149,8 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
    
    .. tab-item:: Helm Deployment
 
-      If you use a :ref:`Helm Deployment <sky-api-server-helm-deploy-command>`, save the config to a ``ssh_node_pool.yaml`` file on your local machine and run:
+      If you use a Helm Deployment, follow the :ref:`SSH Node Pool configuration instructions <sky-api-server-configure-credentials>` to upload your ``~/.sky/ssh_node_pools.yaml`` and SSH keys to the API server.
 
-      .. code-block:: bash
-
-         # RELEASE_NAME and NAMESPACE are the same as the ones used in the helm deployment
-         helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-         --namespace $NAMESPACE \
-         --reuse-values \
-         --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
-      
-      If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
-
-      .. code-block:: bash
-
-         SECRET_NAME=apiserver-ssh-key
-         # The NAMESPACE should be consistent with the API server deployment
-         kubectl create secret generic $SECRET_NAME \
-            --namespace $NAMESPACE \
-            --from-file=id_rsa=/path/to/id_rsa \
-            --from-file=other_id_rsa=/path/to/other_id_rsa
-
-         # Keys will be mounted to ~/.ssh/ (e.g., ~/.ssh/id_rsa, ~/.ssh/other_id_rsa)
-         helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-            --namespace $NAMESPACE \
-            --reuse-values \
-            --set apiService.sshKeySecret=$SECRET_NAME
-      
-      .. note::
-
-         SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
-   
    .. tab-item:: VM Deployment
 
       If you use a :ref:`VM Deployment <sky-api-server-cloud-deploy>`, set ``~/.sky/ssh_node_pools.yaml`` on the API server host.
