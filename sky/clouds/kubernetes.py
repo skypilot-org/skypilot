@@ -498,20 +498,16 @@ class Kubernetes(clouds.Cloud):
             # If remote_identity is not a dict, use
             k8s_service_account_name = remote_identity
 
-        if (k8s_service_account_name ==
-                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-            # SA name doesn't matter since automounting credentials is disabled
-            k8s_service_account_name = 'default'
-            k8s_automount_sa_token = 'false'
-        elif (k8s_service_account_name ==
-              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
-            # Use the default service account
+        lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+        sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
+
+        if k8s_service_account_name == lc or k8s_service_account_name == sa:
+            # Use the default service account if remote identity is not set.
+            # For LOCAL_CREDENTIALS, this is for in-cluster authentication.
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
-            k8s_automount_sa_token = 'true'
-        else:
-            # User specified a custom service account
-            k8s_automount_sa_token = 'true'
+
+        k8s_automount_sa_token = 'true'
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -539,13 +535,7 @@ class Kubernetes(clouds.Cloud):
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
-        if (skypilot_config.get_nested(('kubernetes', 'remote_identity'), None)
-                != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-            k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
-        else:
-            # If using local credentials, the remote cluster will get the
-            # context name from the kubeconfig
-            k8s_env_vars = {}
+        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit

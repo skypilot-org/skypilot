@@ -2853,15 +2853,9 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
-    local_credentials = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS
-    use_local_credentials = (
-        local_credentials.value == skypilot_config.get_nested(
-            ('kubernetes', 'remote_identity'), None))
-    if (not use_local_credentials and
-            context == kubernetes.in_cluster_context_name()):
-        # If the context (also used as the region) is in-cluster, and we are
-        # not using local credentials (in which there is no service role)
-        # we need to use in-cluster auth by setting the context to None.
+    if context == kubernetes.in_cluster_context_name():
+        # If the context (also used as the region) is in-cluster, we need
+        # to use in-cluster auth by setting the context to None.
         context = None
     return context
 
