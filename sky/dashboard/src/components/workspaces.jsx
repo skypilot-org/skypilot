@@ -576,10 +576,12 @@ export function Workspaces() {
             </DialogDescription>
           </DialogHeader>
 
-          <ErrorDisplay 
-            error={deleteState.error} 
-            title="Deletion Failed" 
-            onDismiss={() => setDeleteState(prev => ({ ...prev, error: null }))}
+          <ErrorDisplay
+            error={deleteState.error}
+            title="Deletion Failed"
+            onDismiss={() =>
+              setDeleteState((prev) => ({ ...prev, error: null }))
+            }
           />
 
           <DialogFooter>
