@@ -205,6 +205,10 @@ Following tabs describe how to configure credentials for different clouds on the
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
 
+        .. note::
+
+            Changes to the kubeconfig secret will be automatically reflected in the API server if :ref:`apiService.sshNodePools <helm-values-apiService-sshNodePools>` is not set. Otherwise, you will need to recreate the API server Pod to apply the changes.
+
         .. tip::
 
             If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.

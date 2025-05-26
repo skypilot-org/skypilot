@@ -97,6 +97,11 @@ spec:
             fi
           done
           {{- end }}
+          {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
+          mkdir -p /root/.kube
+          # Merge the kubeconfig from secret and PVC
+          KUBECONFIG=/var/skypilot/kubeconfig/config:/root/.kube/config kubectl config view --flatten > /root/.kube/config
+          {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
             exec sky api start --deploy --foreground
@@ -153,8 +158,18 @@ spec:
           subPath: gcp-cred.json
         {{- end }}
         {{- if .Values.kubernetesCredentials.useKubeconfig }}
+        {{- if .Values.apiService.sshNodePools }}
         - name: kube-config
+          mountPath: /var/skypilot/kubeconfig
+        {{- else }}
+        - name: kube-config
+          mountPath: /root/.kube/config
+        {{- end }}
+        {{- end }}
+        {{- if .Values.apiService.sshNodePools }}
+        - name: state-volume
           mountPath: /root/.kube
+          subPath: .kube
         {{- end }}
         {{- if .Values.runpodCredentials.enabled }}
         - name: runpod-config
