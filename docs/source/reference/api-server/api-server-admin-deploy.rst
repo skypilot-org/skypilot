@@ -409,6 +409,47 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
 
+    .. tab-item:: SSH Node Pools
+        :sync: ssh-node-pools-tab
+
+        SkyPilot can configure a set of existing machines to be used as a :ref:`SSH Node Pool <existing-machines>`.
+        
+        To configure SSH node pools for the API server, create your SSH Node Pool :ref:`configuration file <defining-ssh-node-pools>` ``ssh_node_pools.yaml`` and set the :ref:`apiService.sshNodePools <helm-values-apiService-sshNodePools>` to the file path:
+
+        .. code-block:: bash
+
+            # RELEASE_NAME and NAMESPACE are the same as the ones used in the helm deployment
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
+
+        If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
+
+        .. code-block:: bash
+
+            SECRET_NAME=apiserver-ssh-key
+
+            # Create a secret that contains the SSH keys
+            # The NAMESPACE should be consistent with the API server deployment
+            kubectl create secret generic $SECRET_NAME \
+              --namespace $NAMESPACE \
+              --from-file=id_rsa=/path/to/id_rsa \
+              --from-file=other_id_rsa=/path/to/other_id_rsa
+
+            # Keys will be mounted to ~/.ssh/ (e.g., ~/.ssh/id_rsa, ~/.ssh/other_id_rsa)
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set apiService.sshKeySecret=$SECRET_NAME
+        
+        After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
+
+        .. note::
+
+           SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
+   
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
@@ -427,10 +468,37 @@ In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2
 Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
 
+
 Upgrade the API server
 -----------------------
 
 Refer to :ref:`sky-api-server-upgrade` for how to upgrade the API server.
+
+.. _update-sky-config:
+
+Optional: Update SkyPilot configuration
+----------------------------------------
+
+``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config:
+
+1. Fetch the latest config from the API server:
+
+   .. code-block:: bash
+
+     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+     # Make sure the pod is running
+     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" || exit 1
+     # Fetch the config
+     kubectl exec -it $POD_NAME -n $NAMESPACE -- cat /root/.sky/config.yaml > current-config.yaml
+
+2. Edit the configuration file ``current-config.yaml`` with your desired changes.
+3. Upload the updated config to the API server:
+
+   .. code-block:: bash
+
+     kubectl cp current-config.yaml $POD_NAME:/root/.sky/config.yaml -n $NAMESPACE
+
+
 
 Uninstall
 ---------
@@ -442,6 +510,7 @@ To uninstall the API server, run:
     helm uninstall $RELEASE_NAME --namespace $NAMESPACE
 
 This will delete the API server and all associated resources.
+
 
 Other notes
 -----------
@@ -591,31 +660,31 @@ In helm deployment, a set of default permissions are granted to the API server t
 
 * Reduce the RBAC permissions by using ``kubernetes.remote_identity``: by default, the API server creates a service account and RBAC roles to grant permissions to SkyPilot task Pods. This in turn requires the API server to have permissions to manipulate RBAC roles and service accounts. You can disable this by the following steps:
 
-    1. Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` to set ``kubernetes.remote_identity`` to the service account of API server, which already has the necessary permissions:
+  1. Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` to set ``kubernetes.remote_identity`` to the service account of API server, which already has the necessary permissions:
 
-    .. code-block:: yaml
+     .. code-block:: yaml
 
         # TODO: replace ${RELEASE_NAME} with the actual release name in deployment step
         kubernetes:
           remote_identity: ${RELEASE_NAME}-api-sa
 
-    .. note::
+     .. note::
 
         If you also grant external Kubernetes cluster permissions to the API server via ``kubernetesCredentials.useKubeconfig``, the same service account with enough permissions must be prepared in these Kubernetes clusters manually.
 
-    2. Set ``rbac.manageRbacPolicies=false`` in helm valuesto disable the RBAC policies:
+  2. Set ``rbac.manageRbacPolicies=false`` in helm valuesto disable the RBAC policies:
 
-    .. code-block:: bash
+     .. code-block:: bash
 
         helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
           --set rbac.manageRbacPolicies=false
 
 * If your use case does not require object storage mounting, you can disable the permissions to manage SkyPilot system components by setting ``rbac.manageSystemComponents=false``:
 
-    .. code-block:: bash
+  .. code-block:: bash
 
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
-          --set rbac.manageSystemComponents=false
+      helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+        --set rbac.manageSystemComponents=false
 
 If you want to use an existing service account and permissions that meet the :ref:`minimum permissions required for SkyPilot<k8s-permissions>` instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
 

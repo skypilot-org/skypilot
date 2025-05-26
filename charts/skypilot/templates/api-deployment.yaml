@@ -38,6 +38,8 @@ spec:
         env:
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
+        - name: SKYPILOT_RELEASE_NAME
+          value: {{ .Release.Name | quote }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -61,12 +63,24 @@ spec:
           {{- if .Values.apiService.preDeployHook }}
           {{ .Values.apiService.preDeployHook | nindent 10 }}
           {{- end }}
-          {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
-          echo "Linking config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
-          # The configmap serves as the ground truth for the config.yaml file, read-only
-          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
-          {{- end }}
+          # When the config.yaml is a symlink, it should be from the old API
+          # server code. We remove the symlink and copy the ConfigMap config to
+          # PVC location for backward compatibility.
+          # TODO(zhwu): remove this after 0.12.0.
+          if [ -L /root/.sky/config.yaml ]; then
+            echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
+            rm /root/.sky/config.yaml
+          fi
+          # Initialize the SkyPilot config.
+          if [ -s /root/.sky/config.yaml ]; then
+            # If the config.yaml is not empty, sync the PVC config to ConfigMap
+            python3 -c "from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup('~/.sky/config.yaml')"
+          else
+            # If the config.yaml is empty, we initialize the config on PVC with
+            # user specified config.
+            cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          fi
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
           echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
@@ -116,10 +130,8 @@ spec:
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
         {{- end }}
-        {{- if .Values.apiService.config }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
-        {{- end }}
         {{- if .Values.apiService.sshNodePools }}
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
@@ -337,11 +349,9 @@ spec:
         secret:
           secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
       {{- end }}
-      {{- if .Values.apiService.config }}
       - name: skypilot-config
         configMap:
           name: {{ .Release.Name }}-config
-      {{- end }}
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:

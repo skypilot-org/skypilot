@@ -18,8 +18,8 @@ import {
   SlackIcon,
   CommentFeedbackIcon,
   BookDocIcon,
-  UsersIcon,
   UserCircleIcon,
+  UsersIcon,
 } from '@/components/elements/icons';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
@@ -136,6 +136,13 @@ export function TopBar() {
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
+    // Special case: highlight workspaces for both /workspaces and /workspace paths
+    if (path === '/workspaces') {
+      return (
+        router.pathname.startsWith('/workspaces') ||
+        router.pathname.startsWith('/workspace')
+      );
+    }
     return router.pathname.startsWith(path);
   };
 
