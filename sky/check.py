@@ -32,13 +32,16 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core
+
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(skypilot_config.get_workspaces().keys())
+    available_workspaces = list(core.get_workspaces().keys())
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])

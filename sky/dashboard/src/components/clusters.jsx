@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import {
   CustomTooltip as Tooltip,
@@ -55,14 +56,25 @@ import {
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
 
 export function Clusters() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE); // Default to ALL_WORKSPACES_VALUE
+  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
   const [workspaces, setWorkspaces] = useState([]);
   const isMobile = useMobile();
+
+  // Handle URL query parameters for workspace filtering
+  useEffect(() => {
+    if (router.isReady && router.query.workspace) {
+      const workspaceParam = Array.isArray(router.query.workspace)
+        ? router.query.workspace[0]
+        : router.query.workspace;
+      setWorkspaceFilter(workspaceParam);
+    }
+  }, [router.isReady, router.query.workspace]);
 
   useEffect(() => {
     const fetchFilterData = async () => {

@@ -148,10 +148,10 @@ The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all con
 
 This page shows all workspaces, and for each workspace its current clusters/jobs usage information and enabled infra choices.
 
-To view a workspace's definition, click on a workspace's **Details** button.
+To view or edit a workspace's definition, click on a workspace's **Edit** button.
 
-.. image:: ../images/workspaces/details.png
-   :alt: SkyPilot dashboard workspaces details
+.. image:: ../images/workspaces/edit.png
+   :alt: SkyPilot dashboard workspaces edit
 
 To view all workspaces' definitions (i.e., the one defined at the API server), click on **View All Configs**.
 
