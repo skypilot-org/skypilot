@@ -353,12 +353,12 @@ _TASK_OPTIONS = [
         type=str,
         help='Infrastructure to use. '
         'Format: cloud, cloud/region, cloud/region/zone, '
-        'or kubernetes/context-name. '
+        'k8s/context-name, or ssh/node-pool-name. '
         'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
         # TODO(zhwu): we have to use `\*` to make sure the docs build
         # not complaining about the `*`, but this will cause `--help`
         # to show `\*` instead of `*`.
-        'aws/\\*/us-east-1a, kubernetes/my-cluster-context.'),
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'),
     click.option(
         '--cloud',
         required=False,
@@ -1993,7 +1993,17 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
-        workspace_request_id = sdk.workspaces()
+        try:
+            workspace_request_id = sdk.workspaces()
+        except RuntimeError:
+            # Backward compatibility for API server before #5660.
+            # TODO(zhwu): remove this after 0.12.0.
+            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
+                           'in an old version, and may miss feature: '
+                           'workspaces. Update with: sky api stop; '
+                           'sky api start'
+                           f'{colorama.Style.RESET_ALL}')
+            workspace_request_id = None
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
