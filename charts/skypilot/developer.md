@@ -21,9 +21,9 @@ the API server. Instead, we provide instructions for updating config
   and backing up is difficult
 
 **Note:** SkyPilot syncs config back to ConfigMap for user convenience, but 
-ConfigMap may not always be in sync with PVC (e.g., after upgrades without 
-`forceConfigOverride`). Sync occurs when config changes are made through 
-the workspace API.
+ConfigMap may not always be in sync with PVC (e.g., user `helm upgrade` with a
+new configMap). Sync occurs when config changes are made through the workspace
+API.
 
 **TODO:** Provide API to get config directly from API server to eliminate 
 ConfigMap dependency.
