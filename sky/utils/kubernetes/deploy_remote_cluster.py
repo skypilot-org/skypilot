@@ -625,6 +625,7 @@ def main():
     global_use_ssh_config = args.use_ssh_config
 
     failed_clusters = []
+    successful_clusters = []
 
     # Print cleanup mode marker if applicable
     if args.cleanup:
@@ -795,6 +796,7 @@ def main():
                 print(
                     f'{GREEN}==== Completed deployment for cluster: {cluster_name} ====${NC}'
                 )
+                successful_clusters.append(cluster_name)
             except Exception as e:  # pylint: disable=broad-except
                 reason = str(e)
                 failed_clusters.append((cluster_name, reason))
@@ -803,7 +805,9 @@ def main():
                 )  # Print for internal logging
 
     if failed_clusters:
-        msg = f'{RED}Failed to deploy {len(failed_clusters)} clusters: {NC}'
+        action = 'clean' if args.cleanup else 'deploy'
+        msg = f'{GREEN}Successfully {action}ed {len(successful_clusters)} cluster(s) ({", ".join(successful_clusters)}). {NC}'
+        msg += f'{RED}Failed to {action} {len(failed_clusters)} cluster(s): {NC}'
         for cluster_name, reason in failed_clusters:
             msg += f'\n  {cluster_name}: {reason}'
         raise RuntimeError(msg)

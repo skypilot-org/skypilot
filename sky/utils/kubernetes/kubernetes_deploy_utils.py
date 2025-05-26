@@ -92,7 +92,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
     else:
         with ux_utils.print_exception_no_traceback():
             log_hint = ux_utils.log_path_hint(log_path, is_local=False)
-            raise RuntimeError('Failed to deploy SkyPilot on SSH targets. '
+            raise RuntimeError('Failed to deploy SkyPilot on some Node Pools. '
                                f'{log_hint}'
                                f'\nError: {stderr}')
 
