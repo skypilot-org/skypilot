@@ -311,7 +311,7 @@ export function Workspaces() {
 
       // Fetch enabled clouds for all workspaces
       const enabledCloudsArray = await Promise.all(
-        configuredWorkspaceNames.map((wsName) => getEnabledClouds(wsName))
+        configuredWorkspaceNames.map((wsName) => getEnabledClouds(wsName, true))
       );
       const enabledCloudsMap = Object.fromEntries(
         configuredWorkspaceNames.map((wsName, index) => [
@@ -390,7 +390,7 @@ export function Workspaces() {
         .map((ws) => ({
           ...ws,
           clouds: Array.isArray(enabledCloudsMap[ws.name])
-            ? enabledCloudsMap[ws.name].sort()
+            ? enabledCloudsMap[ws.name]
             : [],
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -576,7 +576,11 @@ export function Workspaces() {
             </DialogDescription>
           </DialogHeader>
 
-          <ErrorDisplay error={deleteState.error} title="Deletion Failed" />
+          <ErrorDisplay 
+            error={deleteState.error} 
+            title="Deletion Failed" 
+            onDismiss={() => setDeleteState(prev => ({ ...prev, error: null }))}
+          />
 
           <DialogFooter>
             <Button

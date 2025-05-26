@@ -231,7 +231,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         await Promise.all([
           getClusters(),
           getManagedJobs(),
-          getEnabledClouds(workspaceName),
+          getEnabledClouds(workspaceName, true),
         ]);
 
       // Filter clusters for this workspace
@@ -274,7 +274,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         totalClusterCount: workspaceClusters.length,
         runningClusterCount: runningClusters.length,
         managedJobsCount: managedJobsCount,
-        clouds: Array.isArray(enabledClouds) ? enabledClouds.sort() : [],
+        clouds: Array.isArray(enabledClouds) ? enabledClouds : [],
       });
     } catch (err) {
       console.error('Failed to fetch workspace stats:', err);
