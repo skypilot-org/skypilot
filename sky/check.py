@@ -513,8 +513,8 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
         allowed_contexts = sky_clouds.SSH.existing_allowed_contexts()
         # Contexts that exist in file but not in allowed list are disabled
         # due to allowed_node_pools configuration
-        disabled_due_to_allowed_node_pools = (
-            set(all_node_pool_contexts) - set(allowed_contexts))
+        disabled_due_to_allowed_node_pools = (set(all_node_pool_contexts) -
+                                              set(allowed_contexts))
 
     # Format the context info with consistent styling
     contexts_formatted = []
@@ -533,12 +533,13 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             if ctx2text is not None:
                 if context in ctx2text:
                     text_suffix = f': {ctx2text[context]}'
-                elif (isinstance(cloud_type, sky_clouds.SSH) and 
+                elif (isinstance(cloud_type, sky_clouds.SSH) and
                       context in disabled_due_to_allowed_node_pools):
                     # Context is disabled due to allowed_node_pools config
                     text_suffix = (': ' + _red_color('disabled. ') +
                                    _dim_color('Reason: Not included in '
-                                              'allowed_node_pools configuration.'))
+                                              'allowed_node_pools '
+                                              'configuration.'))
                 else:
                     # Default case - not set up
                     text_suffix = (': ' + _red_color('disabled. ') +
