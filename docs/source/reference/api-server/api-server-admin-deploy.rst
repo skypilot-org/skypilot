@@ -191,7 +191,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             kubectl create secret generic kube-credentials \
               --namespace $NAMESPACE \
-              --from-file=config=~/.kube/config
+              --from-file=config=$HOME/.kube/config
 
 
         Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig for authentication:
