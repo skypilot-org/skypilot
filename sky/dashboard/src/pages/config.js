@@ -71,11 +71,7 @@ export default function ConfigPage() {
       <Layout highlighted="workspaces">
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link href="/workspaces" className="text-sky-blue hover:underline">
-              Workspaces
-            </Link>
-            <span className="mx-2 text-gray-500">›</span>
-            <span className="text-sky-blue">Edit Configuration</span>
+            <span className="text-sky-blue">SkyPilot Configuration</span>
           </div>
 
           <div className="text-sm flex items-center">
