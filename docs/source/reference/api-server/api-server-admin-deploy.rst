@@ -80,6 +80,8 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
+The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>`.
+
 .. _sky-get-api-server-url:
 
 Step 2: Get the API server URL
