@@ -857,8 +857,10 @@ def deploy_cluster(head_node,
         print_output=True)
     if result is None:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
-                               f'Please check the SSH configuration and logs for more details.')
+            raise RuntimeError(
+                f'Failed to SSH to head node ({head_node}). '
+                f'Please check the SSH configuration and logs for more details.'
+            )
 
     # Checking history
     history_exists = (history_worker_nodes is not None and
