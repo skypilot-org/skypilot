@@ -106,7 +106,7 @@ export default function ConfigPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-gray-600 mb-3">
-              Edit the entire SkyPilot configuration. Refer to the{' '}
+              Refer to the{' '}
               <a
                 href="https://docs.skypilot.co/en/latest/reference/config.html"
                 target="_blank"
@@ -115,7 +115,16 @@ export default function ConfigPage() {
               >
                 SkyPilot Docs
               </a>{' '}
-              for details.
+              for details.{' '}
+              Click{' '}
+              <button
+                onClick={loadConfig}
+                disabled={loading || saving}
+                className="text-blue-600 hover:underline underline-offset-2 disabled:text-gray-400 disabled:no-underline"
+              >
+                Refresh
+              </button>{' '}
+              to reset to the latest config on API server.
             </p>
 
             {/* Success Message */}
