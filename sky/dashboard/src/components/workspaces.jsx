@@ -481,7 +481,7 @@ export function Workspaces() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setIsAllWorkspacesModalOpen(true)}
+            onClick={() => router.push('/config')}
             className="ml-4 px-2 py-1 text-xs"
             disabled={
               loading ||
@@ -489,7 +489,7 @@ export function Workspaces() {
               Object.keys(rawWorkspacesData).length === 0
             }
           >
-            View All Configs
+            Edit All Configs
           </Button>
         </div>
         <div className="flex items-center">
