@@ -299,6 +299,10 @@ def get_nested(keys: Tuple[str, ...],
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace config."""
+    # TODO(zhwu): Instead of just returning the workspace specific config, we
+    # should return the config that already merges the global config, so that
+    # the caller does not need to manually merge the global config with
+    # the workspace specific config.
     if workspace is None:
         workspace = get_active_workspace()
     clouds = get_nested(keys=(

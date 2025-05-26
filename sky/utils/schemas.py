@@ -1044,6 +1044,25 @@ def get_config_schema():
                 },
             }
         },
+        'ssh': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_node_pools': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -1177,12 +1196,13 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(
         service_catalog.ALL_CLOUDS) + ['cloudflare']
-    # Create pattern for non-GCP clouds (all clouds except gcp)
-    non_gcp_clouds = [
+    # Create pattern for not supported clouds, i.e.
+    # all clouds except gcp, kubernetes, ssh
+    not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() != 'gcp'
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
     ]
-    non_gcp_cloud_regex = '|'.join(non_gcp_clouds)
+    not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -1192,7 +1212,7 @@ def get_config_schema():
             'additionalProperties': False,
             'patternProperties': {
                 # Pattern for non-GCP clouds - only allows 'disabled' property
-                f'^({non_gcp_cloud_regex})$': {
+                f'^({not_supported_cloud_regex})$': {
                     'type': 'object',
                     'additionalProperties': False,
                     'properties': {
@@ -1214,6 +1234,38 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         }
+                    },
+                    'additionalProperties': False,
+                },
+                'ssh': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_node_pools': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'kubernetes': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_contexts': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
                     },
                     'additionalProperties': False,
                 },

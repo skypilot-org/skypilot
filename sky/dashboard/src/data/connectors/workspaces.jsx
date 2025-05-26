@@ -190,12 +190,19 @@ export async function getWorkspaces() {
   }
 }
 
-export async function getEnabledClouds(workspaceName = null) {
+export async function getEnabledClouds(workspaceName = null, expand = false) {
   try {
     // Step 1: Call the /enabled_clouds endpoint to schedule the task
     let url = `${ENDPOINT}/enabled_clouds`;
+    const params = new URLSearchParams();
     if (workspaceName) {
-      url += `?workspace=${encodeURIComponent(workspaceName)}`;
+      params.append('workspace', workspaceName);
+    }
+    if (expand) {
+      params.append('expand', 'true');
+    }
+    if (params.toString()) {
+      url += `?${params.toString()}`;
     }
 
     const scheduleResponse = await fetch(url, {

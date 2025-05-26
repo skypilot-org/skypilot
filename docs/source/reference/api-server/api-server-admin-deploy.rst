@@ -191,7 +191,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             kubectl create secret generic kube-credentials \
               --namespace $NAMESPACE \
-              --from-file=config=~/.kube/config
+              --from-file=config=$HOME/.kube/config
 
 
         Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig for authentication:
@@ -215,6 +215,8 @@ Following tabs describe how to configure credentials for different clouds on the
                 python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
 
             Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
+
+            The specific cloud's credential for the exec-based authentication also needs to be configured. For example, to enable exec-based authentication for GKE, you also need to setup GCP credentials (see the GCP tab above).
 
         To use multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config. An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
 
@@ -485,11 +487,10 @@ Optional: Update SkyPilot configuration
 
    .. code-block:: bash
 
-     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
-     # Make sure the pod is running
-     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" || exit 1
-     # Fetch the config
-     kubectl exec -it $POD_NAME -n $NAMESPACE -- cat /root/.sky/config.yaml > current-config.yaml
+     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -n $NAMESPACE -o jsonpath='{.items[0].metadata.name}')
+     # Make sure the pod is running and download the config
+     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" && \
+     kubectl cp $POD_NAME:/root/.sky/config.yaml current-config.yaml -n $NAMESPACE --no-preserve
 
 2. Edit the configuration file ``current-config.yaml`` with your desired changes.
 3. Upload the updated config to the API server:
