@@ -5,6 +5,8 @@ import { useRouter } from 'next/router';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
+import dashboardCache from '@/lib/cache';
+import { REFRESH_INTERVALS } from '@/lib/config';
 import {
   Card,
   CardContent,
@@ -35,6 +37,8 @@ import { RotateCwIcon, DollarSign } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs'; // Import statusGroups
 
+const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
+
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
   const [globalRunningClusters, setGlobalRunningClusters] = useState(0);
@@ -54,11 +58,17 @@ export function Workspaces() {
 
   const isMobile = useMobile();
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
       const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
-        await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
+        await Promise.all([
+          dashboardCache.get(getWorkspaces),
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs),
+        ]);
 
       console.log(
         '[Workspaces Debug] Raw fetchedWorkspacesConfig:',
@@ -73,7 +83,7 @@ export function Workspaces() {
       );
 
       const enabledCloudsPromises = configuredWorkspaceNames.map((wsName) =>
-        getEnabledClouds(wsName)
+        dashboardCache.get(getEnabledClouds, [wsName])
       );
       const enabledCloudsForAllWorkspacesArray = await Promise.all(
         enabledCloudsPromises
@@ -210,11 +220,20 @@ export function Workspaces() {
       setGlobalTotalClusters(0);
       setGlobalManagedJobs(0);
     }
-    setLoading(false);
+    if (showLoading) {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(true); // Show loading on initial load
+    
+    // Set up refresh interval
+    const interval = setInterval(() => {
+      fetchData(false); // Don't show loading on background refresh
+    }, REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleShowWorkspaceDetails = (workspaceName) => {
@@ -248,7 +267,13 @@ export function Workspaces() {
   };
 
   const handleRefresh = () => {
-    fetchData();
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs);
+    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+    
+    fetchData(true); // Show loading on manual refresh
   };
 
   const preStyle = {

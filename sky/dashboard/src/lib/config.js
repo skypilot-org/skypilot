@@ -7,6 +7,7 @@ export const CACHE_CONFIG = {
 
 // Refresh intervals for different data types (in milliseconds)
 export const REFRESH_INTERVALS = {
+  REFRESH_INTERVAL: 30 * 1000, // 30 seconds - standard refresh interval for all pages
   GPU_REFRESH_INTERVAL: 30 * 1000, // 30 seconds - aligned with standard refresh interval
 };
 

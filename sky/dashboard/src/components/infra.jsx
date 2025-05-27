@@ -20,8 +20,8 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
 
-// Set the refresh interval to 1 minute for GPU data
-const GPU_REFRESH_INTERVAL = REFRESH_INTERVALS.GPU_REFRESH_INTERVAL;
+// Set the refresh interval to align with other pages
+const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
@@ -513,13 +513,13 @@ export function GPUs() {
         // Calls the latest fetchData from the ref, with showLoadingIndicators: false
         refreshDataRef.current({ showLoadingIndicators: false });
       }
-    }, GPU_REFRESH_INTERVAL);
+    }, REFRESH_INTERVAL);
 
     return () => {
       isCurrent = false;
       clearInterval(interval);
     };
-  }, [GPU_REFRESH_INTERVAL]); // Depends only on GPU_REFRESH_INTERVAL.
+  }, [REFRESH_INTERVAL]); // Depends only on REFRESH_INTERVAL.
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {

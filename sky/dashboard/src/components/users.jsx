@@ -21,13 +21,15 @@ import {
 import { getUsers } from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters'; // For fetching all clusters
 import { getManagedJobs } from '@/data/connectors/jobs'; // For fetching all jobs
+import dashboardCache from '@/lib/cache';
+import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, ExternalLinkIcon } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 
-const REFRESH_INTERVAL = 30000; // 30 seconds
+const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 // Helper to parse username
 const parseUsername = (username) => {
@@ -50,6 +52,11 @@ export function Users() {
   const isMobile = useMobile();
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getUsers);
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs);
+    
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -101,14 +108,14 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     direction: 'ascending',
   });
 
-  const fetchDataAndProcess = useCallback(async () => {
-    if (setLoading) setLoading(true); // Use parent setLoading if available
-    setIsLoading(true);
+  const fetchDataAndProcess = useCallback(async (showLoading = false) => {
+    if (setLoading && showLoading) setLoading(true); // Use parent setLoading if available
+    if (showLoading) setIsLoading(true);
     try {
       const [usersData, clustersData, jobsResponse] = await Promise.all([
-        getUsers(),
-        getClusters(), // Fetches all clusters
-        getManagedJobs(), // Fetches all jobs
+        dashboardCache.get(getUsers),
+        dashboardCache.get(getClusters), // Fetches all clusters
+        dashboardCache.get(getManagedJobs), // Fetches all jobs
       ]);
 
       const jobsData = jobsResponse.jobs || [];
@@ -133,19 +140,21 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       console.error('Failed to fetch or process user data:', error);
       setUsersWithCounts([]);
     }
-    if (setLoading) setLoading(false);
-    setIsLoading(false);
+    if (setLoading && showLoading) setLoading(false);
+    if (showLoading) setIsLoading(false);
   }, [setLoading]);
 
   useEffect(() => {
     if (refreshDataRef) {
-      refreshDataRef.current = fetchDataAndProcess;
+      refreshDataRef.current = () => fetchDataAndProcess(true); // Show loading on manual refresh
     }
   }, [refreshDataRef, fetchDataAndProcess]);
 
   useEffect(() => {
-    fetchDataAndProcess();
-    const interval = setInterval(fetchDataAndProcess, refreshInterval);
+    fetchDataAndProcess(true); // Show loading on initial load
+    const interval = setInterval(() => {
+      fetchDataAndProcess(false); // Don't show loading on background refresh
+    }, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
 
