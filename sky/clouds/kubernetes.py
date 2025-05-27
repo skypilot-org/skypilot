@@ -1,6 +1,7 @@
 """Kubernetes."""
-import os
 import re
+import subprocess
+import tempfile
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -30,7 +31,6 @@ logger = sky_logging.init_logger(__name__)
 
 # Check if KUBECONFIG is set, and use it if it is.
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
-CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
@@ -744,6 +744,7 @@ class Kubernetes(clouds.Cloud):
         """Checks if the user has access credentials to
         Kubernetes."""
         # Check for port forward dependencies
+        logger.info(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
         if reasons is not None:
             formatted = '\n'.join(
@@ -806,10 +807,24 @@ class Kubernetes(clouds.Cloud):
         return ''.join(message_parts)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+        credential_paths = kubernetes_utils.get_kubeconfig_paths()
+        if credential_paths:
+            # For single kubeconfig path, keep the original path.
+            kubeconfig_file = credential_paths[0]
+            if len(credential_paths) > 1:
+                # For multiple kubeconfig paths, merge them into a single file.
+                # TODO(aylei): GC merged kubeconfig files.
+                kubeconfig_file = tempfile.NamedTemporaryFile(
+                    prefix='merged-kubeconfig-', suffix='.yaml',
+                    delete=False).name
+                subprocess.run(
+                    'kubectl config view --flatten '
+                    f'> {kubeconfig_file}',
+                    shell=True,
+                    check=True)
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+            return {DEFAULT_KUBECONFIG_PATH: kubeconfig_file}
         else:
             return {}
 
