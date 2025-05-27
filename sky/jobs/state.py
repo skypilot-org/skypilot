@@ -1130,7 +1130,7 @@ def get_num_alive_jobs() -> int:
         return cursor.execute(
             'SELECT COUNT(*) '
             'FROM job_info '
-            'WHERE schedule_state IN (?, ?, ?)',
+            'WHERE schedule_state IN (?, ?, ?, ?)',
             (ManagedJobScheduleState.ALIVE_WAITING.value,
              ManagedJobScheduleState.LAUNCHING.value,
              ManagedJobScheduleState.ALIVE.value,
@@ -1141,38 +1141,32 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority (lowest numerical value) WAITING or
-    ALIVE_WAITING job, provided it's priority is less than or equal to any
+    ALIVE_WAITING job, provided its priority value is less than or equal to any
     currently LAUNCHING or ALIVE_BACKOFF job.
 
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
     """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        # Get the highest priority (numerically smallest) LAUNCHING or
-        # ALIVE_BACKOFF job's priority.
-        hp_launching_job_row = cursor.execute(
-            'SELECT priority FROM job_info '
-            'WHERE schedule_state IN (?, ?) '
-            'ORDER BY priority ASC, spot_job_id ASC LIMIT 1',
-            (ManagedJobScheduleState.LAUNCHING.value,
-             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()
-
-        # Max priority value (that is, lowest possible priority)
-        effective_max_priority_to_consider = 1000
-        if hp_launching_job_row:
-            effective_max_priority_to_consider = hp_launching_job_row[0]
-
-        # Select the highest-priority (lowest numerical value) WAITING or
+        # Get the highest-priority (lowest numerical value) WAITING or
         # ALIVE_WAITING job whose priority value is less than or equal to
-        # effective_min_priority_to_consider.
+        # the highest priority (numerically smallest) LAUNCHING or
+        # ALIVE_BACKOFF job's priority.
         waiting_job_row = cursor.execute(
             'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
-            'WHERE schedule_state IN (?, ?) AND priority <= ? '
+            'WHERE schedule_state IN (?, ?) '
+            'AND priority <= COALESCE('
+            '    (SELECT MIN(priority) '
+            '     FROM job_info '
+            '     WHERE schedule_state IN (?, ?)), '
+            '    1000'
+            ')'
             'ORDER BY priority ASC, spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
              ManagedJobScheduleState.ALIVE_WAITING.value,
-             effective_max_priority_to_consider)).fetchone()
+             ManagedJobScheduleState.LAUNCHING.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()
 
         if waiting_job_row is None:
             return None
