@@ -444,35 +444,37 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 def test_jobs_launch_and_logs(generic_cloud: str):
     # Use the context manager
-    with skypilot_config.override_skypilot_config(
-            smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
-        name = smoke_tests_utils.get_cluster_name()
-        task = sky.Task(run="echo start job; sleep 30; echo end job")
-        task.set_resources(
-            sky.Resources(infra=generic_cloud,
-                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
-        job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
-        assert handle is not None
-        # Check the job status from the dashboard
-        queue_request_id = (
-            smoke_tests_utils.get_dashboard_jobs_queue_request_id())
-        queue_response = (
-            smoke_tests_utils.get_response_from_request_id(queue_request_id))
-        job_exist = False
-        for job in queue_response:
-            if job['job_id'] == job_id:
-                job_exist = True
-                break
-        assert job_exist
-        try:
-            with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
-                sky.jobs.tail_logs(job_id=job_id, output_stream=f)
-                f.seek(0)
-                content = f.read()
-                assert content.count('start job') == 1
-                assert content.count('end job') == 1
-        finally:
-            sky.jobs.cancel(job_ids=[job_id])
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            task = sky.Task(run="echo start job; sleep 30; echo end job")
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+            assert handle is not None
+            # Check the job status from the dashboard
+            queue_request_id = (
+                smoke_tests_utils.get_dashboard_jobs_queue_request_id())
+            queue_response = (smoke_tests_utils.get_response_from_request_id(
+                queue_request_id))
+            job_exist = False
+            for job in queue_response:
+                if job['job_id'] == job_id:
+                    job_exist = True
+                    break
+            assert job_exist
+            try:
+                with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
+                    sky.jobs.tail_logs(job_id=job_id, output_stream=f)
+                    f.seek(0)
+                    content = f.read()
+                    assert content.count('start job') == 1
+                    assert content.count('end job') == 1
+            finally:
+                sky.jobs.cancel(job_ids=[job_id])
 
 
 # ---------- Testing YAML Specs ----------

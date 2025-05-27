@@ -376,6 +376,14 @@ def override_sky_config(
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
                                             endpoint)
+        # For test that use SDK, not subprocess, the python process already
+        # cache the lru_cache of get_server_url and created the sky_config
+        # before we override the environment, so we need to disabled the
+        # lru_cache of get_server_url and set SKY_API_SERVER_URL_ENV_VAR
+        # to make sure the new endpoint is used.
+        env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
+        # Clear the get_server_url cache before setting the new endpoint
+        server_common.get_server_url.cache_clear()
         echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
