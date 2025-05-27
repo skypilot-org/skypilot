@@ -23,7 +23,7 @@ import yaml
 
 def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
     """Strip path information from exec plugin commands in a kubeconfig file.
-    
+
     For Nebius kubeconfigs, also changes the --profile argument to 'sky'.
 
     Args:
