@@ -384,7 +384,6 @@ def override_sky_config(
         env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
         # Clear the get_server_url cache before setting the new endpoint
         server_common.get_server_url.cache_clear()
-        server_common.is_api_server_local.cache_clear()
         echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
@@ -643,7 +642,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              envs: Set[str] = None) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
         return cmd
     else:
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
