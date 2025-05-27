@@ -13,13 +13,15 @@ import {
   getCloudInfrastructure,
   getClustersAndJobsData,
 } from '@/data/connectors/infra';
+import dashboardCache from '@/lib/cache';
+import { CACHE_CONFIG, REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
 
 // Set the refresh interval to 1 minute for GPU data
-const GPU_REFRESH_INTERVAL = 60000;
-const NAME_TRUNCATE_LENGTH = 30;
+const GPU_REFRESH_INTERVAL = REFRESH_INTERVALS.GPU_REFRESH_INTERVAL;
+const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
@@ -425,59 +427,66 @@ export function GPUs() {
     setKubeLoading(true);
     setCloudLoading(true);
 
-    // Fetch clusters and jobs data once to share between both API calls
-    const clustersAndJobsData = await getClustersAndJobsData();
+    try {
+      // Fetch clusters and jobs data once using cache with specific TTL
+      const clustersAndJobsData = await dashboardCache.get(
+        getClustersAndJobsData);
 
-    // Fetch both data sources in parallel
-    const [kubeResult, cloudResult] = await Promise.allSettled([
-      getGPUs(clustersAndJobsData),
-      getCloudInfrastructure(clustersAndJobsData),
-    ]);
+      // Fetch both data sources in parallel using cache with specific TTLs
+      const [kubeResult, cloudResult] = await Promise.allSettled([
+        dashboardCache.get(getGPUs, [clustersAndJobsData]),
+        dashboardCache.get(getCloudInfrastructure, [clustersAndJobsData]),
+      ]);
 
-    // Handle Kubernetes data result
-    if (kubeResult.status === 'fulfilled') {
-      const {
-        allContextNames: fetchedAllKubeContextNames,
-        allGPUs: fetchedAllGPUs,
-        perContextGPUs: fetchedPerContextGPUs,
-        perNodeGPUs: fetchedPerNodeGPUs,
-        contextStats: fetchedContextStats,
-      } = kubeResult.value;
+      // Handle Kubernetes data result
+      if (kubeResult.status === 'fulfilled') {
+        const {
+          allContextNames: fetchedAllKubeContextNames,
+          allGPUs: fetchedAllGPUs,
+          perContextGPUs: fetchedPerContextGPUs,
+          perNodeGPUs: fetchedPerNodeGPUs,
+          contextStats: fetchedContextStats,
+        } = kubeResult.value;
 
-      setAllKubeContextNames(fetchedAllKubeContextNames || []);
-      setAllGPUs(fetchedAllGPUs || []);
-      setPerContextGPUs(fetchedPerContextGPUs || []);
-      setPerNodeGPUs(fetchedPerNodeGPUs || []);
-      setContextStats(fetchedContextStats || {});
-      setKubeDataLoaded(true);
-    } else {
-      console.error('Error fetching Kubernetes data:', kubeResult.reason);
-      setAllKubeContextNames([]);
-      setAllGPUs([]);
-      setPerContextGPUs([]);
-      setPerNodeGPUs([]);
-      setContextStats({});
+        setAllKubeContextNames(fetchedAllKubeContextNames || []);
+        setAllGPUs(fetchedAllGPUs || []);
+        setPerContextGPUs(fetchedPerContextGPUs || []);
+        setPerNodeGPUs(fetchedPerNodeGPUs || []);
+        setContextStats(fetchedContextStats || {});
+        setKubeDataLoaded(true);
+      } else {
+        console.error('Error fetching Kubernetes data:', kubeResult.reason);
+        setAllKubeContextNames([]);
+        setAllGPUs([]);
+        setPerContextGPUs([]);
+        setPerNodeGPUs([]);
+        setContextStats({});
+      }
+      setKubeLoading(false);
+
+      // Handle Cloud infrastructure data result
+      if (cloudResult.status === 'fulfilled') {
+        setCloudInfraData(cloudResult.value?.clouds || []);
+        setTotalClouds(cloudResult.value?.totalClouds || 0);
+        setEnabledClouds(cloudResult.value?.enabledClouds || 0);
+        setCloudDataLoaded(true);
+      } else {
+        console.error('Error fetching cloud infrastructure data:', cloudResult.reason);
+        setCloudInfraData([]);
+        setTotalClouds(0);
+        setEnabledClouds(0);
+      }
+      setCloudLoading(false);
+
+      if (isInitialLoad) {
+        setIsInitialLoad(false);
+      }
+    } catch (error) {
+      console.error('Error in fetchData:', error);
+      setKubeLoading(false);
+      setCloudLoading(false);
+      if (isInitialLoad) setIsInitialLoad(false);
     }
-    setKubeLoading(false);
-
-    // Handle Cloud infrastructure data result
-    if (cloudResult.status === 'fulfilled') {
-      setCloudInfraData(cloudResult.value?.clouds || []);
-      setTotalClouds(cloudResult.value?.totalClouds || 0);
-      setEnabledClouds(cloudResult.value?.enabledClouds || 0);
-      setCloudDataLoaded(true);
-    } else {
-      console.error(
-        'Error fetching cloud infrastructure data:',
-        cloudResult.reason
-      );
-      setCloudInfraData([]);
-      setTotalClouds(0);
-      setEnabledClouds(0);
-    }
-    setCloudLoading(false);
-
-    if (isInitialLoad) setIsInitialLoad(false);
   }, [isInitialLoad]);
 
   React.useEffect(() => {
@@ -505,6 +514,8 @@ export function GPUs() {
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
+      // For manual refresh, we want fast response with background updates
+      // Don't invalidate cache - let it serve cached data and refresh in background
       setIsInitialLoad(false);
       refreshDataRef.current();
     }
