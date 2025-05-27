@@ -260,6 +260,7 @@ def _list_accelerators(
                                         container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
+                total_accelerators_available[accelerator_name] = 0
 
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
