@@ -6,7 +6,7 @@
 
 **Drawback:** Helm upgrades cannot directly change the SkyPilot config for 
 the API server. Instead, we provide instructions for updating config 
-(see: https://skypilot.readthedocs.io/en/latest/reference/api-server/api-server-admin-deploy.html#optional-update-skypilot-configuration).
+(see: https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config).
 
 ### Why PVC?
 - **Fast:** Immediate reflection of config changes

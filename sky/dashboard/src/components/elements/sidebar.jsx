@@ -21,6 +21,7 @@ import {
   UserCircleIcon,
   UsersIcon,
 } from '@/components/elements/icons';
+import { Settings } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
@@ -304,6 +305,27 @@ export function TopBar() {
                 className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`}
               />
             </a>
+          </CustomTooltip>
+
+          <div className="border-l border-gray-200 h-6 mx-1"></div>
+
+          {/* Config Button */}
+          <CustomTooltip
+            content="Configuration"
+            className="text-sm text-muted-foreground"
+          >
+            <Link
+              href="/config"
+              className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
+                isActivePath('/config')
+                  ? 'text-blue-600 hover:bg-gray-100'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+              title="Configuration"
+              prefetch={false}
+            >
+              <Settings className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+            </Link>
           </CustomTooltip>
         </div>
 
