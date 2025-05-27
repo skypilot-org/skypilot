@@ -382,7 +382,7 @@ def override_sky_config(
         # lru_cache of get_server_url and set SKY_API_SERVER_URL_ENV_VAR
         # to make sure the new endpoint is used.
         env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
-        # Clear the get_server_url cache before setting the new endpoint
+        # Clear the get_server_url cache
         server_common.get_server_url.cache_clear()
         echo(
             f'Overriding API server endpoint: '
