@@ -403,14 +403,14 @@ Examples:
 
       When creating a node group on the Nebius console, attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
 
-      * Ensure "Auto mount" is enabled.
+      * Ensure ``Auto mount`` is enabled.
       * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
 
       .. image:: ../../images/screenshots/nebius/nebius-k8s-attach-fs.png
         :width: 50%
         :align: center
 
-      With this, Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
+      Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
 
       **Per-task configuration:**
 
