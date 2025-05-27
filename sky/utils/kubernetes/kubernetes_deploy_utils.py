@@ -26,6 +26,48 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
 
+def check_ssh_cluster_dependencies(
+        raise_error: bool = True) -> Optional[List[str]]:
+    """Checks if the dependencies for ssh cluster are installed.
+
+    Args:
+        raise_error: set to true when the dependency needs to be present.
+            set to false for `sky check`, where reason strings are compiled
+            at the end.
+
+    Returns: the reasons list if there are missing dependencies.
+    """
+    # error message
+    jq_message = ('`jq` is required to setup ssh cluster.')
+
+    # save
+    reasons = []
+    required_binaries = []
+
+    # Ensure jq is installed
+    try:
+        subprocess.run(['jq', '--version'],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        required_binaries.append('jq')
+        reasons.append(jq_message)
+
+    if required_binaries:
+        reasons.extend([
+            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+            f'  $ sudo apt install {" ".join(required_binaries)}',
+            'On MacOS, install with: ',
+            f'  $ brew install {" ".join(required_binaries)}',
+        ])
+        if raise_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('\n'.join(reasons))
+        return reasons
+    return None
+
+
 def deploy_ssh_cluster(cleanup: bool = False,
                        infra: Optional[str] = None,
                        kubeconfig_path: Optional[str] = None):
@@ -41,6 +83,8 @@ def deploy_ssh_cluster(cleanup: bool = False,
         kubeconfig_path: Path to save the Kubernetes configuration file.
             If None, the default ~/.kube/config will be used.
     """
+    check_ssh_cluster_dependencies()
+
     # Prepare command to call deploy_remote_cluster.py script
     # TODO(romilb): We should move this to a native python method/class call
     #  instead of invoking a script with subprocess.
@@ -81,9 +125,9 @@ def deploy_ssh_cluster(cleanup: bool = False,
             cmd=deploy_command,
             log_path=log_path,
             require_outputs=True,
-            stream_logs=False,  # TODO: Fixme to False after we fix the logging
+            stream_logs=False,
             line_processor=log_utils.SkySSHUpLineProcessor(log_path=log_path,
-                                                           is_local=True),
+                                                           is_local=False),
             cwd=cwd,
             env=env)
 
@@ -91,9 +135,9 @@ def deploy_ssh_cluster(cleanup: bool = False,
         success = True
     else:
         with ux_utils.print_exception_no_traceback():
-            log_hint = ux_utils.log_path_hint(log_path, is_local=True)
-            raise RuntimeError('Failed to deploy SkyPilot on SSH targets. '
-                               f'Full log: {log_hint}'
+            log_hint = ux_utils.log_path_hint(log_path, is_local=False)
+            raise RuntimeError('Failed to deploy SkyPilot on some Node Pools. '
+                               f'{log_hint}'
                                f'\nError: {stderr}')
 
     if success:

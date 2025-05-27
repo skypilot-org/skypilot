@@ -408,3 +408,7 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
+
+# Experimental - may be deprecated in the future without notice.
+SKYPILOT_API_SERVER_DB_URL_ENV_VAR: str = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_DB_URL')

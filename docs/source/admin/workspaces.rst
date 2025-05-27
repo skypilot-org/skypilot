@@ -13,8 +13,11 @@ Example use cases:
 - **Resource Tracking**: Track resource usage by team or project.
 
 
-Configuration
--------------
+Defining workspaces
+-------------------
+
+Defining workspaces in configuration file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Workspaces are defined in the :ref:`SkyPilot config file <config-yaml>` of API server, i.e., ``~/.sky/config.yaml`` on the API server host.
 
@@ -53,13 +56,25 @@ The above is achieved by configuring the following section in the config file:
         default: {}
 
         <workspace name>:
-           <infra name>:  # aws, gcp, ...; ssh; k8s
-             disabled: false  # Disable an infra provider for this workspace (default: false).
+           <infra name>:  # aws, gcp, ...; ssh; kubernetes
+             disabled: false  # Disable an infra for this workspace (default: false).
 
-           # Currently, 'gcp' supports an additional field:
+           # Certain infra providers support additional fields:
+           ssh:
+             disabled: false
+             allowed_node_pools:
+               - node-pool-1
+
+           kubernetes:
+             disabled: false
+             allowed_contexts:
+               - node-pool-1
+               - node-pool-2
+
            gcp:
              disabled: false
              project_id: GCP project ID
+
 
 To apply the configuration, follow the following steps:
 
@@ -89,6 +104,27 @@ To apply the configuration, follow the following steps:
       in the :ref:`SkyPilot config file <config-yaml>`, ``~/.sky/config.yaml``.
       The API server will automatically reload the configuration to apply the
       changes.
+
+Defining workspaces in UI
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Equivalently, you can also define workspaces in the UI.
+
+The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all configured workspaces.
+
+.. image:: ../images/workspaces/overview.png
+   :alt: SkyPilot dashboard workspaces tab
+
+This page shows all workspaces, and for each workspace its current clusters/jobs usage information and enabled infra choices.
+
+To create a new workspace, click on the **Create New Workspace** button. Users can edit the workspace's definition in the UI.
+
+To view or edit a workspace's definition, click on a workspace's **Edit** button.
+
+.. image:: ../images/workspaces/edit.png
+   :alt: SkyPilot dashboard workspaces edit
+
+
 
 Setting the active workspace
 ----------------------------
@@ -129,22 +165,22 @@ All SkyPilot CLI or API calls with ``/monorepo/team-b`` as the PWD will use the 
 
 For team-c, since it has no workspace set, all CLI or API calls there will use the ``default`` workspace.
 
-Viewing workspaces in dashboard
-------------------------------------
 
-The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all configured workspaces.
+.. tip::
 
-.. image:: ../images/workspaces/overview.png
-   :alt: SkyPilot dashboard workspaces tab
+   You can also set the workspace in the CLI using ``--config active_workspace=<workspace>``:
 
-This page shows all workspaces, and for each workspace its current clusters/jobs usage information and enabled infra choices.
+   .. code-block:: bash
 
-To view a workspace's definition, click on a workspace's **Details** button.
+      sky launch --config active_workspace=team-a ...
 
-.. image:: ../images/workspaces/details.png
-   :alt: SkyPilot dashboard workspaces details
+   See also :ref:`config-sources-and-overrides` for various ways to set configuration.
 
-To view all workspaces' definitions (i.e., the one defined at the API server), click on **View All Configs**.
+
+Workspaces in UI
+----------------
+
+Workspaces are shown in the **Workspaces** page in ``sky dashboard``.
 
 In the **Clusters** and **Jobs** pages, all compute resources are tagged with the
 workspace they belong to. Users can filter the view by workspace. Example:

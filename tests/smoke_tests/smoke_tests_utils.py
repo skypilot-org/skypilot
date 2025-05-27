@@ -360,6 +360,11 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 def override_sky_config(
     test: Test, env_dict: Dict[str, str]
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+    if is_postgres_backend_test():
+        env_dict[
+            constants.
+            SKYPILOT_API_SERVER_DB_URL_ENV_VAR] = 'postgresql://postgres@localhost/skypilot'
+
     override_sky_config_dict = skypilot_config.config_utils.Config()
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
@@ -689,6 +694,10 @@ def is_remote_server_test() -> bool:
 
 def pytest_controller_cloud() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def is_postgres_backend_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
 
 
 def override_env_config(config: Dict[str, str]):

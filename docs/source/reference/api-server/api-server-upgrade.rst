@@ -64,19 +64,25 @@ Upgrade the API server:
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
+
 Optionally, you can watch the upgrade progress with:
 
 .. code-block:: console
 
     $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
-    NAME                                       READY   STATUS     RESTARTS   AGE
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2   0          7s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2   0          24s
+    NAME                                       READY   STATUS            RESTARTS   AGE
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2          0          7s
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2          0          24s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     PodInitializing   0          26s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
     skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
 
 The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. If the API server was cordoned previously, the cordon will be removed automatically after the upgrade.
+
+.. note::
+
+    ``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, see :ref:`here <update-sky-config>`.
+
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
