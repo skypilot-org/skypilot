@@ -3166,7 +3166,7 @@ def format_kubeconfig_exec_auth(config: Any,
             elif executable != current_command:
                 exec_info['command'] = executable
                 updated = True
-            
+
             # Handle Nebius kubeconfigs: change --profile to 'sky'
             if executable == 'nebius':
                 args = exec_info.get('args', [])
