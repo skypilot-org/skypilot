@@ -1,4 +1,4 @@
-name: pypi-publish-nightly
+name: nightly-build
 on:
   schedule:
     - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
