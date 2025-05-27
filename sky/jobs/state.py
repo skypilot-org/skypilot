@@ -484,7 +484,7 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
 
 def set_backoff_pending(job_id: int, task_id: int):
     """Set the task to PENDING state if it is in backoff.
-    
+
     This should only be used to transition from STARTING or RECOVERING back to
     PENDING.
     """
@@ -508,7 +508,7 @@ def set_backoff_pending(job_id: int, task_id: int):
 
 def set_restarting(job_id: int, task_id: int, recovering: bool):
     """Set the task back to STARTING or RECOVERING from PENDING.
-    
+
     This should not be used for the initial transition from PENDING to STARTING.
     In that case, use set_starting instead. This function should only be used
     after using set_backoff_pending to transition back to PENDING during
