@@ -45,6 +45,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import { CACHE_CONFIG } from '@/lib/config';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -199,11 +201,11 @@ export function ManagedJobs() {
     const fetchFilterData = async () => {
       try {
         // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await getWorkspaces();
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await getManagedJobs();
+        const jobsResponse = await dashboardCache.get(getManagedJobs);
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(
@@ -225,6 +227,11 @@ export function ManagedJobs() {
   }, []);
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getManagedJobs);
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getWorkspaces);
+    
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -359,8 +366,8 @@ export function ManagedJobsTable({
     try {
       // Fetch both jobs and clusters data in parallel
       const [jobsResponse, clustersData] = await Promise.all([
-        getManagedJobs(),
-        getClusters(),
+        dashboardCache.get(getManagedJobs),
+        dashboardCache.get(getClusters),
       ]);
 
       const { jobs, controllerStopped } = jobsResponse;

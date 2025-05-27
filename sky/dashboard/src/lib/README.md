@@ -35,11 +35,18 @@ const data = await dashboardCache.get(
 
 ### Configuration
 
-The cache system uses configurable TTL values defined in `config.js`:
+The cache system supports configurable TTL values defined in `config.js`. Currently, all cache entries use the `DEFAULT_TTL` of 2 minutes, but the system can be extended to support different TTLs for different data types if needed.
 
-- `CLUSTERS_AND_JOBS_TTL`: 2 minutes - For cluster and job data
-- `GPU_DATA_TTL`: 2 minutes - For GPU data from k8s and ssh node pools
-- `CLOUD_INFRA_TTL`: 2 minutes - For cloud infrastructure data
+```javascript
+// Current configuration
+export const CACHE_CONFIG = {
+  DEFAULT_TTL: 2 * 60 * 1000, // 2 minutes
+};
+
+// Example of how different TTLs could be configured:
+// CLUSTERS_TTL: 5 * 60 * 1000, // 5 minutes for cluster data
+// JOBS_TTL: 1 * 60 * 1000,     // 1 minute for job data
+```
 
 ### Cache Behavior
 
@@ -55,6 +62,73 @@ background refresh is triggered to pull fresh data
 // Invalidate specific cache entries (useful for manual refresh)
 dashboardCache.invalidate(getClustersAndJobsData);
 dashboardCache.invalidate(getGPUs, [clustersAndJobsData]);
+
+// Invalidate all cache entries for a function (regardless of arguments)
+dashboardCache.invalidateFunction(getGPUs); // Removes all getGPUs entries
+dashboardCache.invalidateFunction(getClusters); // Removes all getClusters entries
+
+// Clear all cache entries
+dashboardCache.clear();
+
+// Get cache statistics for debugging
+const stats = dashboardCache.getStats();
+console.log('Cache size:', stats.cacheSize);
+console.log('Background jobs:', stats.backgroundJobs);
+console.log('Cache keys:', stats.keys);
+
+// Get detailed cache information for debugging
+const detailedStats = dashboardCache.getDetailedStats();
+console.log('Detailed cache stats:', detailedStats);
+
+// Enable debug logging to track cache behavior
+dashboardCache.setDebugMode(true);
+// Disable debug logging
+dashboardCache.setDebugMode(false);
+```
+
+### Cache TTL Refresh on Access
+
+By default, the cache refreshes the TTL (Time To Live) when data is accessed, preventing cache expiration during frequent page switching:
+
+```javascript
+// Default behavior - TTL is refreshed on access
+const data = await dashboardCache.get(fetchFunction);
+
+// Disable TTL refresh on access (data will expire based on original fetch time)
+const data = await dashboardCache.get(fetchFunction, [], { refreshOnAccess: false });
+```
+
+### Refresh Button Implementation
+
+For refresh buttons that should pull completely fresh data:
+
+```javascript
+// Best practice: Use invalidate() for functions without arguments (more efficient)
+// and invalidateFunction() for functions that can have multiple cache entries
+const handleRefresh = () => {
+  // Functions without arguments - use invalidate()
+  dashboardCache.invalidate(getClusters);
+  dashboardCache.invalidate(getManagedJobs);
+  dashboardCache.invalidate(getWorkspaces);
+  
+  // Functions with arguments - use invalidateFunction()
+  dashboardCache.invalidateFunction(getGPUs);
+  dashboardCache.invalidateFunction(getCloudInfrastructure);
+  
+  if (refreshDataRef.current) {
+    refreshDataRef.current();
+  }
+};
+
+// Alternative: Invalidate specific cache entries (when you know the exact arguments)
+const handleRefreshSpecific = () => {
+  dashboardCache.invalidate(getClusters);
+  dashboardCache.invalidate(getGPUs, [specificClusters, specificJobs]);
+  
+  if (refreshDataRef.current) {
+    refreshDataRef.current();
+  }
+};
 ```
 
 ## Implementation Details
@@ -113,4 +187,5 @@ const handleRefresh = () => {
 - **Reduced API Calls**: Cached responses reduce server load
 - **Faster Page Loads**: Subsequent visits load instantly from cache
 - **Background Updates**: Data stays fresh without blocking user interactions
-- **Graceful Degradation**: Stale data served if fresh fetch fails 
+- **Graceful Degradation**: Stale data served if fresh fetch fails
+- **Smart Refresh**: Manual refresh invalidates cache for truly fresh data 

@@ -8,24 +8,8 @@ import {
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 
-// Helper function to fetch clusters and jobs data
-export async function getClustersAndJobsData() {
-  const [clustersData, jobsData] = await Promise.all([
-    getClusters(),
-    getManagedJobs(),
-  ]);
-
-  return {
-    clusters: clustersData || [],
-    jobs: jobsData?.jobs || [],
-  };
-}
-
-export async function getCloudInfrastructure(clustersAndJobsData) {
+export async function getCloudInfrastructure(clusters, jobs) {
   try {
-    const clusters = clustersAndJobsData.clusters;
-    const jobs = clustersAndJobsData.jobs;
-
     // Get enabled clouds
     let enabledCloudsList = [];
     try {
@@ -117,7 +101,11 @@ export async function getCloudInfrastructure(clustersAndJobsData) {
   }
 }
 
-export async function getGPUs(clustersAndJobsData) {
+export async function getGPUs(clusters, jobs) {
+  const clustersAndJobsData = {
+    clusters: clusters || [],
+    jobs: jobs || [],
+  };
   const gpus = await getKubernetesGPUs(clustersAndJobsData);
   return gpus;
 }

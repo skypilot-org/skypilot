@@ -11,8 +11,9 @@ import { useMobile } from '@/hooks/useMobile';
 import {
   getGPUs,
   getCloudInfrastructure,
-  getClustersAndJobsData,
 } from '@/data/connectors/infra';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import { CACHE_CONFIG, REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
@@ -422,87 +423,95 @@ export function GPUs() {
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
-  const fetchData = React.useCallback(async () => {
-    // Start loading for both data sources
-    setKubeLoading(true);
-    setCloudLoading(true);
+  // Create a single stable wrapper function for all infra data
+  const getInfraData = React.useCallback(async () => {
+    const [clustersData, jobsData] = await Promise.all([
+      dashboardCache.get(getClusters),
+      dashboardCache.get(getManagedJobs),
+    ]);
+    const clusters = clustersData || [];
+    const jobs = jobsData?.jobs || [];
+    
+    // Fetch both GPU and cloud data together
+    const [gpuData, cloudData] = await Promise.all([
+      getGPUs(clusters, jobs),
+      getCloudInfrastructure(clusters, jobs),
+    ]);
+    
+    return {
+      gpuData,
+      cloudData,
+    };
+  }, []);
+
+  const fetchData = React.useCallback(async (options = { showLoadingIndicators: true }) => {
+    if (options.showLoadingIndicators) {
+      setKubeLoading(true);
+      setCloudLoading(true);
+    }
 
     try {
-      // Fetch clusters and jobs data once using cache with specific TTL
-      const clustersAndJobsData = await dashboardCache.get(
-        getClustersAndJobsData);
+      // Use a single cache entry for all infra data
+      const infraData = await dashboardCache.get(getInfraData);
+      
+      const { gpuData, cloudData } = infraData;
 
-      // Fetch both data sources in parallel using cache with specific TTLs
-      const [kubeResult, cloudResult] = await Promise.allSettled([
-        dashboardCache.get(getGPUs, [clustersAndJobsData]),
-        dashboardCache.get(getCloudInfrastructure, [clustersAndJobsData]),
-      ]);
+      // Set GPU data
+      const {
+        allContextNames: fetchedAllKubeContextNames,
+        allGPUs: fetchedAllGPUs,
+        perContextGPUs: fetchedPerContextGPUs,
+        perNodeGPUs: fetchedPerNodeGPUs,
+        contextStats: fetchedContextStats,
+      } = gpuData;
 
-      // Handle Kubernetes data result
-      if (kubeResult.status === 'fulfilled') {
-        const {
-          allContextNames: fetchedAllKubeContextNames,
-          allGPUs: fetchedAllGPUs,
-          perContextGPUs: fetchedPerContextGPUs,
-          perNodeGPUs: fetchedPerNodeGPUs,
-          contextStats: fetchedContextStats,
-        } = kubeResult.value;
+      setAllKubeContextNames(fetchedAllKubeContextNames || []);
+      setAllGPUs(fetchedAllGPUs || []);
+      setPerContextGPUs(fetchedPerContextGPUs || []);
+      setPerNodeGPUs(fetchedPerNodeGPUs || []);
+      setContextStats(fetchedContextStats || {});
+      setKubeDataLoaded(true);
 
-        setAllKubeContextNames(fetchedAllKubeContextNames || []);
-        setAllGPUs(fetchedAllGPUs || []);
-        setPerContextGPUs(fetchedPerContextGPUs || []);
-        setPerNodeGPUs(fetchedPerNodeGPUs || []);
-        setContextStats(fetchedContextStats || {});
-        setKubeDataLoaded(true);
-      } else {
-        console.error('Error fetching Kubernetes data:', kubeResult.reason);
-        setAllKubeContextNames([]);
-        setAllGPUs([]);
-        setPerContextGPUs([]);
-        setPerNodeGPUs([]);
-        setContextStats({});
-      }
-      setKubeLoading(false);
+      // Set cloud data
+      setCloudInfraData(cloudData?.clouds || []);
+      setTotalClouds(cloudData?.totalClouds || 0);
+      setEnabledClouds(cloudData?.enabledClouds || 0);
+      setCloudDataLoaded(true);
 
-      // Handle Cloud infrastructure data result
-      if (cloudResult.status === 'fulfilled') {
-        setCloudInfraData(cloudResult.value?.clouds || []);
-        setTotalClouds(cloudResult.value?.totalClouds || 0);
-        setEnabledClouds(cloudResult.value?.enabledClouds || 0);
-        setCloudDataLoaded(true);
-      } else {
-        console.error('Error fetching cloud infrastructure data:', cloudResult.reason);
-        setCloudInfraData([]);
-        setTotalClouds(0);
-        setEnabledClouds(0);
-      }
-      setCloudLoading(false);
-
-      if (isInitialLoad) {
-        setIsInitialLoad(false);
-      }
     } catch (error) {
       console.error('Error in fetchData:', error);
+      // Potentially set error states for UI more explicitly
+    } finally {
+      // Always clear loading states, regardless of showLoadingIndicators
       setKubeLoading(false);
       setCloudLoading(false);
-      if (isInitialLoad) setIsInitialLoad(false);
+      
+      // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
+      if (isInitialLoad && options.showLoadingIndicators) {
+        setIsInitialLoad(false);
+      }
     }
-  }, [isInitialLoad]);
+  }, [isInitialLoad, getInfraData]);
 
-  React.useEffect(() => {
-    if (refreshDataRef) {
-      refreshDataRef.current = fetchData;
-    }
-  }, [refreshDataRef, fetchData]);
+  // Effect for assigning fetchData to refreshDataRef, stable after isInitialLoad becomes false.
+  useEffect(() => {
+    refreshDataRef.current = fetchData;
+  }, [fetchData]);
 
+  // Effect for initial load.
+  useEffect(() => {
+    // This calls the fetchData version defined when isInitialLoad is true.
+    // That fetchData will then set isInitialLoad to false within its finally block.
+    fetchData({ showLoadingIndicators: true });
+  }, []); // Empty dependency array ensures this runs once on mount.
+
+  // Effect for interval refresh.
   useEffect(() => {
     let isCurrent = true;
-
-    fetchData();
-
     const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
+      if (isCurrent && refreshDataRef.current) {
+        // Calls the latest fetchData from the ref, with showLoadingIndicators: false
+        refreshDataRef.current({ showLoadingIndicators: false });
       }
     }, GPU_REFRESH_INTERVAL);
 
@@ -510,14 +519,19 @@ export function GPUs() {
       isCurrent = false;
       clearInterval(interval);
     };
-  }, [fetchData]);
+  }, [GPU_REFRESH_INTERVAL]); // Depends only on GPU_REFRESH_INTERVAL.
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
-      // For manual refresh, we want fast response with background updates
-      // Don't invalidate cache - let it serve cached data and refresh in background
-      setIsInitialLoad(false);
-      refreshDataRef.current();
+      // Invalidate the base cache entries that are shared between pages
+      dashboardCache.invalidate(getClusters);
+      dashboardCache.invalidate(getManagedJobs);
+      
+      // Invalidate the stable cache keys for infra data
+      dashboardCache.invalidate(getInfraData);
+      
+      // Manual refresh should show loading indicators.
+      refreshDataRef.current({ showLoadingIndicators: true });
     }
   };
 

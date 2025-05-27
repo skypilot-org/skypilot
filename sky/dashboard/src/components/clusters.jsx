@@ -42,6 +42,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import { CACHE_CONFIG } from '@/lib/config';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -68,11 +70,11 @@ export function Clusters() {
     const fetchFilterData = async () => {
       try {
         // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await getWorkspaces();
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all clusters to see if 'default' workspace is implicitly used
-        const allClusters = await getClusters();
+        const allClusters = await dashboardCache.get(getClusters);
         const uniqueClusterWorkspaces = [
           ...new Set(
             allClusters
@@ -105,6 +107,10 @@ export function Clusters() {
   }, []);
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getWorkspaces);
+    
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -210,7 +216,7 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    const initialData = await getClusters();
+    const initialData = await dashboardCache.get(getClusters);
     setData(initialData);
     setLoading(false);
     setLocalLoading(false);
