@@ -87,6 +87,17 @@ spec:
           # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
           ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
           {{- end }}
+          # Nebius credentials mounting
+          # Since the ~/.nebius directory is also used by the Nebius CLI, we mount the credentials to /root/.nebius_credentials
+          # and create a symlink to /root/.nebius. This cannot be done in the init container because the Nebius CLI needs read-write access to ~/.nebius.
+          {{- if .Values.nebiusCredentials.enabled }}
+          echo "Setting up Nebius credentials..."
+          mkdir -p /root/.nebius
+          ln -sf /root/.nebius_credentials/credentials.json /root/.nebius/credentials.json
+          echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
+          # Create a Nebius profile for the nebius CLI to use as default
+          nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
+          {{- end }}
           {{- if .Values.apiService.sshKeySecret }}
           mkdir -p /root/.ssh
           echo "Linking ssh keys to /root/.ssh"
@@ -167,9 +178,9 @@ spec:
           readOnly: true
         {{- end }}
         {{- if .Values.nebiusCredentials.enabled }}
-        - name: nebius-config
-          mountPath: /root/.nebius
-          readOnly: true
+        - name: nebius-credentials
+          mountPath: /root/.nebius_credentials/credentials.json
+          subPath: credentials.json
         {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
@@ -288,27 +299,6 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
-      {{- if .Values.nebiusCredentials.enabled }}
-      - name: create-nebius-credentials
-        {{- with .Values.securityContext }}
-        securityContext:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        image: {{ .Values.apiService.image }}
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          echo "Setting up Nebius credentials..."
-          mkdir -p /root/.nebius
-          cp /root/.nebius_cloud/credentials.json /root/.nebius/credentials.json
-          echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
-        volumeMounts:
-        - name: nebius-config
-          mountPath: /root/.nebius
-        - name: nebius-credentials
-          mountPath: /root/.nebius_cloud/credentials.json
-          subPath: credentials.json
-      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -338,8 +328,6 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- if .Values.nebiusCredentials.enabled }}
-      - name: nebius-config
-        emptyDir: {}
       - name: nebius-credentials
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
