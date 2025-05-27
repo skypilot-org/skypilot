@@ -31,13 +31,29 @@ const SidebarContext = createContext(null);
 
 export function SidebarProvider({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [userEmail, setUserEmail] = useState(null);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
   };
 
+  useEffect(() => {
+    fetch(`${ENDPOINT}/api/health`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user && data.user.name) {
+          setUserEmail(data.user.name);
+        }
+      })
+      .catch((error) => {
+        console.error('Error fetching user data:', error);
+      });
+  }, []);
+
   return (
-    <SidebarContext.Provider value={{ isSidebarOpen, toggleSidebar }}>
+    <SidebarContext.Provider
+      value={{ isSidebarOpen, toggleSidebar, userEmail }}
+    >
       {children}
     </SidebarContext.Provider>
   );
@@ -104,22 +120,9 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
-  const [userEmail, setUserEmail] = useState(null);
+  const { userEmail } = useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    fetch(`${ENDPOINT}/api/health`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.user && data.user.name) {
-          setUserEmail(data.user.name);
-        }
-      })
-      .catch((error) => {
-        console.error('Error fetching user data:', error);
-      });
-  }, []);
 
   useEffect(() => {
     function handleClickOutside(event) {
