@@ -280,9 +280,9 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
         'user': user.id if user is not None else None,
         'cookies': request.cookies,
     }
-    # Use base64 encoding to avoid having to escape anything in the HTML.
+    
     json_bytes = json.dumps(token_data).encode('utf-8')
-    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+    full_token = base64.b64encode(json_bytes).decode('utf-8')
 
     html_dir = pathlib.Path(__file__).parent / 'html'
     token_page_path = html_dir / 'token_page.html'
@@ -296,7 +296,7 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
     user_info_string = f'Logged in as {user.name}' if user is not None else ''
     html_content = html_content.replace(
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
-        base64_str).replace('USER_PLACEHOLDER', user_info_string)
+        full_token).replace('USER_PLACEHOLDER', user_info_string)
 
     return fastapi.responses.HTMLResponse(
         content=html_content,

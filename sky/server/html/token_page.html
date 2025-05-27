@@ -88,12 +88,34 @@
             cursor: pointer;
             transition: background-color 0.3s;
             margin-top: 10px;
+            margin-right: 8px;
         }
         .copy-button:hover {
             background-color: #287ae6;
         }
         .copy-button:active {
             background-color: #1b66c9;
+        }
+        .download-button {
+            background-color: #34a853;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 10px;
+        }
+        .download-button:hover {
+            background-color: #2d8f47;
+        }
+        .download-button:active {
+            background-color: #1e7e34;
+        }
+        .button-container {
+            margin-top: 16px;
         }
         .footer-text {
             font-size: 12px;
@@ -117,9 +139,21 @@
         <h1>Sign in to SkyPilot CLI</h1>
         <p class="user-identifier">USER_PLACEHOLDER</p>
         <p>You are seeing this page because a SkyPilot command requires authentication.</p>
-        <p>Please copy the following token and paste it into your SkyPilot CLI prompt:</p>
+        <p>Please copy the following token and paste it into your SkyPilot CLI prompt, or download it as a file:</p>
         <div id="token-box" class="code-block">SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER</div>
-        <button id="copy-btn" class="copy-button">Copy Token</button>
+        <div class="button-container">
+            <button id="copy-btn" class="copy-button">Copy Token</button>
+            <button id="download-btn" class="download-button">Download Token</button>
+        </div>
+        
+        <details style="margin-top: 20px;">
+            <summary style="cursor: pointer; color: #5f6368; font-size: 12px;">Show full token (for older CLI versions)</summary>
+            <div id="full-token-box" class="code-block" style="margin-top: 10px;">SKYPILOT_API_SERVER_FULL_TOKEN_PLACEHOLDER</div>
+            <div class="button-container">
+                <button id="copy-full-btn" class="copy-button">Copy Full Token</button>
+                <button id="download-full-btn" class="download-button">Download Full Token</button>
+            </div>
+        </details>
 
         <p class="footer-text">You can close this tab after copying the token.</p>
     </div>
@@ -127,9 +161,12 @@
     <script>
         const tokenBox = document.getElementById('token-box');
         const copyBtn  = document.getElementById('copy-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const fullTokenBox = document.getElementById('full-token-box');
+        const copyFullBtn = document.getElementById('copy-full-btn');
+        const downloadFullBtn = document.getElementById('download-full-btn');
 
         function selectToken() {
-            // For <pre> or <div>, create a range to select its content
             const range = document.createRange();
             range.selectNodeContents(tokenBox);
             const sel = window.getSelection();
@@ -137,21 +174,73 @@
             sel.addRange(range);
         }
 
-        // Optional: Select the token when the page loads or when token box is clicked
-        tokenBox.addEventListener('click', selectToken);
-        window.addEventListener('load', selectToken);
+        function selectFullToken() {
+            const range = document.createRange();
+            range.selectNodeContents(fullTokenBox);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
 
+        function downloadToken(tokenElement, filename) {
+            const tokenText = tokenElement.textContent;
+            const blob = new Blob([tokenText], { type: 'text/plain' });
+            const downloadLink = document.createElement('a');
+            downloadLink.href = URL.createObjectURL(blob);
+            downloadLink.download = filename;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            URL.revokeObjectURL(downloadLink.href);
+        }
+
+        // Copy button
         copyBtn.addEventListener('click', () => {
-            selectToken(); // Select the text
+            selectToken();
             try {
                 document.execCommand('copy');
+                const originalText = copyBtn.textContent;
                 copyBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                }, 2000);
             } catch (err) {
-                copyBtn.textContent = 'Error!';
+                console.error('Failed to copy: ', err);
+            }
+        });
+
+        // Download button
+        downloadBtn.addEventListener('click', () => {
+            downloadToken(tokenBox, 'skypilot_token.txt');
+            const originalText = downloadBtn.textContent;
+            downloadBtn.textContent = 'Downloaded!';
+            setTimeout(() => {
+                downloadBtn.textContent = originalText;
+            }, 2000);
+        });
+
+        // Full token copy button
+        copyFullBtn.addEventListener('click', () => {
+            selectFullToken();
+            try {
+                document.execCommand('copy');
+                copyFullBtn.textContent = 'Copied!';
+            } catch (err) {
+                copyFullBtn.textContent = 'Error!';
                 console.error('Failed to copy text: ', err);
             }
             setTimeout(() => {
-                copyBtn.textContent = 'Copy Token';
+                copyFullBtn.textContent = 'Copy Full Token';
+            }, 2000);
+        });
+
+        // Full token download button
+        downloadFullBtn.addEventListener('click', () => {
+            downloadToken(fullTokenBox, 'skypilot_full_token.txt');
+            const originalText = downloadFullBtn.textContent;
+            downloadFullBtn.textContent = 'Downloaded!';
+            setTimeout(() => {
+                downloadFullBtn.textContent = originalText;
             }, 2000);
         });
     </script>
