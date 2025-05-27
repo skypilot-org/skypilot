@@ -2,16 +2,26 @@
 import os
 import threading
 
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import ux_utils
 
-NEBIUS_TENANT_ID_FILENAME = 'NEBIUS_TENANT_ID.txt'
-NEBIUS_IAM_TOKEN_FILENAME = 'NEBIUS_IAM_TOKEN.txt'
-NEBIUS_CREDENTIALS_FILENAME = 'credentials.json'
-NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
-NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
-NEBIUS_CREDENTIALS_PATH = '~/.nebius/' + NEBIUS_CREDENTIALS_FILENAME
+
+def tenant_id_path() -> str:
+    return skypilot_config.get_workspace_cloud('nebius').get(
+        'tenant_id_file_path', '~/.nebius/NEBIUS_TENANT_ID.txt')
+
+
+def iam_token_path() -> str:
+    return skypilot_config.get_workspace_cloud('nebius').get(
+        'iam_token_file_path', '~/.nebius/NEBIUS_IAM_TOKEN.txt')
+
+
+def credentials_path() -> str:
+    return skypilot_config.get_workspace_cloud('nebius').get(
+        'credentials_file_path', '~/.nebius/credentials.json')
+
 
 DEFAULT_REGION = 'eu-north1'
 
@@ -74,39 +84,35 @@ def vpc():
     return vpc_v1
 
 
-@annotations.lru_cache(scope='request')
 def get_iam_token():
     try:
-        with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
+        with open(os.path.expanduser(iam_token_path()),
                   encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
         return None
 
 
-@annotations.lru_cache(scope='request')
 def is_token_or_cred_file_exist():
-    return (os.path.exists(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH)) or
-            os.path.exists(os.path.expanduser(NEBIUS_CREDENTIALS_PATH)))
+    return (os.path.exists(os.path.expanduser(iam_token_path())) or
+            os.path.exists(os.path.expanduser(credentials_path())))
 
 
-@annotations.lru_cache(scope='request')
 def get_tenant_id():
     try:
-        with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
+        with open(os.path.expanduser(tenant_id_path()),
                   encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
         return None
 
 
-@annotations.lru_cache(scope='request')
 def sdk():
     token = get_iam_token()
     if token is not None:
         return nebius.sdk.SDK(credentials=token)
     return nebius.sdk.SDK(
-        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
+        credentials_file_name=os.path.expanduser(credentials_path()))
 
 
 def get_nebius_credentials(boto3_session):

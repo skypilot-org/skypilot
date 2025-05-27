@@ -1200,7 +1200,7 @@ def get_config_schema():
     # all clouds except gcp, kubernetes, ssh
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1262,6 +1262,25 @@ def get_config_schema():
                             'items': {
                                 'type': 'string',
                             },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'nebius': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'credentials_file_path': {
+                            'type': 'string',
+                        },
+                        'iam_token_file_path': {
+                            'type': 'string',
+                        },
+                        'tenant_id_file_path': {
+                            'type': 'string',
                         },
                         'disabled': {
                             'type': 'boolean'

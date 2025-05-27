@@ -14,11 +14,11 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
-_CREDENTIAL_FILES = [
+_CREDENTIAL_FILE_PATHS = [
     # credential files for Nebius
-    nebius.NEBIUS_TENANT_ID_FILENAME,
-    nebius.NEBIUS_IAM_TOKEN_FILENAME,
-    nebius.NEBIUS_CREDENTIALS_FILENAME
+    nebius.tenant_id_path(),
+    nebius.iam_token_path(),
+    nebius.credentials_path()
 ]
 
 _INDENT_PREFIX = '    '
@@ -296,20 +296,19 @@ class Nebius(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    @annotations.lru_cache(scope='request')
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
         token_cred_msg = (
             f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
-            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX} or generate  ~/.nebius/credentials.json \n')
+            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
         tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
         sdk = nebius.sdk()
@@ -357,8 +356,7 @@ class Nebius(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         credential_file_mounts = {
-            f'~/.nebius/{filename}': f'~/.nebius/{filename}'
-            for filename in _CREDENTIAL_FILES
+            filepath: filepath for filepath in _CREDENTIAL_FILE_PATHS
         }
         if nebius_profile_in_aws_cred_and_config():
             credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
@@ -378,3 +376,10 @@ class Nebius(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='nebius')
+
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        sdk = nebius.sdk()
+        profile_client = nebius.iam().ProfileServiceClient(sdk)
+        profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
+        return [[profile.service_account_profile.info.metadata.name]]
