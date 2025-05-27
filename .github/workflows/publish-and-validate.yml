@@ -47,7 +47,7 @@ jobs:
           pip install fastapi
 
           # Set up variables for package check
-          MAX_ATTEMPTS=5
+          MAX_ATTEMPTS=10
           ATTEMPT=1
 
           echo "Waiting for package ${{ inputs.package_name }} version ${{ inputs.expected_version }} to be available..."
