@@ -662,7 +662,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
 def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
     """Down the cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
