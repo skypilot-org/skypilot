@@ -127,6 +127,11 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         auth_user = _get_auth_user_header(request)
+
+        # Add user to database if auth_user is present
+        if auth_user is not None:
+            global_user_state.add_or_update_user(auth_user)
+
         body = await request.body()
         if auth_user and body:
             try:
@@ -137,10 +142,16 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.debug(f'Overriding user for {request.state.request_id}: '
                              f'{auth_user.name}, {auth_user.id}')
                 if 'env_vars' in original_json:
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
+                    if isinstance(original_json.get('env_vars'), dict):
+                        original_json['env_vars'][
+                            constants.USER_ID_ENV_VAR] = auth_user.id
+                        original_json['env_vars'][
+                            constants.USER_ENV_VAR] = auth_user.name
+                    else:
+                        logger.warning(
+                            f'"env_vars" in request body is not a dictionary '
+                            f'for request {request.state.request_id}. '
+                            'Skipping user info injection into body.')
                 request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
         return await call_next(request)
 
@@ -262,10 +273,7 @@ app.include_router(workspaces_rest.router,
 
 @app.get('/token')
 async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
-    # If we have auth info, save this user to the database.
     user = _get_auth_user_header(request)
-    if user is not None:
-        global_user_state.add_or_update_user(user)
 
     token_data = {
         'v': 1,  # Token version number, bump for backwards incompatible.
