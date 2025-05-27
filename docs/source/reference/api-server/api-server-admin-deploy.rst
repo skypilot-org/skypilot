@@ -80,6 +80,8 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
+The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>`.
+
 .. _sky-get-api-server-url:
 
 Step 2: Get the API server URL
@@ -191,16 +193,16 @@ Following tabs describe how to configure credentials for different clouds on the
 
             kubectl create secret generic kube-credentials \
               --namespace $NAMESPACE \
-              --from-file=config=~/.kube/config
+              --from-file=config=$HOME/.kube/config
 
 
         Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig for authentication:
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
@@ -216,6 +218,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
             Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
 
+            The specific cloud's credential for the exec-based authentication also needs to be configured. For example, to enable exec-based authentication for GKE, you also need to setup GCP credentials (see the GCP tab above).
+
         To use multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config. An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
 
         .. code-block:: yaml
@@ -228,7 +232,7 @@ Following tabs describe how to configure credentials for different clouds on the
               - context1
               - context2
 
-        Refer to :ref:`sky-api-server-config` for how to set the SkyPilot config in Helm chart values.
+        Refer to :ref:`config-yaml-kubernetes-allowed-contexts` for how to set the SkyPilot config in Helm chart values.
 
     .. tab-item:: AWS
         :sync: aws-creds-tab
@@ -250,9 +254,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
                 --namespace $NAMESPACE \
-                # keep the Helm chart values set in the previous step
                 --reuse-values \
                 --set awsCredentials.enabled=true
 
@@ -288,9 +292,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set gcpCredentials.enabled=true \
               --set gcpCredentials.projectId=YOUR_PROJECT_ID
@@ -353,9 +357,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set lambdaCredentials.enabled=true
 
@@ -389,9 +393,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set nebiusCredentials.enabled=true \
               --set nebiusCredentials.tenantId=YOUR_TENANT_ID
@@ -477,27 +481,11 @@ Refer to :ref:`sky-api-server-upgrade` for how to upgrade the API server.
 .. _update-sky-config:
 
 Optional: Update SkyPilot configuration
-----------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config:
+``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, go to http://<api-server-url>/dashboard/config
 
-1. Fetch the latest config from the API server:
-
-   .. code-block:: bash
-
-     POD_NAME=$(kubectl get pod -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
-     # Make sure the pod is running
-     kubectl get pod $POD_NAME -n $NAMESPACE | grep -q "Running" || exit 1
-     # Fetch the config
-     kubectl exec -it $POD_NAME -n $NAMESPACE -- cat /root/.sky/config.yaml > current-config.yaml
-
-2. Edit the configuration file ``current-config.yaml`` with your desired changes.
-3. Upload the updated config to the API server:
-
-   .. code-block:: bash
-
-     kubectl cp current-config.yaml $POD_NAME:/root/.sky/config.yaml -n $NAMESPACE
-
+.. image:: ../../images/workspaces/config.png
 
 
 Uninstall
@@ -609,9 +597,9 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
     EOF
 
     # Install the API server with the config file
+    # --reuse-values keeps the Helm chart values set in the previous step
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
-      # Reuse the values set in the previous steps, if any
       --reuse-values \
       --set-file apiService.config=config.yaml
 

@@ -26,7 +26,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version extracted: $VERSION"
 
-  publish-to-pypi:
+  build-package:
     needs: extract-version
     if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'test_releases/')
     runs-on: ubuntu-latest
@@ -73,47 +73,32 @@ jobs:
           --outdir dist/
           .
 
-      - name: Publish distribution to Test PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
         with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
+          name: python-package-distributions
+          path: dist/
 
-      - name: Validate published package
-        run: |
-          # Wait a moment for package to be available
-          sleep 30
-          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
-          pip install fastapi
-          # Install skypilot from Test PyPI with fallback to PyPI for dependencies
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
-          # Verify installation
-          sky -v
-          sky -c
-          sky check
-          sky show-gpus
-          sky dashboard || (echo "Launch dashboard failed" && exit 1)
-          # Verify dashboard endpoint is accessible
-          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || (echo "Dashboard endpoint is not accessible" && exit 1)
-          # Verify version
-          EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
-          INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
-          echo "Expected version: $EXPECTED_VERSION, Installed version: $INSTALLED_VERSION"
-          if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "Version mismatch!"
-            exit 1
-          fi
-          echo "Version verified successfully!"
+  publish-and-validate-test-pypi:
+    needs: [extract-version, build-package]
+    uses: ./.github/workflows/publish-and-validate.yml
+    with:
+      package_name: skypilot
+      expected_version: ${{ needs.extract-version.outputs.version }}
+      repository_type: 'test-pypi'
+    secrets: inherit
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
+  publish-and-validate-pypi:
+    needs: [publish-and-validate-test-pypi]
+    uses: ./.github/workflows/publish-and-validate.yml
+    with:
+      package_name: skypilot
+      expected_version: ${{ needs.extract-version.outputs.version }}
+      repository_type: 'pypi'
+    secrets: inherit
 
   trigger-docker-build:
-    needs: [extract-version, publish-to-pypi]
+    needs: [extract-version, publish-and-validate-pypi]
     uses: ./.github/workflows/docker-build.yaml
     with:
       package_name: 'skypilot'
@@ -121,7 +106,7 @@ jobs:
     secrets: inherit
 
   publish-helm:
-    needs: [extract-version, publish-to-pypi, trigger-docker-build]
+    needs: [extract-version, publish-and-validate-pypi, trigger-docker-build]
     uses: ./.github/workflows/publish-helm.yml
     with:
       version: ${{ needs.extract-version.outputs.version }}

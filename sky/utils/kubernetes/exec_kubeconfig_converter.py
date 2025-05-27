@@ -5,6 +5,9 @@ the 'command' field in the exec configuration, leaving only the executable name.
 This is useful when moving between different environments where auth plugin
 executables might be installed in different locations.
 
+For Nebius kubeconfigs, it also changes the --profile argument to 'sky' to
+ensure compatibility with SkyPilot's expected profile configuration.
+
 It assumes the target environment has the auth executable available in PATH.
 If not, you'll need to update your environment container to include the auth
 executable in PATH.

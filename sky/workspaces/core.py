@@ -13,6 +13,7 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
@@ -88,70 +89,103 @@ def _check_workspace_has_no_active_resources(workspace_name: str,
     Raises:
         ValueError: If the workspace has active clusters or managed jobs.
     """
+    _check_workspaces_have_no_active_resources([(workspace_name, operation)])
 
-    def check_clusters():
-        # Check for active clusters
-        all_clusters = global_user_state.get_clusters()
+
+def _check_workspaces_have_no_active_resources(
+        workspace_operations: list) -> None:
+    """Check if workspaces have active clusters or managed jobs.
+
+    Args:
+        workspace_operations: List of tuples (workspace_name, operation) where
+            operation is 'update' or 'delete'.
+
+    Raises:
+        ValueError: If any workspace has active clusters or managed jobs.
+            The error message will include all workspaces with issues.
+    """
+    if not workspace_operations:
+        return
+
+    def get_all_clusters():
+        return global_user_state.get_clusters()
+
+    def get_all_managed_jobs():
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs.server import core as managed_jobs_core
+        try:
+            return managed_jobs_core.queue(refresh=False,
+                                           skip_finished=True,
+                                           all_users=True)
+        except exceptions.ClusterNotUpError:
+            logger.warning('All jobs should be finished in workspace.')
+            return []
+
+    # Fetch both clusters and jobs in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        clusters_future = executor.submit(get_all_clusters)
+        jobs_future = executor.submit(get_all_managed_jobs)
+
+        all_clusters = clusters_future.result()
+        all_managed_jobs = jobs_future.result()
+
+    # Collect all error messages instead of raising immediately
+    error_messages = []
+
+    # Check each workspace against the fetched data
+    for workspace_name, operation in workspace_operations:
+        # Filter clusters for this workspace
         workspace_clusters = [
             cluster for cluster in all_clusters
             if (cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
                 == workspace_name)
         ]
-        return workspace_clusters
 
-    def check_managed_jobs():
-        # Check for active managed jobs using the jobs controller
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs.server import core as managed_jobs_core
-
-        try:
-            # Get active managed jobs from the jobs controller
-            # (skip_finished=True)
-            managed_jobs = managed_jobs_core.queue(refresh=False,
-                                                   skip_finished=True,
-                                                   all_users=True)
-
-            workspace_active_jobs = [
-                job for job in managed_jobs
-                if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) ==
-                workspace_name
-            ]
-
-            return workspace_active_jobs
-
-        except exceptions.ClusterNotUpError:
-            # If we can't check managed jobs (e.g., controller not running),
-            # log a warning but don't fail the operation
-            logger.warning('All jobs should be finished in workspace.')
-            return []
-
-    # Run both checks in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        cluster_future = executor.submit(check_clusters)
-        jobs_future = executor.submit(check_managed_jobs)
-
-        # Wait for both to complete
-        workspace_clusters = cluster_future.result()
-        workspace_active_jobs = jobs_future.result()
-
-    # Check results
-    if workspace_clusters:
-        active_cluster_names = [
-            cluster['name'] for cluster in workspace_clusters
+        # Filter managed jobs for this workspace
+        workspace_active_jobs = [
+            job for job in all_managed_jobs
+            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) ==
+            workspace_name
         ]
-        cluster_list = ', '.join(active_cluster_names)
-        raise ValueError(
-            f'Cannot {operation} workspace {workspace_name!r} because it has '
-            f'{len(workspace_clusters)} active cluster(s): {cluster_list}. '
-            f'Please terminate these clusters first.')
 
-    if workspace_active_jobs:
-        job_names = [job['job_id'] for job in workspace_active_jobs]
-        job_list = ', '.join(job_names)
-        raise ValueError(
-            f'Cannot {operation} workspace {workspace_name!r} because it has '
-            f'{len(workspace_active_jobs)} active managed job(s): '
-            f'{job_list}. Please cancel these jobs first.')
+        # Collect error messages for this workspace
+        workspace_errors = []
+
+        if workspace_clusters:
+            active_cluster_names = [
+                cluster['name'] for cluster in workspace_clusters
+            ]
+            cluster_list = ', '.join(active_cluster_names)
+            workspace_errors.append(
+                f'{len(workspace_clusters)} active cluster(s): {cluster_list}')
+
+        if workspace_active_jobs:
+            job_names = [job['job_id'] for job in workspace_active_jobs]
+            job_list = ', '.join(job_names)
+            workspace_errors.append(
+                f'{len(workspace_active_jobs)} active managed job(s): '
+                f'{job_list}')
+
+        # If this workspace has issues, add to overall error messages
+        if workspace_errors:
+            workspace_error_summary = ' and '.join(workspace_errors)
+            error_messages.append(
+                f'Cannot {operation} workspace {workspace_name!r} because it '
+                f'has {workspace_error_summary}.')
+
+    # If we collected any errors, raise them all together
+    if error_messages:
+        if len(error_messages) == 1:
+            # Single workspace error
+            full_message = error_messages[
+                0] + ' Please terminate these resources first.'
+        else:
+            # Multiple workspace errors
+            full_message = (f'Cannot proceed due to active resources in '
+                            f'{len(error_messages)} workspace(s):\n' +
+                            '\n'.join(f'• {msg}' for msg in error_messages) +
+                            '\nPlease terminate these resources first.')
+        raise ValueError(full_message)
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -293,3 +327,105 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
 
     # Use the internal helper function to save
     return _update_workspaces_config(delete_workspace_fn)
+
+
+# =========================
+# = Config Management =
+# =========================
+
+
+@usage_lib.entrypoint
+def get_config() -> Dict[str, Any]:
+    """Returns the entire SkyPilot configuration.
+
+    Returns:
+        The complete SkyPilot configuration as a dictionary.
+    """
+    return skypilot_config.to_dict()
+
+
+@usage_lib.entrypoint
+def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Updates the entire SkyPilot configuration.
+
+    Args:
+        config: The new configuration to save.
+
+    Returns:
+        The updated configuration.
+
+    Raises:
+        ValueError: If the configuration is invalid, or if there are
+            active clusters or managed jobs in workspaces being modified.
+        FileNotFoundError: If the config file cannot be found.
+        PermissionError: If the config file cannot be written.
+    """
+    # Validate the configuration using the schema
+    try:
+        common_utils.validate_schema(config, schemas.get_config_schema(),
+                                     'Invalid SkyPilot configuration: ')
+    except exceptions.InvalidSkyPilotConfigError as e:
+        raise ValueError(str(e)) from e
+
+    # Check for API server changes and validate them
+    current_config = skypilot_config.to_dict()
+
+    current_endpoint = current_config.get('api_server', {}).get('endpoint')
+    new_endpoint = config.get('api_server', {}).get('endpoint')
+    if current_endpoint != new_endpoint:
+        raise ValueError('API server endpoint should not be changed to avoid '
+                         'unexpected behavior.')
+
+    # Check for workspace changes and validate them
+    current_workspaces = current_config.get('workspaces', {})
+    new_workspaces = config.get('workspaces', {})
+
+    # Collect all workspaces that need to be checked for active resources
+    workspaces_to_check = []
+
+    # Check each workspace that is being modified
+    for workspace_name, new_workspace_config in new_workspaces.items():
+        current_workspace_config = current_workspaces.get(workspace_name, {})
+
+        # If workspace configuration is changing, validate and mark for checking
+        if current_workspace_config != new_workspace_config:
+            _validate_workspace_config(workspace_name, new_workspace_config)
+            workspaces_to_check.append((workspace_name, 'update'))
+
+    # Check for workspace deletions
+    for workspace_name in current_workspaces:
+        if workspace_name not in new_workspaces:
+            # Workspace is being deleted
+            if workspace_name == constants.SKYPILOT_DEFAULT_WORKSPACE:
+                raise ValueError(f'Cannot delete the default workspace '
+                                 f'{constants.SKYPILOT_DEFAULT_WORKSPACE!r}.')
+            workspaces_to_check.append((workspace_name, 'delete'))
+
+    # Check all workspaces for active resources in one efficient call
+    _check_workspaces_have_no_active_resources(workspaces_to_check)
+
+    # Use file locking to prevent race conditions
+    lock_path = skypilot_config.get_skypilot_config_lock_path()
+    try:
+        with filelock.FileLock(lock_path,
+                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            # Convert to config_utils.Config and save
+            config_obj = config_utils.Config.from_dict(config)
+            skypilot_config.update_config_no_lock(config_obj)
+    except filelock.Timeout as e:
+        raise RuntimeError(
+            f'Failed to update configuration due to a timeout '
+            f'when trying to acquire the lock at {lock_path}. This may '
+            'indicate another SkyPilot process is currently updating the '
+            'configuration. Please try again or manually remove the lock '
+            f'file if you believe it is stale.') from e
+
+    # Validate the configuration by running sky check
+    try:
+        sky_check.check(quiet=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Configuration saved but '
+                       f'validation check failed: {e}')
+        # Don't fail the update if the check fails, just warn
+
+    return config
