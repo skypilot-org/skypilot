@@ -48,6 +48,10 @@ spec:
         - name: SKYPILOT_IN_CLUSTER_NAMESPACE
           value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
         {{- end }}
+        {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
+        - name: KUBECONFIG
+          value: /var/skypilot/kubeconfig/config:/root/.kube/config
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -96,11 +100,6 @@ spec:
               ln -sf "$file" "/root/.ssh/$filename"
             fi
           done
-          {{- end }}
-          {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
-          mkdir -p /root/.kube
-          # Merge the kubeconfig from secret and PVC
-          KUBECONFIG=/var/skypilot/kubeconfig/config:/root/.kube/config kubectl config view --flatten > /root/.kube/config
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
