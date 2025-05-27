@@ -1199,10 +1199,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-    websocket: fastapi.WebSocket,
-    cluster_name: str
-) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
