@@ -110,13 +110,14 @@ async def log_streamer(request_id: Optional[str],
             # while keeps the loop tight to make log stream responsive.
             await asyncio.sleep(0)
             line: Optional[bytes] = await f.readline()
-            
+
             current_time = asyncio.get_event_loop().time()
             if not line:
-                if buffer and (current_time - last_flush_time) >= BUFFER_TIMEOUT:
+                if buffer and (current_time -
+                               last_flush_time) >= BUFFER_TIMEOUT:
                     async for chunk in flush_buffer():
                         yield chunk
-                
+
                 if request_id is not None:
                     request_task = requests_lib.get_request(request_id)
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
@@ -144,7 +145,7 @@ async def log_streamer(request_id: Optional[str],
             buffer_bytes += len(line_str.encode('utf-8'))
 
             # Check if we should flush the buffer
-            if (buffer_bytes >= BUFFER_SIZE or 
+            if (buffer_bytes >= BUFFER_SIZE or
                 (current_time - last_flush_time) >= BUFFER_TIMEOUT):
                 async for chunk in flush_buffer():
                     yield chunk
