@@ -1,3 +1,5 @@
+# This example is used to test the InfiniBand
+# connection between two VMs.
 resources:
   cloud: nebius
   region: eu-north1

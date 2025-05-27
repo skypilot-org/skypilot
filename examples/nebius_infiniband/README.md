@@ -2,7 +2,7 @@
 
 To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand, a high-throughput, low-latency networking standard.
 
-## TL;DR: Use InfiniBand on managed Nebius Kubernetes cluster with SkyPilot
+## InfiniBand on Managed Nebius Kubernetes clusters with SkyPilot
 
 With Nebius Kubernetes cluster, you can use SkyPilot to run your jobs with InfiniBand enabled:
 
@@ -150,7 +150,7 @@ The example result is as below:
 sky launch -c no_infiniband nccl_no_ib.yaml
 ```
 
-## Use InfiniBand on Nebius VMs with SkyPilot
+## InfiniBand on Nebius VMs with SkyPilot
 
 While the previous section covered InfiniBand setup for managed Kubernetes service, you can also enable InfiniBand directly on Nebius VMs. This approach gives you more flexibility and control over your infrastructure. For detailed instructions, refer to the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu).
 

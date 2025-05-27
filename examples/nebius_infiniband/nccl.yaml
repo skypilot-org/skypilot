@@ -1,3 +1,5 @@
+# This example is used to test the NCCL performance with
+# InfiniBand on managed Nebius Kubernetes cluster.
 name: nccl-test
 
 resources:
