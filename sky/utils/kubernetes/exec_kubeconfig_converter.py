@@ -44,7 +44,7 @@ def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
             if executable != current_command:
                 exec_info['command'] = executable
                 updated = True
-            
+
             # Handle Nebius kubeconfigs: change --profile to 'sky'
             if executable == 'nebius' or current_command == 'nebius':
                 args = exec_info.get('args', [])
