@@ -1096,6 +1096,9 @@ def get_config_schema():
             'required': [],
             'properties': {
                 **_NETWORK_CONFIG_SCHEMA,
+                'tenant_id': {
+                    'type': 'string',
+                },
             },
             'additionalProperties': {
                 'type': 'object',
@@ -1276,10 +1279,7 @@ def get_config_schema():
                         'credentials_file_path': {
                             'type': 'string',
                         },
-                        'iam_token_file_path': {
-                            'type': 'string',
-                        },
-                        'tenant_id_file_path': {
+                        'tenant_id': {
                             'type': 'string',
                         },
                         'disabled': {

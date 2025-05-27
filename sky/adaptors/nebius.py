@@ -9,13 +9,11 @@ from sky.utils import ux_utils
 
 
 def tenant_id_path() -> str:
-    return skypilot_config.get_workspace_cloud('nebius').get(
-        'tenant_id_file_path', '~/.nebius/NEBIUS_TENANT_ID.txt')
+    return '~/.nebius/NEBIUS_TENANT_ID.txt'
 
 
 def iam_token_path() -> str:
-    return skypilot_config.get_workspace_cloud('nebius').get(
-        'iam_token_file_path', '~/.nebius/NEBIUS_IAM_TOKEN.txt')
+    return '~/.nebius/NEBIUS_IAM_TOKEN.txt'
 
 
 def credentials_path() -> str:
@@ -99,6 +97,14 @@ def is_token_or_cred_file_exist():
 
 
 def get_tenant_id():
+    tenant_id_in_ws_config = skypilot_config.get_workspace_cloud('nebius').get(
+        'tenant_id', None)
+    if tenant_id_in_ws_config is not None:
+        return tenant_id_in_ws_config
+    tenant_id_in_config = skypilot_config.get_nested(('nebius', 'tenant_id'),
+                                                     None)
+    if tenant_id_in_config is not None:
+        return tenant_id_in_config
     try:
         with open(os.path.expanduser(tenant_id_path()),
                   encoding='utf-8') as file:
