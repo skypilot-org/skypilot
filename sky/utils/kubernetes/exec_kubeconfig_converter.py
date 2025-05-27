@@ -5,6 +5,9 @@ the 'command' field in the exec configuration, leaving only the executable name.
 This is useful when moving between different environments where auth plugin
 executables might be installed in different locations.
 
+For Nebius kubeconfigs, it also changes the --profile argument to 'sky' to
+ensure compatibility with SkyPilot's expected profile configuration.
+
 It assumes the target environment has the auth executable available in PATH.
 If not, you'll need to update your environment container to include the auth
 executable in PATH.
@@ -20,6 +23,8 @@ import yaml
 
 def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
     """Strip path information from exec plugin commands in a kubeconfig file.
+
+    For Nebius kubeconfigs, also changes the --profile argument to 'sky'.
 
     Args:
         kubeconfig_path (str): Path to the input kubeconfig file
@@ -39,6 +44,20 @@ def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
             if executable != current_command:
                 exec_info['command'] = executable
                 updated = True
+
+            # Handle Nebius kubeconfigs: change --profile to 'sky'
+            if executable == 'nebius' or current_command == 'nebius':
+                args = exec_info.get('args', [])
+                if args and '--profile' in args:
+                    try:
+                        profile_index = args.index('--profile')
+                        if profile_index + 1 < len(args):
+                            old_profile = args[profile_index + 1]
+                            if old_profile != 'sky':
+                                args[profile_index + 1] = 'sky'
+                                updated = True
+                    except ValueError:
+                        pass  # --profile not found in args
 
     if updated:
         with open(output_path, 'w', encoding='utf-8') as file:
