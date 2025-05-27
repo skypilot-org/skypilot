@@ -232,7 +232,7 @@ Following tabs describe how to configure credentials for different clouds on the
               - context1
               - context2
 
-        Refer to :ref:`sky-api-server-config` for how to set the SkyPilot config in Helm chart values.
+        Refer to :ref:`config-yaml-kubernetes-allowed-contexts` for how to set the SkyPilot config in Helm chart values.
 
     .. tab-item:: AWS
         :sync: aws-creds-tab
