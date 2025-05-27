@@ -3166,6 +3166,20 @@ def format_kubeconfig_exec_auth(config: Any,
             elif executable != current_command:
                 exec_info['command'] = executable
                 updated = True
+            
+            # Handle Nebius kubeconfigs: change --profile to 'sky'
+            if executable == 'nebius':
+                args = exec_info.get('args', [])
+                if args and '--profile' in args:
+                    try:
+                        profile_index = args.index('--profile')
+                        if profile_index + 1 < len(args):
+                            old_profile = args[profile_index + 1]
+                            if old_profile != 'sky':
+                                args[profile_index + 1] = 'sky'
+                                updated = True
+                    except ValueError:
+                        pass
 
     os.makedirs(os.path.dirname(os.path.expanduser(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as file:
