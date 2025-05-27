@@ -306,6 +306,10 @@ class Test(NamedTuple):
         prefix = f'[{self.name}]'
         message = f'{prefix} {message}'
         message = message.replace('\n', f'\n{prefix} ')
+        self.echo_without_prefix(message)
+
+    @classmethod
+    def echo_without_prefix(cls, message: str):
         print(message, file=sys.stderr, flush=True)
 
 
@@ -358,14 +362,21 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 
 @contextlib.contextmanager
 def override_sky_config(
-    test: Test, env_dict: Dict[str, str]
+    test: Optional[Test] = None,
+    env_dict: Optional[Dict[str, str]] = None
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+    echo = Test.echo_without_prefix if test is None else test.echo
+    env_before_override: Optional[Dict[str, Any]] = None
+    if env_dict is None:
+        env_dict = os.environ
+        env_before_override = os.environ.copy()
+
     override_sky_config_dict = skypilot_config.config_utils.Config()
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
                                             endpoint)
-        test.echo(
+        echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
@@ -375,7 +386,7 @@ def override_sky_config(
             ('jobs', 'controller', 'resources', 'cloud'), cloud)
         override_sky_config_dict.set_nested(
             ('serve', 'controller', 'resources', 'cloud'), cloud)
-        test.echo(
+        echo(
             f'Overriding controller cloud: '
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
@@ -398,6 +409,9 @@ def override_sky_config(
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
     yield temp_config_file
+    if env_before_override is not None:
+        os.environ.clear()
+        os.environ.update(env_before_override)
 
 
 def run_one_test(test: Test) -> None:

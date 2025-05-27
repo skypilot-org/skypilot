@@ -376,8 +376,7 @@ def test_scp_logs():
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
 def test_core_api_sky_launch_exec(generic_cloud: str):
-    with smoke_tests_utils.override_sky_config(smoke_tests_utils.Test(),
-                                               os.environ):
+    with smoke_tests_utils.override_sky_config():
         name = smoke_tests_utils.get_cluster_name()
         task = sky.Task(run="whoami")
         task.set_resources(
