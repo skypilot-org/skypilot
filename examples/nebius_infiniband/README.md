@@ -1,8 +1,8 @@
-# Using Infiniband in Nebius Managed Kubernetes clusters with SkyPilot
+# Using InfiniBand in Nebius with SkyPilot
 
 To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand, a high-throughput, low-latency networking standard.
 
-## TL;DR: Use inifiband on managed Nebius Kubernetes cluster with SkyPilot
+## InfiniBand on Managed Nebius Kubernetes clusters with SkyPilot
 
 With Nebius Kubernetes cluster, you can use SkyPilot to run your jobs with InfiniBand enabled:
 
@@ -86,13 +86,15 @@ export NB_GPU_CLUSTER_ID=$(nebius compute gpu-cluster create \
 
 nebius mk8s node-group create \
   --parent-id $NB_K8S_CLUSTER_ID \
-  --name high1-ib-group \
+  --name infini-ib-group \
   --fixed-node-count 2 \
   --template-resources-platform gpu-h100-sxm \
   --template-resources-preset 8gpu-128vcpu-1600gb \
   --template-gpu-cluster-id $NB_GPU_CLUSTER_ID \
   --template-gpu-settings-drivers-preset cuda12
 ```
+
+Refer to the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu#fabrics) for how to select the fabric according to the type of GPUs you are going to use.
 
 3. Setup Kubeconfig and setup Nvidia GPUs 
 
@@ -147,3 +149,89 @@ The example result is as below:
 ```bash
 sky launch -c no_infiniband nccl_no_ib.yaml
 ```
+
+## InfiniBand on Nebius VMs with SkyPilot
+
+While the previous section covered InfiniBand setup for managed Kubernetes service, you can also enable InfiniBand directly on Nebius VMs. This approach gives you more flexibility and control over your infrastructure. For detailed instructions, refer to the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu).
+
+### Automatic InfiniBand Setup with SkyPilot
+
+SkyPilot simplifies the process of setting up InfiniBand-enabled GPU clusters on Nebius VMs. When you launch a cluster with the appropriate configurations, SkyPilot will automatically create a GPU cluster with InfiniBand support and add VMs to the GPU cluster.
+
+To enable automatic InfiniBand setup, you need to configure your `~/.sky/config.yaml` file with the following settings:
+
+```yaml
+nebius:
+  eu-north1:
+    project_id: <project_id>
+    fabric: <fabric>
+```
+
+Where:
+- `<project_id>`: Your Nebius project identifier
+- `<fabric>`: The GPU cluster configuration identifier that determines the InfiniBand fabric type
+
+For detailed information about fabric selection based on your GPU requirements, consult the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu#fabrics).
+
+Additional configuration options are available in the [SkyPilot Nebius configuration reference](https://docs.skypilot.co/en/latest/reference/config.html#nebius).
+
+### Running Performance Tests
+
+You can verify your InfiniBand setup by running either of these tests:
+
+1. NCCL Performance Test:
+
+```bash
+sky launch -c infiniband nccl_vm_ib.yaml
+```
+
+Result example:
+
+```
+#                                                              out-of-place                       in-place
+#       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)
+   536870912     134217728     float     sum      -1   2424.4  221.45  415.21      0   2391.0  224.53  421.00      
+  1073741824     268435456     float     sum      -1   4528.1  237.13  444.62      0   4533.5  236.85  444.09      
+  2147483648     536870912     float     sum      -1   8795.2  244.17  457.81      0   8783.6  244.49  458.42      
+  4294967296    1073741824     float     sum      -1    17442  246.25  461.71      0    17386  247.03  463.19      
+  8589934592    2147483648     float     sum      -1    34430  249.49  467.79      0    34443  249.39  467.61      
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 450.146
+```
+
+2. InfiniBand Direct Test:
+
+```bash
+sky launch -c infiniband infiniband.yaml
+```
+
+Result example:
+
+```
+---------------------------------------------------------------------------------------
+                    Send BW Test
+ Dual-port       : OFF          Device         : mlx5_0
+ Number of qps   : 1            Transport type : IB
+ Connection type : RC           Using SRQ      : OFF
+ PCIe relax order: ON
+ ibv_wr* API     : ON
+ TX depth        : 128
+ CQ Moderation   : 1
+ Mtu             : 4096[B]
+ Link type       : IB
+ Max inline data : 0[B]
+ rdma_cm QPs     : OFF
+ Data ex. method : Ethernet
+---------------------------------------------------------------------------------------
+ local address: LID 0x4624 QPN 0x0127 PSN 0x45bd8e
+ remote address: LID 0x461b QPN 0x0127 PSN 0x1d3746
+---------------------------------------------------------------------------------------
+ #bytes     #iterations    BW peak[Gb/sec]    BW average[Gb/sec]   MsgRate[Mpps]
+ 65536      1000             357.12             353.53             0.674308
+---------------------------------------------------------------------------------------
+```
+
+## Additional Resources
+
+The Nebius team maintains a comprehensive collection of example configurations in their [ml-cookbook repository](https://github.com/nebius/ml-cookbook/tree/main/skypilot). These examples cover various use cases and can help you get started with different ML workloads on Nebius using SkyPilot.
