@@ -8,7 +8,11 @@ import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
-import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import {
+  getGPUs,
+  getCloudInfrastructure,
+  getClustersAndJobsData,
+} from '@/data/connectors/infra';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
@@ -421,10 +425,13 @@ export function GPUs() {
     setKubeLoading(true);
     setCloudLoading(true);
 
+    // Fetch clusters and jobs data once to share between both API calls
+    const clustersAndJobsData = await getClustersAndJobsData();
+
     // Fetch both data sources in parallel
     const [kubeResult, cloudResult] = await Promise.allSettled([
-      getGPUs(),
-      getCloudInfrastructure(),
+      getGPUs(clustersAndJobsData),
+      getCloudInfrastructure(clustersAndJobsData),
     ]);
 
     // Handle Kubernetes data result
@@ -460,13 +467,16 @@ export function GPUs() {
       setEnabledClouds(cloudResult.value?.enabledClouds || 0);
       setCloudDataLoaded(true);
     } else {
-      console.error('Error fetching cloud infrastructure data:', cloudResult.reason);
+      console.error(
+        'Error fetching cloud infrastructure data:',
+        cloudResult.reason
+      );
       setCloudInfraData([]);
       setTotalClouds(0);
       setEnabledClouds(0);
     }
     setCloudLoading(false);
-    
+
     if (isInitialLoad) setIsInitialLoad(false);
   }, [isInitialLoad]);
 

@@ -8,16 +8,23 @@ import {
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 
-export async function getCloudInfrastructure() {
-  try {
-    // Use existing data connectors
-    const [clustersData, jobsData] = await Promise.all([
-      getClusters(),
-      getManagedJobs(),
-    ]);
+// Helper function to fetch clusters and jobs data
+export async function getClustersAndJobsData() {
+  const [clustersData, jobsData] = await Promise.all([
+    getClusters(),
+    getManagedJobs(),
+  ]);
 
-    const clusters = clustersData || [];
-    const jobs = jobsData?.jobs || [];
+  return {
+    clusters: clustersData || [],
+    jobs: jobsData?.jobs || [],
+  };
+}
+
+export async function getCloudInfrastructure(clustersAndJobsData) {
+  try {
+    const clusters = clustersAndJobsData.clusters;
+    const jobs = clustersAndJobsData.jobs;
 
     // Get enabled clouds
     let enabledCloudsList = [];
@@ -110,8 +117,8 @@ export async function getCloudInfrastructure() {
   }
 }
 
-export async function getGPUs() {
-  const gpus = await getKubernetesGPUs();
+export async function getGPUs(clustersAndJobsData) {
+  const gpus = await getKubernetesGPUs(clustersAndJobsData);
   return gpus;
 }
 
@@ -273,16 +280,10 @@ async function getKubernetesPerNodeGPUs(context) {
   }
 }
 
-export async function getContextClustersAndJobs() {
+export async function getContextClustersAndJobs(clustersAndJobsData) {
   try {
-    // Use existing data connectors
-    const [clustersData, jobsData] = await Promise.all([
-      getClusters(),
-      getManagedJobs(),
-    ]);
-
-    const clusters = clustersData || [];
-    const jobs = jobsData?.jobs || [];
+    const clusters = clustersAndJobsData.clusters;
+    const jobs = clustersAndJobsData.jobs;
 
     // Count clusters and jobs per k8s context/ssh node pool
     const contextStats = {};
@@ -359,7 +360,7 @@ export async function getContextClustersAndJobs() {
   }
 }
 
-async function getKubernetesGPUs() {
+async function getKubernetesGPUs(clustersAndJobsData) {
   try {
     // 1. Fetch all context names (Kubernetes + SSH)
     const allAvailableContextNames = await getAllContexts();
@@ -376,7 +377,7 @@ async function getKubernetesGPUs() {
     }
 
     // 2. Fetch cluster and job counts per context
-    const contextStats = await getContextClustersAndJobs();
+    const contextStats = await getContextClustersAndJobs(clustersAndJobsData);
 
     // 3. Fetch GPU availability information
     const contextGPUAvailability = await getKubernetesContextGPUs();
