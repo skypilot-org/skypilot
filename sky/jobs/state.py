@@ -2,9 +2,11 @@
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import enum
+import functools
 import json
 import pathlib
 import sqlite3
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -158,7 +160,28 @@ def _get_db_path() -> str:
 
 
 _DB_PATH = _get_db_path()
-db_utils.SQLiteConn(_DB_PATH, create_table)
+_DB_INITIALIZED = False
+_DB_INIT_LOCK = threading.Lock()
+
+
+def init_db(func):
+    """Initialize the database."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global _DB_INITIALIZED
+        if not _DB_INITIALIZED:
+            with _DB_INIT_LOCK:
+                # DB_INITIALIZED may be set by another thread
+                # while waiting for the lock.
+                # Check again to avoid race condition.
+                if not _DB_INITIALIZED:
+                    db_utils.SQLiteConn(_DB_PATH, create_table)
+                    _DB_INITIALIZED = True
+        return func(*args, **kwargs)
+
+    return wrapper
+
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -389,6 +412,7 @@ class ManagedJobScheduleState(enum.Enum):
 
 
 # === Status transition functions ===
+@init_db
 def set_job_info(job_id: int, name: str, workspace: str):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -399,6 +423,7 @@ def set_job_info(job_id: int, name: str, workspace: str):
             (job_id, name, ManagedJobScheduleState.INACTIVE.value, workspace))
 
 
+@init_db
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the task to pending state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -411,6 +436,7 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
              ManagedJobStatus.PENDING.value))
 
 
+@init_db
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
                   submit_time: float, resources_str: str,
                   specs: Dict[str, Union[str,
@@ -455,6 +481,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     callback_func('SUBMITTED')
 
 
+@init_db
 def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to starting state."""
     logger.info('Launching the spot cluster...')
@@ -474,6 +501,7 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
     callback_func('STARTING')
 
 
+@init_db
 def set_started(job_id: int, task_id: int, start_time: float,
                 callback_func: CallbackType):
     """Set the task to started state."""
@@ -505,6 +533,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
     callback_func('STARTED')
 
 
+@init_db
 def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
@@ -526,6 +555,7 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
     callback_func('RECOVERING')
 
 
+@init_db
 def set_recovered(job_id: int, task_id: int, recovered_time: float,
                   callback_func: CallbackType):
     """Set the task to recovered."""
@@ -548,6 +578,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
     callback_func('RECOVERED')
 
 
+@init_db
 def set_succeeded(job_id: int, task_id: int, end_time: float,
                   callback_func: CallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
@@ -570,6 +601,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
     logger.info('Job succeeded.')
 
 
+@init_db
 def set_failed(
     job_id: int,
     task_id: Optional[int],
@@ -644,6 +676,7 @@ def set_failed(
     logger.info(failure_reason)
 
 
+@init_db
 def set_cancelling(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 
@@ -665,6 +698,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
         logger.info('Cancellation skipped, job is already terminal')
 
 
+@init_db
 def set_cancelled(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
@@ -686,6 +720,7 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
         logger.info('Cancellation skipped, job is not CANCELLING')
 
 
+@init_db
 def set_local_log_file(job_id: int, task_id: Optional[int],
                        local_log_file: str):
     """Set the local log file for a job."""
@@ -701,6 +736,9 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 
 
 # ======== utility functions ========
+
+
+@init_db
 def get_nonterminal_job_ids_by_name(name: Optional[str],
                                     all_users: bool = False) -> List[int]:
     """Get non-terminal job ids by name."""
@@ -738,6 +776,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
         return job_ids
 
 
+@init_db
 def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
     """Get jobs from the database that have a live schedule_state.
 
@@ -776,6 +815,7 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
         return jobs
 
 
+@init_db
 def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
     """Get jobs that need controller process checking.
 
@@ -832,6 +872,7 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         return [row[0] for row in rows if row[0] is not None]
 
 
+@init_db
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
     name_filter = ''
@@ -859,6 +900,7 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
+@init_db
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -902,6 +944,7 @@ def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     return status
 
 
+@init_db
 def get_failure_reason(job_id: int) -> Optional[str]:
     """Get the failure reason of a job.
 
@@ -919,6 +962,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
         return reason[0]
 
 
+@init_db
 def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get managed jobs from the database."""
     job_filter = '' if job_id is None else f'WHERE spot.spot_job_id={job_id}'
@@ -951,6 +995,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         return jobs
 
 
+@init_db
 def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -962,6 +1007,7 @@ def get_task_name(job_id: int, task_id: int) -> str:
         return task_name[0]
 
 
+@init_db
 def get_latest_job_id() -> Optional[int]:
     """Get the latest job id."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -974,6 +1020,7 @@ def get_latest_job_id() -> Optional[int]:
         return None
 
 
+@init_db
 def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         task_specs = cursor.execute(
@@ -984,6 +1031,7 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
         return json.loads(task_specs[0])
 
 
+@init_db
 def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
     filter_str = 'spot_job_id=(?)'
@@ -1003,6 +1051,7 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 # scheduler lock to work correctly.
 
 
+@init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
                           user_hash: str) -> None:
     """Do not call without holding the scheduler lock."""
@@ -1018,6 +1067,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
         assert updated_count == 1, (job_id, updated_count)
 
 
+@init_db
 def scheduler_set_launching(job_id: int,
                             current_state: ManagedJobScheduleState) -> None:
     """Do not call without holding the scheduler lock."""
@@ -1031,6 +1081,7 @@ def scheduler_set_launching(job_id: int,
         assert updated_count == 1, (job_id, updated_count)
 
 
+@init_db
 def scheduler_set_alive(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -1043,6 +1094,7 @@ def scheduler_set_alive(job_id: int) -> None:
         assert updated_count == 1, (job_id, updated_count)
 
 
+@init_db
 def scheduler_set_alive_waiting(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -1055,6 +1107,7 @@ def scheduler_set_alive_waiting(job_id: int) -> None:
         assert updated_count == 1, (job_id, updated_count)
 
 
+@init_db
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -1068,6 +1121,7 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
             assert updated_count == 1, (job_id, updated_count)
 
 
+@init_db
 def set_job_controller_pid(job_id: int, pid: int):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
@@ -1077,6 +1131,7 @@ def set_job_controller_pid(job_id: int, pid: int):
         assert updated_count == 1, (job_id, updated_count)
 
 
+@init_db
 def get_job_schedule_state(job_id: int) -> ManagedJobScheduleState:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         state = cursor.execute(
@@ -1085,6 +1140,7 @@ def get_job_schedule_state(job_id: int) -> ManagedJobScheduleState:
         return ManagedJobScheduleState(state)
 
 
+@init_db
 def get_num_launching_jobs() -> int:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         return cursor.execute(
@@ -1094,6 +1150,7 @@ def get_num_launching_jobs() -> int:
             (ManagedJobScheduleState.LAUNCHING.value,)).fetchone()[0]
 
 
+@init_db
 def get_num_alive_jobs() -> int:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         return cursor.execute(
@@ -1105,6 +1162,7 @@ def get_num_alive_jobs() -> int:
              ManagedJobScheduleState.ALIVE.value)).fetchone()[0]
 
 
+@init_db
 def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
@@ -1127,6 +1185,7 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
         } if row is not None else None
 
 
+@init_db
 def get_workspace(job_id: int) -> str:
     """Get the workspace of a job."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
