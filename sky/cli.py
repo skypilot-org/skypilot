@@ -4352,8 +4352,6 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
     - ``PENDING``: Job is waiting for a free slot on the jobs controller to be
       accepted.
 
-    - ``SUBMITTED``: Job is submitted to and accepted by the jobs controller.
-
     - ``STARTING``: Job is starting (provisioning a cluster for the job).
 
     - ``RUNNING``: Job is running.

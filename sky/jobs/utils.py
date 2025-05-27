@@ -981,7 +981,7 @@ def _get_job_status_from_tasks(
         # Use the first non-succeeded status.
         if managed_task_status != managed_job_state.ManagedJobStatus.SUCCEEDED:
             # TODO(zhwu): we should not blindly use the first non-
-            # succeeded as the status could be changed to SUBMITTED
+            # succeeded as the status could be changed to PENDING
             # when going from one task to the next one, which can be
             # confusing.
             break

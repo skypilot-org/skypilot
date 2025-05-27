@@ -225,7 +225,7 @@ class ManagedJobStatus(enum.Enum):
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
 
     However, a managed job only has one ManagedJobStatus on the jobs controller.
-        ManagedJobStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
+        ManagedJobStatus = [PENDING, STARTING, RUNNING, ...]
     Mapping from JobStatus to ManagedJobStatus:
         INIT            ->  STARTING/RECOVERING
         SETTING_UP      ->  RUNNING
@@ -245,10 +245,14 @@ class ManagedJobStatus(enum.Enum):
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
     PENDING = 'PENDING'
+    # SUBMITTED: This state used to be briefly set before immediately changing
+    # to STARTING. Its use was removed in #5682. We keep it for backwards
+    # compatibility, so we can still parse old jobs databases that may have jobs
+    # in this state.
+    # TODO(cooperc): remove this in v0.12.0
+    DEPRECATED_SUBMITTED = 'SUBMITTED'
     # The submitted_at timestamp of the managed job in the 'spot' table will be
     # set to the time when the job controller begins running.
-    # SUBMITTED: The jobs controller starts the controller process.
-    SUBMITTED = 'SUBMITTED'
     # STARTING: The controller process is launching the cluster for the managed
     # job.
     STARTING = 'STARTING'
@@ -324,7 +328,6 @@ class ManagedJobStatus(enum.Enum):
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
-    ManagedJobStatus.SUBMITTED: colorama.Fore.BLUE,
     ManagedJobStatus.STARTING: colorama.Fore.BLUE,
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
@@ -336,6 +339,8 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.FAILED_CONTROLLER: colorama.Fore.RED,
     ManagedJobStatus.CANCELLING: colorama.Fore.YELLOW,
     ManagedJobStatus.CANCELLED: colorama.Fore.YELLOW,
+    # TODO(cooperc): backwards compatibility, remove this in v0.12.0
+    ManagedJobStatus.DEPRECATED_SUBMITTED: colorama.Fore.BLUE,
 }
 
 
@@ -429,11 +434,11 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
              ManagedJobStatus.PENDING.value))
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
-                  submit_time: float, resources_str: str,
-                  specs: Dict[str, Union[str,
-                                         int]], callback_func: CallbackType):
-    """Set the task to submitted.
+def set_starting(job_id: int, task_id: int, run_timestamp: str,
+                 submit_time: float, resources_str: str,
+                 specs: Dict[str, Union[str,
+                                        int]], callback_func: CallbackType):
+    """Set the task to starting state.
 
     Args:
         job_id: The managed job ID.
@@ -450,6 +455,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     # make it easier to find them based on one of the values.
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the managed task is submitted.
+    logger.info('Launching the spot cluster...')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -463,19 +469,54 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?) AND
             status=(?) AND
             end_at IS null""",
-            (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
+            (resources_str, submit_time, ManagedJobStatus.STARTING.value,
              run_timestamp, json.dumps(specs), job_id, task_id,
              ManagedJobStatus.PENDING.value))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to submitted. '
+                'Failed to set the task to starting. '
                 f'({cursor.rowcount} rows updated)')
+    # SUBMITTED is no longer used, but we keep it for backward compatibility.
+    # TODO(cooperc): remove this in v0.12.0
     callback_func('SUBMITTED')
+    callback_func('STARTING')
 
 
-def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
-    """Set the task to starting state."""
-    logger.info('Launching the spot cluster...')
+def set_backoff_pending(job_id: int, task_id: int):
+    """Set the task to PENDING state if it is in backoff.
+    
+    This should only be used to transition from STARTING or RECOVERING back to
+    PENDING.
+    """
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE spot SET status=(?)
+            WHERE spot_job_id=(?) AND
+            task_id=(?) AND
+            status IN (?, ?) AND
+            end_at IS null""", (ManagedJobStatus.PENDING.value, job_id, task_id,
+                                ManagedJobStatus.STARTING.value,
+                                ManagedJobStatus.RECOVERING.value))
+        logger.debug('back to PENDING')
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                'Failed to set the task back to pending. '
+                f'({cursor.rowcount} rows updated)')
+    # Do not call callback_func here, as we don't use the callback for PENDING.
+
+
+def set_restarting(job_id: int, task_id: int, recovering: bool):
+    """Set the task back to STARTING or RECOVERING from PENDING.
+    
+    This should not be used for the initial transition from PENDING to STARTING.
+    In that case, use set_starting instead. This function should only be used
+    after using set_backoff_pending to transition back to PENDING during
+    launch retry backoff.
+    """
+    target_status = ManagedJobStatus.STARTING.value
+    if recovering:
+        target_status = ManagedJobStatus.RECOVERING.value
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -483,13 +524,15 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
             WHERE spot_job_id=(?) AND
             task_id=(?) AND
             status=(?) AND
-            end_at IS null""", (ManagedJobStatus.STARTING.value, job_id,
-                                task_id, ManagedJobStatus.SUBMITTED.value))
+            end_at IS null""",
+            (target_status, job_id, task_id, ManagedJobStatus.PENDING.value))
+        logger.debug(f'back to {target_status}')
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to starting. '
+                f'Failed to set the task back to {target_status}. '
                 f'({cursor.rowcount} rows updated)')
-    callback_func('STARTING')
+    # Do not call callback_func here, as it should only be invoked for the
+    # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
 
 
 def set_started(job_id: int, task_id: int, start_time: float,

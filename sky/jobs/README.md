@@ -33,12 +33,15 @@ Managed job status follows the following state diagram:
 
 state "All States" as AllStates {
     state "Inner Controller Loop" as InnerLoop {
-        PENDING -> SUBMITTED : controller\nproc. init
-        SUBMITTED -> STARTING
-        STARTING -\-> RUNNING : job started
-        PENDING -\-> RUNNING : empty job shortcut
+        PENDING -> STARTING : scheduled
+        STARTING -> PENDING : backoff
+        STARTING -\-> RUNNING
+        PENDING -\-> RUNNING : empty job\nshortcut
         RUNNING -> RECOVERING : preempted
-        RECOVERING -left> RUNNING : recovered
+        state "PENDING" as PENDING_RECOVERY : during recovery
+        RECOVERING -> PENDING_RECOVERY : backoff
+        PENDING_RECOVERY -left> RECOVERING : rescheduled
+        RECOVERING -> RUNNING : recovered
     }
 
     [*] -\-> PENDING: job created
@@ -59,7 +62,7 @@ state "All States" as AllStates {
     }
 
     InnerLoop -\-> CANCELLING : user cancel request
-    CANCELLING -> CANCELLED : cluster cleaned up
+    CANCELLING -> CANCELLED : cluster\ncleaned up
     CANCELLING -[dotted]-> Terminal: job could complete\nbefore we can cancel
 }
 
