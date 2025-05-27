@@ -29,7 +29,9 @@ export default function ConfigPage() {
     try {
       const config = await getConfig();
       if (Object.keys(config).length === 0) {
-        setEditableConfig('# Empty SkyPilot config. Enter config in YAML format\n');
+        setEditableConfig(
+          '# Empty SkyPilot config. Enter config in YAML format\n'
+        );
       } else {
         setEditableConfig(yaml.dump(config, { indent: 2 }));
       }
