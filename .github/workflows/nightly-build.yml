@@ -127,9 +127,16 @@ jobs:
       repository_type: 'pypi'
     secrets: inherit
 
+  trigger-helm-release:
+    needs: [publish-and-validate-pypi]
+    uses: ./.github/workflows/helm-docker-release.yaml
+    with:
+      package_name: skypilot-nightly
+    secrets: inherit
+
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, extract-build-number, wait-for-buildkite, publish-and-validate-test-pypi, publish-and-validate-pypi]
+    needs: [check-date, nightly-build-pypi, extract-build-number, wait-for-buildkite, publish-and-validate-test-pypi, publish-and-validate-pypi, trigger-helm-release]
     if: failure() # Only run this job if any of the previous jobs failed
     steps:
       - name: Prepare failure message
