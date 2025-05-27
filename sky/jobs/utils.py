@@ -953,6 +953,22 @@ def dump_managed_job_queue() -> str:
             job['region'] = '-'
             job['zone'] = '-'
 
+        # Add details about schedule state / backoff.
+        state_details = None
+        if job['schedule_state'] == 'ALIVE_BACKOFF':
+            state_details = 'In backoff, waiting for resources'
+        elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
+            state_details = 'Waiting for other jobs to launch'
+
+        if state_details and job['failure_reason']:
+            job['details'] = f'{state_details} - {job["failure_reason"]}'
+        elif state_details:
+            job['details'] = state_details
+        elif job['failure_reason']:
+            job['details'] = f'Failure: {job["failure_reason"]}'
+        else:
+            job['details'] = None
+
     return message_utils.encode_payload(jobs)
 
 
@@ -1093,7 +1109,10 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    def generate_details(failure_reason: Optional[str]) -> str:
+    def generate_details(details: Optional[str],
+                         failure_reason: Optional[str]) -> str:
+        if details is not None:
+            return details
         if failure_reason is not None:
             return f'Failure: {failure_reason}'
         return '-'
@@ -1178,13 +1197,14 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
+                details = job_tasks[current_task_id].get('details')
                 failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
                     job_tasks[0]['schedule_state'],
-                    generate_details(failure_reason),
+                    generate_details(details, failure_reason),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1249,7 +1269,8 @@ def format_job_table(
                     infra.formatted_str(),
                     task['cluster_resources'],
                     schedule_state,
-                    generate_details(task['failure_reason']),
+                    generate_details(task.get('details'),
+                                     task['failure_reason']),
                 ])
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
