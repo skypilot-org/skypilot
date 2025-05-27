@@ -50,7 +50,7 @@ export async function getCloudInfrastructure() {
     // Initialize with all clouds from CLOUDS_LIST
     CLOUDS_LIST.forEach((cloud) => {
       // Check if the cloud is in the enabled clouds list
-      const isEnabled = enabledCloudsList.includes(cloud);
+      const isEnabled = enabledCloudsList.includes(cloud.toLowerCase());
 
       cloudsData[cloud] = {
         name: cloud,

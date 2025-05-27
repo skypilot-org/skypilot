@@ -28,7 +28,13 @@ export default function ConfigPage() {
     setError(null);
     try {
       const config = await getConfig();
-      setEditableConfig(yaml.dump(config, { indent: 2 }));
+      if (Object.keys(config).length === 0) {
+        setEditableConfig(
+          '# Empty SkyPilot config. Enter config in YAML format\n'
+        );
+      } else {
+        setEditableConfig(yaml.dump(config, { indent: 2 }));
+      }
     } catch (error) {
       console.error('Error loading config:', error);
       setError(error);
@@ -101,7 +107,7 @@ export default function ConfigPage() {
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="text-base font-normal flex items-center justify-between">
-              <span>Edit SkyPilot Configuration</span>
+              <span>Edit SkyPilot Configuration YAML</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">

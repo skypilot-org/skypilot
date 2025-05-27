@@ -72,6 +72,8 @@ def request_body_env_vars() -> dict:
 
 def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
+    if annotations.is_on_api_server:
+        return {}
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
     # server endpoint on the server side. This avoids the warning at

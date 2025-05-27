@@ -80,6 +80,8 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
+The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>`.
+
 .. _sky-get-api-server-url:
 
 Step 2: Get the API server URL
@@ -198,9 +200,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set kubernetesCredentials.useKubeconfig=true \
               --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
@@ -230,7 +232,7 @@ Following tabs describe how to configure credentials for different clouds on the
               - context1
               - context2
 
-        Refer to :ref:`sky-api-server-config` for how to set the SkyPilot config in Helm chart values.
+        Refer to :ref:`config-yaml-kubernetes-allowed-contexts` for how to set the SkyPilot config in Helm chart values.
 
     .. tab-item:: AWS
         :sync: aws-creds-tab
@@ -252,9 +254,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
                 --namespace $NAMESPACE \
-                # keep the Helm chart values set in the previous step
                 --reuse-values \
                 --set awsCredentials.enabled=true
 
@@ -290,9 +292,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set gcpCredentials.enabled=true \
               --set gcpCredentials.projectId=YOUR_PROJECT_ID
@@ -355,9 +357,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set lambdaCredentials.enabled=true
 
@@ -391,9 +393,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              # keep the Helm chart values set in the previous step
               --reuse-values \
               --set nebiusCredentials.enabled=true \
               --set nebiusCredentials.tenantId=YOUR_TENANT_ID
@@ -595,9 +597,9 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
     EOF
 
     # Install the API server with the config file
+    # --reuse-values keeps the Helm chart values set in the previous step
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
-      # Reuse the values set in the previous steps, if any
       --reuse-values \
       --set-file apiService.config=config.yaml
 
