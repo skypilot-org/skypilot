@@ -260,8 +260,6 @@ export function TopBar() {
             </a>
           </CustomTooltip>
 
-          <div className="border-l border-gray-200 h-6 mx-1"></div>
-
           {/* Keep the rest of the external links as icons only */}
           <CustomTooltip
             content="GitHub Repository"
@@ -310,7 +308,7 @@ export function TopBar() {
             </a>
           </CustomTooltip>
 
-          <div className="border-l border-gray-200 h-6 mx-1"></div>
+          <div className="border-l border-gray-200 h-6"></div>
 
           {/* Config Button */}
           <CustomTooltip
@@ -330,56 +328,56 @@ export function TopBar() {
               <Settings className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
             </Link>
           </CustomTooltip>
-        </div>
 
-        {/* User Profile Icon and Dropdown */}
-        {userEmail && (
-          <div className="relative ml-2" ref={dropdownRef}>
-            <button
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-              title="User Profile"
-            >
-              <UserCircleIcon
-                className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`}
-              />
-            </button>
+          {/* User Profile Icon and Dropdown */}
+          {userEmail && (
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                title="User Profile"
+              >
+                <UserCircleIcon
+                  className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`}
+                />
+              </button>
 
-            {isDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
-                {(() => {
-                  let displayName = userEmail;
-                  let emailToDisplay = null;
-                  if (userEmail && userEmail.includes('@')) {
-                    displayName = userEmail.split('@')[0];
-                    emailToDisplay = userEmail;
-                  }
-                  return (
-                    <>
-                      <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
-                        {displayName}
-                      </div>
-                      {emailToDisplay && (
-                        <div className="px-4 pt-0 pb-2 text-xs text-gray-500">
-                          {emailToDisplay}
+              {isDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                  {(() => {
+                    let displayName = userEmail;
+                    let emailToDisplay = null;
+                    if (userEmail && userEmail.includes('@')) {
+                      displayName = userEmail.split('@')[0];
+                      emailToDisplay = userEmail;
+                    }
+                    return (
+                      <>
+                        <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
+                          {displayName}
                         </div>
-                      )}
-                    </>
-                  );
-                })()}
-                <div className="border-t border-gray-200 mx-1 my-1"></div>
-                <Link
-                  href="/users"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
-                  onClick={() => setIsDropdownOpen(false)}
-                  prefetch={false}
-                >
-                  See all users
-                </Link>
-              </div>
-            )}
-          </div>
-        )}
+                        {emailToDisplay && (
+                          <div className="px-4 pt-0 pb-2 text-xs text-gray-500">
+                            {emailToDisplay}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <div className="border-t border-gray-200 mx-1 my-1"></div>
+                  <Link
+                    href="/users"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                    onClick={() => setIsDropdownOpen(false)}
+                    prefetch={false}
+                  >
+                    See all users
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
