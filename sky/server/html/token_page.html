@@ -49,6 +49,11 @@
             margin-bottom: 20px;
             color: #5f6368;
         }
+        .user-identifier {
+            font-size: 12px; /* Smaller font size */
+            color: #80868b;  /* Lighter color */
+            margin-bottom: 8px; /* Adjusted margin */
+        }
         .code-block {
             background-color: #f1f3f4;
             border: 1px solid #dadce0;
@@ -110,8 +115,8 @@
             </svg>
         </div>
         <h1>Sign in to SkyPilot CLI</h1>
+        <p class="user-identifier">USER_PLACEHOLDER</p>
         <p>You are seeing this page because a SkyPilot command requires authentication.</p>
-
         <p>Please copy the following token and paste it into your SkyPilot CLI prompt:</p>
         <div id="token-box" class="code-block">SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER</div>
         <button id="copy-btn" class="copy-button">Copy Token</button>

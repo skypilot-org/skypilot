@@ -48,9 +48,7 @@ export function InfrastructureSection({
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
           <h3 className="text-lg font-semibold mb-4">{title}</h3>
-          <p className="text-sm text-gray-500">
-            No {title} found or {title} is not configured.
-          </p>
+          <p className="text-sm text-gray-500">No {title} found.</p>
         </div>
       </div>
     );

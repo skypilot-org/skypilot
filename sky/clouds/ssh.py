@@ -6,14 +6,19 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import yaml
 
+from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import annotations
 from sky.utils import registry
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 
@@ -95,6 +100,26 @@ class SSH(kubernetes.Kubernetes):
         return region, zone
 
     @classmethod
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def _ssh_log_skipped_contexts_once(
+            cls, skipped_contexts: Tuple[str, ...]) -> None:
+        """Log skipped contexts for only once.
+
+        We don't directly cache the result of _filter_existing_allowed_contexts
+        as the admin policy may update the allowed contexts.
+        """
+        if skipped_contexts:
+            count = len(set(skipped_contexts))
+            is_singular = count == 1
+            logger.warning(
+                f'SSH Node {("Pool" if is_singular else "Pools")} '
+                f'{set(skipped_contexts)!r} specified in '
+                f'{SSH_NODE_POOLS_PATH} {("has" if is_singular else "have")} '
+                'not been set up. Skipping '
+                f'{("that pool" if is_singular else "those pools")}. '
+                'Run `sky ssh up` to set up.')
+
+    @classmethod
     def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts that start with 'ssh-'.
 
@@ -110,29 +135,44 @@ class SSH(kubernetes.Kubernetes):
 
         all_contexts = set(all_contexts)
 
+        # Workspace-level allowed_node_pools should take precedence over
+        # the global allowed_node_pools.
+        allowed_node_pools = skypilot_config.get_workspace_cloud('ssh').get(
+            'allowed_node_pools', None)
+        if allowed_node_pools is None:
+            allowed_node_pools = skypilot_config.get_nested(
+                ('ssh', 'allowed_node_pools'), None)
+
         # Filter for SSH contexts (those starting with 'ssh-')
         ssh_contexts = [
             context for context in all_contexts if context.startswith('ssh-')
         ]
 
         # Get contexts from SSH node pools file
-        allowed_contexts = cls.get_ssh_node_pool_contexts()
+        all_node_pool_contexts = cls.get_ssh_node_pool_contexts()
 
-        if allowed_contexts:
+        def filter_by_allowed_node_pools(ctxs):
+            if allowed_node_pools is None:
+                return ctxs
+            return [
+                ctx for ctx in ctxs if ctx.lstrip('ssh-') in allowed_node_pools
+            ]
+
+        if all_node_pool_contexts:
             # Only include allowed contexts that exist
             existing_contexts = []
             skipped_contexts = []
-            for context in allowed_contexts:
+            for context in all_node_pool_contexts:
                 if context in ssh_contexts:
                     existing_contexts.append(context)
                 else:
                     skipped_contexts.append(context)
             if not silent:
-                cls._log_skipped_contexts_once(tuple(skipped_contexts))
-            return existing_contexts
+                cls._ssh_log_skipped_contexts_once(tuple(skipped_contexts))
+            return filter_by_allowed_node_pools(existing_contexts)
 
-        # If no allowed_contexts found, return all SSH contexts
-        return ssh_contexts
+        # If no all_node_pool_contexts found, return all SSH contexts
+        return filter_by_allowed_node_pools(ssh_contexts)
 
     @classmethod
     def _check_compute_credentials(
@@ -168,9 +208,9 @@ class SSH(kubernetes.Kubernetes):
         return success, ctx2text
 
     @classmethod
-    def get_infras(cls) -> List[str]:
+    def expand_infras(cls) -> List[str]:
         return [
-            f'{cls._REPR.lower()}/{c.lstrip("ssh-")}'
+            f'{cls.canonical_name()}/{c.lstrip("ssh-")}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 

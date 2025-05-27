@@ -109,5 +109,261 @@ class TestResourcesSchema(unittest.TestCase):
                 jsonschema.validate(instance=config, schema=resources_schema)
 
 
+class TestWorkspaceSchema(unittest.TestCase):
+    """Tests for the workspace schema in schemas.py"""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.config_schema = schemas.get_config_schema()
+        self.workspaces_schema = self.config_schema['properties']['workspaces']
+
+    def test_valid_workspace_configs(self):
+        """Test validation of valid workspace configurations."""
+        # Valid workspace configurations
+        valid_workspace_configs = [
+            # Empty workspace
+            {},
+            # Workspace with disabled cloud
+            {
+                'my-workspace': {
+                    'aws': {
+                        'disabled': True
+                    }
+                }
+            },
+            # GCP with project_id
+            {
+                'my-workspace': {
+                    'gcp': {
+                        'project_id': 'my-project',
+                        'disabled': False
+                    }
+                }
+            },
+            # GCP with only project_id
+            {
+                'my-workspace': {
+                    'gcp': {
+                        'project_id': 'my-project'
+                    }
+                }
+            },
+            # GCP with only disabled
+            {
+                'my-workspace': {
+                    'gcp': {
+                        'disabled': True
+                    }
+                }
+            },
+            # Multiple clouds
+            {
+                'my-workspace': {
+                    'aws': {
+                        'disabled': False
+                    },
+                    'gcp': {
+                        'project_id': 'my-project',
+                        'disabled': False
+                    },
+                    'azure': {
+                        'disabled': True
+                    }
+                }
+            },
+            # Multiple workspaces
+            {
+                'workspace-1': {
+                    'aws': {
+                        'disabled': False
+                    }
+                },
+                'workspace-2': {
+                    'gcp': {
+                        'project_id': 'other-project'
+                    }
+                }
+            }
+        ]
+
+        for config in valid_workspace_configs:
+            # Should not raise an exception
+            try:
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+            except jsonschema.exceptions.ValidationError as e:
+                self.fail(f"Valid config {config} was rejected: {e}")
+
+    def test_non_gcp_clouds_only_allow_disabled(self):
+        """Test that non-GCP clouds only allow 'disabled' property."""
+        # Test that all non-GCP clouds only accept 'disabled' property
+        non_gcp_clouds = ['aws', 'azure', 'kubernetes', 'oci', 'nebius']
+
+        for cloud in non_gcp_clouds:
+            # Valid: only disabled
+            valid_config = {'my-workspace': {cloud: {'disabled': True}}}
+            try:
+                jsonschema.validate(instance=valid_config,
+                                    schema=self.workspaces_schema)
+            except jsonschema.exceptions.ValidationError as e:
+                self.fail(f"Valid config for {cloud} was rejected: {e}")
+
+            # Invalid: additional property should be rejected
+            invalid_config = {
+                'my-workspace': {
+                    cloud: {
+                        'disabled': True,
+                        'project_id': 'should-not-be-allowed'
+                    }
+                }
+            }
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Config with extra property for {cloud} should be "
+                    f"rejected"):
+                jsonschema.validate(instance=invalid_config,
+                                    schema=self.workspaces_schema)
+
+    def test_gcp_allows_project_id_and_disabled(self):
+        """Test that GCP allows both 'project_id' and 'disabled' properties."""
+        # Valid: both project_id and disabled
+        valid_configs = [{
+            'my-workspace': {
+                'gcp': {
+                    'project_id': 'my-project',
+                    'disabled': False
+                }
+            }
+        }, {
+            'my-workspace': {
+                'gcp': {
+                    'project_id': 'my-project'
+                }
+            }
+        }, {
+            'my-workspace': {
+                'gcp': {
+                    'disabled': True
+                }
+            }
+        }]
+
+        for config in valid_configs:
+            try:
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+            except jsonschema.exceptions.ValidationError as e:
+                self.fail(f"Valid GCP config {config} was rejected: {e}")
+
+    def test_gcp_rejects_invalid_additional_properties(self):
+        """Test that GCP rejects invalid additional properties."""
+        # Invalid: additional property not allowed for GCP either
+        invalid_config = {
+            'my-workspace': {
+                'gcp': {
+                    'project_id': 'my-project',
+                    'disabled': False,
+                    'invalid_property': 'should-not-be-allowed'
+                }
+            }
+        }
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=invalid_config,
+                                schema=self.workspaces_schema)
+
+    def test_invalid_workspace_types(self):
+        """Test validation rejects invalid workspace types."""
+        # Invalid types
+        invalid_configs = [
+            'string-not-object',  # Should be object, not string
+            123,  # Should be object, not number
+            ['array'],  # Should be object, not array
+            {
+                'my-workspace': 'should-be-object'  # Workspace should be object
+            },
+            {
+                'my-workspace': {
+                    'aws': 'should-be-object'  # Cloud config should be object
+                }
+            },
+            {
+                'my-workspace': {
+                    'gcp': {
+                        'project_id': 123  # project_id should be string
+                    }
+                }
+            },
+            {
+                'my-workspace': {
+                    'aws': {
+                        'disabled': 'should-be-boolean'  # disabled should be bool
+                    }
+                }
+            }
+        ]
+
+        for invalid_config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Invalid config {invalid_config} should be rejected"):
+                jsonschema.validate(instance=invalid_config,
+                                    schema=self.workspaces_schema)
+
+    def test_unknown_cloud_names_rejected(self):
+        """Test that unknown cloud names are rejected."""
+        invalid_config = {'my-workspace': {'unknown-cloud': {'disabled': True}}}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=invalid_config,
+                                schema=self.workspaces_schema)
+
+    def test_only_lowercase_cloud_names_allowed(self):
+        """Test that only lowercase cloud names are allowed."""
+        # Valid: lowercase cloud names
+        valid_config = {
+            'my-workspace': {
+                'cloudflare': {  # Special cloud
+                    'disabled': False
+                }
+            }
+        }
+        try:
+            jsonschema.validate(instance=valid_config,
+                                schema=self.workspaces_schema)
+        except jsonschema.exceptions.ValidationError as e:
+            self.fail(f"Valid lowercase config was rejected: {e}")
+
+        # Invalid: uppercase cloud names should be rejected
+        invalid_configs = [
+            {
+                'my-workspace': {
+                    'AWS': {  # Uppercase
+                        'disabled': True
+                    }
+                }
+            },
+            {
+                'my-workspace': {
+                    'GCP': {  # Uppercase GCP
+                        'project_id': 'my-project'
+                    }
+                }
+            },
+            {
+                'my-workspace': {
+                    'Azure': {  # Mixed case
+                        'disabled': False
+                    }
+                }
+            }
+        ]
+
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Uppercase cloud config {config} should be rejected"):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
+
 if __name__ == "__main__":
     unittest.main()

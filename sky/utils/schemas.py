@@ -1047,6 +1047,25 @@ def get_config_schema():
                 },
             }
         },
+        'ssh': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_node_pools': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -1176,6 +1195,87 @@ def get_config_schema():
         }
     }
 
+    workspace_schema = {'type': 'string'}
+
+    allowed_workspace_cloud_names = list(
+        service_catalog.ALL_CLOUDS) + ['cloudflare']
+    # Create pattern for not supported clouds, i.e.
+    # all clouds except gcp, kubernetes, ssh
+    not_supported_clouds = [
+        cloud for cloud in allowed_workspace_cloud_names
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
+    ]
+    not_supported_cloud_regex = '|'.join(not_supported_clouds)
+    workspaces_schema = {
+        'type': 'object',
+        'required': [],
+        # each key is a workspace name
+        'additionalProperties': {
+            'type': 'object',
+            'additionalProperties': False,
+            'patternProperties': {
+                # Pattern for non-GCP clouds - only allows 'disabled' property
+                f'^({not_supported_cloud_regex})$': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                },
+            },
+            'properties': {
+                # Explicit definition for GCP allows both project_id and
+                # disabled
+                'gcp': {
+                    'type': 'object',
+                    'properties': {
+                        'project_id': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                    'additionalProperties': False,
+                },
+                'ssh': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_node_pools': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'kubernetes': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_contexts': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+            },
+        },
+    }
+
     provision_configs = {
         'type': 'object',
         'required': [],
@@ -1202,6 +1302,10 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            # TODO Replace this with whatever syang cooks up
+            'workspace': {
+                'type': 'string',
+            },
             'jobs': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
@@ -1209,6 +1313,8 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'active_workspace': workspace_schema,
+            'workspaces': workspaces_schema,
             'provision': provision_configs,
             **cloud_configs,
         },
