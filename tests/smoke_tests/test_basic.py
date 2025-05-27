@@ -376,41 +376,44 @@ def test_scp_logs():
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
 def test_core_api_sky_launch_exec(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    task = sky.Task(run="whoami")
-    task.set_resources(
-        sky.Resources(infra=generic_cloud,
-                      **smoke_tests_utils.LOW_RESOURCE_PARAM))
-    try:
-        job_id, handle = sky.get(sky.launch(task, cluster_name=name))
-        assert job_id == 1
-        assert handle is not None
-        assert handle.cluster_name == name
-        assert str(
-            handle.launched_resources.cloud).lower() == generic_cloud.lower()
-        job_id_exec, handle_exec = sky.get(sky.exec(task, cluster_name=name))
-        assert job_id_exec == 2
-        assert handle_exec is not None
-        assert handle_exec.cluster_name == name
-        assert str(handle_exec.launched_resources.cloud).lower(
-        ) == generic_cloud.lower()
-        # For dummy task (i.e. task.run is None), the job won't be submitted.
-        dummy_task = sky.Task()
-        job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
-        assert job_id_dummy is None
-        # Check the cluster status from the dashboard
-        cluster_exist = False
-        status_request_id = (
-            smoke_tests_utils.get_dashboard_cluster_status_request_id())
-        status_response = (
-            smoke_tests_utils.get_response_from_request_id(status_request_id))
-        for cluster in status_response:
-            if cluster['name'] == name:
-                cluster_exist = True
-                break
-        assert cluster_exist, status_response
-    finally:
-        sky.get(sky.down(name))
+    with smoke_tests_utils.override_sky_config(smoke_tests_utils.Test(),
+                                               os.environ):
+        name = smoke_tests_utils.get_cluster_name()
+        task = sky.Task(run="whoami")
+        task.set_resources(
+            sky.Resources(infra=generic_cloud,
+                          **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        try:
+            job_id, handle = sky.get(sky.launch(task, cluster_name=name))
+            assert job_id == 1
+            assert handle is not None
+            assert handle.cluster_name == name
+            assert str(handle.launched_resources.cloud).lower(
+            ) == generic_cloud.lower()
+            job_id_exec, handle_exec = sky.get(sky.exec(task,
+                                                        cluster_name=name))
+            assert job_id_exec == 2
+            assert handle_exec is not None
+            assert handle_exec.cluster_name == name
+            assert str(handle_exec.launched_resources.cloud).lower(
+            ) == generic_cloud.lower()
+            # For dummy task (i.e. task.run is None), the job won't be submitted.
+            dummy_task = sky.Task()
+            job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
+            assert job_id_dummy is None
+            # Check the cluster status from the dashboard
+            cluster_exist = False
+            status_request_id = (
+                smoke_tests_utils.get_dashboard_cluster_status_request_id())
+            status_response = (smoke_tests_utils.get_response_from_request_id(
+                status_request_id))
+            for cluster in status_response:
+                if cluster['name'] == name:
+                    cluster_exist = True
+                    break
+            assert cluster_exist, status_response
+        finally:
+            sky.get(sky.down(name))
 
 
 # The sky launch CLI has some additional checks to make sure the cluster is up/
