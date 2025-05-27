@@ -45,11 +45,12 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
-if os.environ.get('SKYPILOT_API_SRV_DB_URI'):
-    # If SKYPILOT_API_SRV_DB_URI is set, use it as the database URI.
-    logger.debug('using db URI from SKYPILOT_API_SRV_DB_URI')
+if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
+    # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set, use it as the database URI.
+    logger.debug(
+        f'using db URI from {constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
     _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-        os.environ.get('SKYPILOT_API_SRV_DB_URI'))
+        os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
 else:
     _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
 
