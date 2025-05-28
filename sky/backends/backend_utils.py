@@ -1154,8 +1154,7 @@ def wait_until_ray_cluster_ready(
         logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
-    # TODO does this need to be global_user_state.get_cluster_yaml_dict?
-    config = common_utils.read_yaml(cluster_config_file)
+    config = global_user_state.get_cluster_yaml_dict(cluster_config_file)
 
     docker_user = None
     if 'docker' in config:
@@ -1446,8 +1445,7 @@ def get_node_ips(cluster_yaml: str,
         exceptions.FetchClusterInfoError: if we failed to get the IPs. e.reason is
             HEAD or WORKER.
     """
-    # TODO does this need to be global_user_state.get_cluster_yaml_dict?
-    ray_config = common_utils.read_yaml(cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     # Use the new provisioner for AWS.
     provider_name = cluster_utils.get_provider_name(ray_config)
     cloud = registry.CLOUD_REGISTRY.from_str(provider_name)

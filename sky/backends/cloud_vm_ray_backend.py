@@ -1936,9 +1936,8 @@ class RetryingVmProvisioner(object):
             # ready to ensure cluster will not scale up after preemption (spot).
             # Skip for non-spot as this takes extra time to provision (~1min).
             if use_spot:
-                # TODO does this need to be
-                # global_user_state.get_cluster_yaml_dict?
-                ray_config = common_utils.read_yaml(cluster_config_file)
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    cluster_config_file)
                 ray_config['upscaling_speed'] = 0
                 common_utils.dump_yaml(cluster_config_file, ray_config)
                 start = time.time()
@@ -2638,9 +2637,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # pylint: disable=import-outside-toplevel
             launched_resources = state['launched_resources']
             if isinstance(launched_resources.cloud, clouds.Kubernetes):
-                # TODO does this need to be
-                # global_user_state.get_cluster_yaml_dict?
-                yaml_config = common_utils.read_yaml(
+                yaml_config = global_user_state.get_cluster_yaml_dict(
                     os.path.expanduser(state['_cluster_yaml']))
                 context = kubernetes_utils.get_context_from_config(
                     yaml_config['provider'])
@@ -3050,7 +3047,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ssh_port_list = handle.external_ssh_ports()
             assert ip_list is not None, handle
             assert ssh_port_list is not None, handle
-            # TODO does this need to be global_user_state.get_cluster_yaml_dict?
             config = global_user_state.get_cluster_yaml_dict(
                 cluster_config_file)
             if 'docker' in config:
