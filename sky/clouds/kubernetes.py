@@ -559,6 +559,10 @@ class Kubernetes(clouds.Cloud):
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
         k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        if resources.network_tier is not None and resources.network_tier == resources_utils.NetworkTier.BEST:
+            if 'nebius' in context:
+                k8s_env_vars['NCCL_IB_HCA'] = "mlx5"
+                k8s_env_vars['UCX_NET_DEVICES'] = "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1"
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit

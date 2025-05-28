@@ -715,7 +715,6 @@ def write_cluster_config(
     # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name)
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -813,9 +812,29 @@ def write_cluster_config(
 
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
+        cluster_config_overrides = to_provision.cluster_config_overrides
+        if to_provision.network_tier is not None and to_provision.network_tier == resources_utils.NetworkTier.BEST:
+            if 'nebius' in resources_vars['k8s_env_vars']['SKYPILOT_IN_CLUSTER_CONTEXT_NAME']:
+                # Force security context with IPC_LOCK capability
+                if 'kubernetes' not in cluster_config_overrides:
+                    cluster_config_overrides['kubernetes'] = {}
+                if 'pod_config' not in cluster_config_overrides['kubernetes']:
+                    cluster_config_overrides['kubernetes']['pod_config'] = {}
+                if 'spec' not in cluster_config_overrides['kubernetes']['pod_config']:
+                    cluster_config_overrides['kubernetes']['pod_config']['spec'] = {}
+                if 'containers' not in cluster_config_overrides['kubernetes']['pod_config']['spec']:
+                    cluster_config_overrides['kubernetes']['pod_config']['spec']['containers'] = [{}]
+                
+                cluster_config_overrides['kubernetes']['pod_config']['spec']['containers'][0]['securityContext'] = {
+                    'capabilities': {
+                        'add': ['IPC_LOCK']
+                    }
+                }
+
+
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path,
-            cluster_config_overrides=to_provision.cluster_config_overrides)
+            cluster_config_overrides=cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
