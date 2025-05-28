@@ -701,6 +701,12 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('priority')}
+              >
+                Priority{getSortDirection('priority')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources_str')}
               >
                 Requested{getSortDirection('resources_str')}
@@ -717,7 +723,6 @@ export function ManagedJobsTable({
               >
                 Resources{getSortDirection('cluster')}
               </TableHead>
-
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('recoveries')}
@@ -732,7 +737,7 @@ export function ManagedJobsTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={12}
+                  colSpan={13}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -778,6 +783,7 @@ export function ManagedJobsTable({
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
+                      <TableCell>{item.priority}</TableCell>
                       <TableCell>{item.requested_resources}</TableCell>
                       <TableCell>
                         {item.infra && item.infra !== '-' ? (
@@ -840,7 +846,7 @@ export function ManagedJobsTable({
                     {expandedRowId === item.id && (
                       <ExpandedDetailsRow
                         text={item.details}
-                        colSpan={12}
+                        colSpan={13}
                         innerRef={expandedRowRef}
                       />
                     )}
@@ -849,7 +855,7 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-6">
+                <TableCell colSpan={13} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
@@ -1207,6 +1213,12 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('priority')}
+              >
+                Priority{getSortDirection('priority')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources')}
               >
                 Resources{getSortDirection('resources')}
@@ -1258,6 +1270,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
+                    <TableCell>{item.priority}</TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions
