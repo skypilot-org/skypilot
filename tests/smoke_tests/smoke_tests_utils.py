@@ -800,7 +800,7 @@ def is_ssh_test() -> bool:
 
 def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
     """Parse the SSH command to get a list of commands to launch a node pool."""
-    gpus_val, infra_val, instance_type_val, yaml_path_val = None, None, None, None
+    gpus_val, infra_val, instance_type_val, yaml_path_val, cpus_val, memory_val = None, None, None, None, None, None
     ssh_node_pool_size = 0
 
     for original_command_str in commands:
@@ -860,6 +860,10 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
                             gpus_val = gpus_val[0] if gpus_val else ''
                     if 'instance_type' in resources:
                         instance_type_val = resources['instance_type']
+                    if 'cpus' in resources:
+                        cpus_val = resources['cpus']
+                    if 'memory' in resources:
+                        memory_val = resources['memory']
 
                 if 'num_nodes' in task_config:
                     # One extra for controller node
@@ -878,6 +882,10 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
             ssh_node_pool_command.extend(['--instance-type', instance_type_val])
         if gpus_val:
             ssh_node_pool_command.extend(['--gpus', gpus_val])
+        if cpus_val:
+            ssh_node_pool_command.extend(['--cpus', cpus_val])
+        if memory_val:
+            ssh_node_pool_command.extend(['--memory', memory_val])
         ssh_node_pool_command = ' '.join(ssh_node_pool_command)
 
     return ssh_node_pool_command, ssh_node_pool_size
