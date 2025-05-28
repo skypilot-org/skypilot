@@ -57,7 +57,6 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
             </head>
             <body>
                 <div class="container">
-                    <div class="logo">🚀 SkyPilot</div>
                     <h2 class="success">Authentication Successful!</h2>
                     <p>You have successfully authenticated with SkyPilot.</p>
                     <p>You can now close this window and return to your 

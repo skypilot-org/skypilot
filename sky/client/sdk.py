@@ -1979,7 +1979,8 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                 except Exception:  # pylint: disable=broad-except
                     pass
             if not token:
-                raise ValueError('Authentication failed.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Authentication failed.')
 
         # Parse the token.
         # b64decode will ignore invalid characters, but does some length and
