@@ -474,3 +474,41 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_docker_image_and_ssh():
+    """Test K8s docker image ID interchangeability with/without prefix."""
+    # We use a real, simple image like alpine for the test.
+    # 'abc' in the user query is a placeholder.
+    image_name = 'alpine'
+    docker_prefixed_image_id = f'docker:{image_name}'
+    unprefixed_image_id = image_name
+    run_command = 'echo hello world'
+
+    # Scenario 1: launch with docker:alpine, exec with alpine
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        f'k8s-docker-prefix-launch-{image_name}',
+        [
+            f'sky launch -c {name}-1 --retry-until-up -y --async '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra kubernetes/none '
+            f'--image-id {docker_prefixed_image_id} -- "{run_command}"',
+            f'sky launch -c {name}-2 --retry-until-up -y '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra kubernetes/none '
+            f'--image-id {unprefixed_image_id} -- "{run_command}"',
+            f'sky logs {name}-1 1 --status',
+            f'sky exec {name}-1 --image-id {unprefixed_image_id} -- "{run_command}" | grep "hello world"',
+            f'sky logs {name}-1 2 --status',
+            f'sky logs {name}-2 1 --status',
+            f'sky exec {name}-2 --image-id {docker_prefixed_image_id} -- "{run_command}" | grep "hello world"',
+            f'sky logs {name}-2 2 --status',
+            f'ssh {name}-1 -- "{run_command}" | grep "hello world"',
+            f'ssh {name}-2 -- "{run_command}" | grep "hello world"',
+        ],
+        f'sky down -y {name}-1 {name}-2',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
