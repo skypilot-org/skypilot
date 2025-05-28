@@ -1,4 +1,5 @@
 """Constants used by the GCP provisioner."""
+import textwrap
 
 VERSION = 'v1'
 # Using v2 according to
@@ -53,9 +54,7 @@ CLUSTER_PREFIX_LENGTH = 10
 
 COMPACT_GROUP_PLACEMENT_POLICY = 'compact'
 COLLOCATED_COLLOCATION = 'COLLOCATED'
-GPU_DIRECT_TCPX_USER_DATA = """#!/bin/bash
-    set -e
-    set -x
+GPU_DIRECT_TCPX_USER_DATA = textwrap.dedent("""
     # Install GPU Direct TCPX
     cos-extensions install gpu -- --version=latest;
     sudo mount --bind /var/lib/nvidia /var/lib/nvidia;
@@ -83,7 +82,7 @@ GPU_DIRECT_TCPX_USER_DATA = """#!/bin/bash
     sudo mount --bind /var/lib/tcpx /var/lib/tcpx;
     sudo mount -o remount,exec /var/lib/tcpx;
     echo "GPU Direct TCPX installed"
-    """
+    """)
 
 GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--cap-add=IPC_LOCK',
@@ -105,6 +104,150 @@ GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--device /dev/nvidiactl:/dev/nvidiactl',
     '--env LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/tcpx/lib64',
 ]
+
+PD_EXTREME_IOPS = 20000
+DEFAULT_DISK_SIZE = 100
+NETWORK_STORAGE_TYPE = 'PERSISTENT'
+INSTANCE_STORAGE_TYPE = 'SCRATCH'
+INSTANCE_STORAGE_DISK_TYPE = 'local-ssd'
+INSTANCE_STORAGE_INTERFACE_TYPE = 'NVME'
+INSTANCE_STORAGE_DEVICE_NAME_PREFIX = '/dev/disk/by-id/google-local-nvme-ssd-'
+DEVICE_NAME_PREFIX = '/dev/disk/by-id/google-'
+
+BASH_SCRIPT_START = textwrap.dedent("""#!/bin/bash
+set -e
+set -x
+""")
+DISK_MOUNT_USER_DATA_TEMPLATE = textwrap.dedent("""
+    # Define arrays for devices and mount points
+    declare -A device_mounts=(
+        {device_mounts}
+    )
+
+    # Function to format and mount a single device
+    format_and_mount() {{
+        local device_name="$1"
+        local mount_point="$2"
+
+        if [ ! -e "$device_name" ]; then
+            echo "Error: Device $device_name does not exist."
+            return 1
+        fi
+
+        # Check if filesystem is already formatted (ext4)
+        if ! sudo blkid "$device_name" | grep -q 'TYPE="ext4"'; then
+            if [[ "$device_name" == "/dev/disk/by-id/google-local-nvme-ssd"* ]]; then
+                echo "Formatting local SSD $device_name..."
+                if ! sudo mkfs.ext4 -F "$device_name"; then
+                    echo "Error: Failed to format $device_name"
+                    return 1
+                fi
+            else
+                echo "Formatting persistent disk $device_name..."
+                if ! sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$device_name"; then
+                    echo "Error: Failed to format $device_name"
+                    return 1
+                fi
+            fi
+        else
+            echo "$device_name is already formatted."
+        fi
+
+        # Check if already mounted
+        if ! grep -q "$mount_point" /proc/mounts; then
+            echo "Mounting $device_name to $mount_point..."
+            if ! sudo mkdir -p "$mount_point"; then
+                echo "Error: Failed to create mount point $mount_point"
+                return 1
+            fi
+
+            if ! sudo mount "$device_name" "$mount_point"; then
+                echo "Error: Failed to mount $device_name to $mount_point"
+                return 1
+            fi
+
+            # Add to fstab if not already present
+            if ! grep -q " $mount_point " /etc/fstab; then
+                echo "Adding mount entry to /etc/fstab..."
+                echo "UUID=`sudo blkid -s UUID -o value $device_name` $mount_point ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+            else
+                echo "Mount entry already exists in /etc/fstab"
+            fi
+        else
+            echo "$device_name is already mounted at $mount_point"
+        fi
+    }}
+
+    # Main execution
+    echo "Starting device mounting process..."
+
+    # Process each device-mount pair
+    for device in "${{!device_mounts[@]}}"; do
+        mount_point="${{device_mounts[$device]}}"
+        echo "Processing device: $device -> $mount_point"
+        if ! format_and_mount "$device" "$mount_point"; then
+            echo "Failed to process device $device"
+            # Continue with other devices even if one fails
+            continue
+        fi
+    done
+
+    echo "Device mounting process completed."
+""")
+
+# The local SSDs will be attached automatically to the following
+# machine types with the following number of disks.
+# Refer to https://cloud.google.com/compute/docs/disks/local-ssd#lssd_disks_fixed
+SSD_AUTO_ATTACH_MACHINE_TYPES = {
+    'c4a-standard-4-lssd': 1,
+    'c4a-highmem-4-lssd': 1,
+    'c4a-standard-8-lssd': 2,
+    'c4a-highmem-8-lssd': 2,
+    'c4a-standard-16-lssd': 4,
+    'c4a-highmem-16-lssd': 4,
+    'c4a-standard-32-lssd': 6,
+    'c4a-highmem-32-lssd': 6,
+    'c4a-standard-48-lssd': 10,
+    'c4a-highmem-48-lssd': 10,
+    'c4a-standard-64-lssd': 14,
+    'c4a-highmem-64-lssd': 14,
+    'c4a-standard-72-lssd': 16,
+    'c4a-highmem-72-lssd': 16,
+    'c3-standard-4-lssd': 1,
+    'c3-standard-8-lssd': 2,
+    'c3-standard-22-lssd': 4,
+    'c3-standard-44-lssd': 8,
+    'c3-standard-88-lssd': 16,
+    'c3-standard-176-lssd': 32,
+    'c3d-standard-8-lssd': 1,
+    'c3d-highmem-8-lssd': 1,
+    'c3d-standard-16-lssd': 1,
+    'c3d-highmem-16-lssd': 1,
+    'c3d-standard-30-lssd': 2,
+    'c3d-highmem-30-lssd': 2,
+    'c3d-standard-60-lssd': 4,
+    'c3d-highmem-60-lssd': 4,
+    'c3d-standard-90-lssd': 8,
+    'c3d-highmem-90-lssd': 8,
+    'c3d-standard-180-lssd': 16,
+    'c3d-highmem-180-lssd': 16,
+    'c3d-standard-360-lssd': 32,
+    'c3d-highmem-360-lssd': 32,
+    'a4-highgpu-8g': 32,
+    'a3-ultragpu-8g': 32,
+    'a3-megagpu-8g': 16,
+    'a3-highgpu-1g': 2,
+    'a3-highgpu-2g': 4,
+    'a3-highgpu-4g': 8,
+    'a3-highgpu-8g': 16,
+    'a3-edgegpu-8g': 16,
+    'a2-ultragpu-1g': 1,
+    'a2-ultragpu-2g': 2,
+    'a2-ultragpu-4g': 4,
+    'a2-ultragpu-8g': 8,
+    'z3-highmem-88': 12,
+    'z3-highmem-176': 12,
+}
 
 # Below parameters are from the default VPC on GCP.
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc

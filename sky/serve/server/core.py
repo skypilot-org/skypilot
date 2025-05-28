@@ -228,20 +228,22 @@ def up(
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
-            admin_policy_utils.apply(
-                controller_task,
-                admin_policy.RequestOptions(
+            with skypilot_config.local_active_workspace_ctx(
+                    constants.SKYPILOT_DEFAULT_WORKSPACE):
+                admin_policy_utils.apply(
+                    controller_task,
+                    admin_policy.RequestOptions(
+                        cluster_name=controller_name,
+                        idle_minutes_to_autostop=None,
+                        down=False,
+                        dryrun=False,
+                    ))
+                controller_job_id, controller_handle = execution.launch(
+                    task=controller_task,
                     cluster_name=controller_name,
-                    idle_minutes_to_autostop=None,
-                    down=False,
-                    dryrun=False,
-                ))
-            controller_job_id, controller_handle = execution.launch(
-                task=controller_task,
-                cluster_name=controller_name,
-                retry_until_up=True,
-                _disable_controller_check=True,
-            )
+                    retry_until_up=True,
+                    _disable_controller_check=True,
+                )
 
         style = colorama.Style
         fore = colorama.Fore

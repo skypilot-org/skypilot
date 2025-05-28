@@ -4,6 +4,7 @@ import textwrap
 import click
 from click import testing as cli_testing
 import pytest
+from sqlalchemy import create_engine
 import yaml
 
 import sky
@@ -40,11 +41,12 @@ def _mock_db_conn(tmp_path, monkeypatch):
     # Create a temporary database file
     db_path = tmp_path / 'state_testing.db'
 
-    # Create a new SQLiteConn instance
-    db_conn = db_utils.SQLiteConn(str(db_path), global_user_state.create_table)
+    sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
 
-    # Monkeypatch the global database connection
-    monkeypatch.setattr(global_user_state, '_DB', db_conn)
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+                        sqlalchemy_engine)
+
+    global_user_state.create_table()
 
 
 def _generate_tmp_yaml(tmp_path, filename: str) -> str:
@@ -66,7 +68,7 @@ def _generate_tmp_yaml(tmp_path, filename: str) -> str:
 
 @pytest.fixture
 def _mock_cluster_state(_mock_db_conn, tmp_path):
-    assert 'state.db' not in global_user_state._DB.db_path
+    assert 'state.db' not in global_user_state._SQLALCHEMY_ENGINE.url
     # Mock an empty /tmp/cluster1.yaml using tmp_path
 
     handle = backends.CloudVmRayResourceHandle(

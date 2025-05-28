@@ -1,8 +1,16 @@
 """Utils for sky databases."""
 import contextlib
+import enum
 import sqlite3
 import threading
+import typing
 from typing import Any, Callable, Optional
+
+import sqlalchemy
+from sqlalchemy import exc as sqlalchemy_exc
+
+if typing.TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
 # obtains a database lock (not necessarily during connection, but whenever it is
@@ -19,6 +27,11 @@ from typing import Any, Callable, Optional
 # 1000x parallelism, this is thus thought to be a conservative setting.
 # For more info, see the PR description for #4552.
 _DB_TIMEOUT_S = 60
+
+
+class SQLAlchemyDialect(enum.Enum):
+    SQLITE = 'sqlite'
+    POSTGRESQL = 'postgresql'
 
 
 @contextlib.contextmanager
@@ -69,6 +82,46 @@ def add_column_to_table(
             else:
                 raise
     conn.commit()
+
+
+def add_column_to_table_sqlalchemy(
+    session: 'Session',
+    table_name: str,
+    column_name: str,
+    column_type: str,
+    copy_from: Optional[str] = None,
+    value_to_replace_existing_entries: Optional[Any] = None,
+):
+    """Add a column to a table."""
+    dialect = session.bind.dialect
+    if dialect.name == SQLAlchemyDialect.SQLITE.value:
+        try:
+            session.execute(
+                sqlalchemy.text(f'ALTER TABLE {table_name} '
+                                f'ADD COLUMN {column_name} {column_type}'))
+            if copy_from is not None:
+                session.execute(
+                    sqlalchemy.text(f'UPDATE {table_name} '
+                                    f'SET {column_name} = {copy_from}'))
+            if value_to_replace_existing_entries is not None:
+                session.execute(
+                    sqlalchemy.text(f'UPDATE {table_name} '
+                                    f'SET {column_name} = :replacement_value '
+                                    f'WHERE {column_name} IS NULL'),
+                    {'replacement_value': value_to_replace_existing_entries})
+        except sqlalchemy_exc.OperationalError as e:
+            if 'duplicate column name' in str(e):
+                pass
+            else:
+                raise
+    elif dialect.name == SQLAlchemyDialect.POSTGRESQL.value:
+        # TODO(syang) support postgres dialect
+        session.rollback()
+        raise ValueError('Unsupported database dialect')
+    else:
+        session.rollback()
+        raise ValueError('Unsupported database dialect')
+    session.commit()
 
 
 def rename_column(

@@ -192,6 +192,7 @@ def _get_cluster_config_template(cloud):
         clouds.DO: 'do-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.SSH: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
@@ -1547,11 +1548,13 @@ class RetryingVmProvisioner(object):
                     controller_str = ('' if controller is None else
                                       f' {controller.value.name}')
                     if isinstance(to_provision.cloud, clouds.Kubernetes):
-                        # Omit the region name for Kubernetes.
+                        suffix = '.'
+                        if region.name.startswith('ssh-'):
+                            suffix = f' ({region.name.lstrip("ssh-")})'
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on '
-                                f'{to_provision.cloud}.'))
+                                f'{to_provision.cloud}{suffix}'))
                     else:
                         logger.info(
                             ux_utils.starting_message(
@@ -1724,8 +1727,17 @@ class RetryingVmProvisioner(object):
                 f'{requested_resources}. ')
         elif to_provision.region is not None:
             # For public clouds, provision.region is always set.
-            message = ('Failed to acquire resources in all zones in '
-                       f'{to_provision.region} for {requested_resources}. ')
+            if to_provision.cloud.is_same_cloud(clouds.SSH()):
+                message = ('Failed to acquire resources in SSH Node Pool '
+                           f'({to_provision.region.lstrip("ssh-")}) for '
+                           f'{requested_resources}. The SSH Node Pool may not '
+                           'have enough resources.')
+            elif to_provision.cloud.is_same_cloud(clouds.Kubernetes()):
+                message = ('Failed to acquire resources in context '
+                           f'{to_provision.region} for {requested_resources}. ')
+            else:
+                message = ('Failed to acquire resources in all zones in '
+                           f'{to_provision.region} for {requested_resources}. ')
         else:
             message = (f'Failed to acquire resources in {to_provision.cloud} '
                        f'for {requested_resources}. ')
@@ -3495,7 +3507,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Add the managed job to job queue database.
                 managed_job_codegen = managed_jobs.ManagedJobCodeGen()
                 managed_job_code = managed_job_codegen.set_pending(
-                    job_id, managed_job_dag)
+                    job_id, managed_job_dag,
+                    skypilot_config.get_active_workspace(
+                        force_user_workspace=True))
                 # Set the managed job to PENDING state to make sure that this
                 # managed job appears in the `sky jobs queue`, even if it needs
                 # to wait to be submitted.

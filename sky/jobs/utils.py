@@ -23,6 +23,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
@@ -463,7 +464,8 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
-                      all_users: bool = False) -> str:
+                      all_users: bool = False,
+                      current_workspace: Optional[str] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
@@ -474,9 +476,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
-    job_id_str = ', '.join(map(str, job_ids))
-    logger.info(f'Cancelling jobs {job_id_str}.')
+    if current_workspace is None:
+        current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+
     cancelled_job_ids: List[int] = []
+    wrong_workspace_job_ids: List[int] = []
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -491,6 +495,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
+        job_workspace = managed_job_state.get_workspace(job_id)
+        if current_workspace is not None and job_workspace != current_workspace:
+            wrong_workspace_job_ids.append(job_id)
+            continue
+
         # Send the signal to the jobs controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
@@ -501,17 +510,30 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 f.flush()
         cancelled_job_ids.append(job_id)
 
+    wrong_workspace_job_str = ''
+    if wrong_workspace_job_ids:
+        plural = 's' if len(wrong_workspace_job_ids) > 1 else ''
+        plural_verb = 'are' if len(wrong_workspace_job_ids) > 1 else 'is'
+        wrong_workspace_job_str = (
+            f' Job{plural} with ID{plural}'
+            f' {", ".join(map(str, wrong_workspace_job_ids))} '
+            f'{plural_verb} skipped as they are not in the active workspace '
+            f'{current_workspace!r}. Check the workspace of the job with: '
+            f'sky jobs queue')
+
     if not cancelled_job_ids:
-        return 'No job to cancel.'
+        return f'No job to cancel.{wrong_workspace_job_str}'
     identity_str = f'Job with ID {cancelled_job_ids[0]} is'
     if len(cancelled_job_ids) > 1:
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    return f'{identity_str} scheduled to be cancelled.'
+    msg = f'{identity_str} scheduled to be cancelled.{wrong_workspace_job_str}'
+    return msg
 
 
-def cancel_job_by_name(job_name: str) -> str:
+def cancel_job_by_name(job_name: str,
+                       current_workspace: Optional[str] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -520,8 +542,8 @@ def cancel_job_by_name(job_name: str) -> str:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    cancel_jobs_by_id(job_ids)
-    return f'Job {job_name!r} is scheduled to be cancelled.'
+    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    return f'{job_name!r} {msg}'
 
 
 def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
@@ -1020,10 +1042,15 @@ def format_job_table(
         jobs[get_hash(task)].append(task)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
+    workspaces = set()
     for job_tasks in jobs.values():
         managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
+        workspaces.add(job_tasks[0].get('workspace',
+                                        constants.SKYPILOT_DEFAULT_WORKSPACE))
+
+    show_workspace = len(workspaces) > 1 or show_all
 
     user_cols: List[str] = []
     if show_user:
@@ -1034,6 +1061,7 @@ def format_job_table(
     columns = [
         'ID',
         'TASK',
+        *(['WORKSPACE'] if show_workspace else []),
         'NAME',
         *user_cols,
         'REQUESTED',
@@ -1093,6 +1121,8 @@ def format_job_table(
     for job_hash, job_tasks in jobs.items():
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
+        workspace = job_tasks[0].get('workspace',
+                                     constants.SKYPILOT_DEFAULT_WORKSPACE)
 
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
@@ -1134,6 +1164,7 @@ def format_job_table(
             job_values = [
                 job_id,
                 '',
+                *([''] if show_workspace else []),
                 job_name,
                 *user_values,
                 '-',
@@ -1163,9 +1194,11 @@ def format_job_table(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
+            task_workspace = '-' if len(job_tasks) > 1 else workspace
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
+                *([task_workspace] if show_workspace else []),
                 task['task_name'],
                 *user_values,
                 task['resources'],
@@ -1263,22 +1296,36 @@ class ManagedJobCodeGen:
     def cancel_jobs_by_id(cls,
                           job_ids: Optional[List[int]],
                           all_users: bool = False) -> str:
+        active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
             # For backward compatibility, since all_users is not supported
-            # before #4787. Assume th
+            # before #4787.
             # TODO(cooperc): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids})
-        else:
+        elif managed_job_version < 4:
+            # For backward compatibility, since current_workspace is not
+            # supported before #5660. Don't check the workspace.
+            # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
+        else:
+            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
+                            current_workspace={active_workspace!r})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
 
     @classmethod
     def cancel_job_by_name(cls, job_name: str) -> str:
+        active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        msg = utils.cancel_job_by_name({job_name!r})
+        if managed_job_version < 4:
+            # For backward compatibility, since current_workspace is not
+            # supported before #5660. Don't check the workspace.
+            # TODO(zhwu): Remove compatibility before 0.12.0
+            msg = utils.cancel_job_by_name({job_name!r})
+        else:
+            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
@@ -1314,11 +1361,16 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
+    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
+                    workspace) -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_info({job_id}, {dag_name!r})
+            set_job_info_kwargs = {{'workspace': {workspace!r}}}
+            if managed_job_version < 4:
+                set_job_info_kwargs = {{}}
+            managed_job_state.set_job_info(
+                {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(

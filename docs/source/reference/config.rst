@@ -76,6 +76,11 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+  
+  :ref: `ssh <config-yaml-ssh>`:
+    :ref: `allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+      - node-pool-1
+      - node-pool-2
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -126,10 +131,15 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`us-ashburn-1 <config-yaml-oci>`:
       vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
   :ref:`nebius <config-yaml-nebius>`:
     :ref:`eu-north1 <config-yaml-nebius>`:
       project_id: project-e00xxxxxxxxxxx
       fabric: fabric-3
+      filesystems:
+      - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
+        mount_path: /mnt/fsnew
+        attach_mode: READ_WRITE
     :ref:`eu-west1 <config-yaml-nebius>`:
       project_id: project-e01xxxxxxxxxxx
       fabric: fabric-5
@@ -1057,6 +1067,20 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+``ssh``
+~~~~~~~~~~~~~~~
+
+Advanced SSH node pool configuration (optional).
+
+.. _config-yaml-ssh-allowed-node-pools:
+
+``ssh.allowed_node_pools``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed SSH node pools (optional).
+
+List of names that SkyPilot is allowed to use.
+
 .. _config-yaml-oci:
 
 ``oci``
@@ -1112,6 +1136,17 @@ Advanced Nebius configuration (optional).
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
 
+``filesystems``
+    List of filesystems to mount on the nodes (optional).
+    Each filesystem is a dict with the following keys:
+
+    - ``filesystem_id``: ID of the filesystem to mount. Required for each filesystem.
+    - ``filesystem_attach_mode``: Attach mode for the filesystem.
+
+      Allowed values: ``READ_WRITE``, ``READ_ONLY``. Defaults to ``READ_WRITE``.
+    - ``filesystem_mount_path``: Path to mount the filesystem on the nodes.
+
+      Defaults to ``/mnt/filesystem-skypilot-<index>``.
 
 The configuration must be specified in region-specific sections.
 
@@ -1135,6 +1170,14 @@ Example:
         eu-west1:
             project_id: project-e01...
             fabric: fabric-5
+            filesystems:
+              - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                mount_path: /mnt/fsnew
+                attach_mode: READ_WRITE
+              - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                mount_path: /mnt/fsnew2
+                attach_mode: READ_ONLY
+
 
 .. _config-yaml-nebius-use-internal-ips:
 
@@ -1178,7 +1221,6 @@ Example:
     ssh_proxy_command:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
-
 
 
 .. toctree::

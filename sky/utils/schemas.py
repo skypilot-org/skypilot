@@ -188,6 +188,35 @@ def _get_single_resources_schema():
                     }
                 }],
             },
+            'volumes': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'disk_size': {
+                            'type': 'integer',
+                        },
+                        'disk_tier': {
+                            'type': 'string',
+                        },
+                        'path': {
+                            'type': 'string',
+                        },
+                        'auto_delete': {
+                            'type': 'boolean',
+                        },
+                        'storage_type': {
+                            'type': 'string',
+                        },
+                        'name': {
+                            'type': 'string',
+                        },
+                        'attach_mode': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
             'disk_size': {
                 'type': 'integer',
             },
@@ -371,6 +400,23 @@ def get_storage_schema():
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
+            },
+            'config': {
+                'type': 'object',
+                'properties': {
+                    'disk_size': {
+                        'type': 'integer',
+                    },
+                    'disk_tier': {
+                        'type': 'string',
+                    },
+                    'storage_type': {
+                        'type': 'string',
+                    },
+                    'attach_mode': {
+                        'type': 'string',
+                    },
+                },
             },
             '_is_sky_managed': {
                 'type': 'boolean',
@@ -998,6 +1044,25 @@ def get_config_schema():
                 },
             }
         },
+        'ssh': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_node_pools': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -1042,6 +1107,27 @@ def get_config_schema():
                     },
                     'fabric': {
                         'type': 'string',
+                    },
+                    'filesystems': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'additionalProperties': False,
+                            'properties': {
+                                'filesystem_id': {
+                                    'type': 'string',
+                                },
+                                'attach_mode': {
+                                    'type': 'string',
+                                    'case_sensitive_enum': [
+                                        'READ_WRITE', 'READ_ONLY'
+                                    ]
+                                },
+                                'mount_path': {
+                                    'type': 'string',
+                                }
+                            }
+                        }
                     },
                 }
             },
@@ -1106,6 +1192,87 @@ def get_config_schema():
         }
     }
 
+    workspace_schema = {'type': 'string'}
+
+    allowed_workspace_cloud_names = list(
+        service_catalog.ALL_CLOUDS) + ['cloudflare']
+    # Create pattern for not supported clouds, i.e.
+    # all clouds except gcp, kubernetes, ssh
+    not_supported_clouds = [
+        cloud for cloud in allowed_workspace_cloud_names
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
+    ]
+    not_supported_cloud_regex = '|'.join(not_supported_clouds)
+    workspaces_schema = {
+        'type': 'object',
+        'required': [],
+        # each key is a workspace name
+        'additionalProperties': {
+            'type': 'object',
+            'additionalProperties': False,
+            'patternProperties': {
+                # Pattern for non-GCP clouds - only allows 'disabled' property
+                f'^({not_supported_cloud_regex})$': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                },
+            },
+            'properties': {
+                # Explicit definition for GCP allows both project_id and
+                # disabled
+                'gcp': {
+                    'type': 'object',
+                    'properties': {
+                        'project_id': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                    'additionalProperties': False,
+                },
+                'ssh': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_node_pools': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'kubernetes': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_contexts': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+            },
+        },
+    }
+
     provision_configs = {
         'type': 'object',
         'required': [],
@@ -1132,6 +1299,10 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            # TODO Replace this with whatever syang cooks up
+            'workspace': {
+                'type': 'string',
+            },
             'jobs': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
@@ -1139,6 +1310,8 @@ def get_config_schema():
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'active_workspace': workspace_schema,
+            'workspaces': workspaces_schema,
             'provision': provision_configs,
             **cloud_configs,
         },

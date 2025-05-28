@@ -57,6 +57,8 @@ import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+import filelock
+
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -66,6 +68,7 @@ from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -120,8 +123,17 @@ class ConfigContext:
 
 
 # The global loaded config.
+_active_workspace_context = threading.local()
 _global_config_context = ConfigContext()
-_reload_config_lock = threading.Lock()
+
+SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
+
+
+def get_skypilot_config_lock_path() -> str:
+    """Get the path for the SkyPilot config lock file."""
+    lock_path = os.path.expanduser(SKYPILOT_CONFIG_LOCK_PATH)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    return lock_path
 
 
 def _get_config_context() -> ConfigContext:
@@ -194,8 +206,7 @@ def get_user_config() -> config_utils.Config:
 
     # load the user config file
     if os.path.exists(user_config_path):
-        user_config = parse_config_file(user_config_path)
-        _validate_config(user_config, user_config_path)
+        user_config = parse_and_validate_config_file(user_config_path)
     else:
         user_config = config_utils.Config()
     return user_config
@@ -223,8 +234,7 @@ def _get_project_config() -> config_utils.Config:
 
     # load the project config file
     if os.path.exists(project_config_path):
-        project_config = parse_config_file(project_config_path)
-        _validate_config(project_config, project_config_path)
+        project_config = parse_and_validate_config_file(project_config_path)
     else:
         project_config = config_utils.Config()
     return project_config
@@ -252,8 +262,7 @@ def get_server_config() -> config_utils.Config:
 
     # load the server config file
     if os.path.exists(server_config_path):
-        server_config = parse_config_file(server_config_path)
-        _validate_config(server_config, server_config_path)
+        server_config = parse_and_validate_config_file(server_config_path)
     else:
         server_config = config_utils.Config()
     return server_config
@@ -285,6 +294,64 @@ def get_nested(keys: Tuple[str, ...],
         override_configs,
         allowed_override_keys=constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK,
         disallowed_override_keys=None)
+
+
+def get_workspace_cloud(cloud: str,
+                        workspace: Optional[str] = None) -> config_utils.Config:
+    """Returns the workspace config."""
+    # TODO(zhwu): Instead of just returning the workspace specific config, we
+    # should return the config that already merges the global config, so that
+    # the caller does not need to manually merge the global config with
+    # the workspace specific config.
+    if workspace is None:
+        workspace = get_active_workspace()
+    clouds = get_nested(keys=(
+        'workspaces',
+        workspace,
+    ), default_value=None)
+    if clouds is None:
+        return config_utils.Config()
+    return clouds.get(cloud.lower(), config_utils.Config())
+
+
+@contextlib.contextmanager
+def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
+    """Temporarily set the active workspace IN CURRENT THREAD.
+
+    Note: having this function thread-local is error-prone, as wrapping some
+    operations with this will not have the underlying threads to get the
+    correct active workspace. However, we cannot make it global either, as
+    backend_utils.refresh_cluster_status() will be called in multiple threads,
+    and they may have different active workspaces for different threads.
+
+    # TODO(zhwu): make this function global by default and able to be set
+    # it to thread-local with an argument.
+
+    Args:
+        workspace: The workspace to set as active.
+
+    Raises:
+        RuntimeError: If called from a non-main thread.
+    """
+    original_workspace = get_active_workspace()
+    if original_workspace == workspace:
+        # No change, do nothing.
+        yield
+        return
+    _active_workspace_context.workspace = workspace
+    logger.debug(f'Set context workspace: {workspace}')
+    yield
+    logger.debug(f'Reset context workspace: {original_workspace}')
+    _active_workspace_context.workspace = original_workspace
+
+
+def get_active_workspace(force_user_workspace: bool = False) -> str:
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if not force_user_workspace and context_workspace is not None:
+        logger.debug(f'Get context workspace: {context_workspace}')
+        return context_workspace
+    return get_nested(keys=('active_workspace',),
+                      default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -336,7 +403,7 @@ def overlay_skypilot_config(
 
 def safe_reload_config() -> None:
     """Reloads the config, safe to be called concurrently."""
-    with _reload_config_lock:
+    with filelock.FileLock(get_skypilot_config_lock_path()):
         _reload_config()
 
 
@@ -357,7 +424,7 @@ def _reload_config() -> None:
         _reload_config_as_client()
 
 
-def parse_config_file(config_path: str) -> config_utils.Config:
+def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     config = config_utils.Config()
     try:
         config_dict = common_utils.read_yaml(config_path)
@@ -413,7 +480,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     logger.debug(f'Using config path: {config_path}')
-    _set_loaded_config(parse_config_file(config_path))
+    _set_loaded_config(parse_and_validate_config_file(config_path))
     _set_loaded_config_path(config_path)
 
 
@@ -512,6 +579,19 @@ def override_skypilot_config(
         override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    workspace = config.get_nested(
+        keys=('active_workspace',),
+        default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if (workspace != constants.SKYPILOT_DEFAULT_WORKSPACE and workspace
+            not in get_nested(keys=('workspaces',), default_value={})):
+        raise ValueError(f'Workspace {workspace} does not exist. '
+                         'Use `sky check` to see if it is defined on the API '
+                         'server and try again.')
+    # Initialize the active workspace context to the workspace specified, so
+    # that a new request is not affected by the previous request's workspace.
+    global _active_workspace_context
+    _active_workspace_context = threading.local()
+
     try:
         common_utils.validate_schema(
             config,
@@ -596,7 +676,7 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
                     'Cannot use multiple --config flags with a config file.')
             config_source = maybe_config_path
             # cli_config is a path to a config file
-            parsed_config = parse_config_file(maybe_config_path)
+            parsed_config = parse_and_validate_config_file(maybe_config_path)
         else:  # cli_config is a comma-separated list of key-value pairs
             parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
@@ -627,3 +707,23 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
         overlay_skypilot_config(original_config=_get_loaded_config(),
                                 override_configs=parsed_config))
     return parsed_config
+
+
+def update_config_no_lock(config: config_utils.Config) -> None:
+    """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
+
+    Args:
+        config: The config to save and sync.
+    """
+    global_config_path = os.path.expanduser(get_user_config_path())
+
+    # Always save to the local file (PVC in Kubernetes, local file otherwise)
+    common_utils.dump_yaml(global_config_path, dict(config))
+
+    if config_map_utils.is_running_in_kubernetes():
+        # In Kubernetes, sync the PVC config to ConfigMap for user convenience
+        # PVC file is the source of truth, ConfigMap is just a mirror for easy
+        # access
+        config_map_utils.patch_configmap_with_config(config, global_config_path)
+
+    _reload_config()
