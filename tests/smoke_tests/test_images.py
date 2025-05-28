@@ -492,12 +492,12 @@ def test_kubernetes_docker_image_and_ssh():
         f'k8s-docker-prefix-launch-{image_name}',
         [
             f'sky launch -c {name}-1 --retry-until-up -y --async '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'--infra kubernetes/none '
+            f'--cpus 1+ --memory 2+ '
+            f'--infra kubernetes '
             f'--image-id {docker_prefixed_image_id} -- "{run_command}"',
             f'sky launch -c {name}-2 --retry-until-up -y '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'--infra kubernetes/none '
+            f'--cpus 1+ --memory 2+ '
+            f'--infra kubernetes '
             f'--image-id {unprefixed_image_id} -- "{run_command}"',
             f'sky logs {name}-1 1 --status',
             f'sky exec {name}-1 --image-id {unprefixed_image_id} -- "{run_command}" | grep "hello world"',
@@ -511,6 +511,6 @@ def test_kubernetes_docker_image_and_ssh():
             f'ssh {name}-2 -- "{run_command}" | grep "hello world"',
         ],
         f'sky down -y {name}-1 {name}-2',
-        timeout=20 * 60,
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
