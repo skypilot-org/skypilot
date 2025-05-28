@@ -1,5 +1,5 @@
 Deploying a SkyPilot API Server on GKE with Okta and Nebius
-=========================================================
+===========================================================
 
 In this example, we will deploy a SkyPilot API server on a GKE cluster with Okta for authentication.
 
@@ -10,7 +10,7 @@ Infra choices configured in this guide (pick any combination or all):
 * GKE Kubernetes cluster
 * Nebius Managed Kubernetes cluster
 
-More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are covered in the `docs <https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-configure-cloud-accounts>`_.
+More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are covered in the `admin deployment docs <https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-configure-cloud-accounts>`_.
 
 .. figure:: https://i.imgur.com/k17TpJU.png
    :width: 600px
@@ -27,16 +27,16 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
    SkyPilot dashboard with running clusters
 
 Prerequisites
-------------
+--------------
 
-* Okta with SkyPilot API server configured as OIDC App (see `docs <https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#setting-up-oauth2-proxy-with-okta>`_)
-* GCP credentials with access to a GKE cluster and permissions to create VMs (`service account with json key <https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html#service-account>`_)
-* Nebius credentials (`service account with json key <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_)
+* Okta with SkyPilot API server configured as OIDC App (see `auth proxy docs <https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#setting-up-oauth2-proxy-with-okta>`_)
+* GCP credentials with access to a GKE cluster and permissions to create VMs (`GCP service account with json key <https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html#service-account>`_)
+* Nebius credentials (`Nebius service account with json key <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_)
 * An existing `Nebius Managed Kubernetes cluster <https://docs.nebius.com/kubernetes>`_
 * Nvidia GPU Operator and Nvidia Device Plugin must be installed on the cluster (Nebius Console -> Applications -> Nvidia {GPU Operator, Device Plugin} -> Deploy)
 
 Step 1: Collect cloud credentials and variables
----------------------------------------------
+-----------------------------------------------
 
 Set up the following variables by replacing the values with your own. These variables will be used throughout the guide:
 
@@ -68,7 +68,7 @@ Set up the following variables by replacing the values with your own. These vari
    TMP_KUBECONFIG=/tmp/sky_kubeconfig
 
 Prepare GCP credentials
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Create a secret with the GCP service account json key:
 
@@ -86,7 +86,7 @@ Create a secret with the GCP service account json key:
      --from-file=gcp-cred.json=$GCP_SERVICE_ACCOUNT_JSON
 
 Prepare Nebius credentials
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Create a secret with the Nebius service account json key:
 
@@ -97,8 +97,8 @@ Create a secret with the Nebius service account json key:
      --namespace $NAMESPACE \
      --from-file=credentials.json=$NEBIUS_SERVICE_ACCOUNT_JSON
 
-Prepare Kubernetes credentials: Nebius Managed Kubernetes and GKE
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Prepare Kubernetes credentials: Nebius managed Kubernetes and GKE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Combine Nebius and GKE credentials into a single kubeconfig and create a secret with the combined kubeconfig:
 
@@ -135,7 +135,7 @@ Combine Nebius and GKE credentials into a single kubeconfig and create a secret 
    CONFIG_PATH=$PWD/config.yaml
 
 Step 2: Deploy the API server
-----------------------------
+-----------------------------
 
 Deploy the API server with helm:
 
@@ -204,7 +204,7 @@ Here's an explanation of all the arguments used in the helm chart installation:
      - Nebius tenant ID
 
 Step 3: Get the endpoint and configure your DNS
----------------------------------------------
+-----------------------------------------------
 
 .. code-block:: bash
 
@@ -239,7 +239,7 @@ If the login page shows 503 error, make sure the API server pod is healthy:
    kubectl get pods --namespace $NAMESPACE --kubeconfig $TMP_KUBECONFIG --context $GKE_CONTEXT
 
 Step 4: Configure the CLI and launch your first job
--------------------------------------------------
+---------------------------------------------------
 
 On your client(s), install the SkyPilot CLI:
 
@@ -287,7 +287,7 @@ Run ``sky check`` to verify cloud setup:
      Nebius [compute]
 
 🎉 SkyPilot API server is ready to use!
--------------------------------------
+---------------------------------------
 
 Some commands to try:
 
@@ -297,10 +297,10 @@ Some commands to try:
 * ``sky status`` to see SkyPilot status and infra available
 
 ✨ Bonus: Infiniband and Nebius shared filesystem
------------------------------------------------
+-------------------------------------------------
 
-Configuring Infiniband on Nebius kubernetes cluster
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Configuring Infiniband on Nebius Kubernetes cluster
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To configure SkyPilot to use infiniband on Nebius:
 
@@ -333,7 +333,7 @@ To configure SkyPilot to use infiniband on Nebius:
 Refer to `Using InfiniBand in Nebius with SkyPilot <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_ and `NCCL test example <https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml>`_ for more details.
 
 Shared storage with Nebius shared filesystem
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can also use `Nebius shared filesystem <https://docs.nebius.com/compute/storage/types#filesystems>`_ with SkyPilot to get high performance data storage for datasets, checkpoints and more across multiple nodes.
 
