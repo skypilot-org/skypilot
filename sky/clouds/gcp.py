@@ -124,6 +124,7 @@ _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 _NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
                          'nccl-plugin-gpudirecttcpx')
 
+
 def _run_output(cmd):
     proc = subprocess.run(cmd,
                           shell=True,

@@ -323,7 +323,7 @@ class Resources:
                         f'{", ".join(supported_tiers)}.')
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
-        
+
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
