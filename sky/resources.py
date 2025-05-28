@@ -31,8 +31,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
-_NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
-                         'nccl-plugin-gpudirecttcpx')
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
@@ -325,9 +323,6 @@ class Resources:
                         f'{", ".join(supported_tiers)}.')
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
-        if self._network_tier == resources_utils.NetworkTier.BEST:
-            if isinstance(self._cloud, clouds.GCP):
-                self._image_id = {self._region: _NETWORK_GCP_IMAGE_ID}
 
         if ports is not None:
             if isinstance(ports, tuple):
@@ -1561,7 +1556,7 @@ class Resources:
 
         if self.network_tier is not None:
             if other.network_tier is None:
-                return True
+                return False
             if not self.network_tier <= other.network_tier:
                 return False
 
@@ -2119,10 +2114,7 @@ class Resources:
             self._volumes = None
 
         if version < 25:
-            original_network_tier = state.get('_network_tier', None)
-            if original_network_tier is not None:
-                state['_network_tier'] = resources_utils.NetworkTier(
-                    original_network_tier)
+            state['_network_tier'] = state.get('_network_tier', None)
 
         self.__dict__.update(state)
 

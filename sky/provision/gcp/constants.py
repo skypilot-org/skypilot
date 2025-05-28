@@ -113,21 +113,6 @@ GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--env NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX="/run/tcpx"',
     '--env NCCL_GPUDIRECTTCPX_FORCE_ACK=0',
     '--env NCCL_SOCKET_IFNAME=eth0',
-    # '--env NCCL_CROSS_NIC=0',
-    # '--env NCCL_ALGO=Ring',
-    # '--env NCCL_PROTO=Simple',
-    # '--env NCCL_NET_GDR_LEVEL=PIX',
-    # '--env NCCL_DYNAMIC_CHUNK_SIZE=524288',
-    # '--env NCCL_P2P_NET_CHUNKSIZE=524288',
-    # '--env NCCL_P2P_PCI_CHUNKSIZE=524288',
-    # '--env NCCL_P2P_NVL_CHUNKSIZE=1048576',
-    # '--env NCCL_BUFFSIZE=8388608',
-    # '--env NCCL_MAX_NCHANNELS=8',
-    # '--env NCCL_MIN_NCHANNELS=8',
-    # '--env NCCL_NSOCKS_PERTHREAD=4',
-    # '--env NCCL_P2P_PXN_LEVEL=0',
-    # '--env NCCL_SOCKET_NTHREADS=1',
-    # '--env CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7',
 ]
 
 PD_EXTREME_IOPS = 20000
