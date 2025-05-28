@@ -284,6 +284,8 @@ To configure SkyPilot to use infiniband on Nebius:
       ... your own run script ...
     ```
 
+> **💡 Tip:** Add the above config to the SkyPilot config (`~/.sky/config.yaml` [global config](https://docs.skypilot.co/en/latest/reference/config.html#config-yaml) or `.sky.yaml` [project config](https://docs.skypilot.co/en/latest/reference/config-sources.html#config-client-project-config)) to have Infiniband configured automatically for all your jobs.
+
 Refer to [Using InfiniBand in Nebius with SkyPilot](https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html)  and [NCCL test example](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml) for more details.
 
 ### Shared storage with Nebius shared filesystem
@@ -325,3 +327,5 @@ config:
               path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
               type: Directory
 ```
+
+> **💡 Tip:** Add the above `config` field to the SkyPilot config (`~/.sky/config.yaml` [global config](https://docs.skypilot.co/en/latest/reference/config.html#config-yaml) or `.sky.yaml` [project config](https://docs.skypilot.co/en/latest/reference/config-sources.html#config-client-project-config)) to have the shared filesystem mounted automatically for all your jobs.
