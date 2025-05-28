@@ -41,7 +41,7 @@ Check for apiService.config during upgrade and display warning
 WARNING: apiService.config is set during an upgrade operation, which will be IGNORED.
 
 To update your SkyPilot config, follow the instructions in the upgrade guide:
-https://skypilot.readthedocs.io/en/latest/reference/api-server/api-server-admin-deploy.html#optional-update-skypilot-configuration
+https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config
 {{- end -}}
 {{- end -}}
 
