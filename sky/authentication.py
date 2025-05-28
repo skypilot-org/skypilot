@@ -34,6 +34,7 @@ import filelock
 
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -129,6 +130,9 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
               opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
+    global_user_state.set_ssh_keys(common_utils.get_user_hash(), public_key,
+                                   private_key)
+
 
 def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the aboslute private and public key paths."""
@@ -144,9 +148,12 @@ def get_or_generate_keys() -> Tuple[str, str]:
     os.makedirs(lock_dir, exist_ok=True, mode=0o700)
     with filelock.FileLock(lock_path, timeout=10):
         if not os.path.exists(private_key_path):
-            public_key, private_key = _generate_rsa_key_pair()
-            _save_key_pair(private_key_path, public_key_path, private_key,
-                           public_key)
+            ssh_public_key, ssh_private_key, exists = (
+                global_user_state.get_ssh_keys(common_utils.get_user_hash()))
+            if not exists:
+                ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
+            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
+                           ssh_public_key)
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')

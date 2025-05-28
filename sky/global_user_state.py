@@ -133,6 +133,14 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
 )
 
+ssh_key_table = sqlalchemy.Table(
+    'ssh_key',
+    Base.metadata,
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('ssh_public_key', sqlalchemy.Text),
+    sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -1049,3 +1057,21 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': status_lib.StorageStatus[row.status],
         })
     return records
+
+
+def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(ssh_key_table).filter_by(
+            user_hash=user_hash).first()
+    if row:
+        return row.ssh_public_key, row.ssh_private_key, True
+    return '', '', False
+
+
+def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(ssh_key_table).filter_by(user_hash=user_hash).update({
+            ssh_key_table.c.ssh_public_key: ssh_public_key,
+            ssh_key_table.c.ssh_private_key: ssh_private_key
+        })
+        session.commit()
