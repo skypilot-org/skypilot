@@ -1,6 +1,7 @@
 """Nebius cloud adaptor."""
 import os
 import threading
+from typing import Optional
 
 from sky import skypilot_config
 from sky.adaptors import common
@@ -115,10 +116,15 @@ def get_tenant_id():
 
 def sdk():
     token = get_iam_token()
+    cred_path = credentials_path()
+    return _sdk(token, cred_path)
+
+
+@annotations.lru_cache(scope='request')
+def _sdk(token: Optional[str], cred_path: str):
     if token is not None:
         return nebius.sdk.SDK(credentials=token)
-    return nebius.sdk.SDK(
-        credentials_file_name=os.path.expanduser(credentials_path()))
+    return nebius.sdk.SDK(credentials_file_name=os.path.expanduser(cred_path))
 
 
 def get_nebius_credentials(boto3_session):
