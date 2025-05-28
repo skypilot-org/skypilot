@@ -479,6 +479,7 @@ def setup_ssh_env(request):
 
     # Set environment variable to indicate we're using remote server
     os.environ['PYTEST_SKYPILOT_SSH'] = '1'
+    yield
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -488,3 +489,4 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield

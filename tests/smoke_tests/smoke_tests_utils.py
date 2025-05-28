@@ -800,7 +800,12 @@ def is_ssh_test() -> bool:
 
 def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
     """Parse the SSH command to get a list of commands to launch a node pool."""
-    gpus_val, infra_val, instance_type_val, yaml_path_val, cpus_val, memory_val = None, None, None, None, None, None
+    gpus_val = None
+    infra_val = None
+    instance_type_val = None
+    yaml_path_val = None
+    cpus_val = None
+    memory_val = None
     ssh_node_pool_size = 0
 
     for original_command_str in commands:
