@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 import typing
-from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -32,7 +32,6 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.adaptors import kubernetes
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
