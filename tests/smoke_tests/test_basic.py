@@ -447,7 +447,9 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 def test_jobs_launch_and_logs(generic_cloud: str):
     # The first `with` is to override the sky api endpoint env if --remote-server
     # is specified, so the test knows it's running on the remote server, thats
-    # part of our test suite.
+    # part of our test suite. The sky api endpoint has cache and is_api_server_local()
+    # could be already cached before the first line of this test, so we need to
+    # override and invalidate the cache in the first `with`.
     # The second `with` is to override the skypilot config to use the low
     # controller resource in the memory, thats part of the SDK support.
     with smoke_tests_utils.override_sky_config():
