@@ -1153,3 +1153,10 @@ def set_cluster_yaml(cluster_name: str, yaml: str) -> None:
             set_={cluster_yaml_table.c.yaml: yaml})
         session.execute(do_update_stmt)
         session.commit()
+
+
+def remove_cluster_yaml(cluster_name: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(cluster_yaml_table).filter_by(
+            cluster_name=cluster_name).delete()
+        session.commit()
