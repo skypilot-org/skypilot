@@ -31,10 +31,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
-# From https://cloud.google.com/compute/docs/gpus/gpudirect
-# A specific image is used to ensure that the the GPU is configured with TCPX support.
-_NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
-                         'nccl-plugin-gpudirecttcpx')
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
@@ -327,10 +323,7 @@ class Resources:
                         f'{", ".join(supported_tiers)}.')
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
-        if self._network_tier == resources_utils.NetworkTier.BEST:
-            if isinstance(self._cloud, clouds.GCP):
-                self._image_id = {self._region: _NETWORK_GCP_IMAGE_ID}
-
+        
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
