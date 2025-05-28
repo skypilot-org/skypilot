@@ -488,7 +488,7 @@ def test_kubernetes_docker_image_and_ssh():
     # Scenario 1: launch with docker:alpine, exec with alpine
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
-        f'k8s-docker-prefix-launch-{image_name}',
+        f'test_kubernetes_docker_image_and_ssh',
         [
             f'sky launch -c {name}-1 --retry-until-up -y --async '
             f'--cpus 1+ --memory 2+ '
