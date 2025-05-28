@@ -3,7 +3,7 @@
 import asyncio
 import collections
 import pathlib
-from typing import AsyncGenerator, Deque, Optional
+from typing import AsyncGenerator, Deque, List, Optional
 
 import aiofiles
 import fastapi
@@ -14,6 +14,11 @@ from sky.utils import message_utils
 from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# The buffer size for streaming logs.
+_BUFFER_SIZE = 8 * 1024  # 8KB
+# The timeout for flushing the buffer.
+_BUFFER_TIMEOUT = 0.02  # 20ms
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -36,14 +41,11 @@ async def log_streamer(request_id: Optional[str],
                        follow: bool = True) -> AsyncGenerator[str, None]:
     """Streams the logs of a request."""
 
-    # Buffer settings
-    BUFFER_SIZE = 8 * 1024  # 8KB
-    BUFFER_TIMEOUT = 0.05  # 50ms
-    buffer = []
+    buffer: List[str] = []
     buffer_bytes = 0
     last_flush_time = asyncio.get_event_loop().time()
 
-    async def flush_buffer() -> None:
+    async def flush_buffer() -> AsyncGenerator[str, None]:
         nonlocal buffer, buffer_bytes, last_flush_time
         if buffer:
             yield ''.join(buffer)
@@ -114,7 +116,7 @@ async def log_streamer(request_id: Optional[str],
             current_time = asyncio.get_event_loop().time()
             if not line:
                 if buffer and (current_time -
-                               last_flush_time) >= BUFFER_TIMEOUT:
+                               last_flush_time) >= _BUFFER_TIMEOUT:
                     async for chunk in flush_buffer():
                         yield chunk
 
@@ -145,8 +147,8 @@ async def log_streamer(request_id: Optional[str],
             buffer_bytes += len(line_str.encode('utf-8'))
 
             # Check if we should flush the buffer
-            if (buffer_bytes >= BUFFER_SIZE or
-                (current_time - last_flush_time) >= BUFFER_TIMEOUT):
+            if (buffer_bytes >= _BUFFER_SIZE or
+                (current_time - last_flush_time) >= _BUFFER_TIMEOUT):
                 async for chunk in flush_buffer():
                     yield chunk
 
