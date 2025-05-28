@@ -34,7 +34,6 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
-    priority: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -79,7 +78,6 @@ def launch(
     body = payloads.JobsLaunchBody(
         task=dag_str,
         name=name,
-        priority=priority,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/launch',

@@ -862,6 +862,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    priority: Optional[int] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
@@ -939,6 +940,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+    # job launch specific.
+    if priority is not None:
+        task.set_job_priority(priority)
     return task
 
 
@@ -4260,6 +4264,7 @@ def jobs_launch(
         disk_tier=disk_tier,
         ports=ports,
         job_recovery=job_recovery,
+        priority=priority,
         config_override=config_override,
     )
 
@@ -4285,10 +4290,7 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag,
-                                     name,
-                                     priority=priority,
-                                     _need_confirmation=not yes)
+    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
