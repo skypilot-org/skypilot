@@ -2,7 +2,7 @@
 
 In this example, we will deploy a SkyPilot API server on a GKE cluster with Okta for authentication.
 
-Infra choices covered in this guide (pick any combination or all):
+Infra choices configured in this guide (pick any combination or all):
   * GCP VMs
   * Nebius VMs
   * GKE Kubernetes cluster
@@ -10,10 +10,19 @@ Infra choices covered in this guide (pick any combination or all):
 
 More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are covered in the [docs](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-configure-cloud-accounts).
 
-<div align="center" style="display: flex; align-items: center; justify-content: center; gap: 20px;">
-  <img src="https://i.imgur.com/k17TpJU.png" width="400px" alt="Login page">
-  <img src="https://i.imgur.com/q1JrT1N.png" width="400px" alt="Nebius cluster">
-</div> 
+<div align="center">
+  <div>
+    <img src="https://i.imgur.com/k17TpJU.png" width="600px" alt="Login page">
+    <p><em>SkyPilot login with Okta</em></p>
+  </div>
+</div>
+
+<div align="center">
+  <div>
+    <img src="https://i.imgur.com/q1JrT1N.png" width="600px" alt="Nebius cluster">
+    <p><em>SkyPilot dashboard showing available GPUs</em></p>
+  </div>
+</div>
 
 
 ## Prerequisites
@@ -28,7 +37,7 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 ## Step 1: Collect cloud credentials and variables
 
 Set up the following variables by replacing the values with your own. These variables will be used throughout the guide:
-```
+```bash
 # Namespace to deploy the API server in and the name of the helm release (can be any string)
 NAMESPACE=skypilot
 RELEASE_NAME=skypilot
@@ -49,7 +58,7 @@ GKE_ZONE=<gke_zone> # E.g., us-central1
 # Nebius variables. This is the external k8s cluster with GPUs.
 NEBIUS_CLUSTER_ID=<nebius_cluster_id> # Starts with mk8scluster-; different from cluster name. Can be found in Nebius console.
 NEBIUS_TENANT_ID=$(nebius iam tenant list --format json | jq -r '.items[0].metadata.id') # Also available in Nebius console, e.g., abc-123-...
-NEBIUS_SERVICE_ACCOUNT_JSON=$PWD/nebius-credentials.json
+NEBIUS_SERVICE_ACCOUNT_JSON=<your_nebius_service_account_json_path> # E.g., $PWD/nebius-credentials.json
 
 # Temp variables used in the guide, no need to change
 TMP_KUBECONFIG=/tmp/sky_kubeconfig
@@ -58,7 +67,7 @@ TMP_KUBECONFIG=/tmp/sky_kubeconfig
 ### Prepare GCP credentials
 Create a secret with the GCP service account json key:
 
-```
+```bash
 rm -f $TMP_KUBECONFIG # Remove the file if it exists
 
 # Get GKE credentials
@@ -75,7 +84,7 @@ kubectl create secret generic gcp-credentials --kubeconfig $TMP_KUBECONFIG --con
 
 Create a secret with the Nebius service account json key:
 
-```
+```bash
 # Set up Nebius credentials for Nebius CLI auth
 kubectl create secret generic nebius-credentials \
   --namespace $NAMESPACE \
@@ -85,7 +94,7 @@ kubectl create secret generic nebius-credentials \
 ### Prepare Kubernetes credentials: Nebius Managed Kubernetes and GKE
 
 Combine Nebius and GKE credentials into a single kubeconfig and create a secret with the combined kubeconfig:
-```
+```bash
 # Get Nebius credentials
 nebius mk8s cluster get-credentials --id $NEBIUS_CLUSTER_ID --external --kubeconfig $TMP_KUBECONFIG
 NEBIUS_CONTEXT=$(kubectl config current-context --kubeconfig $TMP_KUBECONFIG)
@@ -122,7 +131,7 @@ CONFIG_PATH=$PWD/config.yaml
 
 Deploy the API server with helm:
 
-```
+```bash
 helm repo add skypilot https://helm.skypilot.co
 helm repo update
 
@@ -174,7 +183,7 @@ Here's an explanation of all the arguments used in the helm chart installation:
 
 ## Step 3: Get the endpoint and configure your DNS
 
-```
+```bash
 HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE --kubeconfig $TMP_KUBECONFIG --context $GKE_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 ENDPOINT=http://$HOST
 echo $ENDPOINT
@@ -187,34 +196,34 @@ Configure your DNS to point to the IP address of the API server. This is require
 Try opening the endpoint in a browser. You should see the SkyPilot dashboard login page. 
 
 <div align="center">
-  <img src="https://i.imgur.com/k17TpJU.png" width="400px" alt="Okta login page">
+  <img src="https://i.imgur.com/k17TpJU.png" width="500px" alt="Okta login page">
 </div>
 
 If the login page shows 503 error, make sure the API server pod is healthy:
-```
+```bash
 kubectl get pods --namespace $NAMESPACE --kubeconfig $TMP_KUBECONFIG --context $GKE_CONTEXT
 ```
 
 ## Step 4: Configure the CLI and launch your first job
 
 On your client(s), install the SkyPilot CLI:
-```
+```bash
 pip install -U skypilot-nightly
 ```
 
 Login to the API server:
-```
+```bash
 sky api login -e $ENDPOINT # E.g., http://34.42.25.204 or http://sky.yourorg.com
 ```
 
-A browser will open and you will be redirected to the Okta login page. Login with your Okta credentials. You will recieve a token:
+A browser will open and you will be redirected to the Okta login page. Login with your Okta credentials. You will receive a token:
 
 <div align="center">
-  <img src="https://i.imgur.com/OflAVTp.png" width="400px" alt="Okta token page">
+  <img src="https://i.imgur.com/OflAVTp.png" width="500px" alt="Okta token page">
 </div>
 Copy the token and paste it in the CLI. You should see the following message:
 
-```
+```console
 $ sky api login -e http://sky.yourorg.com
 Authentication is needed. Please visit this URL setup up the token:
 
@@ -225,7 +234,7 @@ Paste the token:
 ```
 
 Run `sky check` to verify cloud setup:
-```
+```console
 $ sky check
 ...
 🎉 Enabled infra 🎉
@@ -237,7 +246,7 @@ $ sky check
   Nebius [compute]
 ```
 
-## 🎉 Congratulations! Your API server is deployed and ready to use
+## 🎉 SkyPilot API server is ready to use!
 
 Some commands to try:
 
