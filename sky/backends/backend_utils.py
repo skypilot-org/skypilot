@@ -888,7 +888,11 @@ def write_cluster_config(
     usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
 
     # Remove the tmp file.
-    os.remove(tmp_yaml_path)
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        debug_yaml_path = tmp_yaml_path + '.debug'
+        os.rename(tmp_yaml_path, debug_yaml_path)
+    else:
+        os.remove(tmp_yaml_path)
 
     return config_dict
 

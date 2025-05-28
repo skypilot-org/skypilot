@@ -1120,7 +1120,6 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
             with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
                 yaml = f.read()
             set_cluster_yaml(cluster_name, yaml)
-            os.remove(cluster_yaml_path)
             return yaml
         return None
     return row.yaml
