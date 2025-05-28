@@ -20,8 +20,8 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import os
-import textwrap
 import subprocess
+import textwrap
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -486,8 +486,8 @@ def test_kubernetes_docker_image_and_ssh():
     unprefixed_image_id = image_name
     run_command = 'echo hello world'
     # Create temporary YAML files for testing
-    import tempfile
     import os
+    import tempfile
 
     def create_temp_yaml(content, suffix):
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
@@ -559,4 +559,3 @@ def test_kubernetes_docker_image_and_ssh():
         # Clean up temporary files
         os.unlink(docker_yaml_path)
         os.unlink(unprefixed_yaml_path)
-
