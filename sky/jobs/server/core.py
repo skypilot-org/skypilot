@@ -50,7 +50,7 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
-    priority: int = 500,
+    priority: Optional[int] = None,
     stream_logs: bool = True,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -92,6 +92,7 @@ def launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
+    task_priority = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -101,6 +102,23 @@ def launch(
                     'name only and comment out the task names (so that they '
                     'will be auto-generated) .')
         task_names.add(task_.name)
+        if task_.job_priority is not None:
+            if (task_priority is not None and
+                    task_priority != task_.job_priority):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple tasks in the DAG have different priorities. '
+                        'Either specify a priority in only one task, or set '
+                        'the same priority for each task.')
+            task_priority = task_.job_priority
+
+    if priority is None:
+        priority = task_priority
+    if priority is None:
+        priority = managed_job_constants.DEFAULT_PRIORITY
+
+    if priority < 0 or priority > 1000:
+        raise ValueError(f'Priority must be between 0 and 1000, got {priority}')
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 

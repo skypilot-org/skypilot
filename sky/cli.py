@@ -4171,11 +4171,11 @@ def jobs():
               type=str,
               help='Recovery strategy to use for managed jobs.')
 @click.option('--priority',
-              type=int,
-              default=500,
+              type=click.IntRange(0, 1000),
+              default=None,
               show_default=True,
               help=('Job priority from 0 to 1000. A lower number is higher '
-                    'priority.'))
+                    'priority. Default is 500.'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4213,7 +4213,7 @@ def jobs_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
-    priority: int,
+    priority: Optional[int],
     detach_run: bool,
     yes: bool,
     async_call: bool,
