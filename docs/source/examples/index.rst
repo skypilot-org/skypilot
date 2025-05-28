@@ -19,7 +19,7 @@ A collection of examples demonstrating the use cases of SkyPilot.
    :maxdepth: 2
 
    Quickstart: PyTorch <../getting-started/tutorial>
-   API Server Deployment <skypilot-deployment/index>
+   SkyPilot Deployment <skypilot-deployment/index>
    Training <training/index>
    Serving <serving/index>
    Models <models/index>
