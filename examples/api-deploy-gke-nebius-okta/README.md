@@ -30,7 +30,7 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 * Okta with SkyPilot API server configured as OIDC App (see [docs](https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#setting-up-oauth2-proxy-with-okta))
 * GCP credentials with access to a GKE cluster and permissions to create VMs ([service account with json key](https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html#service-account))
 * Nebius credentials ([service account with json key](https://docs.nebius.com/iam/service-accounts/authorized-keys#create))
-* [Nebius Managed Kubernetes cluster](https://docs.nebius.com/kubernetes)
+* An existing [Nebius Managed Kubernetes cluster](https://docs.nebius.com/kubernetes)
   * Nvidia GPU Operator and Nvidia Device Plugin must be installed on the cluster (Nebius Console -> Applications -> Nvidia {GPU Operator, Device Plugin} -> Deploy)
 
 
