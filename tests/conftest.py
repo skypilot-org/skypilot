@@ -152,6 +152,12 @@ def pytest_addoption(parser):
         default=False,
         help='Run tests with SSH node pool',
     )
+    parser.addoption(
+        '--postgres',
+        action='store_true',
+        default=False,
+        help='Run tests for Postgres Backend',
+    )
 
 
 def pytest_configure(config):
@@ -473,4 +479,12 @@ def setup_ssh_env(request):
 
     # Set environment variable to indicate we're using remote server
     os.environ['PYTEST_SKYPILOT_SSH'] = '1'
-    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_postgres_backend_env(request):
+    """Setup Postgres Backend environment variable if --postgres is specified."""
+    if not request.config.getoption('--postgres'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'

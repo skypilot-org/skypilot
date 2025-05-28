@@ -1921,6 +1921,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
+    endpoint = endpoint.rstrip('/')
 
     server_status = server_common.check_server_healthy(endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:

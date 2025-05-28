@@ -124,6 +124,8 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument('--ssh', action="store_true")
 
+    parser.add_argument('--postgres', action="store_true")
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -156,6 +158,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
     if parsed_args.ssh:
         extra_args.append(f'--ssh')
+    if parsed_args.postgres:
+        extra_args.append('--postgres')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 

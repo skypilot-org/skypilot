@@ -60,3 +60,28 @@ async def delete(request: fastapi.Request,
         func=core.delete_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
     )
+
+
+@router.get('/config')
+async def get_config(request: fastapi.Request) -> None:
+    """Gets the entire SkyPilot configuration."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='workspaces.get_config',
+        request_body=payloads.GetConfigBody(),
+        func=core.get_config,
+        schedule_type=api_requests.ScheduleType.SHORT,
+    )
+
+
+@router.post('/config')
+async def update_config(request: fastapi.Request,
+                        update_config_body: payloads.UpdateConfigBody) -> None:
+    """Updates the entire SkyPilot configuration."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='workspaces.update_config',
+        request_body=update_config_body,
+        func=core.update_config,
+        schedule_type=api_requests.ScheduleType.SHORT,
+    )
