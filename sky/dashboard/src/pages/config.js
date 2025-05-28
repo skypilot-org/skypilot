@@ -10,6 +10,7 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { CircularProgress } from '@mui/material';
 import { SaveIcon, RotateCwIcon } from 'lucide-react';
 import yaml from 'js-yaml';
+import { VersionDisplay } from '@/components/elements/version-display';
 
 export default function ConfigPage() {
   const router = useRouter();
@@ -102,26 +103,18 @@ export default function ConfigPage() {
             <span className="text-sky-blue">SkyPilot Configuration</span>
           </div>
 
-          <div className="text-sm flex items-center">
-            {(loading || saving) && (
-              <div className="flex items-center mr-4">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
-                  {saving ? 'Applying...' : 'Loading...'}
-                </span>
-              </div>
-            )}
-
-            {/* <div className="flex items-center space-x-4">
-              <button
-                onClick={loadConfig}
-                disabled={loading || saving}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
-              >
-                <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                Refresh
-              </button>
-            </div> */}
+          <div className="flex items-center">
+            <div className="text-sm flex items-center">
+              {(loading || saving) && (
+                <div className="flex items-center mr-4">
+                  <CircularProgress size={15} className="mt-0" />
+                  <span className="ml-2 text-gray-500">
+                    {saving ? 'Applying...' : 'Loading...'}
+                  </span>
+                </div>
+              )}
+            </div>
+            <VersionDisplay />
           </div>
         </div>
 

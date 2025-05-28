@@ -862,6 +862,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    priority: Optional[int] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
@@ -939,6 +940,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+    # job launch specific.
+    if priority is not None:
+        task.set_job_priority(priority)
     return task
 
 
@@ -4170,6 +4174,12 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
+@click.option('--priority',
+              type=click.IntRange(0, 1000),
+              default=None,
+              show_default=True,
+              help=('Job priority from 0 to 1000. A lower number is higher '
+                    'priority. Default is 500.'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4207,6 +4217,7 @@ def jobs_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    priority: Optional[int],
     detach_run: bool,
     yes: bool,
     async_call: bool,
@@ -4253,6 +4264,7 @@ def jobs_launch(
         disk_tier=disk_tier,
         ports=ports,
         job_recovery=job_recovery,
+        priority=priority,
         config_override=config_override,
     )
 
@@ -4334,8 +4346,6 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
     - ``PENDING``: Job is waiting for a free slot on the jobs controller to be
       accepted.
-
-    - ``SUBMITTED``: Job is submitted to and accepted by the jobs controller.
 
     - ``STARTING``: Job is starting (provisioning a cluster for the job).
 
