@@ -59,7 +59,8 @@ install_requires = [
     'sqlalchemy',
     'psycopg2-binary',
     # see https://github.com/conda/conda/issues/13619
-    'pyopenssl >= 23.2.0',
+    # see https://github.com/googleapis/google-api-python-client/issues/2554
+    'pyopenssl >= 23.2.0, <24.3.0',
 ]
 
 local_ray = [
