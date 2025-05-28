@@ -1081,7 +1081,7 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -1097,6 +1097,7 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
             })
         session.execute(do_update_stmt)
         session.commit()
+
 
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.
