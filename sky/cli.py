@@ -5317,7 +5317,8 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {instance_type: g4dn.2xlarge}
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
-    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
+    config = global_user_state.get_cluster_yaml_dict(
+        os.path.expanduser(yaml_path))
     if not isinstance(config, dict):
         raise ValueError(f'Invalid YAML file: {yaml_path}. '
                          'The YAML file should be parsed into a dictionary.')

@@ -141,6 +141,13 @@ ssh_key_table = sqlalchemy.Table(
     sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
 )
 
+cluster_yaml_table = sqlalchemy.Table(
+    'cluster_yaml',
+    Base.metadata,
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('yaml', sqlalchemy.Text),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -1074,7 +1081,7 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -1088,5 +1095,60 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
                 ssh_key_table.c.ssh_public_key: ssh_public_key,
                 ssh_key_table.c.ssh_private_key: ssh_private_key
             })
+        session.execute(do_update_stmt)
+        session.commit()
+
+def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
+    """Get the cluster yaml from the database or the local file system.
+    If the cluster yaml is not in the database, check if it exists on the
+    local file system and migrate it to the database.
+
+    It is assumed that the cluster yaml file is named as <cluster_name>.yml.
+    """
+    if cluster_yaml_path is None:
+        raise ValueError('Attempted to read a None YAML.')
+    cluster_file_name = os.path.basename(cluster_yaml_path)
+    cluster_name, _ = os.path.splitext(cluster_file_name)
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_yaml_table).filter_by(
+            cluster_name=cluster_name).first()
+    if row is None:
+        # If the cluster yaml is not in the database, check if it exists
+        # on the local file system and migrate it to the database.
+        if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
+            with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+                yaml = f.read()
+            set_cluster_yaml(cluster_name, yaml)
+            os.remove(cluster_yaml_path)
+            return yaml
+        return None
+    return row.yaml
+
+
+def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
+    """Get the cluster yaml as a dictionary from the database.
+
+    It is assumed that the cluster yaml file is named as <cluster_name>.yml.
+    """
+    yaml = get_cluster_yaml_str(cluster_yaml_path)
+    return common_utils.read_yaml_str(yaml)
+
+
+def set_cluster_yaml(cluster_name: str, yaml: str) -> None:
+    """Set the cluster yaml in the database."""
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(cluster_yaml_table).values(
+            cluster_name=cluster_name, yaml=yaml)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[cluster_yaml_table.c.cluster_name],
+            set_={cluster_yaml_table.c.yaml: yaml})
         session.execute(do_update_stmt)
         session.commit()

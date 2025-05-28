@@ -213,7 +213,7 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
 # Add retry for the file mounts optimization, as the underlying cp command may
 # experience transient errors, #4758.
 @common_utils.retry
-def _optimize_file_mounts(yaml_path: str) -> None:
+def _optimize_file_mounts(tmp_yaml_path: str) -> None:
     """Optimize file mounts in the given ray yaml file.
 
     Runtime files handling:
@@ -227,7 +227,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
         subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
-    yaml_config = common_utils.read_yaml(yaml_path)
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -311,7 +311,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
             shell=True,
             check=True)
 
-    common_utils.dump_yaml(yaml_path, yaml_config)
+    common_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -842,9 +842,8 @@ def write_cluster_config(
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
-    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            old_yaml_content = f.read()
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
@@ -881,18 +880,24 @@ def write_cluster_config(
     # compatibility should go before this call.
     _optimize_file_mounts(tmp_yaml_path)
 
-    # Rename the tmp file to the final YAML path.
-    os.rename(tmp_yaml_path, yaml_path)
+    # commit the final yaml to the database
+    global_user_state.set_cluster_yaml(
+        cluster_name,
+        open(tmp_yaml_path, 'r', encoding='utf-8').read())
+
+    # Remove the tmp file.
+    os.remove(tmp_yaml_path)
+
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     return config_dict
 
 
-def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
+def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
     """
-    config = common_utils.read_yaml(cluster_config_file)
+    config = common_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
     if isinstance(cloud, (
             clouds.AWS,
@@ -922,7 +927,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_fluidstack_authentication(config)
     else:
         assert False, cloud
-    common_utils.dump_yaml(cluster_config_file, config)
+    common_utils.dump_yaml(tmp_yaml_path, config)
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -980,7 +985,7 @@ def _count_healthy_nodes_from_ray(output: str,
 
 
 @timeline.event
-def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
+def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     """Hash the cluster yaml and contents of file mounts to a unique string.
 
     Two invocations of this function should return the same string if and only
@@ -1024,7 +1029,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
     """
 
     # Load the yaml contents so that we can directly remove keys.
-    yaml_config = common_utils.read_yaml(yaml_path)
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
@@ -1053,7 +1058,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
         file_mounts.pop('')
 
     for dst, src in sorted(file_mounts.items()):
-        if src == yaml_path:
+        if src == tmp_yaml_path:
             # Skip the yaml file itself. We have already hashed a modified
             # version of it. The file may include fields we don't want to hash.
             continue
@@ -1248,7 +1253,9 @@ def ssh_credential_from_yaml(
     """
     if cluster_yaml is None:
         return dict()
-    config = common_utils.read_yaml(cluster_yaml)
+    config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
+    if not config:
+        return dict()
     auth_section = config['auth']
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
@@ -1653,7 +1660,7 @@ def _query_cluster_status_via_cloud_api(
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
 
     # Query the cloud provider.
@@ -3002,7 +3009,7 @@ def get_endpoints(cluster: str,
             raise ValueError('Querying endpoints is not supported '
                              f'for {cluster!r} on {cloud}.') from None
 
-    config = common_utils.read_yaml(handle.cluster_yaml)
+    config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
                                              handle.cluster_name_on_cloud,
                                              handle.launched_resources.ports,

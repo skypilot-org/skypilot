@@ -1235,7 +1235,8 @@ class RetryingVmProvisioner(object):
                 assert isinstance(handle, CloudVmRayResourceHandle), (
                     'handle should be CloudVmRayResourceHandle (found: '
                     f'{type(handle)}) {cluster_name!r}')
-                config = common_utils.read_yaml(handle.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
                 # launch and multi-node cluster before PR #1700).
@@ -2270,7 +2271,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # Directly load the `use_internal_ips` flag from the cluster yaml
         # instead of `skypilot_config` as the latter can be changed after the
         # cluster is UP.
-        return common_utils.read_yaml(self.cluster_yaml).get(
+        return global_user_state.get_cluster_yaml_dict(self.cluster_yaml).get(
             'provider', {}).get('use_internal_ips', False)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
@@ -2299,7 +2300,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # It is possible that the cluster yaml is not available when
                 # the handle is unpickled for service replicas from the
                 # controller with older version.
-                config = common_utils.read_yaml(self.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    self.cluster_yaml)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -3113,7 +3115,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cloud = handle.launched_resources.cloud
         logger.debug(
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
-        config = common_utils.read_yaml(handle.cluster_yaml)
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         provider_config = config['provider']
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
                                  handle.launched_resources.ports,
@@ -4195,7 +4197,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_abs_path = os.path.abspath(log_path)
         launched_resources = handle.launched_resources.assert_launchable()
         cloud = launched_resources.cloud
-        config = common_utils.read_yaml(handle.cluster_yaml)
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
 
@@ -4255,7 +4257,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             from sky.adaptors import ibm
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
 
-            config_provider = common_utils.read_yaml(
+            config_provider = global_user_state.get_cluster_yaml_dict(
                 handle.cluster_yaml)['provider']
             region = config_provider['region']
             search_client = ibm.search_client()
@@ -4409,7 +4411,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     launched_resources = (
                         handle.launched_resources.assert_launchable())
                     cloud = launched_resources.cloud
-                    config = common_utils.read_yaml(handle.cluster_yaml)
+                    config = global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml)
                     cloud.check_features_are_supported(
                         launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -4448,7 +4451,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # https://github.com/skypilot-org/skypilot/pull/4443#discussion_r1872798032
             attempts = 0
             while True:
-                config = common_utils.read_yaml(handle.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
 
                 logger.debug(f'instance statuses attempt {attempts + 1}')
                 node_status_dict = provision_lib.query_instances(

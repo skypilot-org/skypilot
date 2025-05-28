@@ -11,6 +11,7 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import sky
+from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.usage import constants
@@ -423,12 +424,15 @@ def prepare_json_from_yaml_config(
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
         yaml_info = [yaml_config_or_path]
-        comment_lines = []
+        comment_lines: List[str] = []
     else:
-        with open(yaml_config_or_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            comment_lines = [line for line in lines if line.startswith('#')]
-        yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
+        yaml_str = global_user_state.get_cluster_yaml_str(yaml_config_or_path)
+        comment_lines = []
+        if yaml_str is not None:
+            comment_lines = [
+                line for line in yaml_str.split('\n') if line.startswith('#')
+            ]
+            yaml_info = common_utils.read_yaml_all_str(yaml_str)
 
     for i in range(len(yaml_info)):
         if yaml_info[i] is None:
