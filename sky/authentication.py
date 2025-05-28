@@ -175,7 +175,7 @@ def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
 
     private_key_path_generated, public_key_path, lock_path = (
         get_ssh_key_and_lock_path(user_hash))
-    assert private_key_path_generated == private_key_path, (
+    assert private_key_path == os.path.expanduser(private_key_path_generated), (
         f'Private key path {private_key_path} does not '
         f'match the generated path {private_key_path_generated}')
     private_key_path = os.path.expanduser(private_key_path)
