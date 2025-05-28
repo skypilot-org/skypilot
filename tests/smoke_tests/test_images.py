@@ -21,6 +21,7 @@
 
 import os
 import subprocess
+import textwrap
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -474,3 +475,87 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_docker_image_and_ssh():
+    """Test K8s docker image ID interchangeability with/without prefix."""
+    # We use a real, simple image like docker for the test.
+    image_name = 'continuumio/miniconda3:latest'
+    docker_prefixed_image_id = f'docker:{image_name}'
+    unprefixed_image_id = image_name
+    run_command = 'echo hello world'
+    # Create temporary YAML files for testing
+    import os
+    import tempfile
+
+    def create_temp_yaml(content, suffix):
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(content.encode())
+            return f.name
+
+    # YAML with docker: prefix
+    docker_yaml = textwrap.dedent(f"""\
+        resources:
+            image_id: {docker_prefixed_image_id}
+            cpus: 2+
+            memory: 2+
+            infra: kubernetes
+        run: {run_command}
+        """)
+
+    # YAML without docker: prefix
+    unprefixed_yaml = textwrap.dedent(f"""\
+        resources:
+            image_id: {unprefixed_image_id}
+            cpus: 2+
+            memory: 2+
+            infra: kubernetes
+        run: {run_command}
+        """)
+
+    docker_yaml_path = create_temp_yaml(docker_yaml, '_docker.yaml')
+    unprefixed_yaml_path = create_temp_yaml(unprefixed_yaml, '_unprefixed.yaml')
+
+    try:
+        # Scenario 1: launch with docker:alpine, exec with alpine
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
+            'test_kubernetes_docker_image_and_ssh',
+            [
+                f'sky launch -c {name}-1 --retry-until-up -y --async '
+                f'--cpus 2+ --memory 2+ '
+                f'--infra kubernetes '
+                f'--image-id {docker_prefixed_image_id} "{run_command}"',
+                f'sky launch -c {name}-2 --retry-until-up -y '
+                f'--cpus 2+ --memory 2+ '
+                f'--infra kubernetes '
+                f'--image-id {unprefixed_image_id} "{run_command}"',
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=f'{name}-1',
+                    cluster_status=[sky.ClusterStatus.UP],
+                    timeout=5 * 60),
+                f'sky logs {name}-1 1 --status',
+                f'sky launch --fast -c {name}-1 {unprefixed_yaml_path}',
+                f'sky exec {name}-1 {unprefixed_yaml_path}',
+                f'sky logs {name}-1 2 --status',
+                f'sky logs {name}-1 3 --status',
+                # Second cluster
+                f'sky logs {name}-2 1 --status',
+                f'sky launch --fast -c {name}-2 {docker_yaml_path}',
+                f'sky exec {name}-2 {docker_yaml_path}',
+                f'sky logs {name}-2 2 --status',
+                f'sky logs {name}-2 3 --status',
+                # Ensure SSH config is updated.
+                'sky status',
+                f'ssh {name}-1 -- "{run_command}" | grep "hello world"',
+                f'ssh {name}-2 -- "{run_command}" | grep "hello world"',
+            ],
+            f'sky down -y {name}-1 {name}-2',
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        # Clean up temporary files
+        os.unlink(docker_yaml_path)
+        os.unlink(unprefixed_yaml_path)
