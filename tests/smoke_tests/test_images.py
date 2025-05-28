@@ -505,6 +505,8 @@ def test_kubernetes_docker_image_and_ssh():
             f'sky logs {name}-2 1 --status',
             f'sky exec {name}-2 --image-id {docker_prefixed_image_id} -- "{run_command}" | grep "hello world"',
             f'sky logs {name}-2 2 --status',
+            # Ensure SSH config is updated.
+            'sky status',
             f'ssh {name}-1 -- "{run_command}" | grep "hello world"',
             f'ssh {name}-2 -- "{run_command}" | grep "hello world"',
         ],
