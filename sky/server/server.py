@@ -421,6 +421,10 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
+    ctx = context.get()
+    assert ctx is not None
+    # TODO(aylei): generalize this to all requests without a db record.
+    ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive

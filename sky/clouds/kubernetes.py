@@ -853,11 +853,11 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
-        k8s = kubernetes.kubernetes
         identities = []
+        k8s = kubernetes.kubernetes
         try:
             all_contexts, current_context = (
-                k8s.config.list_kube_config_contexts())
+                kubernetes.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
             return None
         # Add current context at the head of the list
