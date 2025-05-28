@@ -124,6 +124,17 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'sleep 10; '
     'done')
 
+_LAUNCH_CMDS = ['sky launch', 'sky jobs launch', 'sky serve up']
+
+
+def is_launch_cmd(cmd: str, launch_cmds: List[str] = _LAUNCH_CMDS) -> bool:
+    return any(cmd in launch_cmd for launch_cmd in launch_cmds)
+
+
+def yaml_path_in_command(cmd: str) -> Optional[str]:
+    yaml_path_match = re.search(r'([\w./-]+\.yaml)', cmd)
+    return yaml_path_match.group(1) if yaml_path_match else None
+
 
 def get_cloud_specific_resource_config(generic_cloud: str):
     # Kubernetes (EKS) requires more resources to avoid flakiness.
@@ -449,10 +460,17 @@ def override_sky_config(
             new_test_commands += ['sky ssh up', 'sky check ssh']
             # Replace the cloud and infra flags with the ssh node pools
             for command in test.commands:
-                if 'sky ' in command:
+                if is_launch_cmd(command):
                     modified_command = re.sub(
                         r'(--cloud\s+.+?(?=\s|$)|--infra\s+.+?(?=\s|$))',
                         r'--infra ssh/test-ssh-node-pools', command)
+                    if yaml_path_in_command(modified_command):
+                        # Insert --infra flag before the yaml file
+                        # Override the infra in the yaml file with cli argument
+                        modified_command = re.sub(
+                            r'(\s+[^\s]+\.yaml)',
+                            r' --infra ssh/test-ssh-node-pools\1',
+                            modified_command)
                     new_test_commands.append(modified_command)
                 else:
                     new_test_commands.append(command)
@@ -786,14 +804,8 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
     ssh_node_pool_size = 0
 
     for original_command_str in commands:
-        if 'sky launch' in original_command_str or \
-           'sky jobs launch' in original_command_str or \
-           'sky serve up' in original_command_str:
-            # Basic check passed, now try to identify the core sky command part
-            # to ensure we're not matching substrings in other contexts.
-            if not re.search(r'\bsky\s+(?:launch|jobs\s+launch|serve\s+up)\b',
-                             original_command_str):
-                continue
+        if not is_launch_cmd(original_command_str):
+            continue
 
         # --- Argument extraction for the main/controller SSH node pool VM ---
         # Search for each argument type independently
@@ -823,15 +835,11 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
             ssh_node_pool_size = num_nodes_val
 
         # --- Handle job/service specific nodes based on YAML ---
-        if 'sky jobs launch' in original_command_str or 'sky serve up' in original_command_str:
+        if is_launch_cmd(original_command_str, _LAUNCH_CMDS[1:]):
             # General YAML path from the command for jobs/serve task definition
             # This can be a positional argument or part of other structures.
             # Regex looks for a path-like string ending in .yaml
-            yaml_path_match = re.search(r'([\w./-]+\.yaml)',
-                                        original_command_str)
-            if yaml_path_match:
-                yaml_path_val = yaml_path_match.group(
-                    1)  # group(1) because of the parens
+            yaml_path_val = yaml_path_in_command(original_command_str)
 
             if yaml_path_val:  # Use the YAML found in the original command
                 with open(yaml_path_val, 'r') as f:
