@@ -2,7 +2,7 @@ name: tcpx-sglang-serving
 
 resources:
   cloud: gcp
-  instance_type: a3-highgpu-8g
+  gpus: H100:8
   network_tier: best
   disk_size: 1024
   disk_tier: best
@@ -11,7 +11,6 @@ resources:
 num_nodes: 2 # Specify number of nodes to launch; requirements may vary based on accelerators
 
 setup: |
-  python3 -m pip install uv
   source ~/sky-venv/bin/activate
   if [ $? -eq 0 ]; then
     echo 'venv exists'
