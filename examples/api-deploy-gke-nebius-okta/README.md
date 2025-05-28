@@ -19,8 +19,8 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 
 <div align="center">
   <div>
-    <img src="https://i.imgur.com/q1JrT1N.png" width="600px" alt="Nebius cluster">
-    <p><em>SkyPilot dashboard showing available GPUs</em></p>
+    <img src="https://i.imgur.com/FBSv0PR.png" width="600px" alt="SkyPilot dashboard">
+    <p><em>SkyPilot dashboard with running jobs</em></p>
   </div>
 </div>
 
@@ -199,6 +199,16 @@ Try opening the endpoint in a browser. You should see the SkyPilot dashboard log
   <img src="https://i.imgur.com/k17TpJU.png" width="500px" alt="Okta login page">
 </div>
 
+After logging, you should be able to see the configured cloud and kubernetes infra on the dashboard.
+
+
+<div align="center">
+  <div>
+    <img src="https://i.imgur.com/0cY1B5A.png" width="600px" alt="infras page">
+    <p><em>SkyPilot dashboard showing available infra</em></p>
+  </div>
+</div>
+
 If the login page shows 503 error, make sure the API server pod is healthy:
 ```bash
 kubectl get pods --namespace $NAMESPACE --kubeconfig $TMP_KUBECONFIG --context $GKE_CONTEXT
@@ -257,7 +267,7 @@ Some commands to try:
 
 ## ✨ Bonus: Infiniband and Nebius shared filesystem
 
-### Configuring Infiniband on Nebius k8s cluster
+### Configuring Infiniband on Nebius kubernetes cluster
 
 To configure SkyPilot to use infiniband on Nebius:
 
