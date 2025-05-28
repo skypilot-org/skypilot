@@ -147,7 +147,7 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
-### Test API Server on Helm Chart Deployment
+### Test API server on Helm chart deployment
 
 By default, the [Helm Chart Deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) will use the latest released API Server. To test the local change on API Server, you can follow the steps below.
 
