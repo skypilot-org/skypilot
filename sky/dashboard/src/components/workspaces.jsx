@@ -38,6 +38,8 @@ import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
+import { REFRESH_INTERVALS } from '@/lib/config';
+import cachePreloader from '@/lib/cache-preloader';
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -318,9 +320,11 @@ export function Workspaces() {
       setRawWorkspacesData(fetchedWorkspacesConfig);
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-      // Fetch enabled clouds for all workspaces
+      // Fetch enabled clouds for all workspaces using cache
       const enabledCloudsArray = await Promise.all(
-        configuredWorkspaceNames.map((wsName) => getEnabledClouds(wsName, true))
+        configuredWorkspaceNames.map((wsName) => 
+          dashboardCache.get(getEnabledClouds, [wsName])
+        )
       );
       const enabledCloudsMap = Object.fromEntries(
         configuredWorkspaceNames.map((wsName, index) => [

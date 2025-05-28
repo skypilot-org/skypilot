@@ -13,7 +13,7 @@ import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
-import { CACHE_CONFIG, REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
+import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
@@ -54,7 +54,9 @@ export function InfrastructureSection({
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
           <h3 className="text-lg font-semibold mb-4">{title}</h3>
-          <p className="text-sm text-gray-500">No {title} found.</p>
+          <p className="text-sm text-gray-500">
+            No {title} found or {title} is not configured.
+          </p>
         </div>
       </div>
     );
