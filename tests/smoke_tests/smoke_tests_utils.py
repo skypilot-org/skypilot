@@ -478,7 +478,7 @@ def override_sky_config(
             teardown_command = 'sky ssh down; sky down ssh-node-pool -y'
             new_teardown = None
             if test.teardown:
-                new_teardown = f'{teardown_command}; ' + test.teardown
+                new_teardown = f'{teardown_command}; {test.teardown}'
             else:
                 new_teardown = teardown_command
             echo(f'{os.linesep}Overriding test commands: {os.linesep}'
