@@ -128,7 +128,7 @@ _LAUNCH_CMDS = ['sky launch', 'sky jobs launch', 'sky serve up']
 
 
 def is_launch_cmd(cmd: str, launch_cmds: List[str] = _LAUNCH_CMDS) -> bool:
-    return any(cmd in launch_cmd for launch_cmd in launch_cmds)
+    return any(launch_cmd in cmd for launch_cmd in launch_cmds)
 
 
 def yaml_path_in_command(cmd: str) -> Optional[str]:
