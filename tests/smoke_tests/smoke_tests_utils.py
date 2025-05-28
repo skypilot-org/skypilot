@@ -636,6 +636,10 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
     """Launch the cluster for cloud commands asynchronously."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
     if sky.server.common.is_api_server_local() and not is_remote_server_test():
+        # We need is_remote_server_test() because we override the SKY_API_SERVER_URL_ENV_VAR
+        # in the middle of the test, which is after the test is launched, so the
+        # is_api_server_local() already cached and returned True but we're actually
+        # running the test on the remote server if --remote-server is specified.
         return 'true'
     else:
         return (
