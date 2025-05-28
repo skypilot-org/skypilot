@@ -480,7 +480,7 @@ def test_custom_default_conda_env(generic_cloud: str):
 def test_kubernetes_docker_image_and_ssh():
     """Test K8s docker image ID interchangeability with/without prefix."""
     # We use a real, simple image like docker for the test.
-    image_name = 'ubuntu:20.04'
+    image_name = 'continuumio/miniconda3:latest'
     docker_prefixed_image_id = f'docker:{image_name}'
     unprefixed_image_id = image_name
     run_command = 'echo hello world'
