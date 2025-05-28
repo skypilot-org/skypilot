@@ -288,17 +288,15 @@ export function ManagedJobs() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
+          <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
             title="Refresh"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <ManagedJobsTable

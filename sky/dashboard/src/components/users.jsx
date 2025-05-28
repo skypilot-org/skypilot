@@ -62,15 +62,14 @@ export function Users() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
+          <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center px-3 py-1.5 text-sm"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <UsersTable

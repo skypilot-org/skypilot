@@ -538,15 +538,14 @@ export function Workspaces() {
               <span className="ml-2 text-gray-500 text-xs">Refreshing...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
+          <button
             onClick={handleRefresh}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
 
