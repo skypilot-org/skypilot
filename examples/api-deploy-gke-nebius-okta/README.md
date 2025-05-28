@@ -255,9 +255,40 @@ Some commands to try:
 * `sky show-gpus` to show available GPUs
 * `sky status` to see SkyPilot status and infra available
 
-## ✨ Bonus: Use Nebius shared filesystem with SkyPilot
+## ✨ Bonus: Infiniband and Nebius shared filesystem
 
-You can also use Nebius shared filesystem with SkyPilot to get high performance data storage for datasets, checkpoints and more. 
+### Configuring Infiniband on Nebius k8s cluster
+
+To configure SkyPilot to use infiniband on Nebius:
+
+1. Set the following config in your SkyPilot task YAML to enable InfiniBand:
+
+    ```yaml
+    config:
+      kubernetes:
+        pod_config:
+          spec:
+            containers:
+            - securityContext:
+                capabilities:
+                  add:
+                  - IPC_LOCK
+    ```
+
+2. Configure the environment variables in your SkyPilot task:
+
+    ```yaml
+    run: |
+      export NCCL_IB_HCA=mlx5
+      export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+      ... your own run script ...
+    ```
+
+Refer to [Using InfiniBand in Nebius with SkyPilot](https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html)  and [NCCL test example](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml) for more details.
+
+### Shared storage with Nebius shared filesystem
+
+You can also use [Nebius shared filesystem](https://docs.nebius.com/compute/storage/types#filesystems) with SkyPilot to get high performance data storage for datasets, checkpoints and more across multiple nodes. 
 
 When creating a node group on the Nebius console, simply attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
 
