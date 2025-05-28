@@ -1070,8 +1070,23 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
 
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(ssh_key_table).filter_by(user_hash=user_hash).update({
-            ssh_key_table.c.ssh_public_key: ssh_public_key,
-            ssh_key_table.c.ssh_private_key: ssh_private_key
-        })
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(ssh_key_table).values(
+            user_hash=user_hash,
+            ssh_public_key=ssh_public_key,
+            ssh_private_key=ssh_private_key)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[ssh_key_table.c.user_hash],
+            set_={
+                ssh_key_table.c.ssh_public_key: ssh_public_key,
+                ssh_key_table.c.ssh_private_key: ssh_private_key
+            })
+        session.execute(do_update_stmt)
         session.commit()
