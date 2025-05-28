@@ -188,14 +188,17 @@ generate_credentials_json() {
     debug_log "Key data length: $(echo -n "$client_key_data" | wc -c) bytes"
     
     # Check if we can create proper JSON with `jq`
-    if command -v jq &>/dev/null; then
-      debug_log "Using jq for JSON formatting"
-      
-      # Create a temporary file for the JSON output to avoid shell escaping issues
-      local TEMP_JSON_FILE=$(mktemp)
-      
-      # Write the JSON to the temporary file using jq for proper JSON formatting
-      cat > "$TEMP_JSON_FILE" << EOL
+    if ! command -v jq &>/dev/null; then
+      echo "jq is not installed. Please install jq to use this script." >&2
+      exit 1
+    fi
+    debug_log "Using jq for JSON formatting"
+    
+    # Create a temporary file for the JSON output to avoid shell escaping issues
+    local TEMP_JSON_FILE=$(mktemp)
+    
+    # Write the JSON to the temporary file using jq for proper JSON formatting
+    cat > "$TEMP_JSON_FILE" << EOL
 {
   "apiVersion": "client.authentication.k8s.io/v1beta1",
   "kind": "ExecCredential",
@@ -207,25 +210,14 @@ generate_credentials_json() {
 }
 EOL
       
-      # Read the JSON from the file
-      local json_response=$(cat "$TEMP_JSON_FILE")
-      
-      # Clean up
-      rm -f "$TEMP_JSON_FILE"
-      
-      # Output the JSON
-      echo "$json_response"
-    else
-      debug_log "jq is not available, using simpler formatting method"
-      
-      # Alternative approach: encode with base64 and use the token field instead
-      # This works because kubectl will decode token data properly
-      local combined_data=$(echo -n "${client_cert_data}:${client_key_data}" | base64 | tr -d '\n')
-      
-      echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"$combined_data\",\"expirationTimestamp\":\"$expiration_time\"}}"
-      
-      debug_log "Sent certificate data as encoded token instead of direct certificate fields"
-    fi
+    # Read the JSON from the file
+    local json_response=$(cat "$TEMP_JSON_FILE")
+    
+    # Clean up
+    rm -f "$TEMP_JSON_FILE"
+    
+    # Output the JSON
+    echo "$json_response"
   else
     # Fallback to token-based credential for tunnel-only authentication
     echo "{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"k8s-ssh-tunnel-token\",\"expirationTimestamp\":\"$expiration_time\"}}"

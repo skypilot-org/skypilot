@@ -398,6 +398,44 @@ Examples:
                        path: /path/on/host/nvme
                        type: Directory
 
+    .. tab-item:: Nebius shared filesystem
+      :name: kubernetes-volumes-nebius-shared-filesystem
+
+      When creating a node group on the Nebius console, attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
+
+      * Ensure ``Auto mount`` is enabled.
+      * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
+
+      .. image:: ../../images/screenshots/nebius/nebius-k8s-attach-fs.png
+        :width: 50%
+        :align: center
+
+      Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: nebius-sharedfs
+                   volumes:
+                     - name: nebius-sharedfs
+                       hostPath:
+                         path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                         type: Directory
+
+
 .. note::
 
   When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.

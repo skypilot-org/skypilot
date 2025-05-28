@@ -138,12 +138,14 @@ def check(infra_list: Optional[Tuple[str, ...]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def enabled_clouds(workspace: Optional[str] = None) -> server_common.RequestId:
+def enabled_clouds(workspace: Optional[str] = None,
+                   expand: bool = False) -> server_common.RequestId:
     """Gets the enabled clouds.
 
     Args:
         workspace: The workspace to get the enabled clouds for. If None, the
         active workspace will be used.
+        expand: Whether to expand Kubernetes and SSH to list of resource pools.
 
     Returns:
         The request ID of the enabled clouds request.
@@ -154,7 +156,7 @@ def enabled_clouds(workspace: Optional[str] = None) -> server_common.RequestId:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
-                             f'workspace={workspace}'),
+                             f'workspace={workspace}&expand={expand}'),
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
@@ -1919,6 +1921,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
+    endpoint = endpoint.rstrip('/')
 
     server_status = server_common.check_server_healthy(endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:

@@ -23,6 +23,13 @@ export const CLOUDS_LIST = [
   'DO',
   'Nebius',
 ];
+
+export const CLOUD_CONONICATIONS = Object.fromEntries([
+  ...CLOUDS_LIST.map((cloud) => [cloud.toLowerCase(), cloud]),
+  ['kubernetes', 'Kubernetes'],
+  ['ssh', 'SSH Node Pool'],
+]);
+
 export const COMMON_GPUS = [
   'A10',
   'A10G',

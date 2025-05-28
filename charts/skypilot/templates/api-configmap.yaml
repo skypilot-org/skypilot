@@ -1,10 +1,12 @@
-{{- if .Values.apiService.config }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-config
   namespace: {{ .Release.Namespace }}
 data:
-  config.yaml: |
-{{ .Values.apiService.config | indent 4 }} 
-{{- end }}
+  config.yaml: |-
+    {{- if .Values.apiService.config }}
+    {{- .Values.apiService.config | nindent 4 }}
+    {{- else }}
+    {}
+    {{- end }} 
