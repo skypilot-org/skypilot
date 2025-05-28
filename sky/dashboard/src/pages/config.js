@@ -10,6 +10,7 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { CircularProgress } from '@mui/material';
 import { SaveIcon, RotateCwIcon } from 'lucide-react';
 import yaml from 'js-yaml';
+import { VersionDisplay } from '@/components/elements/version-display';
 
 export default function ConfigPage() {
   const router = useRouter();
@@ -29,9 +30,7 @@ export default function ConfigPage() {
     try {
       const config = await getConfig();
       if (Object.keys(config).length === 0) {
-        setEditableConfig(
-          '# Empty SkyPilot config. Enter config in YAML format\n'
-        );
+        setEditableConfig('');
       } else {
         setEditableConfig(yaml.dump(config, { indent: 2 }));
       }
@@ -48,7 +47,31 @@ export default function ConfigPage() {
     setError(null);
     setSaveSuccess(false);
     try {
-      const parsedConfig = yaml.load(editableConfig);
+      let parsedConfig = yaml.load(editableConfig);
+
+      // If the config is empty, only comments, or only whitespace,
+      // treat it as an empty object.
+      if (parsedConfig === null || parsedConfig === undefined) {
+        parsedConfig = {};
+      }
+
+      // Client-side validation for the parsed configuration structure
+      if (typeof parsedConfig !== 'object' || Array.isArray(parsedConfig)) {
+        let validationMessage =
+          'Invalid config structure: Configuration must be a mapping (key-value pairs) in YAML format.';
+        if (Array.isArray(parsedConfig)) {
+          validationMessage =
+            'Invalid config structure: Configuration must be a mapping (key-value pairs) in YAML format.';
+        } else {
+          // This case would catch scalars if not for the null check above
+          validationMessage =
+            'Invalid config structure: Configuration must be a mapping (key-value pairs) in YAML format.';
+        }
+        setError(new Error(validationMessage));
+        setSaving(false);
+        return;
+      }
+
       await updateConfig(parsedConfig);
       setSaveSuccess(true);
       // Auto-hide success message after 3 seconds
@@ -80,26 +103,18 @@ export default function ConfigPage() {
             <span className="text-sky-blue">SkyPilot Configuration</span>
           </div>
 
-          <div className="text-sm flex items-center">
-            {(loading || saving) && (
-              <div className="flex items-center mr-4">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
-                  {saving ? 'Applying...' : 'Loading...'}
-                </span>
-              </div>
-            )}
-
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={loadConfig}
-                disabled={loading || saving}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
-              >
-                <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                Refresh
-              </button>
+          <div className="flex items-center">
+            <div className="text-sm flex items-center">
+              {(loading || saving) && (
+                <div className="flex items-center mr-4">
+                  <CircularProgress size={15} className="mt-0" />
+                  <span className="ml-2 text-gray-500">
+                    {saving ? 'Applying...' : 'Loading...'}
+                  </span>
+                </div>
+              )}
             </div>
+            <VersionDisplay />
           </div>
         </div>
 
@@ -107,7 +122,7 @@ export default function ConfigPage() {
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="text-base font-normal flex items-center justify-between">
-              <span>Edit SkyPilot Configuration YAML</span>
+              <span>Edit SkyPilot API Server Configuration</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -121,15 +136,7 @@ export default function ConfigPage() {
               >
                 SkyPilot Docs
               </a>{' '}
-              for details. Click{' '}
-              <button
-                onClick={loadConfig}
-                disabled={loading || saving}
-                className="text-blue-600 hover:underline underline-offset-2 disabled:text-gray-400 disabled:no-underline"
-              >
-                Refresh
-              </button>{' '}
-              to reset to the latest config on API server.
+              for details. The configuration should be in YAML format.
             </p>
 
             {/* Success Message */}
@@ -174,7 +181,11 @@ export default function ConfigPage() {
                 value={editableConfig}
                 onChange={(e) => setEditableConfig(e.target.value)}
                 className="w-full h-96 p-3 border border-gray-300 rounded font-mono text-sm resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Loading configuration..."
+                placeholder={
+                  loading
+                    ? 'Loading configuration...'
+                    : '# Enter SkyPilot configuration in YAML format\n# Example:\n# kubernetes:\n#   allowed_contexts: [default, my-context]'
+                }
                 disabled={loading || saving}
               />
             </div>
@@ -189,7 +200,7 @@ export default function ConfigPage() {
               </Button>
               <Button
                 onClick={handleSave}
-                disabled={loading || saving || !editableConfig.trim()}
+                disabled={loading || saving}
                 className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
               >
                 {saving ? (

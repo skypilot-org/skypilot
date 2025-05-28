@@ -1561,7 +1561,7 @@ class Resources:
 
         if self.network_tier is not None:
             if other.network_tier is None:
-                return False
+                return True
             if not self.network_tier <= other.network_tier:
                 return False
 
