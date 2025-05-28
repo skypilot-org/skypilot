@@ -1,4 +1,21 @@
 import { ENDPOINT } from './constants';
+import { getClusters } from './clusters';
+import { getManagedJobs } from './jobs';
+
+// Helper functions for username parsing
+const parseUsername = (username) => {
+  if (username && username.includes('@')) {
+    return username.split('@')[0];
+  }
+  return username || 'N/A';
+};
+
+const getFullEmail = (username) => {
+  if (username && username.includes('@')) {
+    return username;
+  }
+  return '-';
+};
 
 // Mock data for now - replace with actual API call
 const mockUsers = [
@@ -26,4 +43,36 @@ export async function getUsers() {
     console.error('Failed to fetch users:', error);
     return []; // Return empty array on error
   }
+}
+
+/**
+ * Composite function to fetch all users data with cluster and job counts atomically
+ * This prevents cache invalidation issues when switching between pages
+ */
+export async function getUsersWithCounts() {
+  const [usersData, clustersData, jobsResponse] = await Promise.all([
+    getUsers(),
+    getClusters(),
+    getManagedJobs(),
+  ]);
+
+  const jobsData = jobsResponse.jobs || [];
+
+  const processedUsers = (usersData || []).map((user) => {
+    const userClusters = (clustersData || []).filter(
+      (c) => c.user_hash === user.userId // Match by hash only
+    );
+    const userJobs = (jobsData || []).filter(
+      (j) => j.user_hash === user.userId // Match by hash only
+    );
+    return {
+      ...user,
+      usernameDisplay: parseUsername(user.username),
+      fullEmail: getFullEmail(user.username),
+      clusterCount: userClusters.length,
+      jobCount: userJobs.length,
+    };
+  });
+
+  return processedUsers;
 }
