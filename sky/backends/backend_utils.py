@@ -1252,7 +1252,7 @@ def ssh_credential_from_yaml(
     auth_section = config['auth']
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
-    ssh_private_key = auth_section.get('ssh_private_key')
+    ssh_private_key_path = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
@@ -1261,9 +1261,16 @@ def ssh_credential_from_yaml(
             constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
         ssh_proxy_command = ssh_proxy_command.replace(
             constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
+    # pull the ssh keys from the DB to files if key files were deleted.
+    logger.info(f'{ssh_user} is using ssh keys from the DB')
+
+    if (ssh_private_key_path is not None and
+            not os.path.exists(ssh_private_key_path)):
+        auth.create_ssh_key_files_from_db(ssh_private_key_path)
+
     credentials = {
         'ssh_user': ssh_user,
-        'ssh_private_key': ssh_private_key,
+        'ssh_private_key': ssh_private_key_path,
         'ssh_control_name': ssh_control_name,
         'ssh_proxy_command': ssh_proxy_command,
     }
