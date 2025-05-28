@@ -1932,19 +1932,20 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         server: Optional[oauth_lib.HTTPServer] = None
         try:
             callback_port = common_utils.find_free_port(8000)
-            callback_url = f'http://localhost:{callback_port}'
 
             token_container: Dict[str, Optional[str]] = {'token': None}
             logger.debug('Starting local authentication server...')
             server = oauth_lib.start_local_auth_server(callback_port,
-                                                       token_container)
+                                                       token_container,
+                                                       endpoint)
 
-            token_url = (f'{endpoint}/token?redirect_uri='
-                         f'{urlparse.quote(callback_url)}')
+            token_url = (f'{endpoint}/token?local_port={callback_port}')
             if webbrowser.open(token_url):
                 click.echo(f'{colorama.Fore.GREEN}A web browser has been '
                            f'opened at {token_url}. Please continue the login '
-                           f'in the web browser.{colorama.Style.RESET_ALL}')
+                           f'in the web browser.{colorama.Style.RESET_ALL}\n'
+                           f'{colorama.Style.DIM}To manually copy the token, '
+                           f'press ctrl+c.{colorama.Style.RESET_ALL}')
             else:
                 raise ValueError('Failed to open browser.')
 
@@ -1960,9 +1961,12 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
             else:
                 token = token_container['token']
 
-        except Exception as e:  # pylint: disable=broad-except
+        except (Exception, KeyboardInterrupt) as e:  # pylint: disable=broad-except
             logger.debug(f'Automatic authentication failed: {e}, '
                          'falling back to manual token entry.')
+            if isinstance(e, KeyboardInterrupt):
+                click.echo(f'\n{colorama.Style.DIM}Interrupted. Press ctrl+c '
+                           f'again to exit.{colorama.Style.RESET_ALL}')
             # Fall back to manual token entry
             token_url = f'{endpoint}/token'
             click.echo('Authentication is needed. Please visit this URL '

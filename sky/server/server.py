@@ -17,7 +17,6 @@ import re
 import shutil
 import sys
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
-import urllib.parse
 import uuid
 import zipfile
 
@@ -273,9 +272,9 @@ app.include_router(workspaces_rest.router,
 
 
 @app.get('/token')
-async def token(
-        request: fastapi.Request,
-        redirect_uri: Optional[str] = None) -> fastapi.responses.Response:
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
     user = _get_auth_user_header(request)
 
     token_data = {
@@ -287,22 +286,6 @@ async def token(
     json_bytes = json.dumps(token_data).encode('utf-8')
     base64_str = base64.b64encode(json_bytes).decode('utf-8')
 
-    # If redirect_uri is provided, redirect with token as query parameter
-    if redirect_uri is not None:
-        # Parse the redirect URI to add the token parameter
-        parsed_url = urllib.parse.urlparse(redirect_uri)
-        query_params = urllib.parse.parse_qs(parsed_url.query)
-        query_params['token'] = [base64_str]
-
-        # Reconstruct the URL with the token parameter
-        new_query = urllib.parse.urlencode(query_params, doseq=True)
-        redirect_url = urllib.parse.urlunparse(
-            (parsed_url.scheme, parsed_url.netloc, parsed_url.path,
-             parsed_url.params, new_query, parsed_url.fragment))
-
-        return fastapi.responses.RedirectResponse(url=redirect_url)
-
-    # Original HTML response when no redirect_uri is provided
     html_dir = pathlib.Path(__file__).parent / 'html'
     token_page_path = html_dir / 'token_page.html'
     try:
