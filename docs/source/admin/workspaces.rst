@@ -75,6 +75,10 @@ The above is achieved by configuring the following section in the config file:
              disabled: false
              project_id: GCP project ID
 
+           nebius:
+             disabled: false
+             tenant_id: Nebius tenant ID
+             credentials_file_path: Path to the Nebius credentials file
 
 To apply the configuration, follow the following steps:
 
