@@ -498,6 +498,10 @@ def test_kubernetes_docker_image_and_ssh():
             f'--cpus 1+ --memory 2+ '
             f'--infra kubernetes '
             f'--image-id {unprefixed_image_id} -- "{run_command}"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=f'{name}-1',
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=5 * 60),
             f'sky logs {name}-1 1 --status',
             f'sky exec {name}-1 --image-id {unprefixed_image_id} -- "{run_command}" | grep "hello world"',
             f'sky logs {name}-1 2 --status',
