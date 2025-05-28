@@ -2119,10 +2119,7 @@ class Resources:
             self._volumes = None
 
         if version < 25:
-            original_network_tier = state.get('_network_tier', None)
-            if original_network_tier is not None:
-                state['_network_tier'] = resources_utils.NetworkTier(
-                    original_network_tier)
+            state['_network_tier'] = state.get('_network_tier', None)
 
         self.__dict__.update(state)
 
