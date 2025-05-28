@@ -18,31 +18,17 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getUsers } from '@/data/connectors/users';
-import { getClusters } from '@/data/connectors/clusters'; // For fetching all clusters
-import { getManagedJobs } from '@/data/connectors/jobs'; // For fetching all jobs
+import { getUsersWithCounts } from '@/data/connectors/users';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, ExternalLinkIcon } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 
-const REFRESH_INTERVAL = 30000; // 30 seconds
-
-// Helper to parse username
-const parseUsername = (username) => {
-  if (username && username.includes('@')) {
-    return username.split('@')[0];
-  }
-  return username || 'N/A';
-};
-
-const getFullEmail = (username) => {
-  if (username && username.includes('@')) {
-    return username;
-  }
-  return '-';
-};
+const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 export function Users() {
   const [loading, setLoading] = useState(false);
@@ -50,6 +36,9 @@ export function Users() {
   const isMobile = useMobile();
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getUsersWithCounts);
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -73,15 +62,14 @@ export function Users() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
+          <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center px-3 py-1.5 text-sm"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <UsersTable
@@ -96,56 +84,54 @@ export function Users() {
 function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [sortConfig, setSortConfig] = useState({
     key: 'username',
     direction: 'ascending',
   });
 
-  const fetchDataAndProcess = useCallback(async () => {
-    if (setLoading) setLoading(true); // Use parent setLoading if available
-    setIsLoading(true);
-    try {
-      const [usersData, clustersData, jobsResponse] = await Promise.all([
-        getUsers(),
-        getClusters(), // Fetches all clusters
-        getManagedJobs(), // Fetches all jobs
-      ]);
-
-      const jobsData = jobsResponse.jobs || [];
-
-      const processedUsers = (usersData || []).map((user) => {
-        const userClusters = (clustersData || []).filter(
-          (c) => c.user_hash === user.userId // Match by hash only
-        );
-        const userJobs = (jobsData || []).filter(
-          (j) => j.user_hash === user.userId // Match by hash only
-        );
-        return {
-          ...user,
-          usernameDisplay: parseUsername(user.username),
-          fullEmail: getFullEmail(user.username),
-          clusterCount: userClusters.length,
-          jobCount: userJobs.length,
-        };
-      });
-      setUsersWithCounts(processedUsers);
-    } catch (error) {
-      console.error('Failed to fetch or process user data:', error);
-      setUsersWithCounts([]);
-    }
-    if (setLoading) setLoading(false);
-    setIsLoading(false);
-  }, [setLoading]);
+  const fetchDataAndProcess = useCallback(
+    async (showLoading = false) => {
+      if (setLoading && showLoading) setLoading(true); // Use parent setLoading if available
+      if (showLoading) setIsLoading(true);
+      try {
+        const processedUsers = await dashboardCache.get(getUsersWithCounts);
+        setUsersWithCounts(processedUsers);
+        setHasInitiallyLoaded(true);
+      } catch (error) {
+        console.error('Failed to fetch or process user data:', error);
+        setUsersWithCounts([]);
+        setHasInitiallyLoaded(true);
+      }
+      if (setLoading && showLoading) setLoading(false);
+      if (showLoading) setIsLoading(false);
+    },
+    [setLoading]
+  );
 
   useEffect(() => {
     if (refreshDataRef) {
-      refreshDataRef.current = fetchDataAndProcess;
+      refreshDataRef.current = () => fetchDataAndProcess(true); // Show loading on manual refresh
     }
   }, [refreshDataRef, fetchDataAndProcess]);
 
   useEffect(() => {
-    fetchDataAndProcess();
-    const interval = setInterval(fetchDataAndProcess, refreshInterval);
+    const initializeData = async () => {
+      // Reset loading state when component mounts
+      setHasInitiallyLoaded(false);
+      setIsLoading(true);
+
+      // Trigger cache preloading for users page and background preload other pages
+      await cachePreloader.preloadForPage('users');
+
+      fetchDataAndProcess(true); // Show loading on initial load
+    };
+
+    initializeData();
+
+    const interval = setInterval(() => {
+      fetchDataAndProcess(false); // Don't show loading on background refresh
+    }, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
 
@@ -172,6 +158,15 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
+      </div>
+    );
+  }
+
+  if (!hasInitiallyLoaded) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading users...</span>
       </div>
     );
   }

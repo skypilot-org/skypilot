@@ -37,6 +37,9 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { RotateCwIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
+import dashboardCache from '@/lib/cache';
+import { REFRESH_INTERVALS } from '@/lib/config';
+import cachePreloader from '@/lib/cache-preloader';
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -275,6 +278,8 @@ const StatsSummary = ({
   </div>
 );
 
+const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
+
 export function Workspaces() {
   const [workspaceDetails, setWorkspaceDetails] = useState([]);
   const [globalStats, setGlobalStats] = useState({
@@ -300,18 +305,26 @@ export function Workspaces() {
   const router = useRouter();
   const isMobile = useMobile();
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
       const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
-        await Promise.all([getWorkspaces(), getClusters(), getManagedJobs()]);
+        await Promise.all([
+          dashboardCache.get(getWorkspaces),
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs),
+        ]);
 
       setRawWorkspacesData(fetchedWorkspacesConfig);
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-      // Fetch enabled clouds for all workspaces
+      // Fetch enabled clouds for all workspaces using cache
       const enabledCloudsArray = await Promise.all(
-        configuredWorkspaceNames.map((wsName) => getEnabledClouds(wsName, true))
+        configuredWorkspaceNames.map((wsName) =>
+          dashboardCache.get(getEnabledClouds, [wsName])
+        )
       );
       const enabledCloudsMap = Object.fromEntries(
         configuredWorkspaceNames.map((wsName, index) => [
@@ -406,11 +419,27 @@ export function Workspaces() {
       setWorkspaceDetails([]);
       setGlobalStats({ runningClusters: 0, totalClusters: 0, managedJobs: 0 });
     }
-    setLoading(false);
+    if (showLoading) {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchData();
+    const initializeData = async () => {
+      // Trigger cache preloading for workspaces page and background preload other pages
+      await cachePreloader.preloadForPage('workspaces');
+
+      fetchData(true); // Show loading on initial load
+    };
+
+    initializeData();
+
+    // Set up refresh interval
+    const interval = setInterval(() => {
+      fetchData(false); // Don't show loading on background refresh
+    }, REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleDeleteWorkspace = (workspaceName) => {
@@ -443,6 +472,16 @@ export function Workspaces() {
         error: error,
       }));
     }
+  };
+
+  const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs);
+    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+
+    fetchData(true); // Show loading on manual refresh
   };
 
   const handleCancelDelete = () => {
@@ -499,15 +538,14 @@ export function Workspaces() {
               <span className="ml-2 text-gray-500 text-xs">Refreshing...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
-            onClick={fetchData}
+          <button
+            onClick={handleRefresh}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
 

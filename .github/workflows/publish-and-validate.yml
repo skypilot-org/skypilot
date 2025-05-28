@@ -50,6 +50,12 @@ jobs:
           MAX_ATTEMPTS=10
           ATTEMPT=1
 
+          # Validate expected version is not empty
+          if [ -z "${{ inputs.expected_version }}" ]; then
+            echo "Error: Expected version is empty"
+            exit 1
+          fi
+
           echo "Waiting for package ${{ inputs.package_name }} version ${{ inputs.expected_version }} to be available..."
 
           # Try installing the package up to MAX_ATTEMPTS times
@@ -81,7 +87,8 @@ jobs:
             # If this is the final attempt, don't sleep
             if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
               echo "Final attempt completed."
-              break
+              echo "Failed to install expected version after $MAX_ATTEMPTS attempts"
+              exit 1
             fi
 
             # Wait before next attempt

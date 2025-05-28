@@ -1017,7 +1017,7 @@ Example:
 SkyServe Service
 ================
 
-To define a YAML for use for :ref:services <sky-serve>, use previously mentioned fields to describe each replica, then add a service section to describe the entire service.
+To define a YAML for use for :ref:`services <sky-serve>`, use previously mentioned fields to describe each replica, then add a service section to describe the entire service.
 
 Syntax
 
