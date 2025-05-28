@@ -1113,6 +1113,7 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
         row = session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).first()
     if row is None:
+        logger.info(f'Cluster yaml not found for cluster {cluster_yaml_path}')
         # If the cluster yaml is not in the database, check if it exists
         # on the local file system and migrate it to the database.
         if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):

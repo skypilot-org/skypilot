@@ -885,10 +885,11 @@ def write_cluster_config(
         cluster_name,
         open(tmp_yaml_path, 'r', encoding='utf-8').read())
 
+    usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
+
     # Remove the tmp file.
     os.remove(tmp_yaml_path)
 
-    usage_lib.messages.usage.update_ray_yaml(yaml_path)
     return config_dict
 
 
