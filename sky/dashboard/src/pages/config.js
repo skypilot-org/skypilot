@@ -103,8 +103,7 @@ export default function ConfigPage() {
             <span className="text-sky-blue">SkyPilot Configuration</span>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <VersionDisplay />
+          <div className="flex items-center">
             <div className="text-sm flex items-center">
               {(loading || saving) && (
                 <div className="flex items-center mr-4">
@@ -115,6 +114,7 @@ export default function ConfigPage() {
                 </div>
               )}
             </div>
+            <VersionDisplay />
           </div>
         </div>
 
