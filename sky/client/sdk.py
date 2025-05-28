@@ -1941,12 +1941,9 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
 
             token_url = (f'{endpoint}/token?redirect_uri='
                          f'{urlparse.quote(callback_url)}')
-
-            # Try to open browser
-            browser_opened = webbrowser.open(token_url)
-            if browser_opened:
+            if webbrowser.open(token_url):
                 click.echo(f'{colorama.Fore.GREEN}A web browser has been '
-                           'opened at {token_url}. Please continue the login '
+                           f'opened at {token_url}. Please continue the login '
                            f'in the web browser.{colorama.Style.RESET_ALL}')
             else:
                 raise ValueError('Failed to open browser.')

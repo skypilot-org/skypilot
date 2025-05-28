@@ -98,11 +98,8 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
             </head>
             <body>
                 <div class="container">
-                    <div class="logo">🚀 SkyPilot</div>
                     <h2 class="error">Authentication Failed</h2>
                     <p>No authentication token was received.</p>
-                    <p>Please try again or contact support if the problem 
-                       persists.</p>
                 </div>
             </body>
             </html>
