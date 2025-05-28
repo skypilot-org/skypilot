@@ -322,7 +322,7 @@ export function Workspaces() {
 
       // Fetch enabled clouds for all workspaces using cache
       const enabledCloudsArray = await Promise.all(
-        configuredWorkspaceNames.map((wsName) => 
+        configuredWorkspaceNames.map((wsName) =>
           dashboardCache.get(getEnabledClouds, [wsName])
         )
       );
@@ -473,7 +473,6 @@ export function Workspaces() {
       }));
     }
   };
-
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
