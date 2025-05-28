@@ -43,3 +43,6 @@ moto==5.1.2
 
 # boto3 type checking
 boto3-stubs[s3,ec2,sts,iam,service-quotas]
+
+# For postgres
+psycopg2-binary==2.9.10

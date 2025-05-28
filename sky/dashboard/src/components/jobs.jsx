@@ -45,6 +45,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -209,12 +211,15 @@ export function ManagedJobs() {
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
+        // Trigger cache preloading for jobs page and background preload other pages
+        await cachePreloader.preloadForPage('jobs');
+
         // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await getWorkspaces();
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await getManagedJobs();
+        const jobsResponse = await dashboardCache.get(getManagedJobs);
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(
@@ -236,6 +241,11 @@ export function ManagedJobs() {
   }, []);
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getManagedJobs);
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getWorkspaces);
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -278,17 +288,15 @@ export function ManagedJobs() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
+          <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
             title="Refresh"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <ManagedJobsTable
@@ -370,8 +378,8 @@ export function ManagedJobsTable({
     try {
       // Fetch both jobs and clusters data in parallel
       const [jobsResponse, clustersData] = await Promise.all([
-        getManagedJobs(),
-        getClusters(),
+        dashboardCache.get(getManagedJobs),
+        dashboardCache.get(getClusters),
       ]);
 
       const { jobs, controllerStopped } = jobsResponse;
@@ -693,6 +701,12 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('priority')}
+              >
+                Priority{getSortDirection('priority')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources_str')}
               >
                 Requested{getSortDirection('resources_str')}
@@ -709,7 +723,6 @@ export function ManagedJobsTable({
               >
                 Resources{getSortDirection('cluster')}
               </TableHead>
-
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('recoveries')}
@@ -724,7 +737,7 @@ export function ManagedJobsTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={12}
+                  colSpan={13}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -770,6 +783,7 @@ export function ManagedJobsTable({
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
+                      <TableCell>{item.priority}</TableCell>
                       <TableCell>{item.requested_resources}</TableCell>
                       <TableCell>
                         {item.infra && item.infra !== '-' ? (
@@ -832,7 +846,7 @@ export function ManagedJobsTable({
                     {expandedRowId === item.id && (
                       <ExpandedDetailsRow
                         text={item.details}
-                        colSpan={12}
+                        colSpan={13}
                         innerRef={expandedRowRef}
                       />
                     )}
@@ -841,7 +855,7 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-6">
+                <TableCell colSpan={13} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
@@ -1199,6 +1213,12 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('priority')}
+              >
+                Priority{getSortDirection('priority')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources')}
               >
                 Resources{getSortDirection('resources')}
@@ -1250,6 +1270,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
+                    <TableCell>{item.priority}</TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions

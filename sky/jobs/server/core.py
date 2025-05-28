@@ -91,6 +91,7 @@ def launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
+    priority = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -100,6 +101,20 @@ def launch(
                     'name only and comment out the task names (so that they '
                     'will be auto-generated) .')
         task_names.add(task_.name)
+        if task_.job_priority is not None:
+            if (priority is not None and priority != task_.job_priority):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple tasks in the DAG have different priorities. '
+                        'Either specify a priority in only one task, or set '
+                        'the same priority for each task.')
+            priority = task_.job_priority
+
+    if priority is None:
+        priority = managed_job_constants.DEFAULT_PRIORITY
+
+    if priority < 0 or priority > 1000:
+        raise ValueError(f'Priority must be between 0 and 1000, got {priority}')
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -186,6 +201,7 @@ def launch(
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             'dashboard_user_id': common.SERVER_ID,
+            'priority': priority,
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
                 remote_user_config_path=remote_user_config_path,

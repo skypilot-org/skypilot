@@ -306,6 +306,10 @@ class Test(NamedTuple):
         prefix = f'[{self.name}]'
         message = f'{prefix} {message}'
         message = message.replace('\n', f'\n{prefix} ')
+        self.echo_without_prefix(message)
+
+    @classmethod
+    def echo_without_prefix(cls, message: str):
         print(message, file=sys.stderr, flush=True)
 
 
@@ -358,14 +362,35 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 
 @contextlib.contextmanager
 def override_sky_config(
-    test: Test, env_dict: Dict[str, str]
+    test: Optional[Test] = None,
+    env_dict: Optional[Dict[str, str]] = None
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+    echo = Test.echo_without_prefix if test is None else test.echo
+    env_before_override: Optional[Dict[str, Any]] = None
     override_sky_config_dict = skypilot_config.config_utils.Config()
+
+    if env_dict is None:
+        env_dict = os.environ
+        env_before_override = os.environ.copy()
+
+    if is_postgres_backend_test():
+        env_dict[
+            constants.
+            SKYPILOT_API_SERVER_DB_URL_ENV_VAR] = 'postgresql://postgres@localhost/skypilot'
+
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
                                             endpoint)
-        test.echo(
+        # For test that use SDK, not subprocess, the python process already
+        # cache the lru_cache of get_server_url and created the sky_config
+        # before we override the environment, so we need to disabled the
+        # lru_cache of get_server_url and set SKY_API_SERVER_URL_ENV_VAR
+        # to make sure the new endpoint is used.
+        env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
+        # Clear the get_server_url cache
+        server_common.get_server_url.cache_clear()
+        echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
@@ -375,7 +400,7 @@ def override_sky_config(
             ('jobs', 'controller', 'resources', 'cloud'), cloud)
         override_sky_config_dict.set_nested(
             ('serve', 'controller', 'resources', 'cloud'), cloud)
-        test.echo(
+        echo(
             f'Overriding controller cloud: '
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
@@ -398,6 +423,9 @@ def override_sky_config(
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
     yield temp_config_file
+    if env_before_override is not None:
+        os.environ.clear()
+        os.environ.update(env_before_override)
 
 
 def run_one_test(test: Test) -> None:
@@ -607,7 +635,11 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
     """Launch the cluster for cloud commands asynchronously."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+        # We need is_remote_server_test() because we override the SKY_API_SERVER_URL_ENV_VAR
+        # in the middle of the test, which is after the test is launched, so the
+        # is_api_server_local() already cached and returned True but we're actually
+        # running the test on the remote server if --remote-server is specified.
         return 'true'
     else:
         return (
@@ -620,7 +652,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              envs: Set[str] = None) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
         return cmd
     else:
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
@@ -640,7 +672,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
 def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
     """Down the cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
@@ -689,6 +721,10 @@ def is_remote_server_test() -> bool:
 
 def pytest_controller_cloud() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def is_postgres_backend_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
 
 
 def override_env_config(config: Dict[str, str]):

@@ -143,12 +143,15 @@ def check_capabilities(
         combinations = list(itertools.product(clouds_to_check, capabilities))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
+        if not config_allowed_cloud_names:
+            for capability in capabilities:
+                global_user_state.set_enabled_clouds([], capability,
+                                                     current_workspace_name)
         if not combinations:
             echo(
                 _summary_message(enabled_clouds, cloud2ctx2text,
                                  current_workspace_name, hide_workspace_str,
                                  disallowed_cloud_names))
-
             return {}
 
         workspace_str = f' for workspace: {current_workspace_name!r}'

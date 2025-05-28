@@ -89,7 +89,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '12'
+SKYLET_VERSION = '13'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -408,3 +408,7 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
+
+# Experimental - may be deprecated in the future without notice.
+SKYPILOT_API_SERVER_DB_URL_ENV_VAR: str = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_DB_URL')
