@@ -31,6 +31,8 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
+# From https://cloud.google.com/compute/docs/gpus/gpudirect
+# A specific image is used to ensure that the the GPU is configured with TCPX support.
 _NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
                          'nccl-plugin-gpudirecttcpx')
 
