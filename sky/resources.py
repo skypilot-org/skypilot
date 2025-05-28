@@ -98,7 +98,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 24
+    _VERSION = 25
 
     def __init__(
         self,
@@ -294,6 +294,11 @@ class Resources:
                 }
         else:
             self._image_id = image_id
+        if (isinstance(self._cloud, clouds.Kubernetes) and
+                self._image_id is not None):
+            for k, v in self._image_id.items():
+                if not v.startswith('docker:'):
+                    self._image_id[k] = f'docker:{v}'
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
@@ -2074,6 +2079,14 @@ class Resources:
 
         if version < 24:
             self._volumes = None
+
+        if version < 25:
+            if (state.get('_cloud', None) is not None and
+                    state.get('_image_id', None) is not None):
+                if isinstance(state['_cloud'], clouds.Kubernetes):
+                    for k, v in state['_image_id'].items():
+                        if not v.startswith('docker:'):
+                            state['_image_id'][k] = f'docker:{v}'
 
         self.__dict__.update(state)
 
