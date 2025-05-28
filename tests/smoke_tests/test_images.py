@@ -479,9 +479,9 @@ def test_custom_default_conda_env(generic_cloud: str):
 @pytest.mark.kubernetes
 def test_kubernetes_docker_image_and_ssh():
     """Test K8s docker image ID interchangeability with/without prefix."""
-    # We use a real, simple image like alpine for the test.
+    # We use a real, simple image like docker for the test.
     # 'abc' in the user query is a placeholder.
-    image_name = 'alpine'
+    image_name = 'ubuntu:latest'
     docker_prefixed_image_id = f'docker:{image_name}'
     unprefixed_image_id = image_name
     run_command = 'echo hello world'
