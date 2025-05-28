@@ -101,6 +101,34 @@ export async function getCloudInfrastructure(clusters, jobs) {
   }
 }
 
+/**
+ * Shared function to get all infra data (GPU + Cloud) - used by both cache preloader and infra page
+ */
+export async function getInfraData() {
+  // Import here to avoid circular dependencies
+  const { getClusters } = await import('@/data/connectors/clusters');
+  const { getManagedJobs } = await import('@/data/connectors/jobs');
+
+  const [clustersData, jobsData] = await Promise.all([
+    getClusters(),
+    getManagedJobs(),
+  ]);
+
+  const clusters = clustersData || [];
+  const jobs = jobsData?.jobs || [];
+
+  // Fetch both GPU and cloud data together
+  const [gpuData, cloudData] = await Promise.all([
+    getGPUs(clusters, jobs),
+    getCloudInfrastructure(clusters, jobs),
+  ]);
+
+  return {
+    gpuData,
+    cloudData,
+  };
+}
+
 export async function getGPUs(clusters, jobs) {
   const clustersAndJobsData = {
     clusters: clusters || [],

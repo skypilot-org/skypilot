@@ -14,4 +14,4 @@ export const REFRESH_INTERVALS = {
 // UI configuration
 export const UI_CONFIG = {
   NAME_TRUNCATE_LENGTH: 20, // Maximum length for truncated names
-}; 
+};

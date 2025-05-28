@@ -43,7 +43,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
-import { CACHE_CONFIG } from '@/lib/config';
+import cachePreloader from '@/lib/cache-preloader';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -69,6 +69,9 @@ export function Clusters() {
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
+        // Trigger cache preloading for clusters page and background preload other pages
+        await cachePreloader.preloadForPage('clusters');
+
         // Fetch configured workspaces for the filter dropdown
         const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
@@ -110,7 +113,7 @@ export function Clusters() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getWorkspaces);
-    
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }

@@ -46,7 +46,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
-import { CACHE_CONFIG } from '@/lib/config';
+import cachePreloader from '@/lib/cache-preloader';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -200,6 +200,9 @@ export function ManagedJobs() {
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
+        // Trigger cache preloading for jobs page and background preload other pages
+        await cachePreloader.preloadForPage('jobs');
+
         // Fetch configured workspaces for the filter dropdown
         const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
@@ -231,7 +234,7 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getManagedJobs);
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getWorkspaces);
-    
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }

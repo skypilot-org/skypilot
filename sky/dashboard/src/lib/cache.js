@@ -33,45 +33,50 @@ class DashboardCache {
     const now = Date.now();
 
     // If we have cached data and it's not stale, return it and refresh in background
-    if (cachedItem && (now - cachedItem.lastUpdated) < ttl) {
+    if (cachedItem && now - cachedItem.lastUpdated < ttl) {
       const age = Math.round((now - cachedItem.lastUpdated) / 1000);
-      this._debug(`Cache HIT for ${functionName} (age: ${age}s, TTL: ${Math.round(ttl/1000)}s)`);
-      
+      this._debug(
+        `Cache HIT for ${functionName} (age: ${age}s, TTL: ${Math.round(ttl / 1000)}s)`
+      );
+
       // Update the lastUpdated timestamp to extend the cache life on access
       if (refreshOnAccess) {
         this.cache.set(key, {
           data: cachedItem.data,
-          lastUpdated: now
+          lastUpdated: now,
         });
         this._debug(`Cache TTL refreshed for ${functionName}`);
       }
-      
+
       // Launch background refresh if we're not already refreshing
       if (!this.backgroundJobs.has(key)) {
         this._refreshInBackground(fetchFunction, args, key);
       }
-      
+
       return cachedItem.data;
     }
 
     // If data is stale or doesn't exist, fetch fresh data
     try {
       const freshData = await fetchFunction(...args);
-      
+
       // Update cache with fresh data
       this.cache.set(key, {
         data: freshData,
-        lastUpdated: now
+        lastUpdated: now,
       });
 
       return freshData;
     } catch (error) {
       // If fetch fails and we have stale data, return stale data
       if (cachedItem) {
-        console.warn(`Failed to fetch fresh data for ${key}, returning stale data:`, error);
+        console.warn(
+          `Failed to fetch fresh data for ${key}, returning stale data:`,
+          error
+        );
         return cachedItem.data;
       }
-      
+
       // If no cached data and fetch fails, re-throw the error
       throw error;
     }
@@ -96,16 +101,16 @@ class DashboardCache {
   invalidateFunction(fetchFunction) {
     const functionName = fetchFunction.name || 'anonymous';
     const keysToDelete = [];
-    
+
     // Find all keys that start with the function name
     for (const key of this.cache.keys()) {
       if (key.startsWith(`${functionName}_`)) {
         keysToDelete.push(key);
       }
     }
-    
+
     // Delete all matching entries
-    keysToDelete.forEach(key => {
+    keysToDelete.forEach((key) => {
       this.cache.delete(key);
       this.backgroundJobs.delete(key);
     });
@@ -126,7 +131,7 @@ class DashboardCache {
     return {
       cacheSize: this.cache.size,
       backgroundJobs: this.backgroundJobs.size,
-      keys: Array.from(this.cache.keys())
+      keys: Array.from(this.cache.keys()),
     };
   }
 
@@ -136,21 +141,21 @@ class DashboardCache {
   getDetailedStats() {
     const now = Date.now();
     const entries = [];
-    
+
     for (const [key, item] of this.cache.entries()) {
       const age = now - item.lastUpdated;
       entries.push({
         key,
         age: Math.round(age / 1000), // Age in seconds
         lastUpdated: new Date(item.lastUpdated).toISOString(),
-        hasBackgroundJob: this.backgroundJobs.has(key)
+        hasBackgroundJob: this.backgroundJobs.has(key),
       });
     }
-    
+
     return {
       cacheSize: this.cache.size,
       backgroundJobs: this.backgroundJobs.size,
-      entries: entries.sort((a, b) => a.age - b.age)
+      entries: entries.sort((a, b) => a.age - b.age),
     };
   }
 
@@ -181,14 +186,14 @@ class DashboardCache {
 
     // Execute the refresh asynchronously
     fetchFunction(...args)
-      .then(freshData => {
+      .then((freshData) => {
         // Update cache with fresh data
         this.cache.set(key, {
           data: freshData,
-          lastUpdated: Date.now()
+          lastUpdated: Date.now(),
         });
       })
-      .catch(error => {
+      .catch((error) => {
         console.warn(`Background refresh failed for ${key}:`, error);
       })
       .finally(() => {
@@ -213,4 +218,4 @@ const dashboardCache = new DashboardCache();
 
 // Export both the class and the singleton instance
 export { DashboardCache, dashboardCache };
-export default dashboardCache; 
+export default dashboardCache;

@@ -6,6 +6,7 @@ import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import {
   Card,
@@ -226,8 +227,15 @@ export function Workspaces() {
   };
 
   useEffect(() => {
-    fetchData(true); // Show loading on initial load
-    
+    const initializeData = async () => {
+      // Trigger cache preloading for workspaces page and background preload other pages
+      await cachePreloader.preloadForPage('workspaces');
+
+      fetchData(true); // Show loading on initial load
+    };
+
+    initializeData();
+
     // Set up refresh interval
     const interval = setInterval(() => {
       fetchData(false); // Don't show loading on background refresh
@@ -272,7 +280,7 @@ export function Workspaces() {
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
-    
+
     fetchData(true); // Show loading on manual refresh
   };
 
