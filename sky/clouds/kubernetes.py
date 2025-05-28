@@ -559,12 +559,23 @@ class Kubernetes(clouds.Cloud):
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
         k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+
+        # Check if this is a Nebius cluster and configure IPC_LOCK capability
+        k8s_ipc_lock_capability = False
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
-            if 'nebius' in context:
-                k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
-                k8s_env_vars['UCX_NET_DEVICES'] = \
-                    'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
+            nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+            for node in nodes:
+                if node.metadata.labels:
+                    for label_key in node.metadata.labels.keys():
+                        if label_key.startswith('nebius.com/'):
+                            k8s_ipc_lock_capability = True
+                            break
+
+        if k8s_ipc_lock_capability:
+            k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
+            k8s_env_vars['UCX_NET_DEVICES'] = \
+                'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -630,6 +641,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
+            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

@@ -814,36 +814,6 @@ def write_cluster_config(
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
         cluster_config_overrides = to_provision.cluster_config_overrides
-        if to_provision.network_tier is not None and to_provision.network_tier == resources_utils.NetworkTier.BEST:
-            k8s_env_vars = cast(Dict[str, Optional[str]],
-                                resources_vars['k8s_env_vars'])
-            if k8s_env_vars is not None:
-                context_name = k8s_env_vars.get(
-                    kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR)
-                if context_name is not None and 'nebius' in context_name:
-                    # Force security context with IPC_LOCK capability
-                    if 'kubernetes' not in cluster_config_overrides:
-                        cluster_config_overrides['kubernetes'] = {}
-                    if 'pod_config' not in cluster_config_overrides[
-                            'kubernetes']:
-                        cluster_config_overrides['kubernetes'][
-                            'pod_config'] = {}
-                    if 'spec' not in cluster_config_overrides['kubernetes'][
-                            'pod_config']:
-                        cluster_config_overrides['kubernetes']['pod_config'][
-                            'spec'] = {}
-                    if 'containers' not in cluster_config_overrides[
-                            'kubernetes']['pod_config']['spec']:
-                        cluster_config_overrides['kubernetes']['pod_config'][
-                            'spec']['containers'] = [{}]
-
-                    cluster_config_overrides['kubernetes']['pod_config'][
-                        'spec']['containers'][0]['securityContext'] = {
-                            'capabilities': {
-                                'add': ['IPC_LOCK']
-                            }
-                        }
-
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path, cluster_config_overrides=cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
