@@ -70,7 +70,7 @@ SkyPilot will use the user info passed by the auth proxy in your SkyPilot API se
 Setting up OAuth2 Proxy with Okta
 ---------------------------------
 
-The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup. 
+The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup.
 
 To integrate with Okta, OAuth2 Proxy uses OpenID Connect (OIDC) and follows the `Authorization Code flow <https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/>`__ recommended by Okta.
 
@@ -90,7 +90,7 @@ Create application in Okta
     :width: 80%
 
 2. Configure the application:
-    
+
    * **App integration name:** ``SkyPilot API Server`` or any other name.
    * **Sign-in redirect URIs:** ``<ENDPOINT>/oauth2/callback``, where ``<ENDPOINT>`` is your API server endpoint. e.g. ``http://skypilot.example.com/oauth2/callback``
    * **Assignments > Controlled access:** ``Allow everyone in your organization to access``, unless you want to limit access to select groups.
@@ -152,4 +152,4 @@ During the login flow, the token provided by the web login will encode the cooki
 
     If your auth proxy is not automatically detected, try using ``sky api login --cookies`` to force auth proxy mode.
 
-If the `X-Auth-Request-Email` header is set by your auth proxy, SkyPilot will use it as the username in all requests.
+If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will use it as the username in all requests.

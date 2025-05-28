@@ -367,11 +367,17 @@ def override_sky_config(
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
     env_before_override: Optional[Dict[str, Any]] = None
+    override_sky_config_dict = skypilot_config.config_utils.Config()
+
     if env_dict is None:
         env_dict = os.environ
         env_before_override = os.environ.copy()
 
-    override_sky_config_dict = skypilot_config.config_utils.Config()
+    if is_postgres_backend_test():
+        env_dict[
+            constants.
+            SKYPILOT_API_SERVER_DB_URL_ENV_VAR] = 'postgresql://postgres@localhost/skypilot'
+
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
@@ -711,6 +717,10 @@ def is_remote_server_test() -> bool:
 
 def pytest_controller_cloud() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def is_postgres_backend_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
 
 
 def override_env_config(config: Dict[str, str]):

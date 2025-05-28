@@ -79,7 +79,7 @@ Use high-performance networking
 
         See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
 
-    .. tab-item:: Nebius Using InfiniBand
+    .. tab-item:: Nebius with InfiniBand
         :sync: nebius-infiniband-tab
 
         InfiniBand is a high-throughput, low-latency networking standard. To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand.
