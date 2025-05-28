@@ -1,4 +1,5 @@
 """ Nebius Cloud. """
+import json
 import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
@@ -379,6 +380,19 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """Returns the email address + project id of the active user."""
+        gcp_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('nebius'), sort_keys=True)
+        return cls._get_user_identities(gcp_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def _get_user_identities(
+            cls, workspace_config: Optional[str]) -> List[List[str]]:
+        # We add workspace_config in args to avoid caching the GCP identity
+        # for when different workspace configs are used. Use json.dumps to
+        # ensure the config is hashable.
+        del workspace_config  # Unused
         sdk = nebius.sdk()
         profile_client = nebius.iam().ProfileServiceClient(sdk)
         profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
