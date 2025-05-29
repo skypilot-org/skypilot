@@ -376,6 +376,7 @@ class JobsLogsBody(RequestBody):
     follow: bool = True
     controller: bool = False
     refresh: bool = False
+    tail: Optional[int] = None
 
 
 class RequestCancelBody(RequestBody):
