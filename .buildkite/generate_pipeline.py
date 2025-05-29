@@ -67,8 +67,7 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
 
 
 def _get_buildkite_queue(cloud: str, remote_server: bool,
-                         run_on_cloud_kube_backend: bool,
-                         is_ssh_test: bool) -> str:
+                         run_on_cloud_kube_backend: bool) -> str:
     """Get the Buildkite queue for a given cloud.
 
     We use a separate queue for generic cloud tests on remote servers because:
@@ -79,15 +78,10 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
     """
-    if not is_ssh_test and run_on_cloud_kube_backend:
+    if run_on_cloud_kube_backend:
         return QUEUE_KUBE_BACKEND
 
-    if is_ssh_test:
-        # ssh test's --infra are overridden during tests,
-        # we can use the generic cloud queue to run these tests
-        queue = QUEUE_GENERIC_CLOUD
-    else:
-        queue = CLOUD_QUEUE_MAP[cloud]
+    queue = CLOUD_QUEUE_MAP[cloud]
     if queue == QUEUE_GENERIC_CLOUD and remote_server:
         return QUEUE_GENERIC_CLOUD_REMOTE_SERVER
     return queue
@@ -186,7 +180,6 @@ def _extract_marked_tests(
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
     remote_server = '--remote-server' in extra_args
-    is_ssh_test = '--ssh' in extra_args
 
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
@@ -260,7 +253,7 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             _get_buildkite_queue(cloud, remote_server,
-                                 run_on_cloud_kube_backend, is_ssh_test)
+                                 run_on_cloud_kube_backend)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
