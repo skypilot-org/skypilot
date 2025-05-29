@@ -1008,6 +1008,21 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                 job_dict['schedule_state'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
+            
+            # Add YAML content and command for managed jobs
+            dag_yaml_path = job_dict.get('dag_yaml_path')
+            if dag_yaml_path:
+                try:
+                    with open(dag_yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['dag_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError):
+                    job_dict['dag_yaml'] = None
+                
+                # Generate a command that could be used to launch this job
+                # Format: sky jobs launch <yaml_path>
+            else:
+                job_dict['dag_yaml'] = None
+            
             jobs.append(job_dict)
         return jobs
 

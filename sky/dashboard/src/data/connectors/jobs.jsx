@@ -149,6 +149,8 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           ? new Date(job.submitted_at * 1000)
           : null,
         events: events,
+        dag_yaml: job.dag_yaml,
+        dag_command: job.dag_command,
       };
     });
     return { jobs: jobData, controllerStopped: false };
