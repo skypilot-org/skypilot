@@ -21,6 +21,7 @@ check_file_age() {
     fi
 
     if [ $(( current_time - mtime )) -lt 86400 ]; then
+        echo "File $1 is recent (less than 24 hours old)"
         return 0  # File exists and is recent
     fi
     return 1  # File is old
