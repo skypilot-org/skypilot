@@ -4504,9 +4504,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def remove_cluster_config(self, handle: CloudVmRayResourceHandle) -> None:
         """Remove the YAML config of a cluster."""
-        common_utils.remove_file_if_exists(handle.cluster_yaml)
+        cluster_yaml_path = handle.cluster_yaml
         handle.cluster_yaml = None
         global_user_state.update_cluster_handle(handle.cluster_name, handle)
+        common_utils.remove_file_if_exists(cluster_yaml_path)
 
     def set_autostop(self,
                      handle: CloudVmRayResourceHandle,
