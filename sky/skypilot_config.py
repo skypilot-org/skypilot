@@ -179,6 +179,10 @@ def _set_loaded_config_path(
     _get_config_context().config_path = json.dumps(path)
 
 
+def _set_loaded_config_path_serialized(path: Optional[str]) -> None:
+    _get_config_context().config_path = path
+
+
 def _is_config_overridden() -> bool:
     return _get_config_context().config_overridden
 
@@ -593,7 +597,7 @@ def override_skypilot_config(
         yield
         return
     original_config = _get_loaded_config()
-    original_config_path = _get_loaded_config_path()
+    original_config_path = loaded_config_path_serialized()
     override_configs = config_utils.Config(override_configs)
     if override_config_path_serialized is None:
         override_config_path = []
@@ -644,7 +648,8 @@ def override_skypilot_config(
             skip_none=False)
         _set_config_overridden(True)
         _set_loaded_config(config)
-        _set_loaded_config_path(original_config_path + override_config_path)
+        _set_loaded_config_path(
+            _get_loaded_config_path() + override_config_path)
         yield
     except exceptions.InvalidSkyPilotConfigError as e:
         with ux_utils.print_exception_no_traceback():
@@ -659,7 +664,7 @@ def override_skypilot_config(
     finally:
         _set_loaded_config(original_config)
         _set_config_overridden(False)
-        _set_loaded_config_path(original_config_path)
+        _set_loaded_config_path_serialized(original_config_path)
 
 
 @contextlib.contextmanager
@@ -672,7 +677,7 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
        sky_utils.context for more details.
     """
     original_config = _get_loaded_config()
-    original_config_path = _get_loaded_config_path()
+    original_config_path = loaded_config_path_serialized()
     original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if new_configs != original_config:
         # Modify the global config of current process or context
@@ -691,7 +696,7 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
         # Restore the original config and env var.
         _set_loaded_config(original_config)
-        _set_loaded_config_path(original_config_path)
+        _set_loaded_config_path_serialized(original_config_path)
         if original_env_var:
             os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
         else:
