@@ -5,6 +5,7 @@ server.
 """
 import functools
 import os
+import socket
 import threading
 from typing import Optional
 
@@ -27,6 +28,7 @@ def run(config: uvicorn.Config):
     try:
         if config.workers is not None and config.workers > 1:
             sock = config.bind_socket()
+            _configure_tcp_keepalive(sock)
             SlowStartMultiprocess(config,
                                   target=run_server_process,
                                   sockets=[sock]).run()
@@ -36,6 +38,61 @@ def run(config: uvicorn.Config):
         # Copied from unvicorn.run()
         if config.uds and os.path.exists(config.uds):
             os.remove(config.uds)
+
+
+def _configure_tcp_keepalive(sock: socket.socket) -> None:
+    """Configure TCP keepalive options for the server socket.
+    
+    This helps maintain long-lived connections and detect broken connections
+    more reliably, especially when there are firewalls or load balancers
+    between clients and the server.
+    
+    TCP keepalive works by sending periodic probe packets on idle connections
+    to detect if the remote peer is still reachable. This is particularly
+    useful for:
+    - Detecting broken connections through firewalls/NAT devices
+    - Preventing connection drops due to idle timeouts
+    - Improving reliability of long-running API connections
+    
+    Platform support:
+    - Linux: Supports all TCP keepalive options
+    - macOS: Supports TCP_KEEPINTVL and TCP_KEEPCNT, but not TCP_KEEPIDLE
+    - Windows: Limited support for TCP keepalive options
+    
+    Args:
+        sock: The socket to configure.
+    """
+    try:
+        # Enable TCP keepalive
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        
+        # Configure keepalive parameters (platform-dependent)
+        if hasattr(socket, 'TCP_KEEPIDLE'):
+            # Time before sending keepalive probes (seconds)
+            # Available on Linux, not on macOS
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        
+        if hasattr(socket, 'TCP_KEEPINTVL'):
+            # Interval between keepalive probes (seconds)
+            # Available on Linux and macOS
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30)
+        
+        if hasattr(socket, 'TCP_KEEPCNT'):
+            # Number of failed probes before declaring connection dead
+            # Available on Linux and macOS
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+            
+        # Log successful configuration
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug('TCP keepalive configured successfully')
+            
+    except (OSError, AttributeError) as e:
+        # Some platforms may not support all TCP keepalive options
+        # Log the error but don't fail the server startup
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f'Failed to configure TCP keepalive: {e}')
 
 
 def _run_server_process(server: uvicorn.Server, *args, **kwargs):

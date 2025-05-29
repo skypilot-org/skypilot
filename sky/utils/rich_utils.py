@@ -292,7 +292,7 @@ def decode_rich_status(
         last_line = ''
         # Buffer to store incomplete UTF-8 bytes between chunks
         undecoded_buffer = b''
-
+        
         # Iterate over the response content in chunks. We do not use iter_lines
         # because it will strip the trailing newline characters, causing the
         # progress bar ending with `\r` becomes a pyramid.

@@ -19,6 +19,7 @@ import sys
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
+import socket
 
 import aiofiles
 import fastapi
