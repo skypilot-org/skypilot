@@ -381,19 +381,26 @@ class Nebius(clouds.Cloud):
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the email address + project id of the active user."""
-        gcp_workspace_config = json.dumps(
+        nebius_workspace_config = json.dumps(
             skypilot_config.get_workspace_cloud('nebius'), sort_keys=True)
-        return cls._get_user_identities(gcp_workspace_config)
+        return cls._get_user_identities(nebius_workspace_config)
 
     @classmethod
     @annotations.lru_cache(scope='request', maxsize=5)
     def _get_user_identities(
             cls, workspace_config: Optional[str]) -> List[List[str]]:
-        # We add workspace_config in args to avoid caching the GCP identity
-        # for when different workspace configs are used. Use json.dumps to
-        # ensure the config is hashable.
+        # We add workspace_config in args to avoid caching the identity for when
+        # different workspace configs are used.
         del workspace_config  # Unused
         sdk = nebius.sdk()
         profile_client = nebius.iam().ProfileServiceClient(sdk)
         profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
-        return [[profile.service_account_profile.info.metadata.name]]
+        if profile.user_profile is not None:
+            return [[profile.user_profile.attributes.email]]
+        if profile.service_account_profile is not None:
+            return [[profile.service_account_profile.info.metadata.name]]
+        if profile.anonymous_profile is not None:
+            return None
+        unknown_profile_type = profile.which_field_in_oneof("profile")
+        raise exceptions.CloudUserIdentityError(
+            f'Nebius profile is of an unknown type - {unknown_profile_type}')
