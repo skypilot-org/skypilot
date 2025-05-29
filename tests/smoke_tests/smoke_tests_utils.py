@@ -461,12 +461,8 @@ def override_sky_config(
             new_test_commands += ['sky ssh up', 'sky check ssh']
             new_test_commands += test.commands
             # Teardown ssh node pools
-            teardown_command = 'sky ssh down; sky down ssh-node-pool -y'
-            new_teardown = None
-            if test.teardown:
-                new_teardown = f'{teardown_command}; {test.teardown}'
-            else:
-                new_teardown = teardown_command
+            original_teardown = f'{test.teardown};' if test.teardown else ''
+            teardown_command = f'sky ssh down; {original_teardown} sky down ssh-node-pool -y'
             echo(f'{os.linesep}Overriding test commands: {os.linesep}'
                  f'{os.linesep.join(test.commands)}'
                  f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
@@ -474,8 +470,9 @@ def override_sky_config(
             echo(f'{os.linesep}Overriding test teardown: {os.linesep}'
                  f'{test.teardown or ""}'
                  f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
-                 f'{new_teardown or ""}')
-            test = test.copy(commands=new_test_commands, teardown=new_teardown)
+                 f'{teardown_command or ""}')
+            test = test.copy(commands=new_test_commands,
+                             teardown=teardown_command)
             env_dict[
                 deploy_remote_cluster.
                 ENV_VAR_SSH_NODE_POOLS_CONFIG] = temp_ssh_node_pools_file.name
