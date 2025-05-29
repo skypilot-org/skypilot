@@ -193,7 +193,7 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
   :width: 800
   :alt: Managed jobs dashboard
 
-The UI shows the same information as the CLI ``sky jobs queue -a``.
+The UI shows the same information as the CLI ``sky jobs queue -au``.
 
 
 .. _job-priority:
