@@ -1700,7 +1700,7 @@ class Resources:
                 self.disk_tier != resources_utils.DiskTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if (self.network_tier is not None and
-                self.network_tier != resources_utils.NetworkTier.BEST):
+                self.network_tier == resources_utils.NetworkTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
