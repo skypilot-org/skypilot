@@ -1,7 +1,7 @@
 .. _sky-api-server:
 
-Team Deployment
-===============
+API Server Deployment
+=====================
 
 SkyPilot implements a client-server architecture. When a user runs a command or invokes a SDK,
 a SkyPilot client submits :ref:`asynchronous requests <async>` to a **SkyPilot API server**, which

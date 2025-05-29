@@ -20,7 +20,7 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 <div align="center">
   <div>
     <img src="https://i.imgur.com/FBSv0PR.png" width="600px" alt="SkyPilot dashboard">
-    <p><em>SkyPilot dashboard with running jobs</em></p>
+    <p><em>SkyPilot dashboard with running clusters</em></p>
   </div>
 </div>
 
@@ -193,13 +193,13 @@ If you see a blank address, wait a bit and try again. The GCP load balancer take
 
 Configure your DNS to point to the IP address of the API server. This is required for Okta to verify the `redirect_uri` configured by you in the Okta app. Alternatively, update the `redirect_uri` in the Okta app to use the IP address of the API server.
 
-Try opening the endpoint in a browser. You should see the SkyPilot dashboard login page. 
+Try opening the endpoint in a browser. You should see the SkyPilot dashboard login page.
 
 <div align="center">
   <img src="https://i.imgur.com/k17TpJU.png" width="500px" alt="Okta login page">
 </div>
 
-After logging, you should be able to see the configured cloud and kubernetes infra on the dashboard.
+After logging in, you should be able to see the configured cloud and kubernetes infra on the dashboard.
 
 
 <div align="center">
@@ -240,7 +240,7 @@ Authentication is needed. Please visit this URL setup up the token:
 http://sky.yourorg.com/token
 
 Opening browser...
-Paste the token: 
+Paste the token:
 ```
 
 Run `sky check` to verify cloud setup:
@@ -300,7 +300,7 @@ Refer to [Using InfiniBand in Nebius with SkyPilot](https://docs.skypilot.co/en/
 
 ### Shared storage with Nebius shared filesystem
 
-You can also use [Nebius shared filesystem](https://docs.nebius.com/compute/storage/types#filesystems) with SkyPilot to get high performance data storage for datasets, checkpoints and more across multiple nodes. 
+You can also use [Nebius shared filesystem](https://docs.nebius.com/compute/storage/types#filesystems) with SkyPilot to get high performance data storage for datasets, checkpoints and more across multiple nodes.
 
 When creating a node group on the Nebius console, simply attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
 
