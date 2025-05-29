@@ -906,7 +906,7 @@ Default: ``kube-credentials``
 .. _helm-values-kubernetesCredentials-kubeconfig:
 
 ``kubernetesCredentials.kubeconfig``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Content of the kubeconfig file. If set, a secret will be created automatically and referenced by ``kubeconfigSecretName``.
 
@@ -997,7 +997,7 @@ Default: ``aws_secret_access_key``
 .. _helm-values-awsCredentials-accessKeyId:
 
 ``awsCredentials.accessKeyId``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 AWS access key ID. If provided, the chart will create a secret automatically.
 
@@ -1011,7 +1011,7 @@ Default: ``null``
 .. _helm-values-awsCredentials-secretAccessKey:
 
 ``awsCredentials.secretAccessKey``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 AWS secret access key. If provided, the chart will create a secret automatically.
 
@@ -1072,7 +1072,7 @@ Default: ``gcp-credentials``
 .. _helm-values-gcpCredentials-credentialsJson:
 
 ``gcpCredentials.credentialsJson``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Content of the service account JSON key. If provided, the chart will create a secret automatically and reference it via ``gcpSecretName``.
 
