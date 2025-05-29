@@ -266,9 +266,8 @@ class TestCgroupFunctions:
         mock_cgroup_mem.return_value = 4 * 1024**3  # 4GB
         assert common_utils.get_mem_size_gb() == 4.0
 
-        # Test when cgroup limit is higher (should use virtual memory)
-        mock_cgroup_mem.return_value = 12 * 1024**3  # 12GB
-        mock_virtual_memory.return_value.total = 8 * 1024**3  # 8GB
+        # Test when cgroup limit is higher
+        mock_cgroup_mem.return_value = 16 * 1024**3  # 16GB
         assert common_utils.get_mem_size_gb() == 8.0
 
         # Test with env var
