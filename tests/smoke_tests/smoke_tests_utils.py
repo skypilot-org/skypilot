@@ -860,13 +860,15 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
                                     re.match(r'(\d+)',
                                              resources['cpus']).group(1))
                                 if cpu_int >= 8:
-                                    cpus_val = resources['cpus']
+                                    # More buffer
+                                    cpus_val = resources['cpus'] + 8
                             if 'memory' in resources:
                                 memory_int = int(
                                     re.match(r'(\d+)',
                                              resources['memory']).group(1))
                                 if memory_int >= 32:
-                                    memory_val = resources['memory']
+                                    # More buffer
+                                    memory_val = resources['memory'] + 8
 
                         if 'num_nodes' in task_config:
                             # One extra for controller node

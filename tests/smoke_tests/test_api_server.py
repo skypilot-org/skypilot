@@ -1,5 +1,6 @@
 from typing import List
 
+import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
@@ -15,6 +16,7 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 
 
 # ---------- Test multi-tenant ----------
+@pytest.mark.no_ssh  # Stopping clusters is not supported on Kubernetes.
 def test_multi_tenant(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'

@@ -379,6 +379,7 @@ def test_scp_logs():
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
+@pytest.mark.no_ssh  # No sdk test for ssh node pool
 def test_core_api_sky_launch_exec(generic_cloud: str):
     with smoke_tests_utils.override_sky_config():
         # We need to override the sky api endpoint env if --remote-server is
@@ -449,6 +450,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
         sky.down(name)
 
 
+@pytest.mark.no_ssh  # No sdk test for ssh node pool
 def test_jobs_launch_and_logs(generic_cloud: str):
     # The first `with` is to override the sky api endpoint env if --remote-server
     # is specified, so the test knows it's running on the remote server, thats
