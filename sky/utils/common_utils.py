@@ -324,7 +324,67 @@ def get_pretty_entrypoint_cmd() -> str:
         # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
         # things like 'examples/app.py'.
         argv[0] = basename
+    
+    # Redact sensitive environment variable values
+    argv = _redact_env_values(argv)
+    
     return ' '.join(argv)
+
+
+def _redact_env_values(argv: List[str]) -> List[str]:
+    """Redact sensitive values from --env arguments.
+    
+    Args:
+        argv: Command line arguments
+        
+    Returns:
+        Modified argv with redacted --env values
+        
+    Examples:
+        ['sky', 'launch', '--env', 'HF_TOKEN=secret'] -> 
+        ['sky', 'launch', '--env', 'HF_TOKEN=<redacted>']
+        
+        ['sky', 'launch', '--env=HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--env=HF_TOKEN=<redacted>']
+        
+        ['sky', 'launch', '--env', 'HF_TOKEN'] ->
+        ['sky', 'launch', '--env', 'HF_TOKEN'] (no change)
+    """
+    result = []
+    i = 0
+    
+    while i < len(argv):
+        arg = argv[i]
+        
+        if arg == '--env' and i + 1 < len(argv):
+            # Handle: --env KEY=value or --env KEY
+            result.append(arg)
+            next_arg = argv[i + 1]
+            if '=' in next_arg:
+                # Has a value, redact it
+                key, _ = next_arg.split('=', 1)
+                result.append(f'{key}=<redacted>')
+            else:
+                # No value, keep as is
+                result.append(next_arg)
+            i += 2
+        elif arg.startswith('--env='):
+            # Handle: --env=KEY=value or --env=KEY
+            env_part = arg[6:]  # Remove '--env='
+            if '=' in env_part:
+                # Has a value, redact it
+                key, _ = env_part.split('=', 1)
+                result.append(f'--env={key}=<redacted>')
+            else:
+                # No value, keep as is
+                result.append(arg)
+            i += 1
+        else:
+            # Regular argument, keep as is
+            result.append(arg)
+            i += 1
+    
+    return result
 
 
 def user_and_hostname_hash() -> str:
