@@ -25,7 +25,7 @@ def _filter_instances(cluster_name_on_cloud: str,
 
     # Filter by cluster name using metadata
     instances = utils.list_instances(
-        metadata={'skypilot_cluster_name': cluster_name_on_cloud})
+        metadata={'skypilot': {'cluster_name': cluster_name_on_cloud}})
 
     # Normalize status filters to lowercase
     if status_filters is not None:
@@ -329,7 +329,7 @@ def query_instances(
     """Returns the status of the specified instances for Hyperbolic."""
     del provider_config, non_terminated_only  # unused
     # Fetch all instances for this cluster
-    instances = utils.list_instances(metadata={'skypilot_cluster_name': cluster_name_on_cloud})
+    instances = utils.list_instances(metadata={'skypilot': {'cluster_name': cluster_name_on_cloud}})
     if not instances:
         # No instances found: return empty dict to indicate fully deleted
         return {}
