@@ -3,8 +3,10 @@
 # Function to check if file exists and is less than 24 hours old
 check_file_age() {
     if [ -f "$1" ] && [ $(( $(date +%s) - $(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) )) -lt 86400 ]; then
+        echo "File $1 exists and is recent"
         return 0  # File exists and is recent
     fi
+    echo "File $1 does not exist or is old"
     return 1  # File doesn't exist or is old
 }
 
