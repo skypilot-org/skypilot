@@ -826,6 +826,10 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
 
         # --- Handle job/service specific nodes based on YAML ---
         if is_launch_cmd(original_command_str, _LAUNCH_CMDS[1:]):
+            if ssh_node_pool_size <= 1:
+                # Need two nodes for the controller node and the job node.
+                ssh_node_pool_size = 2
+
             # General YAML path from the command for jobs/serve task definition
             # This can be a positional argument or part of other structures.
             # Regex looks for a path-like string ending in .yaml
@@ -833,34 +837,43 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
 
             if yaml_path_val:  # Use the YAML found in the original command
                 with open(yaml_path_val, 'r') as f:
-                    task_config = yaml.safe_load(f)
+                    # Handle multiple YAML documents
+                    for task_config in yaml.load_all(f, Loader=yaml.SafeLoader):
+                        # Resources for job nodes from YAML
+                        if 'resources' in task_config:
+                            resources = task_config['resources']
+                            if 'infra' in resources:
+                                infra_val = resources['infra']
+                                for not_support_infra in _SSH_NODE_NOT_SUPPORT_INFRA:
+                                    if not_support_infra in infra_val:
+                                        infra_val = 'aws'
+                            if 'accelerators' in resources:
+                                gpus_val = resources['accelerators']
+                                if isinstance(gpus_val, dict):
+                                    gpus_val = next(iter(gpus_val.keys()), '')
+                                elif isinstance(gpus_val, list):
+                                    gpus_val = gpus_val[0] if gpus_val else ''
+                            if 'instance_type' in resources:
+                                instance_type_val = resources['instance_type']
+                            if 'cpus' in resources:
+                                cpu_int = int(
+                                    re.match(r'(\d+)',
+                                             resources['cpus']).group(1))
+                                if cpu_int >= 8:
+                                    cpus_val = resources['cpus']
+                            if 'memory' in resources:
+                                memory_int = int(
+                                    re.match(r'(\d+)',
+                                             resources['memory']).group(1))
+                                if memory_int >= 32:
+                                    memory_val = resources['memory']
 
-                # Resources for job nodes from YAML
-                if 'resources' in task_config:
-                    resources = task_config['resources']
-                    if 'infra' in resources:
-                        infra_val = resources['infra']
-                        for not_support_infra in _SSH_NODE_NOT_SUPPORT_INFRA:
-                            if not_support_infra in infra_val:
-                                infra_val = 'aws'
-                    if 'accelerators' in resources:
-                        gpus_val = resources['accelerators']
-                        if isinstance(gpus_val, dict):
-                            gpus_val = next(iter(gpus_val.keys()), '')
-                        elif isinstance(gpus_val, list):
-                            gpus_val = gpus_val[0] if gpus_val else ''
-                    if 'instance_type' in resources:
-                        instance_type_val = resources['instance_type']
-                    if 'cpus' in resources:
-                        cpus_val = resources['cpus']
-                    if 'memory' in resources:
-                        memory_val = resources['memory']
-
-                if 'num_nodes' in task_config:
-                    # One extra for controller node
-                    node_size_required = int(task_config['num_nodes']) + 1
-                    if ssh_node_pool_size < node_size_required:
-                        ssh_node_pool_size = node_size_required
+                        if 'num_nodes' in task_config:
+                            # One extra for controller node
+                            node_size_required = int(
+                                task_config['num_nodes']) + 1
+                            if ssh_node_pool_size < node_size_required:
+                                ssh_node_pool_size = node_size_required
 
     if ssh_node_pool_size > 0:
         ssh_node_pool_command = [

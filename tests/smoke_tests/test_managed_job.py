@@ -785,7 +785,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
                 [
                     # TODO(zhwu): we should make the override for generic_cloud
                     # work with multiple stages in pipeline.
-                    f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
+                    f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
                     # TODO(zhwu): Check why the logs does not return immediately
                     # after job status FAILED.
                     f'sky jobs logs -n {name} | tee {log_file.name} ',
