@@ -47,8 +47,18 @@ apiService:
   #  my-box:
   #    hosts:
   #      - hostname_in_ssh_config
-  # Optional secret that contains SSH keys for the API server to use, all the entries in the secret will be mounted to ~/.ssh/ directory in the API server.
-  sshKeySecret: null
+# Optional secret that contains SSH keys for the API server to use, all the entries
+# in the secret will be mounted to ~/.ssh/ directory in the API server.
+sshKeySecret: null
+# Map of SSH key file names to their contents. If set, the chart will create a
+# secret automatically and mount the keys to ~/.ssh/.
+sshKeys: {}
+# sshKeys:
+#   id_rsa: |-
+#     -----BEGIN RSA PRIVATE KEY-----
+#     ...
+#   id_rsa.pub: |
+#     ssh-rsa AAAA...
   
 
   # Skip resource check for the API server, not recommended for production deployment
@@ -236,6 +246,9 @@ kubernetesCredentials:
   useKubeconfig: false
   # Name of the secret containing the kubeconfig file. Only used if useKubeconfig is true.
   kubeconfigSecretName: kube-credentials
+  # Content of the kubeconfig file. If set, the chart will create a secret using
+  # this value and reference it via `kubeconfigSecretName`.
+  kubeconfig: null
   # Namespace to use for in-cluster resources
   inclusterNamespace: null
 
@@ -247,6 +260,10 @@ awsCredentials:
   accessKeyIdKeyName: aws_access_key_id
   # Key name used to set AWS_SECRET_ACCESS_KEY.
   secretAccessKeyKeyName: aws_secret_access_key
+  # Optional AWS credentials. When provided, a secret will be automatically
+  # created with these values and referenced by `awsSecretName`.
+  accessKeyId: null
+  secretAccessKey: null
 
 gcpCredentials:
   enabled: false
@@ -254,18 +271,27 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+  # Content of the service account JSON key. When set, a secret will be created
+  # with this content and referenced by `gcpSecretName`.
+  credentialsJson: null
 
 # Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:
   enabled: false
   # Name of the secret containing the RunPod credentials. Only used if enabled is true.
   runpodSecretName: runpod-credentials
+  # API key for RunPod. If provided, the chart will create a secret with key
+  # `api_key` and reference it via `runpodSecretName`.
+  apiKey: null
 
 # Populate Lambda credentials from the secret with key `api_key`
 lambdaCredentials:
   enabled: false
   # Name of the secret containing the Lambda credentials. Only used if enabled is true.
   lambdaSecretName: lambda-credentials
+  # API key for Lambda. If provided, the chart will create a secret with key
+  # `api_key` and reference it via `lambdaSecretName`.
+  apiKey: null
 
 # Populate Nebius credentials from the secret with nebius credentials.
 nebiusCredentials:
@@ -273,6 +299,9 @@ nebiusCredentials:
   tenantId: null
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
+  # Content of the Nebius credentials JSON. If provided, a secret will be created
+  # and referenced by `nebiusSecretName`.
+  credentialsJson: null
 
 # Set securityContext for the api pod
 podSecurityContext: {}
