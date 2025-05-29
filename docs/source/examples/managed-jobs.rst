@@ -196,7 +196,7 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
 The UI shows the same information as the CLI ``sky jobs queue -a``.
 
 
-.. _job-priority
+.. _job-priority:
 
 Job queueing and priority
 -------------------------
