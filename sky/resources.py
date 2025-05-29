@@ -98,7 +98,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 24
+    _VERSION = 25
 
     def __init__(
         self,
@@ -294,6 +294,8 @@ class Resources:
                 }
         else:
             self._image_id = image_id
+        if isinstance(self._cloud, clouds.Kubernetes):
+            _maybe_add_docker_prefix_to_image_id(self._image_id)
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
@@ -2075,6 +2077,10 @@ class Resources:
         if version < 24:
             self._volumes = None
 
+        if version < 25:
+            if isinstance(state.get('_cloud', None), clouds.Kubernetes):
+                _maybe_add_docker_prefix_to_image_id(state['_image_id'])
+
         self.__dict__.update(state)
 
 
@@ -2111,3 +2117,12 @@ class LaunchableResources(Resources):
         """
         self.assert_launchable()
         return typing.cast(LaunchableResources, super().copy(**override))
+
+
+def _maybe_add_docker_prefix_to_image_id(
+        image_id_dict: Optional[Dict[Optional[str], str]]) -> None:
+    if image_id_dict is None:
+        return
+    for k, v in image_id_dict.items():
+        if not v.startswith('docker:'):
+            image_id_dict[k] = f'docker:{v}'

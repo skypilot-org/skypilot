@@ -492,3 +492,49 @@ def test_resources_ordered_with_base_infra():
 
     assert str(resources_list[2].cloud).lower() == 'azure'
     assert resources_list[2].region is None
+
+
+def test_kubernetes_image_id_formats_in_resources(enable_all_clouds):
+    """Test Resources normalizes Kubernetes image_id to include 'docker:' prefix."""
+    k8s_cloud = clouds.Kubernetes()
+    test_cases = [
+        # (input_image_id, expected_stored_image_id_in_resources_object)
+        ('alpine', 'docker:alpine'),
+        ('docker:alpine', 'docker:alpine'),
+        ('myrepo/myimage:latest', 'docker:myrepo/myimage:latest'),
+        ('docker:myrepo/myimage:latest', 'docker:myrepo/myimage:latest'),
+        ('another.registry.com/myrepo/myimage:tag',
+         'docker:another.registry.com/myrepo/myimage:tag'),
+        ('docker:another.registry.com/myrepo/myimage:tag',
+         'docker:another.registry.com/myrepo/myimage:tag'),
+    ]
+
+    for input_id, expected_stored_id in test_cases:
+        # Test direct initialization and validation
+        # This assumes Resources.__init__ or a subsequent step normalizes
+        # image_id for Kubernetes by adding 'docker:' if missing.
+        res = Resources(cloud=k8s_cloud, image_id=input_id)
+        res.validate(
+        )  # Kubernetes cloud validate_resources currently just checks type
+        assert list(res.image_id.values())[0] == expected_stored_id, (
+            f'Input: {input_id}, Expected stored: {expected_stored_id}, '
+            f'Got: {res.image_id}')
+
+        # Test YAML serialization and deserialization
+        # Assumes to_yaml_config() serializes the (potentially prefixed)
+        # internal value.
+        yaml_config = res.to_yaml_config()
+        assert list(
+            yaml_config.get('image_id').values())[0] == expected_stored_id, (
+                f'Input: {input_id}, Expected in YAML: {expected_stored_id}, '
+                f'Got in YAML: {yaml_config}')
+
+        loaded_res_list = list(Resources.from_yaml_config(yaml_config))
+        assert len(loaded_res_list) == 1, f"Load count for {input_id}"
+        loaded_res = loaded_res_list[0]
+        assert list(loaded_res.image_id.values())[0] == expected_stored_id, (
+            f'Input: {input_id}, Expected from loaded YAML: {expected_stored_id}, '
+            f'Got: {loaded_res.image_id}')
+        assert isinstance(
+            loaded_res.cloud,
+            clouds.Kubernetes), (f'Loaded cloud type mismatch for {input_id}')

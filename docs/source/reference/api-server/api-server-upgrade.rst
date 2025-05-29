@@ -81,7 +81,7 @@ The upgraded API server is ready to serve requests after the pod becomes running
 
 .. note::
 
-    ``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, see :ref:`here <update-sky-config>`.
+    ``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, see :ref:`here <sky-api-server-config>`.
 
 
 Step 3: Verify the upgrade

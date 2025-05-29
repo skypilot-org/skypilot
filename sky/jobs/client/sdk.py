@@ -46,6 +46,7 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        priority: Priority of the managed job.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 

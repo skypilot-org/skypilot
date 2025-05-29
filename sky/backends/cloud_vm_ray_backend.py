@@ -1727,12 +1727,12 @@ class RetryingVmProvisioner(object):
                 f'{requested_resources}. ')
         elif to_provision.region is not None:
             # For public clouds, provision.region is always set.
-            if to_provision.cloud.is_same_cloud(clouds.SSH()):
+            if clouds.SSH().is_same_cloud(to_provision.cloud):
                 message = ('Failed to acquire resources in SSH Node Pool '
                            f'({to_provision.region.lstrip("ssh-")}) for '
                            f'{requested_resources}. The SSH Node Pool may not '
                            'have enough resources.')
-            elif to_provision.cloud.is_same_cloud(clouds.Kubernetes()):
+            elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
                 message = ('Failed to acquire resources in context '
                            f'{to_provision.region} for {requested_resources}. ')
             else:
