@@ -5,7 +5,13 @@
  */
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import {
@@ -680,43 +686,43 @@ export function ClusterArtifacts({ clusterData }) {
 
   const formatYaml = (yamlString) => {
     if (!yamlString) return 'No YAML available';
-    
+
     try {
       // Parse the YAML string into an object
       const parsed = yaml.load(yamlString);
-      
+
       // Re-serialize with pipe syntax for multiline strings
       const formatted = yaml.dump(parsed, {
-        lineWidth: -1,  // Disable line wrapping
+        lineWidth: -1, // Disable line wrapping
         styles: {
-          '!!str': 'literal'  // Use pipe (|) syntax for multiline strings
+          '!!str': 'literal', // Use pipe (|) syntax for multiline strings
         },
-        quotingType: "'",  // Use single quotes for strings that need quoting
-        forceQuotes: false,  // Only quote when necessary
-        noRefs: true,  // Disable YAML references
-        sortKeys: false,  // Preserve original key order
-        condenseFlow: false,  // Don't condense flow style
-        indent: 2  // Use 2 spaces for indentation
+        quotingType: "'", // Use single quotes for strings that need quoting
+        forceQuotes: false, // Only quote when necessary
+        noRefs: true, // Disable YAML references
+        sortKeys: false, // Preserve original key order
+        condenseFlow: false, // Don't condense flow style
+        indent: 2, // Use 2 spaces for indentation
       });
-      
+
       // Add blank lines between top-level sections for better readability
       const lines = formatted.split('\n');
       const result = [];
       let prevIndent = -1;
-      
+
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const currentIndent = line.search(/\S/); // Find first non-whitespace
-        
+
         // Add blank line before new top-level sections (indent = 0)
         if (currentIndent === 0 && prevIndent >= 0 && i > 0) {
           result.push('');
         }
-        
+
         result.push(line);
         prevIndent = currentIndent;
       }
-      
+
       return result.join('\n').trim();
     } catch (e) {
       console.error('YAML formatting error:', e);
@@ -730,7 +736,7 @@ export function ClusterArtifacts({ clusterData }) {
       <div className="px-4 pt-4">
         <h3 className="text-lg font-semibold">Cluster Creation Artifacts</h3>
       </div>
-      
+
       <div className="p-4 pt-2">
         <div className="space-y-4">
           {/* Creation Command - Always visible */}
@@ -746,7 +752,7 @@ export function ClusterArtifacts({ clusterData }) {
               </div>
             </div>
           )}
-          
+
           {/* Task YAML - Collapsible */}
           {clusterData.task_yaml && clusterData.task_yaml !== '{}' && (
             <div>
@@ -768,7 +774,7 @@ export function ClusterArtifacts({ clusterData }) {
                   )}
                 </div>
               </button>
-              
+
               {isYamlExpanded && (
                 <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                   <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
