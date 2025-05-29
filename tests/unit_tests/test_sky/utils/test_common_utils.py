@@ -309,16 +309,28 @@ class TestRedactEnvValues:
 
     def test_multiple_env_args(self):
         """Test multiple --env arguments with different formats."""
-        argv = ['sky', 'launch', '--env', 'KEY1=secret1', '--env', 'KEY2=secret2', 'app.yaml']
+        argv = [
+            'sky', 'launch', '--env', 'KEY1=secret1', '--env', 'KEY2=secret2',
+            'app.yaml'
+        ]
         result = common_utils._redact_env_values(argv)
-        expected = ['sky', 'launch', '--env', 'KEY1=<redacted>', '--env', 'KEY2=<redacted>', 'app.yaml']
+        expected = [
+            'sky', 'launch', '--env', 'KEY1=<redacted>', '--env',
+            'KEY2=<redacted>', 'app.yaml'
+        ]
         assert result == expected
 
     def test_mixed_env_formats(self):
         """Test mixed --env formats in one command."""
-        argv = ['sky', 'launch', '--env', 'KEY1=secret1', '--env=KEY2=secret2', '--env', 'KEY3', 'app.yaml']
+        argv = [
+            'sky', 'launch', '--env', 'KEY1=secret1', '--env=KEY2=secret2',
+            '--env', 'KEY3', 'app.yaml'
+        ]
         result = common_utils._redact_env_values(argv)
-        expected = ['sky', 'launch', '--env', 'KEY1=<redacted>', '--env=KEY2=<redacted>', '--env', 'KEY3', 'app.yaml']
+        expected = [
+            'sky', 'launch', '--env', 'KEY1=<redacted>',
+            '--env=KEY2=<redacted>', '--env', 'KEY3', 'app.yaml'
+        ]
         assert result == expected
 
     def test_no_env_args(self):
@@ -361,4 +373,59 @@ class TestRedactEnvValues:
         argv = ['sky', 'launch', 'app.yaml', '--env']
         result = common_utils._redact_env_values(argv)
         expected = ['sky', 'launch', 'app.yaml', '--env']
+        assert result == expected
+
+    def test_edge_cases(self):
+        """Test edge cases that should not cause failures."""
+        # Empty list
+        assert common_utils._redact_env_values([]) == []
+
+        # None input
+        assert common_utils._redact_env_values(None) == []
+
+        # Single element
+        assert common_utils._redact_env_values(['sky']) == ['sky']
+
+        # Non-string elements (should be preserved)
+        argv = ['sky', 'launch', 123, '--env', 'KEY=value']
+        result = common_utils._redact_env_values(argv)
+        expected = ['sky', 'launch', 123, '--env', 'KEY=<redacted>']
+        assert result == expected
+
+        # Non-string after --env
+        argv = ['sky', 'launch', '--env', 123]
+        result = common_utils._redact_env_values(argv)
+        expected = ['sky', 'launch', '--env', 123]
+        assert result == expected
+
+        # Very long strings (should not cause memory issues)
+        long_value = 'x' * 10000
+        argv = ['sky', 'launch', '--env', f'KEY={long_value}']
+        result = common_utils._redact_env_values(argv)
+        expected = ['sky', 'launch', '--env', 'KEY=<redacted>']
+        assert result == expected
+
+        # Unicode characters
+        argv = ['sky', 'launch', '--env', 'KEY=密码123']
+        result = common_utils._redact_env_values(argv)
+        expected = ['sky', 'launch', '--env', 'KEY=<redacted>']
+        assert result == expected
+
+        # Special regex characters in key/value
+        argv = ['sky', 'launch', '--env', 'KEY[0]=value.*']
+        result = common_utils._redact_env_values(argv)
+        expected = ['sky', 'launch', '--env', 'KEY[0]=<redacted>']
+        assert result == expected
+
+    @mock.patch('sky.utils.common_utils.re.sub')
+    def test_error_handling_fallback(self, mock_re_sub):
+        """Test that function returns original argv if redaction fails."""
+        # Make re.sub raise an exception
+        mock_re_sub.side_effect = Exception("Simulated regex error")
+
+        argv = ['sky', 'launch', '--env', 'KEY=value']
+        result = common_utils._redact_env_values(argv)
+
+        # Should return original argv when error occurs
+        expected = ['sky', 'launch', '--env', 'KEY=value']
         assert result == expected
