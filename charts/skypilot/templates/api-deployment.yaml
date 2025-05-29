@@ -98,7 +98,7 @@ spec:
           # Create a Nebius profile for the nebius CLI to use as default
           nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
           {{- end }}
-          {{- if .Values.apiService.sshKeySecret }}
+          {{- if or .Values.apiService.sshKeySecret .Values.apiService.sshKeys }}
           mkdir -p /root/.ssh
           echo "Linking ssh keys to /root/.ssh"
           for file in /var/skypilot/ssh_keys/*; do
@@ -147,7 +147,7 @@ spec:
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
         {{- end }}
-        {{- if .Values.apiService.sshKeySecret }}
+        {{- if or .Values.apiService.sshKeySecret .Values.apiService.sshKeys }}
         - name: skypilot-ssh-identity
           mountPath: /var/skypilot/ssh_keys
         {{- end }}
@@ -345,9 +345,9 @@ spec:
         secret:
           secretName: {{ .Release.Name }}-ssh-node-pools
       {{- end }}
-      {{- if .Values.apiService.sshKeySecret }}
+      {{- if or .Values.apiService.sshKeySecret .Values.apiService.sshKeys }}
       - name: skypilot-ssh-identity
         secret:
-          secretName: {{ .Values.apiService.sshKeySecret }}
-          defaultMode: 0600 
+          secretName: {{ default (printf "%s-ssh-keys" .Release.Name) .Values.apiService.sshKeySecret }}
+          defaultMode: 0600
       {{- end }}

@@ -48,6 +48,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`config <helm-values-apiService-config>`: null
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
+    :ref:`sshKeys <helm-values-apiService-sshKeys>`: {}
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
     :ref:`resources <helm-values-apiService-resources>`:
       requests:
@@ -285,6 +286,26 @@ The content of the secret should be like:
     name: my-ssh-key-secret
   data:
     id_rsa: <secret-content>
+
+.. _helm-values-apiService-sshKeys:
+
+``apiService.sshKeys``
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Map of SSH key file names to their contents. When set, the chart will create a secret
+named ``<release-name>-ssh-keys`` and mount the keys to ``~/.ssh/`` in the API server.
+
+Default: ``{}``
+
+.. code-block:: yaml
+
+  apiService:
+    sshKeys:
+      id_rsa: |-
+        -----BEGIN RSA PRIVATE KEY-----
+        ...
+      id_rsa.pub: |
+        ssh-rsa AAAA...
 
 
 .. _helm-values-apiService-skipResourceCheck:
