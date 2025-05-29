@@ -889,7 +889,7 @@ def write_cluster_config(
 
     # Remove the tmp file.
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        debug_yaml_path = tmp_yaml_path + '.debug'
+        debug_yaml_path = yaml_path + '.debug'
         os.rename(tmp_yaml_path, debug_yaml_path)
     else:
         os.remove(tmp_yaml_path)
