@@ -15,7 +15,7 @@ from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_HEARTBEAT_INTERVAL = 15
+_HEARTBEAT_INTERVAL = 30
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -126,6 +126,10 @@ async def log_streamer(request_id: Optional[str],
                 await asyncio.sleep(0.1)
                 continue
 
+            # Refresh the heartbeat time, this is a trivial optimization for
+            # performance but it helps avoid unnecessary heartbeat strings
+            # being printed when the client runs in an old version.
+            last_heartbeat_time = asyncio.get_event_loop().time()
             line_str = line.decode('utf-8')
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
