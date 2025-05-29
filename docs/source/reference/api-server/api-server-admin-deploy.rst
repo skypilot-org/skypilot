@@ -392,24 +392,29 @@ Following tabs describe how to configure credentials for different clouds on the
               --reuse-values \
               --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
 
-        If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
+        If your ``ssh_node_pools.yaml`` requires SSH keys, pass them directly to the chart:
 
         .. code-block:: bash
 
-            SECRET_NAME=apiserver-ssh-key
-
-            # Create a secret that contains the SSH keys
-            # The NAMESPACE should be consistent with the API server deployment
-            kubectl create secret generic $SECRET_NAME \
-              --namespace $NAMESPACE \
-              --from-file=id_rsa=/path/to/id_rsa \
-              --from-file=other_id_rsa=/path/to/other_id_rsa
-
-            # Keys will be mounted to ~/.ssh/ (e.g., ~/.ssh/id_rsa, ~/.ssh/other_id_rsa)
             helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
-              --set apiService.sshKeySecret=$SECRET_NAME
+              --set-file apiService.sshKeys.id_rsa=/path/to/id_rsa \
+              --set-file apiService.sshKeys.other_id_rsa=/path/to/other_id_rsa
+
+        The chart will create a secret named ``$RELEASE_NAME-ssh-keys`` automatically.
+
+        .. dropdown:: Use existing SSH key secret
+
+            You can also set the following value to use a secret that already contains your SSH keys:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set apiService.sshKeySecret=your_secret_name
 
         After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
 
