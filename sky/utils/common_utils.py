@@ -333,7 +333,7 @@ def get_pretty_entrypoint_cmd() -> str:
 
 def _redact_env_values(argv: List[str]) -> List[str]:
     """Redact sensitive values from --env arguments.
-    
+
     Args:
         argv: Command line arguments
 
