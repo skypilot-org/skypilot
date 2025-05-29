@@ -272,7 +272,9 @@ app.include_router(workspaces_rest.router,
 
 
 @app.get('/token')
-async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
     user = _get_auth_user_header(request)
 
     token_data = {
