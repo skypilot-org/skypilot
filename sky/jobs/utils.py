@@ -911,7 +911,32 @@ def stream_logs(job_id: Optional[int],
 
 
 def dump_managed_job_queue() -> str:
+    # Make sure to get all jobs - some logic below (e.g. high priority job
+    # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
+
+    # Figure out what the highest priority blocking job is. We need to know in
+    # order to determine if other jobs are blocked by a higher priority job, or
+    # just by the limited controller resources.
+    lowest_blocking_priority_value = 1000
+    for job in jobs:
+        if job['schedule_state'] not in (
+            # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with lower
+            # priority.
+            managed_job_state.ManagedJobScheduleState.LAUNCHING,
+            managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF,
+            # It's possible for a WAITING/ALIVE_WAITING job to be ready to
+            # launch, but the scheduler just hasn't run yet.
+            managed_job_state.ManagedJobScheduleState.WAITING,
+            managed_job_state.ManagedJobScheduleState.ALIVE_WAITING,
+        ):
+            # This job will not block others.
+            continue
+
+        priority = job.get('priority')
+        if priority is not None and priority < lowest_blocking_priority_value:
+            lowest_blocking_priority_value = priority
+
 
     for job in jobs:
         end_at = job['end_at']
@@ -958,7 +983,12 @@ def dump_managed_job_queue() -> str:
         if job['schedule_state'] == 'ALIVE_BACKOFF':
             state_details = 'In backoff, waiting for resources'
         elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
-            state_details = 'Waiting for other jobs to launch'
+            priority = job.get('priority')
+            if priority is not None and priority > lowest_blocking_priority_value:
+                # Job is lower priority than some other blocking job.
+                state_details = 'Waiting for higher priority jobs to launch'
+            else:
+                state_details = 'Waiting for other jobs to launch'
 
         if state_details and job['failure_reason']:
             job['details'] = f'{state_details} - {job["failure_reason"]}'
