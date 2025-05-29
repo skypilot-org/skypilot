@@ -290,10 +290,10 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
               {hasCreationArtifacts && (
                 <div className="col-span-2">
                   <div className="text-gray-600 font-medium text-base">
-                    Created by
+                    Entrypoint
                   </div>
-
-                  <div className="space-y-4 mt-1">
+                  
+                  <div className="space-y-4 mt-3">
                     {/* Creation Command */}
                     {clusterData.command && (
                       <div>
@@ -311,23 +311,20 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                         <div>
                           <button
                             onClick={toggleYamlExpanded}
-                            className="flex items-center justify-between w-full text-left focus:outline-none mb-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-md transition-colors duration-200"
+                            className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
                           >
-                            <div className="text-gray-700 font-medium text-sm">
-                              SkyPilot YAML
-                            </div>
-                            <div className="flex items-center text-gray-500">
-                              <span className="text-xs mr-1">
-                                {isYamlExpanded ? 'Hide' : 'Show'}
-                              </span>
+                            <div className="flex items-center">
                               {isYamlExpanded ? (
-                                <ChevronDownIcon className="w-5 h-5" />
+                                <ChevronDownIcon className="w-4 h-4 mr-1" />
                               ) : (
-                                <ChevronRightIcon className="w-5 h-5" />
+                                <ChevronRightIcon className="w-4 h-4 mr-1" />
                               )}
+                              <span className="text-base">
+                                Show SkyPilot YAML
+                              </span>
                             </div>
                           </button>
-
+                          
                           {isYamlExpanded && (
                             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                               <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
