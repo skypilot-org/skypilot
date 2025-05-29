@@ -125,6 +125,7 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 _LAUNCH_CMDS = ['sky launch', 'sky jobs launch', 'sky serve up']
+_SSH_NODE_NOT_SUPPORT_INFRA = ['runpod', 'kubernetes', 'ssh']
 
 
 def is_launch_cmd(cmd: str, launch_cmds: List[str] = _LAUNCH_CMDS) -> bool:
@@ -458,22 +459,7 @@ def override_sky_config(
             new_test_commands = [ssh_node_pool_command]
             # Setup ssh node pools
             new_test_commands += ['sky ssh up', 'sky check ssh']
-            # Replace the cloud and infra flags with the ssh node pools
-            for command in test.commands:
-                if is_launch_cmd(command):
-                    modified_command = re.sub(
-                        r'(--cloud\s+.+?(?=\s|$)|--infra\s+.+?(?=\s|$))',
-                        r'--infra ssh/test-ssh-node-pools', command)
-                    if yaml_path_in_command(modified_command):
-                        # Insert --infra flag before the yaml file
-                        # Override the infra in the yaml file with cli argument
-                        modified_command = re.sub(
-                            r'(\s+[^\s]+\.yaml)',
-                            r' --infra ssh/test-ssh-node-pools\1',
-                            modified_command)
-                    new_test_commands.append(modified_command)
-                else:
-                    new_test_commands.append(command)
+            new_test_commands += test.commands
             # Teardown ssh node pools
             teardown_command = 'sky ssh down; sky down ssh-node-pool -y'
             new_teardown = None
@@ -823,8 +809,9 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
         infra_match = re.search(r'--infra\s+(\S+)', original_command_str)
         if infra_match:
             infra_val = infra_match.group(1)
-            if 'kubernetes' in infra_val:  # Specific handling for kubernetes
-                infra_val = 'aws'
+            for not_support_infra in _SSH_NODE_NOT_SUPPORT_INFRA:
+                if not_support_infra in infra_val:
+                    infra_val = 'aws'
 
         # Handle both --instance-type and -t
         it_match = re.search(r'(?:--instance-type|-t)\s+(\S+)',
@@ -855,8 +842,9 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
                     resources = task_config['resources']
                     if 'infra' in resources:
                         infra_val = resources['infra']
-                        if 'kubernetes' in infra_val:
-                            infra_val = 'aws'
+                        for not_support_infra in _SSH_NODE_NOT_SUPPORT_INFRA:
+                            if not_support_infra in infra_val:
+                                infra_val = 'aws'
                     if 'accelerators' in resources:
                         gpus_val = resources['accelerators']
                         if isinstance(gpus_val, dict):

@@ -319,6 +319,7 @@ def test_skyserve_oci_http():
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
@@ -388,6 +389,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_ssh
 @pytest.mark.no_do
 @pytest.mark.no_nebius  # Nebius does not support spot instances
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
@@ -460,6 +462,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.resource_heavy
@@ -507,6 +510,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
+@pytest.mark.no_ssh
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -532,6 +536,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
 @pytest.mark.gcp
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_ssh
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
@@ -578,6 +583,7 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_cancel(generic_cloud: str):
@@ -606,6 +612,7 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
@@ -630,6 +637,7 @@ def test_skyserve_streaming(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
@@ -655,6 +663,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
@@ -679,6 +688,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
@@ -716,6 +726,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
@@ -776,6 +787,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 @pytest.mark.no_fluidstack
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_fast_update(generic_cloud: str):
@@ -820,6 +832,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
@@ -871,6 +884,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_fluidstack  # Spot instances are not supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
+@pytest.mark.no_ssh
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Nebius does not support spot instances
@@ -947,6 +961,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
@@ -1003,6 +1018,7 @@ def test_skyserve_failures(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_https(generic_cloud: str):
@@ -1042,6 +1058,7 @@ def test_skyserve_https(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_multi_ports(generic_cloud: str):
@@ -1096,6 +1113,7 @@ def test_user_dependencies(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.kubernetes
 @pytest.mark.gcp
 @pytest.mark.serve
@@ -1126,6 +1144,7 @@ def test_skyserve_ha_kill_after_ready():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.kubernetes
 @pytest.mark.gcp
 @pytest.mark.serve
@@ -1163,6 +1182,7 @@ def test_skyserve_ha_kill_during_provision():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.kubernetes
 @pytest.mark.gcp
 @pytest.mark.serve
@@ -1197,6 +1217,7 @@ def test_skyserve_ha_kill_during_pending():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_ssh  # SSH node pool does not support serve test
 @pytest.mark.kubernetes
 @pytest.mark.gcp
 @pytest.mark.serve

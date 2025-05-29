@@ -57,7 +57,8 @@ CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KUBERNETES
+    'kubernetes': QUEUE_KUBERNETES,
+    'ssh': QUEUE_GENERIC_CLOUD
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
@@ -122,8 +123,6 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument('--controller-cloud')
 
-    parser.add_argument('--ssh', action="store_true")
-
     parser.add_argument('--postgres', action="store_true")
 
     parsed_args, _ = parser.parse_known_args(args_list)
@@ -156,8 +155,6 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--base-branch {parsed_args.base_branch}')
     if parsed_args.controller_cloud:
         extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
-    if parsed_args.ssh:
-        extra_args.append(f'--ssh')
     if parsed_args.postgres:
         extra_args.append('--postgres')
 

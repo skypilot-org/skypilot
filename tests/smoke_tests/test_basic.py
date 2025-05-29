@@ -42,6 +42,7 @@ from sky.utils import common_utils
 @pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 @pytest.mark.no_kubernetes
+@pytest.mark.no_ssh
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
@@ -130,6 +131,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_ssh
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -204,6 +206,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_ssh
 @pytest.mark.no_vast  # This requires port opening
 def test_stale_job(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -421,6 +424,7 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
+@pytest.mark.no_ssh
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     try:
@@ -637,6 +641,7 @@ def test_multiple_resources():
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
+@pytest.mark.no_ssh
 @pytest.mark.aws  # SkyBenchmark requires S3 access
 def test_sky_bench(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()

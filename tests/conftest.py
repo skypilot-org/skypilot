@@ -53,7 +53,7 @@ from sky.server import common as server_common
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius'
+    'vast', 'nebius', 'ssh'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -78,7 +78,8 @@ cloud_to_pytest_keyword = {
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
-    'nebius': 'nebius'
+    'nebius': 'nebius',
+    'ssh': 'ssh'
 }
 
 
@@ -145,12 +146,6 @@ def pytest_addoption(parser):
         type=str,
         default=None,
         help='Controller cloud to use for tests',
-    )
-    parser.addoption(
-        '--ssh',
-        action='store_true',
-        default=False,
-        help='Run tests with SSH node pool',
     )
     parser.addoption(
         '--postgres',
