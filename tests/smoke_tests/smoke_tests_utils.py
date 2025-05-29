@@ -388,6 +388,7 @@ def override_sky_config(
                                 str]] = None) -> Generator[Test, None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
     override_sky_config_dict = skypilot_config.config_utils.Config()
+    env_before_override = None
 
     if env_dict is None:
         env_dict = os.environ
@@ -462,7 +463,7 @@ def override_sky_config(
             new_test_commands += test.commands
             # Teardown ssh node pools
             original_teardown = f'{test.teardown};' if test.teardown else ''
-            teardown_command = f'sky ssh down; {original_teardown} sky down ssh-node-pool -y'
+            teardown_command = original_teardown + 'sky ssh down; sky down ssh-node-pool -y'
             echo(f'{os.linesep}Overriding test commands: {os.linesep}'
                  f'{os.linesep.join(test.commands)}'
                  f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
