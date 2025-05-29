@@ -177,6 +177,9 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
         return None
     _hint_worker_log_path(cluster_name, cluster_info, 'initialize_docker')
 
+    logger.info("Initializing docker, sleep 10 minutes for testing")
+    time.sleep(600)
+
     @_auto_retry(should_retry=lambda e: isinstance(e, exceptions.CommandError)
                  and e.returncode == 255)
     def _initialize_docker(runner: command_runner.CommandRunner, log_path: str):
