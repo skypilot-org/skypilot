@@ -575,9 +575,8 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
 
-    # Add SSH key to instance metadata
-    config.setdefault('userMetadata', {}).setdefault('skypilot', {})
-    config['userMetadata']['skypilot']['ssh_public_key'] = public_key
+    # TODO: adjust below to use public_keys instead of public_key once backwards-compatibility is no longer required
+    config['publicKey'] = public_key
 
     # Set up auth section for Ray template
     config.setdefault('auth', {})
