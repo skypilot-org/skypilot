@@ -397,6 +397,13 @@ available_node_types:
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
                 (
+                # For backwards compatibility, we put a marker file in the pod
+                # to indicate that the apt ssh setup step will write a completion
+                # marker file (/tmp/apt_ssh_setup_complete) to the pod.
+                # TODO: Remove this marker file and it's usage in setup_commands
+                # after v0.11.0 release.
+                touch /tmp/apt_ssh_setup_started
+
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
@@ -404,7 +411,7 @@ available_node_types:
                 PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
-                # so that curl, rsync and wget are available sooner to unblock the following
+                # so that curl, rsync, ssh and wget are available sooner to unblock the following
                 # conda installation and rsync.
                 # Also, we install fuse first to avoid confliction with fuse3.
                 set -e
@@ -498,7 +505,6 @@ available_node_types:
 
                 touch /tmp/apt_ssh_setup_complete
                 echo "=== SSH setup completed ==="
-
                 ) > /tmp/${STEPS[0]}.log 2>&1 || {
                   echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
                   cat /tmp/${STEPS[0]}.log
@@ -797,9 +803,8 @@ setup_commands:
     STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
     start_epoch=$(date +%s);
     
-    # Wait for STEP 1 (apt-ssh-setup) to complete before proceeding
-    echo "=== Waiting for SSH setup to complete ===";
-    if [ -f /tmp/skypilot_is_nimbus ]; then
+    # Wait for SSH setup to complete before proceeding
+    if [ -f /tmp/apt_ssh_setup_started ]; then
       echo "=== Logs for asynchronous SSH setup ===";
       [ -f /tmp/apt_ssh_setup_complete ] && cat /tmp/${STEPS[0]}.log ||
       { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/apt_ssh_setup_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
