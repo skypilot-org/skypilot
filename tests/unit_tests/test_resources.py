@@ -538,3 +538,131 @@ def test_kubernetes_image_id_formats_in_resources(enable_all_clouds):
         assert isinstance(
             loaded_res.cloud,
             clouds.Kubernetes), (f'Loaded cloud type mismatch for {input_id}')
+
+
+def test_network_tier_basic():
+    """Test basic network tier functionality and validation."""
+    # Test with no network_tier specified (defaults to None)
+    r = Resources()
+    assert r.network_tier is None
+
+    # Test with standard network tier
+    r = Resources(network_tier='standard')
+    assert r.network_tier == resources_utils.NetworkTier.STANDARD
+
+    # Test with best network tier
+    r = Resources(network_tier='best')
+    assert r.network_tier == resources_utils.NetworkTier.BEST
+
+    # Test with NetworkTier enum directly
+    r = Resources(network_tier=resources_utils.NetworkTier.BEST)
+    assert r.network_tier == resources_utils.NetworkTier.BEST
+
+
+def test_network_tier_validation():
+    """Test network tier validation with invalid values."""
+    # Test invalid network tier string
+    with pytest.raises(ValueError, match='Invalid network_tier'):
+        Resources(network_tier='invalid')
+
+    # Test case insensitive validation
+    r = Resources(network_tier='BEST')
+    assert r.network_tier == resources_utils.NetworkTier.BEST
+
+    r = Resources(network_tier='Standard')
+    assert r.network_tier == resources_utils.NetworkTier.STANDARD
+
+
+def test_network_tier_comparison():
+    """Test network tier comparison in less_demanding_than method."""
+    # Test network tier matching
+    r1 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    r2 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    assert r1.less_demanding_than(r2)
+
+    # Test standard <= best
+    r1 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    r2 = Resources(cloud=clouds.GCP(), network_tier='best')
+    assert r1.less_demanding_than(r2)
+
+    # Test best not <= standard
+    r1 = Resources(cloud=clouds.GCP(), network_tier='best')
+    r2 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    assert not r1.less_demanding_than(r2)
+
+    # Test None network_tier vs specified
+    r1 = Resources(cloud=clouds.GCP(), network_tier='best')
+    r2 = Resources(cloud=clouds.GCP())  # No network_tier specified
+    assert not r1.less_demanding_than(r2)
+
+    # Test None network_tier (should accept anything)
+    r1 = Resources(cloud=clouds.GCP())  # No network_tier specified
+    r2 = Resources(cloud=clouds.GCP(), network_tier='best')
+    assert r1.less_demanding_than(r2)
+
+
+def test_network_tier_cloud_features():
+    """Test that network_tier=best requires CUSTOM_NETWORK_TIER feature."""
+    # Test standard tier doesn't require custom network tier feature
+    r = Resources(network_tier='standard')
+    features = r.get_required_cloud_features()
+    assert clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER not in features
+
+    # Test best tier requires custom network tier feature
+    r = Resources(network_tier='best')
+    features = r.get_required_cloud_features()
+    assert clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER in features
+
+
+def test_network_tier_yaml_serialization():
+    """Test network tier YAML serialization and deserialization."""
+    # Test best network tier
+    r = Resources(network_tier='best')
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['network_tier'] == 'best'
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.network_tier == resources_utils.NetworkTier.BEST
+
+    # Test standard network tier
+    r = Resources(network_tier='standard')
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['network_tier'] == 'standard'
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.network_tier == resources_utils.NetworkTier.STANDARD
+
+
+def test_network_tier_with_gcp():
+    """Test network tier functionality specifically with GCP cloud."""
+    # Test GCP supports both standard and best network tiers
+    r_standard = Resources(infra='gcp', network_tier='standard')
+    r_standard.validate()
+    assert r_standard.network_tier == resources_utils.NetworkTier.STANDARD
+
+    r_best = Resources(infra='gcp', network_tier='best')
+    r_best.validate()
+    assert r_best.network_tier == resources_utils.NetworkTier.BEST
+
+
+def test_network_tier_copy():
+    """Test network tier preservation in copy operations."""
+    r = Resources(network_tier='best', cpus=4)
+    r_copy = r.copy()
+    assert r_copy.network_tier == resources_utils.NetworkTier.BEST
+
+    # Test overriding network tier in copy
+    r_override = r.copy(network_tier='standard')
+    assert r_override.network_tier == resources_utils.NetworkTier.STANDARD
+    assert r_override.cpus == '4'  # Other properties preserved
+
+
+def test_network_tier_repr():
+    """Test that network tier appears in the string representation."""
+    r = Resources(network_tier='best')
+    repr_str = str(r)
+    assert 'network_tier=best' in repr_str
+
+    r = Resources(network_tier='standard')
+    repr_str = str(r)
+    assert 'network_tier=standard' in repr_str
