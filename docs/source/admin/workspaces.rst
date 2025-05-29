@@ -77,8 +77,8 @@ The above is achieved by configuring the following section in the config file:
 
            nebius:
              disabled: false
-             tenant_id: Nebius tenant ID
-             credentials_file_path: Path to the Nebius credentials file
+             tenant_id: Nebius tenant ID (tenant-xxxxxxxx)
+             credentials_file_path: ~/.nebius/credentials-file-name.json
 
 To apply the configuration, follow the following steps:
 

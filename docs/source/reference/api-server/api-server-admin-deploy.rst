@@ -389,7 +389,7 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --from-file=credentials.json=$HOME/.nebius/credentials.json
 
-        Optionally, if you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files, following the pattern ``--from-file=<filename>=$HOME/.nebius/<filename>``. This should also be the file name used in the workspace config.
+        Optionally, if you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files, following the pattern ``--from-file=<filename>=$HOME/.nebius/<filename>``. Files in this secret will be linked to `~/.nebius/` in the container.
 
         .. code-block:: bash
 
@@ -398,6 +398,23 @@ Following tabs describe how to configure credentials for different clouds on the
               --from-file=credentials.json=$HOME/.nebius/credentials.json \
               --from-file=serviceaccount-1-credentials.json=$HOME/.nebius/serviceaccount-1-credentials.json \
               --from-file=serviceaccount-2-credentials.json=$HOME/.nebius/serviceaccount-2-credentials.json
+
+
+        .. code-block:: yaml
+
+            # SkyPilot config
+
+            workspaces:
+
+              serviceaccount-1:
+                nebius:
+                  credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
+                  tenant_id: tenant-rrww0kh3nnfo7v0dgw
+
+              serviceaccount-2:
+                nebius:
+                  credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
+                  tenant_id: tenant-52czfp5clbtq0er1ol
 
         When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
 
@@ -427,7 +444,7 @@ Following tabs describe how to configure credentials for different clouds on the
         :sync: ssh-node-pools-tab
 
         SkyPilot can configure a set of existing machines to be used as a :ref:`SSH Node Pool <existing-machines>`.
-        
+
         To configure SSH node pools for the API server, create your SSH Node Pool :ref:`configuration file <defining-ssh-node-pools>` ``ssh_node_pools.yaml`` and set the :ref:`apiService.sshNodePools <helm-values-apiService-sshNodePools>` to the file path:
 
         .. code-block:: bash
@@ -456,13 +473,13 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --reuse-values \
               --set apiService.sshKeySecret=$SECRET_NAME
-        
+
         After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
 
         .. note::
 
            SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
-   
+
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
@@ -733,7 +750,7 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
         --namespace $NAMESPACE \
         --reuse-values \
         --set ingress.path=/first-server
-    
+
     # The second API server, reusing the existing ingress controller and using a different path
     ANOTHER_RELEASE_NAME=skypilot2
     ANOTHER_NAMESPACE=skypilot2
