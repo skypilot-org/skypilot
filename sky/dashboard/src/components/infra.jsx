@@ -600,53 +600,27 @@ export function GPUs() {
 
   // Check URL on component mount to set initial context
   useEffect(() => {
-    if (router.query.context) {
+    if (router.isReady && router.query.context) {
       const contextParam = Array.isArray(router.query.context)
         ? router.query.context[0]
         : router.query.context;
       setSelectedContext(decodeURIComponent(contextParam));
     }
-  }, [router.isReady, router.query]);
+  }, [router.isReady, router.query.context]);
 
   // Handler for clicking on a context
   const handleContextClick = (context) => {
     setSelectedContext(context);
-    // Use replace instead of push and set as to the same URL to ensure it's just a URL change
-    router.replace(
-      {
-        pathname: '/infra',
-        query: context ? { context } : undefined,
-      },
-      context ? `/infra/${encodeURIComponent(context)}` : '/infra',
-      { shallow: true }
-    );
+    // Use push instead of replace for proper browser history
+    router.push(`/infra/${encodeURIComponent(context)}`);
   };
 
   // Handler to go back to main view
   const handleBackClick = () => {
     setSelectedContext(null);
-    // Use replace and set as to the same URL
-    router.replace({ pathname: '/infra' }, '/infra', { shallow: true });
+    // Use push instead of replace for proper browser history
+    router.push('/infra');
   };
-
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    const handleRouteChange = (url) => {
-      const contextMatch = url.match(/\/infra\/([^\/]+)$/);
-      if (contextMatch) {
-        const contextParam = decodeURIComponent(contextMatch[1]);
-        setSelectedContext(contextParam);
-      } else if (url === '/infra') {
-        setSelectedContext(null);
-      }
-    };
-
-    router.events.on('routeChangeComplete', handleRouteChange);
-
-    return () => {
-      router.events.off('routeChangeComplete', handleRouteChange);
-    };
-  }, [router.events]);
 
   // Render context details
   const renderContextDetails = (contextName) => {
@@ -826,12 +800,6 @@ export function GPUs() {
           <Link
             href="/infra"
             className={`text-sky-blue hover:underline ${selectedContext ? '' : 'cursor-default'}`}
-            onClick={(e) => {
-              if (selectedContext) {
-                e.preventDefault();
-                handleBackClick();
-              }
-            }}
           >
             Infrastructure
           </Link>
@@ -839,25 +807,19 @@ export function GPUs() {
             <>
               <span className="mx-2 text-gray-500">›</span>
               {selectedContext.startsWith('ssh-') ? (
-                <span
+                <Link
+                  href="/infra"
                   className="text-sky-blue hover:underline cursor-pointer"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleBackClick();
-                  }}
                 >
                   SSH Node Pool
-                </span>
+                </Link>
               ) : (
-                <span
+                <Link
+                  href="/infra"
                   className="text-sky-blue hover:underline cursor-pointer"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleBackClick();
-                  }}
                 >
                   Kubernetes
-                </span>
+                </Link>
               )}
               <span className="mx-2 text-gray-500">›</span>
               <span className="text-sky-blue">
