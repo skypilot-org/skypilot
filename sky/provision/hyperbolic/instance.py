@@ -10,6 +10,7 @@ from sky.utils import status_lib
 PROVIDER_NAME = 'hyperbolic'
 POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
+#TODO come up with a reasonable value for this timeout
 TIMEOUT = 300
 
 logger = sky_logging.init_logger(__name__)
@@ -327,10 +328,14 @@ def query_instances(
 ) -> Dict[str, Optional[str]]:
     """Returns the status of the specified instances for Hyperbolic."""
     del provider_config, non_terminated_only  # unused
+    # Fetch all instances for this cluster
+    instances = utils.list_instances(metadata={'skypilot_cluster_name': cluster_name_on_cloud})
+    if not instances:
+        # No instances found: return empty dict to indicate fully deleted
+        return {}
     statuses: Dict[str, Optional[str]] = {}
-    if cluster_name_on_cloud is not None:
-        statuses[
-            f'{cluster_name_on_cloud}-head'] = status_lib.ClusterStatus.UP.value
+    for instance_id, instance in instances.items():
+        statuses[instance_id] = instance.get('status', 'unknown').lower()
     return statuses
 
 
