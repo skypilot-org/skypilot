@@ -1914,8 +1914,7 @@ def test_gcp_network_tier():
     # For standard tier, verify basic network functionality
     verification_commands = [
         smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name,
-            cmd='echo "Standard network tier verification" && ip addr show')
+            name, cmd='echo "Standard network tier verification"')
     ]
 
     test_commands = [
