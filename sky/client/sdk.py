@@ -24,6 +24,7 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
 import webbrowser
+import socket
 
 import click
 import colorama
@@ -67,6 +68,52 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
+
+
+def _create_tcp_keepalive_session() -> 'requests.Session':
+    """Create a requests session with TCP keepalive configured.
+    
+    This is useful for long-running streaming connections to prevent
+    connection drops due to idle timeouts or network issues.
+    
+    Returns:
+        A requests.Session with TCP keepalive configured.
+    """
+    session = requests.Session()
+    
+    # Custom HTTPAdapter that configures TCP keepalive
+    class TCPKeepAliveHTTPAdapter(requests.adapters.HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            # Configure socket options for TCP keepalive
+            socket_options = [
+                (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+            ]
+            
+            # Platform-specific TCP keepalive options
+            if hasattr(socket, 'TCP_KEEPIDLE'):
+                # Time before sending keepalive probes (seconds) - Linux only
+                socket_options.append((socket.IPPROTO_TCP, 
+                                     socket.TCP_KEEPIDLE, 30))
+            
+            if hasattr(socket, 'TCP_KEEPINTVL'):
+                # Interval between keepalive probes (seconds) - Linux/macOS
+                socket_options.append((socket.IPPROTO_TCP, 
+                                     socket.TCP_KEEPINTVL, 30))
+            
+            if hasattr(socket, 'TCP_KEEPCNT'):
+                # Number of failed probes before declaring connection dead
+                socket_options.append((socket.IPPROTO_TCP, 
+                                     socket.TCP_KEEPCNT, 3))
+            
+            kwargs['socket_options'] = socket_options
+            return super().init_poolmanager(*args, **kwargs)
+    
+    # Mount the adapter for both HTTP and HTTPS
+    keepalive_adapter = TCPKeepAliveHTTPAdapter()
+    session.mount('http://', keepalive_adapter)
+    session.mount('https://', keepalive_adapter)
+    
+    return session
 
 
 def stream_response(request_id: Optional[str],
@@ -1651,7 +1698,10 @@ def stream_and_get(
         'follow': follow,
         'format': 'console',
     }
-    response = requests.get(
+    # Create a session with TCP keepalive for long-running streaming connections
+    session = _create_tcp_keepalive_session()
+    
+    response = session.get(
         f'{server_common.get_server_url()}/api/stream',
         params=params,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,

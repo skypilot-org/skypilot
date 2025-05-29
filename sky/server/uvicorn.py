@@ -26,14 +26,14 @@ def run(config: uvicorn.Config):
     server = uvicorn.Server(config=config)
     run_server_process = functools.partial(_run_server_process, server)
     try:
+        sock = config.bind_socket()
+        _configure_tcp_keepalive(sock)
         if config.workers is not None and config.workers > 1:
-            sock = config.bind_socket()
-            _configure_tcp_keepalive(sock)
             SlowStartMultiprocess(config,
                                   target=run_server_process,
                                   sockets=[sock]).run()
         else:
-            run_server_process()
+            run_server_process(sockets=[sock])
     finally:
         # Copied from unvicorn.run()
         if config.uds and os.path.exists(config.uds):
@@ -85,7 +85,7 @@ def _configure_tcp_keepalive(sock: socket.socket) -> None:
         # Log successful configuration
         import logging
         logger = logging.getLogger(__name__)
-        logger.debug('TCP keepalive configured successfully')
+        logger.info('TCP keepalive configured successfully')
             
     except (OSError, AttributeError) as e:
         # Some platforms may not support all TCP keepalive options
