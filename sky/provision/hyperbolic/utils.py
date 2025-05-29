@@ -178,7 +178,7 @@ class HyperbolicClient:
                     f'Instance {instance_id} failed to reach ONLINE state')
 
             # Get instance details to get SSH command
-            instances = self.list_instances()
+            instances = self.list_instances(metadata={'skypilot': {'cluster_name': name}})
             instance = instances.get(instance_id)
             if not instance:
                 raise HyperbolicError(
@@ -200,7 +200,7 @@ class HyperbolicClient:
     def list_instances(
         self,
         status: Optional[str] = None,
-        user_metadata: Optional[Dict[str, str]] = None
+        metadata: Optional[Dict[str, str]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status and metadata."""
         endpoint = '/v1/marketplace/instances'
@@ -226,16 +226,15 @@ class HyperbolicClient:
                 if status and instance_status.value != status.lower():
                     continue
 
-                skypilot = instance.get('userMetadata', {}).get('skypilot', {})
-                if user_metadata:
-                    cluster_name = user_metadata.get('skypilot_cluster_name',
-                                                     '')
-                    if not skypilot.get('cluster_name',
-                                        '').startswith(cluster_name):
+                if metadata:
+                    skypilot_metadata = metadata.get('skypilot', {})
+                    cluster_name = skypilot_metadata.get('cluster_name', '')
+                    instance_skypilot = instance.get('userMetadata', {}).get('skypilot', {})
+                    if not instance_skypilot.get('cluster_name', '').startswith(cluster_name):
                         logger.debug(
                             f'Skipping instance {instance.get("id")} - '
-                            f'skypilot metadata {skypilot} '
-                            f'does not match {user_metadata}')
+                            f'skypilot metadata {instance_skypilot} '
+                            f'does not match {skypilot_metadata}')
                         continue
                     logger.debug(f'Including instance {instance.get("id")} '
                                  f'- skypilot metadata matches')
@@ -346,7 +345,7 @@ def list_instances(
         status: Optional[str] = None,
         metadata: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
     """List all instances, optionally filtered by status and metadata."""
-    return get_client().list_instances(status, metadata)
+    return get_client().list_instances(status=status, metadata=metadata)
 
 
 def terminate_instance(instance_id: str) -> None:
