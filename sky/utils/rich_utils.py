@@ -57,6 +57,7 @@ class Control(enum.Enum):
     STOP = 'rich_stop'
     EXIT = 'rich_exit'
     UPDATE = 'rich_update'
+    HEARTBEAT = 'heartbeat'
 
     def encode(self, msg: str) -> str:
         return f'<{self.value}>{msg}</{self.value}>'
@@ -292,7 +293,7 @@ def decode_rich_status(
         last_line = ''
         # Buffer to store incomplete UTF-8 bytes between chunks
         undecoded_buffer = b''
-        
+
         # Iterate over the response content in chunks. We do not use iter_lines
         # because it will strip the trailing newline characters, causing the
         # progress bar ending with `\r` becomes a pyramid.
@@ -385,6 +386,10 @@ def decode_rich_status(
                         decoding_status.__exit__(None, None, None)
                     elif control == Control.START:
                         decoding_status.start()
+                    elif control == Control.HEARTBEAT:
+                        # Heartbeat is not displayed to the user, so we do not
+                        # need to update the status.
+                        pass
     finally:
         if decoding_status is not None:
             decoding_status.__exit__(None, None, None)

@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import pathlib
+import time
 from typing import AsyncGenerator, Deque, Optional
 
 import aiofiles
@@ -14,6 +15,8 @@ from sky.utils import message_utils
 from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_HEARTBEAT_INTERVAL = 15
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -90,6 +93,8 @@ async def log_streamer(request_id: Optional[str],
             for line_str in lines:
                 yield line_str
 
+        last_heartbeat_time = asyncio.get_event_loop().time()
+        
         while True:
             # Sleep 0 to yield control to allow other coroutines to run,
             # while keeps the loop tight to make log stream responsive.
@@ -106,11 +111,22 @@ async def log_streamer(request_id: Optional[str],
                         break
                 if not follow:
                     break
+                    
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
+                    # Send invisible heartbeat using payload encoding
+                    # This will be filtered out by _yield_log_file_with_payloads_skipped
+                    # but keeps the connection alive
+                    yield message_utils.encode_payload(
+                        rich_utils.Control.HEARTBEAT.encode(''))
+                    last_heartbeat_time = current_time
+                    
                 # Sleep shortly to avoid storming the DB and CPU, this has
                 # little impact on the responsivness here since we are waiting
                 # for a new line to come in.
                 await asyncio.sleep(0.1)
                 continue
+                
             line_str = line.decode('utf-8')
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
