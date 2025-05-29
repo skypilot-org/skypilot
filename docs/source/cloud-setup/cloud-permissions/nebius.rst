@@ -32,7 +32,7 @@ Then, run the following command to generate the service account credentials:
 
 The following script saves the service account credentials to `~/.nebius/credentials.json`:
 
-See `Nebius documentation <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for more details.
+See `Nebius documentation on creating authorized keys <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_ for more details.
 
 4. **Add the tenant ID information**
 
