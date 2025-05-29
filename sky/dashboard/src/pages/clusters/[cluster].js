@@ -292,7 +292,7 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                   <div className="text-gray-600 font-medium text-base">
                     Entrypoint
                   </div>
-                  
+
                   <div className="space-y-4 mt-3">
                     {/* Creation Command */}
                     {clusterData.command && (
@@ -324,7 +324,7 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                               </span>
                             </div>
                           </button>
-                          
+
                           {isYamlExpanded && (
                             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                               <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
