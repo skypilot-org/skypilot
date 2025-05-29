@@ -142,6 +142,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`useApiServerCluster <helm-values-kubernetesCredentials-useApiServerCluster>`: true
     :ref:`useKubeconfig <helm-values-kubernetesCredentials-useKubeconfig>`: false
     :ref:`kubeconfigSecretName <helm-values-kubernetesCredentials-kubeconfigSecretName>`: kube-credentials
+    :ref:`kubeconfig <helm-values-kubernetesCredentials-kubeconfig>`: null
     :ref:`inclusterNamespace <helm-values-kubernetesCredentials-inclusterNamespace>`: null
 
   :ref:`awsCredentials <helm-values-awsCredentials>`:
@@ -149,11 +150,14 @@ Below is the available helm value keys and the default value of each key:
     :ref:`awsSecretName <helm-values-awsCredentials-awsSecretName>`: aws-credentials
     :ref:`accessKeyIdKeyName <helm-values-awsCredentials-accessKeyIdKeyName>`: aws_access_key_id
     :ref:`secretAccessKeyKeyName <helm-values-awsCredentials-secretAccessKeyKeyName>`: aws_secret_access_key
+    :ref:`accessKeyId <helm-values-awsCredentials-accessKeyId>`: null
+    :ref:`secretAccessKey <helm-values-awsCredentials-secretAccessKey>`: null
 
   :ref:`gcpCredentials <helm-values-gcpCredentials>`:
     :ref:`enabled <helm-values-gcpCredentials-enabled>`: false
     :ref:`projectId <helm-values-gcpCredentials-projectId>`: null
     :ref:`gcpSecretName <helm-values-gcpCredentials-gcpSecretName>`: gcp-credentials
+    :ref:`credentialsJson <helm-values-gcpCredentials-credentialsJson>`: null
 
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
 
@@ -899,6 +903,22 @@ Default: ``kube-credentials``
   kubernetesCredentials:
     kubeconfigSecretName: kube-credentials
 
+.. _helm-values-kubernetesCredentials-kubeconfig:
+
+``kubernetesCredentials.kubeconfig``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the kubeconfig file. If set, a secret will be created automatically and referenced by ``kubeconfigSecretName``.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  kubernetesCredentials:
+    kubeconfig: |
+      apiVersion: v1
+      clusters: []
+
 .. _helm-values-kubernetesCredentials-inclusterNamespace:
 
 ``kubernetesCredentials.inclusterNamespace``
@@ -974,6 +994,34 @@ Default: ``aws_secret_access_key``
   awsCredentials:
     secretAccessKeyKeyName: aws_secret_access_key
 
+.. _helm-values-awsCredentials-accessKeyId:
+
+``awsCredentials.accessKeyId``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+AWS access key ID. If provided, the chart will create a secret automatically.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  awsCredentials:
+    accessKeyId: YOUR_ACCESS_KEY_ID
+
+.. _helm-values-awsCredentials-secretAccessKey:
+
+``awsCredentials.secretAccessKey``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+AWS secret access key. If provided, the chart will create a secret automatically.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  awsCredentials:
+    secretAccessKey: YOUR_SECRET_ACCESS_KEY
+
 .. _helm-values-gcpCredentials:
 
 ``gcpCredentials``
@@ -1020,6 +1068,23 @@ Default: ``gcp-credentials``
 
   gcpCredentials:
     gcpSecretName: gcp-credentials
+
+.. _helm-values-gcpCredentials-credentialsJson:
+
+``gcpCredentials.credentialsJson``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the service account JSON key. If provided, the chart will create a secret automatically and reference it via ``gcpSecretName``.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  gcpCredentials:
+    credentialsJson: |
+      {
+        "type": "service_account"
+      }
 
 .. _helm-values-podSecurityContext:
 
