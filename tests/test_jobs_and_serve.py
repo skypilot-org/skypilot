@@ -83,7 +83,8 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         'test-cluster1',
         handle,
         requested_resources={handle.launched_resources},
-        ready=True)
+        ready=True,
+        task_yaml=handle.cluster_yaml)
     handle = backends.CloudVmRayResourceHandle(
         cluster_name='test-cluster2',
         cluster_name_on_cloud='test-cluster2',
@@ -97,7 +98,8 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         'test-cluster2',
         handle,
         requested_resources={handle.launched_resources},
-        ready=True)
+        ready=True,
+        task_yaml=handle.cluster_yaml)
     handle = backends.CloudVmRayResourceHandle(
         cluster_name='test-cluster3',
         cluster_name_on_cloud='test-cluster3',
@@ -110,7 +112,8 @@ def _mock_cluster_state(_mock_db_conn, tmp_path):
         'test-cluster3',
         handle,
         requested_resources={handle.launched_resources},
-        ready=False)
+        ready=False,
+        task_yaml=handle.cluster_yaml)
 
 
 @pytest.fixture
@@ -127,7 +130,8 @@ def _mock_jobs_controller(_mock_db_conn, tmp_path):
         common.JOB_CONTROLLER_NAME,
         handle,
         requested_resources={handle.launched_resources},
-        ready=True)
+        ready=True,
+        task_yaml=handle.cluster_yaml)
 
 
 @pytest.fixture
@@ -147,7 +151,8 @@ def _mock_serve_controller(_mock_db_conn, tmp_path):
         common.SKY_SERVE_CONTROLLER_NAME,
         handle,
         requested_resources={handle.launched_resources},
-        ready=True)
+        ready=True,
+        task_yaml=handle.cluster_yaml)
 
 
 class TestWithEmptyDBSetup:

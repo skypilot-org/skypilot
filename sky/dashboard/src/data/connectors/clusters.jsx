@@ -80,6 +80,8 @@ export async function getClusters({ clusterNames = null } = {}) {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
+        command: cluster.last_use,
+        task_yaml: cluster.task_yaml,
         user_hash: cluster.user_hash,
         cloud: cluster.cloud,
         region: cluster.region,

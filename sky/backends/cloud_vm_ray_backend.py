@@ -1520,6 +1520,7 @@ class RetryingVmProvisioner(object):
                 cluster_handle=handle,
                 requested_resources=requested_resources,
                 ready=False,
+                task_yaml=handle.cluster_yaml,
             )
 
             global_user_state.set_owner_identity_for_cluster(
@@ -3185,6 +3186,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
+                task_yaml=handle.cluster_yaml,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)

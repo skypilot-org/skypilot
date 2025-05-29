@@ -229,6 +229,18 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                     : 'N/A'}
                 </div>
               </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">Command</div>
+                <div className="text-base mt-1 break-all">
+                  {clusterData.command || 'N/A'}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">Task YAML</div>
+                <div className="text-base mt-1 break-all">
+                  {clusterData.task_yaml || 'N/A'}
+                </div>
+              </div>
             </div>
           </div>
         </Card>

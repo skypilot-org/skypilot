@@ -96,6 +96,7 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace',
                       sqlalchemy.Text,
                       server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('task_yaml', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -131,6 +132,7 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
     sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('task_yaml', sqlalchemy.Text),
 )
 
 
@@ -264,12 +266,25 @@ def create_table():
 
         db_utils.add_column_to_table_sqlalchemy(
             session,
+            'cluster_history',
+            'task_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
             'clusters',
             'workspace',
             sqlalchemy.Text(),
             default_statement='DEFAULT \'default\'',
             value_to_replace_existing_entries=constants.
             SKYPILOT_DEFAULT_WORKSPACE)
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'task_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -318,7 +333,8 @@ def add_or_update_cluster(cluster_name: str,
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True,
-                          config_hash: Optional[str] = None):
+                          config_hash: Optional[str] = None,
+                          task_yaml: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -329,6 +345,7 @@ def add_or_update_cluster(cluster_name: str,
             be marked as INIT, otherwise it will be marked as UP.
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
+        task_yaml: Path to the task yaml used for launching the cluster.
     """
     # TODO(zhwu): have to be imported here to avoid circular import.
     from sky import skypilot_config  # pylint: disable=import-outside-toplevel
@@ -372,7 +389,8 @@ def add_or_update_cluster(cluster_name: str,
     if is_launch:
         conditional_values.update({
             'launched_at': cluster_launched_at,
-            'last_use': last_use
+            'last_use': last_use,
+            'task_yaml': task_yaml,
         })
 
     if int(ready) == 1:
@@ -448,6 +466,7 @@ def add_or_update_cluster(cluster_name: str,
         insert_stmnt = insert_func(cluster_history_table).values(
             cluster_hash=cluster_hash,
             name=cluster_name,
+            task_yaml=task_yaml,
             num_nodes=launched_nodes,
             requested_resources=pickle.dumps(requested_resources),
             launched_resources=pickle.dumps(launched_resources),
@@ -457,6 +476,7 @@ def add_or_update_cluster(cluster_name: str,
             index_elements=[cluster_history_table.c.cluster_hash],
             set_={
                 cluster_history_table.c.name: cluster_name,
+                cluster_history_table.c.task_yaml: task_yaml,
                 cluster_history_table.c.num_nodes: launched_nodes,
                 cluster_history_table.c.requested_resources:
                     pickle.dumps(requested_resources),
@@ -776,6 +796,7 @@ def get_cluster_from_name(
         'launched_at': row.launched_at,
         'handle': pickle.loads(row.handle),
         'last_use': row.last_use,
+        'task_yaml': row.task_yaml,
         'status': status_lib.ClusterStatus[row.status],
         'autostop': row.autostop,
         'to_down': bool(row.to_down),
@@ -808,6 +829,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'launched_at': row.launched_at,
             'handle': pickle.loads(row.handle),
             'last_use': row.last_use,
+            'task_yaml': row.task_yaml,
             'status': status_lib.ClusterStatus[row.status],
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
@@ -855,6 +877,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'usage_intervals': pickle.loads(row.usage_intervals),
             'status': status,
             'user_hash': user_hash,
+            'task_yaml': row.task_yaml,
         }
 
         records.append(record)
