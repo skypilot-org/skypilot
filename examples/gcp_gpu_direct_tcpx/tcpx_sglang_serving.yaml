@@ -1,7 +1,7 @@
 name: tcpx-sglang-serving
 
 resources:
-  cloud: gcp
+  infra: gcp
   gpus: H100:8
   network_tier: best
   disk_size: 1024
