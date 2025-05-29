@@ -811,6 +811,20 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
                 if not_support_infra in infra_val:
                     infra_val = 'aws'
 
+        cpu_match = re.search(r'--cpus\s+(\d+)', original_command_str)
+        if cpu_match:
+            cpu_int = int(cpu_match.group(1))
+            if cpu_int >= 8:
+                # More buffer
+                cpus_val = f'{cpu_int + 8}+'
+
+        memory_match = re.search(r'--memory\s+(\d+)', original_command_str)
+        if memory_match:
+            memory_int = int(memory_match.group(1))
+            if memory_int >= 16:
+                # More buffer
+                memory_val = f'{memory_int + 8}+'
+
         # Handle both --instance-type and -t
         it_match = re.search(r'(?:--instance-type|-t)\s+(\S+)',
                              original_command_str)
@@ -861,14 +875,14 @@ def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
                                              resources['cpus']).group(1))
                                 if cpu_int >= 8:
                                     # More buffer
-                                    cpus_val = resources['cpus'] + 8
+                                    cpus_val = f'{cpu_int + 8}+'
                             if 'memory' in resources:
                                 memory_int = int(
                                     re.match(r'(\d+)',
                                              resources['memory']).group(1))
-                                if memory_int >= 32:
+                                if memory_int >= 16:
                                     # More buffer
-                                    memory_val = resources['memory'] + 8
+                                    memory_val = f'{memory_int + 8}+'
 
                         if 'num_nodes' in task_config:
                             # One extra for controller node
