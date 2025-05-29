@@ -357,30 +357,16 @@ def _redact_env_values(argv: List[str]) -> List[str]:
         arg = argv[i]
         
         if arg == '--env' and i + 1 < len(argv):
-            # Handle: --env KEY=value or --env KEY
             result.append(arg)
+            # Redact only if there's a value (contains =)
             next_arg = argv[i + 1]
-            if '=' in next_arg:
-                # Has a value, redact it
-                key, _ = next_arg.split('=', 1)
-                result.append(f'{key}=<redacted>')
-            else:
-                # No value, keep as is
-                result.append(next_arg)
+            result.append(re.sub(r'^([^=]+)=.*', r'\1=<redacted>', next_arg))
             i += 2
         elif arg.startswith('--env='):
-            # Handle: --env=KEY=value or --env=KEY
-            env_part = arg[6:]  # Remove '--env='
-            if '=' in env_part:
-                # Has a value, redact it
-                key, _ = env_part.split('=', 1)
-                result.append(f'--env={key}=<redacted>')
-            else:
-                # No value, keep as is
-                result.append(arg)
+            # Redact only if there's a value after the key
+            result.append(re.sub(r'^(--env=[^=]+)=.*', r'\1=<redacted>', arg))
             i += 1
         else:
-            # Regular argument, keep as is
             result.append(arg)
             i += 1
     
