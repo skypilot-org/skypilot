@@ -390,8 +390,6 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
-              # sed -i 's|https://mirror.ubuntu.com|https://archive.ubuntu.com|g' /etc/apt/sources.list
-
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
