@@ -96,8 +96,12 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace',
                       sqlalchemy.Text,
                       server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
-    sqlalchemy.Column('last_creation_yaml', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('last_creation_command', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('last_creation_yaml',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_creation_command',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -284,8 +288,7 @@ def create_table():
             'clusters',
             'last_creation_command',
             sqlalchemy.Text(),
-            default_statement='DEFAULT NULL'
-        )
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -423,9 +426,11 @@ def add_or_update_cluster(cluster_name: str,
             conditional_values.update({
                 'workspace': active_workspace,
             })
-        if (is_launch and not cluster_row or cluster_row.status != status_lib.ClusterStatus.UP.value):
+        if (is_launch and not cluster_row or
+                cluster_row.status != status_lib.ClusterStatus.UP.value):
             conditional_values.update({
-                'last_creation_yaml': common_utils.dump_yaml_str(task_config) if task_config else None,
+                'last_creation_yaml': common_utils.dump_yaml_str(task_config)
+                                      if task_config else None,
                 'last_creation_command': last_use,
             })
 
