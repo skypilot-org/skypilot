@@ -1204,6 +1204,55 @@ def get_config_schema():
         }
     }
 
+    rbac_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'default_role': {
+                'type': 'string',
+            },
+            'roles': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'patternProperties': {
+                    # Any role name is allowed as a key
+                    '^.*$': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'permissions': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'black_list': {
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'object',
+                                            'required': ['path', 'method'],
+                                            'additionalProperties': False,
+                                            'properties': {
+                                                'path': {
+                                                    'type': 'string',
+                                                },
+                                                'method': {
+                                                    'type': 'string',
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     workspace_schema = {'type': 'string'}
 
     allowed_workspace_cloud_names = list(
@@ -1325,6 +1374,7 @@ def get_config_schema():
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
             'provision': provision_configs,
+            'rbac': rbac_schema,
             **cloud_configs,
         },
     }

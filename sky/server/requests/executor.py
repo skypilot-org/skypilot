@@ -432,7 +432,7 @@ def prepare_request(
     if is_skypilot_system:
         user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
-            models.User(id=user_id, name=user_id))
+            models.User(id=user_id, name=user_id, role='admin'))
     request = api_requests.Request(request_id=request_id,
                                    name=server_constants.REQUEST_NAME_PREFIX +
                                    request_name,

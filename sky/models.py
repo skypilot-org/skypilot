@@ -2,18 +2,39 @@
 
 import collections
 import dataclasses
-from typing import Any, Dict, Optional
+import json
+from typing import Any, Dict, List, Optional
 
 
 @dataclasses.dataclass
 class User:
+    """Dataclass to store user information."""
     # User hash
     id: str
     # Display name of the user
     name: Optional[str] = None
+    # Role of the user
+    # default role is admin, to keep backward compatibility
+    role: str = 'admin'
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': self.id, 'name': self.name}
+        return {'id': self.id, 'name': self.name, 'role': self.role}
+
+
+@dataclasses.dataclass
+class Role:
+    """Dataclass to store role information."""
+    name: str
+    black_list: List[Dict[str, str]]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {'name': self.name, 'black_list': json.dumps(self.black_list)}
+
+    def has_permission(self, path: str, method: str) -> bool:
+        for item in self.black_list:
+            if item['path'] == path and item['method'] == method:
+                return False
+        return True
 
 
 RealtimeGpuAvailability = collections.namedtuple(
