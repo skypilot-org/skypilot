@@ -528,7 +528,8 @@ def terminate_instances(
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
     use_mig = provider_config.get('use_managed_instance_group', False)
-    if use_mig:
+    # Deleting MIG only if it uses MIG and has TPUs on the cluster.
+    if use_mig and use_tpu_vms:
         # Deleting the MIG will also delete the instances.
         mig_exists_and_deleted = (
             instance_utils.GCPManagedInstanceGroup.delete_mig(
