@@ -3178,6 +3178,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'Launching - Opening new ports')):
                     self._open_ports(handle)
 
+        # Capture task YAML and command
+        task_config = None
+        if task is not None:
+            try:
+                task_config = task.to_yaml_config()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to capture task info: {e}')
+
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
                 handle.cluster_name,
@@ -3185,6 +3193,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
+                task_config=task_config,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)

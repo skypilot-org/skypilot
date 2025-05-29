@@ -96,6 +96,8 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace',
                       sqlalchemy.Text,
                       server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('last_creation_yaml', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('last_creation_command', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -270,6 +272,20 @@ def create_table():
             default_statement='DEFAULT \'default\'',
             value_to_replace_existing_entries=constants.
             SKYPILOT_DEFAULT_WORKSPACE)
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'last_creation_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL',
+        )
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'last_creation_command',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL'
+        )
         session.commit()
 
 
@@ -318,7 +334,8 @@ def add_or_update_cluster(cluster_name: str,
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True,
-                          config_hash: Optional[str] = None):
+                          config_hash: Optional[str] = None,
+                          task_config: Optional[Dict[str, Any]] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -329,6 +346,8 @@ def add_or_update_cluster(cluster_name: str,
             be marked as INIT, otherwise it will be marked as UP.
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
+        config_hash: Configuration hash for the cluster.
+        task_config: The config of the task being launched.
     """
     # TODO(zhwu): have to be imported here to avoid circular import.
     from sky import skypilot_config  # pylint: disable=import-outside-toplevel
@@ -403,6 +422,11 @@ def add_or_update_cluster(cluster_name: str,
         if not cluster_row or not cluster_row.workspace:
             conditional_values.update({
                 'workspace': active_workspace,
+            })
+        if (is_launch and not cluster_row or cluster_row.status != status_lib.ClusterStatus.UP.value):
+            conditional_values.update({
+                'last_creation_yaml': common_utils.dump_yaml_str(task_config) if task_config else None,
+                'last_creation_command': last_use,
             })
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -790,6 +814,8 @@ def get_cluster_from_name(
         'user_name': get_user(user_hash).name,
         'config_hash': row.config_hash,
         'workspace': row.workspace,
+        'last_creation_yaml': row.last_creation_yaml,
+        'last_creation_command': row.last_creation_command,
     }
 
     return record
@@ -822,6 +848,8 @@ def get_clusters() -> List[Dict[str, Any]]:
             'user_name': get_user(user_hash).name,
             'config_hash': row.config_hash,
             'workspace': row.workspace,
+            'last_creation_yaml': row.last_creation_yaml,
+            'last_creation_command': row.last_creation_command,
         }
 
         records.append(record)

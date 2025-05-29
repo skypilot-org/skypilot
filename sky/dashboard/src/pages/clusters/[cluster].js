@@ -8,7 +8,8 @@ import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -150,6 +151,61 @@ function ClusterDetails() {
 }
 
 function ActiveTab({ clusterData, clusterJobData, loading }) {
+  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
+
+  const toggleYamlExpanded = () => {
+    setIsYamlExpanded(!isYamlExpanded);
+  };
+
+  const formatYaml = (yamlString) => {
+    if (!yamlString) return 'No YAML available';
+    
+    try {
+      // Parse the YAML string into an object
+      const parsed = yaml.load(yamlString);
+      
+      // Re-serialize with pipe syntax for multiline strings
+      const formatted = yaml.dump(parsed, {
+        lineWidth: -1,  // Disable line wrapping
+        styles: {
+          '!!str': 'literal'  // Use pipe (|) syntax for multiline strings
+        },
+        quotingType: "'",  // Use single quotes for strings that need quoting
+        forceQuotes: false,  // Only quote when necessary
+        noRefs: true,  // Disable YAML references
+        sortKeys: false,  // Preserve original key order
+        condenseFlow: false,  // Don't condense flow style
+        indent: 2  // Use 2 spaces for indentation
+      });
+      
+      // Add blank lines between top-level sections for better readability
+      const lines = formatted.split('\n');
+      const result = [];
+      let prevIndent = -1;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const currentIndent = line.search(/\S/); // Find first non-whitespace
+        
+        // Add blank line before new top-level sections (indent = 0)
+        if (currentIndent === 0 && prevIndent >= 0 && i > 0) {
+          result.push('');
+        }
+        
+        result.push(line);
+        prevIndent = currentIndent;
+      }
+      
+      return result.join('\n').trim();
+    } catch (e) {
+      console.error('YAML formatting error:', e);
+      // If parsing fails, return the original string
+      return yamlString;
+    }
+  };
+
+  const hasCreationArtifacts = clusterData?.command || clusterData?.task_yaml;
+
   return (
     <div>
       {/* Cluster Info Card */}
@@ -229,13 +285,67 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                     : 'N/A'}
                 </div>
               </div>
+
+              {/* Created by section - spans both columns */}
+              {hasCreationArtifacts && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    Created by
+                  </div>
+                  
+                  <div className="space-y-4 mt-1">
+                    {/* Creation Command */}
+                    {clusterData.command && (
+                      <div>
+                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                          <code className="text-sm text-gray-800 font-mono break-all">
+                            {clusterData.command}
+                          </code>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Task YAML - Collapsible */}
+                    {clusterData.task_yaml && clusterData.task_yaml !== '{}' && (
+                      <div>
+                        <button
+                          onClick={toggleYamlExpanded}
+                          className="flex items-center justify-between w-full text-left focus:outline-none mb-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-md transition-colors duration-200"
+                        >
+                          <div className="text-gray-700 font-medium text-sm">
+                            SkyPilot YAML
+                          </div>
+                          <div className="flex items-center text-gray-500">
+                            <span className="text-xs mr-1">
+                              {isYamlExpanded ? 'Hide' : 'Show'}
+                            </span>
+                            {isYamlExpanded ? (
+                              <ChevronDownIcon className="w-5 h-5" />
+                            ) : (
+                              <ChevronRightIcon className="w-5 h-5" />
+                            )}
+                          </div>
+                        </button>
+                        
+                        {isYamlExpanded && (
+                          <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                            <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                              {formatYaml(clusterData.task_yaml)}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Card>
       </div>
 
       {/* Jobs Table */}
-      <div>
+      <div className="mb-8">
         {clusterJobData && (
           <ClusterJobs
             clusterName={clusterData.cluster}

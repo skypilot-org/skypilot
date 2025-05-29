@@ -98,6 +98,8 @@ export async function getClusters({ clusterNames = null } = {}) {
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
         jobs: [],
+        command: cluster.last_creation_command || cluster.last_use,
+        task_yaml: cluster.last_creation_yaml || '{}',
         events: [
           {
             time: new Date(cluster.launched_at * 1000),
