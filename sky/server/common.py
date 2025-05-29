@@ -159,7 +159,8 @@ def get_server_url(host: Optional[str] = None) -> str:
 
 
 @annotations.lru_cache(scope='global')
-def get_dashboard_url(server_url: str) -> str:
+def get_dashboard_url(server_url: str,
+                      starting_page: Optional[str] = None) -> str:
     # The server_url may include username or password with the
     # format of https://username:password@example.com:8080/path
     # We need to remove the username and password and only
@@ -172,7 +173,10 @@ def get_dashboard_url(server_url: str) -> str:
     if parsed.path:
         dashboard_url = f'{dashboard_url}{parsed.path}'
     dashboard_url = dashboard_url.rstrip('/')
-    return f'{dashboard_url}/dashboard'
+    dashboard_url = f'{dashboard_url}/dashboard'
+    if starting_page:
+        dashboard_url = f'{dashboard_url}/{starting_page}'
+    return dashboard_url
 
 
 @annotations.lru_cache(scope='global')

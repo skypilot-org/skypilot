@@ -342,10 +342,11 @@ def validate(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def dashboard() -> None:
+def dashboard(starting_page: Optional[str] = None) -> None:
     """Starts the dashboard for SkyPilot."""
     api_server_url = server_common.get_server_url()
-    url = server_common.get_dashboard_url(api_server_url)
+    url = server_common.get_dashboard_url(api_server_url,
+                                          starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
     webbrowser.open(url)
 
