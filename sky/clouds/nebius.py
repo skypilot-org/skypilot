@@ -5,6 +5,7 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.clouds import service_catalog
@@ -14,13 +15,6 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-
-_CREDENTIAL_FILE_PATHS = [
-    # credential files for Nebius
-    nebius.tenant_id_path(),
-    nebius.iam_token_path(),
-    nebius.credentials_path()
-]
 
 _INDENT_PREFIX = '    '
 
@@ -357,7 +351,8 @@ class Nebius(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         credential_file_mounts = {
-            filepath: filepath for filepath in _CREDENTIAL_FILE_PATHS
+            filepath: filepath
+            for filepath in nebius.get_credential_file_paths()
         }
         if nebius_profile_in_aws_cred_and_config():
             credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
@@ -388,7 +383,7 @@ class Nebius(clouds.Cloud):
     @classmethod
     @annotations.lru_cache(scope='request', maxsize=5)
     def _get_user_identities(
-            cls, workspace_config: Optional[str]) -> List[List[str]]:
+            cls, workspace_config: Optional[str]) -> Optional[List[List[str]]]:
         # We add workspace_config in args to avoid caching the identity for when
         # different workspace configs are used.
         del workspace_config  # Unused
@@ -396,11 +391,31 @@ class Nebius(clouds.Cloud):
         profile_client = nebius.iam().ProfileServiceClient(sdk)
         profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
         if profile.user_profile is not None:
+            if profile.user_profile.attributes is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a UserProfile, but has no attributes: '
+                    f'{profile.user_profile}')
+            if profile.user_profile.attributes.email is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a UserProfile, but has no email: '
+                    f'{profile.user_profile}')
             return [[profile.user_profile.attributes.email]]
         if profile.service_account_profile is not None:
+            if profile.service_account_profile.info is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'info: {profile.service_account_profile}')
+            if profile.service_account_profile.info.metadata is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'metadata: {profile.service_account_profile}')
+            if profile.service_account_profile.info.metadata.name is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'name: {profile.service_account_profile}')
             return [[profile.service_account_profile.info.metadata.name]]
         if profile.anonymous_profile is not None:
             return None
-        unknown_profile_type = profile.which_field_in_oneof("profile")
+        unknown_profile_type = profile.which_field_in_oneof('profile')
         raise exceptions.CloudUserIdentityError(
             f'Nebius profile is of an unknown type - {unknown_profile_type}')
