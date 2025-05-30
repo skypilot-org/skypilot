@@ -130,6 +130,12 @@ class Kubernetes(clouds.Cloud):
             if spot_label_key is not None:
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+            # Allow custom network tier if supported by the cluster
+            # (e.g., Nebius clusters with high performance networking)
+            if cls._cluster_supports_high_performance_networking(context):
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                    None)
         except exceptions.KubeAPIUnreachableError as e:
             cls._log_unreachable_context(context, str(e))
         return unsupported_features
@@ -560,17 +566,17 @@ class Kubernetes(clouds.Cloud):
         # independent of the SkyPilot task to be run.
         k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
 
-        # Check if this is a Nebius cluster and configure IPC_LOCK capability
+        # Check if this cluster supports high performance networking and
+        # configure IPC_LOCK capability for clusters like Nebius that support it
         k8s_ipc_lock_capability = False
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
-            nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
-            for node in nodes:
-                if node.metadata.labels:
-                    for label_key in node.metadata.labels.keys():
-                        if label_key.startswith('nebius.com/'):
-                            k8s_ipc_lock_capability = True
-                            break
+            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
+            unsupported_features = self._unsupported_features_for_resources(
+                resources)
+            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
+                not in unsupported_features:
+                k8s_ipc_lock_capability = True
 
         if k8s_ipc_lock_capability:
             k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
@@ -925,3 +931,26 @@ class Kubernetes(clouds.Cloud):
             f'{cls.canonical_name()}/{c}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
+
+    @classmethod
+    def _cluster_supports_high_performance_networking(cls,
+                                                      context: str) -> bool:
+        """Check if the cluster supports high performance networking.
+        Currently detects Nebius clusters by checking for nebius.com/ labels on
+        cluster nodes.
+        Args:
+            context: The Kubernetes context to check.
+        Returns:
+            True if the cluster supports high performance networking.
+        """
+        try:
+            nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+            for node in nodes:
+                if node.metadata.labels:
+                    for label_key in node.metadata.labels.keys():
+                        if label_key.startswith('nebius.com/'):
+                            return True
+        except exceptions.KubeAPIUnreachableError:
+            # If we can't reach the cluster, assume no high perf networking
+            return False
+        return False

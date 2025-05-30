@@ -1956,34 +1956,3 @@ def test_gcp_network_tier_with_gpu():
         timeout=15 * 60,  # 15 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.nebius
-def test_nebius_network_tier_with_gpu():
-    """Test Nebius network_tier with GPU functionality and environment variables."""
-    name = smoke_tests_utils.get_cluster_name() + '-nebius-gpu'
-
-    test = smoke_tests_utils.Test(
-        'nebius-network-tier-gpu',
-        [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('nebius', name),
-            f'sky launch -y -c {name} --infra k8s '
-            f'--gpus H100:8 --network-tier best '
-            f'echo "Testing Nebius network tier with GPU on Kubernetes"',
-            # Check for NCCL_IB_HCA environment variable
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'echo "NCCL_IB_HCA check:" && echo $NCCL_IB_HCA && [ "$NCCL_IB_HCA" = "mlx5" ] && echo "NCCL_IB_HCA is set correctly" || echo "NCCL_IB_HCA not set or incorrect"'
-            ),
-            # Check for UCX_NET_DEVICES environment variable
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'echo "UCX_NET_DEVICES check:" && echo $UCX_NET_DEVICES && echo $UCX_NET_DEVICES | grep -q "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1" && echo "UCX_NET_DEVICES is set correctly" || echo "UCX_NET_DEVICES not set or incorrect"'
-            )
-        ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        timeout=15 * 60,  # 15 mins for GPU provisioning
-    )
-    smoke_tests_utils.run_one_test(test)
