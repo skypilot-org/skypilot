@@ -3178,6 +3178,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'Launching - Opening new ports')):
                     self._open_ports(handle)
 
+        # Capture task YAML and command
+        task_config = None
+        if task is not None:
+            task_config = task.to_yaml_config()
+
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
                 handle.cluster_name,
@@ -3185,6 +3190,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
+                task_config=task_config,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
@@ -3507,9 +3513,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Add the managed job to job queue database.
                 managed_job_codegen = managed_jobs.ManagedJobCodeGen()
                 managed_job_code = managed_job_codegen.set_pending(
-                    job_id, managed_job_dag,
+                    job_id,
+                    managed_job_dag,
                     skypilot_config.get_active_workspace(
-                        force_user_workspace=True))
+                        force_user_workspace=True),
+                    entrypoint=common_utils.get_current_command())
                 # Set the managed job to PENDING state to make sure that this
                 # managed job appears in the `sky jobs queue`, even if it needs
                 # to wait to be submitted.
