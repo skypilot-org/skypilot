@@ -25,7 +25,6 @@ class PermissionService:
         """Initialize policies."""
         self.enforcer.clear_policy()
         for role, permissions in rbac.get_role_permissions().items():
-            logger.info(f'role: {role}, permissions: {permissions}')
             if permissions['permissions'] and 'blocklist' in permissions[
                     'permissions']:
                 blocklist = permissions['permissions']['blocklist']
@@ -33,9 +32,6 @@ class PermissionService:
                     path = item['path']
                     method = item['method']
                     self.enforcer.add_policy(role, path, method)
-                    logger.info(f'add_policy: {role}, {path}, {method}')
-            else:
-                logger.info(f'no blocklist for role: {role}')
         all_users = global_user_state.get_all_users()
         for user in all_users:
             self.enforcer.add_grouping_policy(user.id, user.role)
