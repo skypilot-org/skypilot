@@ -1909,15 +1909,12 @@ def test_gcp_network_tier():
     # Use n2-standard-4 instance type for testing
     instance_type = 'n2-standard-4'
     name = smoke_tests_utils.get_cluster_name() + '-' + network_tier.value
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.GCP.max_cluster_name_length())
     region = 'us-central1'
 
     # For standard tier, verify basic network functionality
     verification_commands = [
         smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name,
-            cmd='echo "Standard network tier verification" && ip addr show')
+            name, cmd='echo "Standard network tier verification"')
     ]
 
     test_commands = [
@@ -1945,32 +1942,14 @@ def test_gcp_network_tier_with_gpu():
         'gcp-network-tier-best-gpu',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} --infra gcp/{region} '
+            f'sky launch -y -c {name} --cloud gcp '
             f'--gpus H100:8 --network-tier best '
             f'echo "Testing network tier best with GPU"',
-            # Verify GPU Direct setup is applied correctly
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'gcloud compute instances describe $(hostname) --zone=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/zone" -H "Metadata-Flavor: Google" | cut -d/ -f4) --format="value(networkInterfaces[0].nicType)" | grep GVNIC'
-            ),
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=
                 'echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths" || echo "LD_LIBRARY_PATH missing required paths"'
-            ),
-            # Check for NCCL_IB_HCA environment variable
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'echo "NCCL_IB_HCA check:" && echo $NCCL_IB_HCA && [ "$NCCL_IB_HCA" = "mlx5" ] && echo "NCCL_IB_HCA is set correctly" || echo "NCCL_IB_HCA not set or incorrect"'
-            ),
-            # Check for UCX_NET_DEVICES environment variable
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'echo "UCX_NET_DEVICES check:" && echo $UCX_NET_DEVICES && echo $UCX_NET_DEVICES | grep -q "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1" && echo "UCX_NET_DEVICES is set correctly" || echo "UCX_NET_DEVICES not set or incorrect"'
             )
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',

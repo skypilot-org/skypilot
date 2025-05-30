@@ -22,6 +22,7 @@ from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
+import yaml
 
 from sky import models
 from sky import sky_logging
@@ -96,6 +97,12 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace',
                       sqlalchemy.Text,
                       server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('last_creation_yaml',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_creation_command',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -131,6 +138,21 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
     sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
+)
+
+ssh_key_table = sqlalchemy.Table(
+    'ssh_key',
+    Base.metadata,
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('ssh_public_key', sqlalchemy.Text),
+    sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
+)
+
+cluster_yaml_table = sqlalchemy.Table(
+    'cluster_yaml',
+    Base.metadata,
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('yaml', sqlalchemy.Text),
 )
 
 
@@ -270,6 +292,19 @@ def create_table():
             default_statement='DEFAULT \'default\'',
             value_to_replace_existing_entries=constants.
             SKYPILOT_DEFAULT_WORKSPACE)
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'last_creation_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL',
+        )
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'last_creation_command',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -318,7 +353,8 @@ def add_or_update_cluster(cluster_name: str,
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True,
-                          config_hash: Optional[str] = None):
+                          config_hash: Optional[str] = None,
+                          task_config: Optional[Dict[str, Any]] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -329,6 +365,8 @@ def add_or_update_cluster(cluster_name: str,
             be marked as INIT, otherwise it will be marked as UP.
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
+        config_hash: Configuration hash for the cluster.
+        task_config: The config of the task being launched.
     """
     # TODO(zhwu): have to be imported here to avoid circular import.
     from sky import skypilot_config  # pylint: disable=import-outside-toplevel
@@ -403,6 +441,13 @@ def add_or_update_cluster(cluster_name: str,
         if not cluster_row or not cluster_row.workspace:
             conditional_values.update({
                 'workspace': active_workspace,
+            })
+        if (is_launch and not cluster_row or
+                cluster_row.status != status_lib.ClusterStatus.UP.value):
+            conditional_values.update({
+                'last_creation_yaml': common_utils.dump_yaml_str(task_config)
+                                      if task_config else None,
+                'last_creation_command': last_use,
             })
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -790,6 +835,8 @@ def get_cluster_from_name(
         'user_name': get_user(user_hash).name,
         'config_hash': row.config_hash,
         'workspace': row.workspace,
+        'last_creation_yaml': row.last_creation_yaml,
+        'last_creation_command': row.last_creation_command,
     }
 
     return record
@@ -822,6 +869,8 @@ def get_clusters() -> List[Dict[str, Any]]:
             'user_name': get_user(user_hash).name,
             'config_hash': row.config_hash,
             'workspace': row.workspace,
+            'last_creation_yaml': row.last_creation_yaml,
+            'last_creation_command': row.last_creation_command,
         }
 
         records.append(record)
@@ -1049,3 +1098,102 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': status_lib.StorageStatus[row.status],
         })
     return records
+
+
+def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(ssh_key_table).filter_by(
+            user_hash=user_hash).first()
+    if row:
+        return row.ssh_public_key, row.ssh_private_key, True
+    return '', '', False
+
+
+def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(ssh_key_table).values(
+            user_hash=user_hash,
+            ssh_public_key=ssh_public_key,
+            ssh_private_key=ssh_private_key)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[ssh_key_table.c.user_hash],
+            set_={
+                ssh_key_table.c.ssh_public_key: ssh_public_key,
+                ssh_key_table.c.ssh_private_key: ssh_private_key
+            })
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
+    """Get the cluster yaml from the database or the local file system.
+    If the cluster yaml is not in the database, check if it exists on the
+    local file system and migrate it to the database.
+
+    It is assumed that the cluster yaml file is named as <cluster_name>.yml.
+    """
+    if cluster_yaml_path is None:
+        raise ValueError('Attempted to read a None YAML.')
+    cluster_file_name = os.path.basename(cluster_yaml_path)
+    cluster_name, _ = os.path.splitext(cluster_file_name)
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_yaml_table).filter_by(
+            cluster_name=cluster_name).first()
+    if row is None:
+        # If the cluster yaml is not in the database, check if it exists
+        # on the local file system and migrate it to the database.
+        # TODO(syang): remove this check once we have a way to migrate the
+        # cluster from file to database. Remove on v0.12.0.
+        if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
+            with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+                yaml_str = f.read()
+            set_cluster_yaml(cluster_name, yaml_str)
+            return yaml_str
+        return None
+    return row.yaml
+
+
+def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
+    """Get the cluster yaml as a dictionary from the database.
+
+    It is assumed that the cluster yaml file is named as <cluster_name>.yml.
+    """
+    yaml_str = get_cluster_yaml_str(cluster_yaml_path)
+    if yaml_str is None:
+        raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
+    return yaml.safe_load(yaml_str)
+
+
+def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
+    """Set the cluster yaml in the database."""
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(cluster_yaml_table).values(
+            cluster_name=cluster_name, yaml=yaml_str)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[cluster_yaml_table.c.cluster_name],
+            set_={cluster_yaml_table.c.yaml: yaml_str})
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+def remove_cluster_yaml(cluster_name: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(cluster_yaml_table).filter_by(
+            cluster_name=cluster_name).delete()
+        session.commit()

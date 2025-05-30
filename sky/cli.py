@@ -4584,7 +4584,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
-    managed_jobs.dashboard()
+    sdk.dashboard(starting_page='jobs')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -5329,7 +5329,8 @@ def serve_logs(
 
 
 @ux_utils.print_exception_no_traceback()
-def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
+def _get_candidate_configs(
+        entrypoint_yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
     Benchmark candidates are configured in the YAML file as a list of
@@ -5343,17 +5344,18 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {instance_type: g4dn.2xlarge}
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
-    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
+    config = common_utils.read_yaml(os.path.expanduser(entrypoint_yaml_path))
     if not isinstance(config, dict):
-        raise ValueError(f'Invalid YAML file: {yaml_path}. '
+        raise ValueError(f'Invalid YAML file: {entrypoint_yaml_path}. '
                          'The YAML file should be parsed into a dictionary.')
     if config.get('resources') is None:
         return None
 
     resources = config['resources']
     if not isinstance(resources, dict):
-        raise ValueError(f'Invalid resources configuration in {yaml_path}. '
-                         'Resources must be a dictionary.')
+        raise ValueError(
+            f'Invalid resources configuration in {entrypoint_yaml_path}. '
+            'Resources must be a dictionary.')
     if resources.get('candidates') is None:
         return None
 

@@ -1,9 +1,11 @@
 """ Nebius Cloud. """
+import json
 import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.clouds import service_catalog
@@ -13,13 +15,6 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-
-_CREDENTIAL_FILES = [
-    # credential files for Nebius
-    nebius.NEBIUS_TENANT_ID_FILENAME,
-    nebius.NEBIUS_IAM_TOKEN_FILENAME,
-    nebius.NEBIUS_CREDENTIALS_FILENAME
-]
 
 _INDENT_PREFIX = '    '
 
@@ -298,20 +293,19 @@ class Nebius(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    @annotations.lru_cache(scope='request')
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
         token_cred_msg = (
             f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
-            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
-            f'{_INDENT_PREFIX} or generate  ~/.nebius/credentials.json \n')
+            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
         tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
         sdk = nebius.sdk()
@@ -359,8 +353,8 @@ class Nebius(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         credential_file_mounts = {
-            f'~/.nebius/{filename}': f'~/.nebius/{filename}'
-            for filename in _CREDENTIAL_FILES
+            filepath: filepath
+            for filepath in nebius.get_credential_file_paths()
         }
         if nebius_profile_in_aws_cred_and_config():
             credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
@@ -380,3 +374,50 @@ class Nebius(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='nebius')
+
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """Returns the email address + project id of the active user."""
+        nebius_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('nebius'), sort_keys=True)
+        return cls._get_user_identities(nebius_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def _get_user_identities(
+            cls, workspace_config: Optional[str]) -> Optional[List[List[str]]]:
+        # We add workspace_config in args to avoid caching the identity for when
+        # different workspace configs are used.
+        del workspace_config  # Unused
+        sdk = nebius.sdk()
+        profile_client = nebius.iam().ProfileServiceClient(sdk)
+        profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
+        if profile.user_profile is not None:
+            if profile.user_profile.attributes is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a UserProfile, but has no attributes: '
+                    f'{profile.user_profile}')
+            if profile.user_profile.attributes.email is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a UserProfile, but has no email: '
+                    f'{profile.user_profile}')
+            return [[profile.user_profile.attributes.email]]
+        if profile.service_account_profile is not None:
+            if profile.service_account_profile.info is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'info: {profile.service_account_profile}')
+            if profile.service_account_profile.info.metadata is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'metadata: {profile.service_account_profile}')
+            if profile.service_account_profile.info.metadata.name is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'name: {profile.service_account_profile}')
+            return [[profile.service_account_profile.info.metadata.name]]
+        if profile.anonymous_profile is not None:
+            return None
+        unknown_profile_type = profile.which_field_in_oneof('profile')
+        raise exceptions.CloudUserIdentityError(
+            f'Nebius profile is of an unknown type - {unknown_profile_type}')

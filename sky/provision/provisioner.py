@@ -15,6 +15,7 @@ import colorama
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import provision
 from sky import sky_logging
 from sky import skypilot_config
@@ -118,7 +119,7 @@ def bulk_provision(
         Cloud specific exceptions: If the provisioning process failed, cloud-
             specific exceptions will be raised by the cloud APIs.
     """
-    original_config = common_utils.read_yaml(cluster_yaml)
+    original_config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     head_node_type = original_config['head_node_type']
     bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
@@ -413,9 +414,11 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 def _post_provision_setup(
         cloud_name: str, cluster_name: resources_utils.ClusterName,
-        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
+        handle_cluster_yaml: str,
+        provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
-    config_from_yaml = common_utils.read_yaml(cluster_yaml)
+    config_from_yaml = global_user_state.get_cluster_yaml_dict(
+        handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
@@ -446,7 +449,7 @@ def _post_provision_setup(
     # TODO(suquark): Move wheel build here in future PRs.
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        cluster_yaml, ssh_user=cluster_info.ssh_user)
+        handle_cluster_yaml, ssh_user=cluster_info.ssh_user)
     docker_config = config_from_yaml.get('docker', {})
 
     with rich_utils.safe_status(
@@ -657,7 +660,8 @@ def _post_provision_setup(
 @timeline.event
 def post_provision_runtime_setup(
         cloud_name: str, cluster_name: resources_utils.ClusterName,
-        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
+        handle_cluster_yaml: str,
+        provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
         log_dir: str) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.
@@ -675,11 +679,12 @@ def post_provision_runtime_setup(
     with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
-            return _post_provision_setup(cloud_name,
-                                         cluster_name,
-                                         cluster_yaml=cluster_yaml,
-                                         provision_record=provision_record,
-                                         custom_resource=custom_resource)
+            return _post_provision_setup(
+                cloud_name,
+                cluster_name,
+                handle_cluster_yaml=handle_cluster_yaml,
+                provision_record=provision_record,
+                custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
             logger.error(
                 ux_utils.error_message(

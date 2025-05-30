@@ -36,6 +36,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
+from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
@@ -341,10 +342,11 @@ def validate(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def dashboard() -> None:
+def dashboard(starting_page: Optional[str] = None) -> None:
     """Starts the dashboard for SkyPilot."""
     api_server_url = server_common.get_server_url()
-    url = server_common.get_dashboard_url(api_server_url)
+    url = server_common.get_dashboard_url(api_server_url,
+                                          starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
     webbrowser.open(url)
 
@@ -1908,6 +1910,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     Args:
         endpoint: The endpoint of the SkyPilot API server, e.g.,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
+        get_token: Whether to force getting a new token even if not needed.
 
     Returns:
         None
@@ -1926,14 +1929,60 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     server_status = server_common.check_server_healthy(endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
-        parsed_url = urlparse.urlparse(endpoint)
-        token_url = f'{endpoint}/token'
-        click.echo('Authentication is needed. Please visit this URL setup up '
-                   f'the token:{colorama.Style.BRIGHT}\n\n{token_url}'
-                   f'\n{colorama.Style.RESET_ALL}')
-        if webbrowser.open(token_url):
-            click.echo('Opening browser...')
-        token: str = click.prompt('Paste the token')
+        token: Optional[str] = None
+        server: Optional[oauth_lib.HTTPServer] = None
+        try:
+            callback_port = common_utils.find_free_port(8000)
+
+            token_container: Dict[str, Optional[str]] = {'token': None}
+            logger.debug('Starting local authentication server...')
+            server = oauth_lib.start_local_auth_server(callback_port,
+                                                       token_container,
+                                                       endpoint)
+
+            token_url = (f'{endpoint}/token?local_port={callback_port}')
+            if webbrowser.open(token_url):
+                click.echo(f'{colorama.Fore.GREEN}A web browser has been '
+                           f'opened at {token_url}. Please continue the login '
+                           f'in the web browser.{colorama.Style.RESET_ALL}\n'
+                           f'{colorama.Style.DIM}To manually copy the token, '
+                           f'press ctrl+c.{colorama.Style.RESET_ALL}')
+            else:
+                raise ValueError('Failed to open browser.')
+
+            start_time = time.time()
+
+            while (token_container['token'] is None and
+                   time.time() - start_time < oauth_lib.AUTH_TIMEOUT):
+                time.sleep(1)
+
+            if token_container['token'] is None:
+                click.echo(f'{colorama.Fore.YELLOW}Authentication timed out '
+                           f'after {oauth_lib.AUTH_TIMEOUT} seconds.')
+            else:
+                token = token_container['token']
+
+        except (Exception, KeyboardInterrupt) as e:  # pylint: disable=broad-except
+            logger.debug(f'Automatic authentication failed: {e}, '
+                         'falling back to manual token entry.')
+            if isinstance(e, KeyboardInterrupt):
+                click.echo(f'\n{colorama.Style.DIM}Interrupted. Press ctrl+c '
+                           f'again to exit.{colorama.Style.RESET_ALL}')
+            # Fall back to manual token entry
+            token_url = f'{endpoint}/token'
+            click.echo('Authentication is needed. Please visit this URL '
+                       f'to set up the token:{colorama.Style.BRIGHT}\n\n'
+                       f'{token_url}\n{colorama.Style.RESET_ALL}')
+            token = click.prompt('Paste the token')
+        finally:
+            if server is not None:
+                try:
+                    server.server_close()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            if not token:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Authentication failed.')
 
         # Parse the token.
         # b64decode will ignore invalid characters, but does some length and
@@ -1959,6 +2008,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         else:
             raise ValueError(f'Unsupported token version: {json_data.get("v")}')
 
+        parsed_url = urlparse.urlparse(endpoint)
         cookie_jar = cookiejar.MozillaCookieJar()
         for (name, value) in cookie_dict.items():
             # dict keys in JSON must be strings
