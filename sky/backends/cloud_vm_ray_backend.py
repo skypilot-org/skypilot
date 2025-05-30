@@ -3181,10 +3181,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Capture task YAML and command
         task_config = None
         if task is not None:
-            try:
-                task_config = task.to_yaml_config()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to capture task info: {e}')
+            task_config = task.to_yaml_config()
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
