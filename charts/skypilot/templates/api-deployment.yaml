@@ -40,6 +40,8 @@ spec:
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
           value: {{ .Release.Name | quote }}
+        - name: SKYPILOT_API_SERVER_DB_URL
+          value: postgresql://skypilot:skypilot@localhost:5432/skypilot
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -189,6 +191,46 @@ spec:
           mountPath: /root/.nebius_credentials
         {{- end }}
       initContainers:
+      - name: cloud-sql-proxy
+        restartPolicy: Always
+        # It is recommended to use the latest version of the Cloud SQL Auth Proxy
+        # Make sure to update on a regular schedule!
+        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+        args:
+          # If connecting from a VPC-native GKE cluster, you can use the
+          # following flag to have the proxy connect over private IP
+          # - "--private-ip"
+
+          # If you are not connecting with Automatic IAM, you can delete
+          # the following flag.
+          - "--auto-iam-authn"
+
+          # Enable structured logging with LogEntry format:
+          - "--structured-logs"
+
+          # Replace DB_PORT with the port the proxy should listen on
+          - "--port=5432"
+          - "connection-string-TODO"
+
+        securityContext:
+          # The default Cloud SQL Auth Proxy image runs as the
+          # "nonroot" user and group (uid: 65532) by default.
+          runAsNonRoot: true
+        # You should use resource requests/limits as a best practice to prevent
+        # pods from consuming too many resources and affecting the execution of
+        # other pods. You should adjust the following values based on what your
+        # application needs. For details, see
+        # https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+        resources:
+          requests:
+            # The proxy's memory use scales linearly with the number of active
+            # connections. Fewer open connections will use less memory. Adjust
+            # this value based on your application's requirements.
+            memory: "2Gi"
+            # The proxy's CPU use scales linearly with the amount of IO between
+            # the database and the application. Adjust this value based on your
+            # application's requirements.
+            cpu: "1"
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
         {{- with .Values.securityContext }}
@@ -355,5 +397,5 @@ spec:
       - name: skypilot-ssh-identity
         secret:
           secretName: {{ .Values.apiService.sshKeySecret }}
-          defaultMode: 0600 
+          defaultMode: 0600
       {{- end }}
