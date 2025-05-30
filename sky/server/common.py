@@ -533,10 +533,13 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
     api_server_status = None
     try:
         api_server_status = check_server_healthy()
+        if api_server_status == ApiServerStatus.NEEDS_AUTH:
+            endpoint = get_server_url()
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
         endpoint = get_server_url()
-        if (not is_api_server_local() or
-                api_server_status == ApiServerStatus.NEEDS_AUTH):
+        if not is_api_server_local():
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the
