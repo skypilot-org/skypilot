@@ -12,6 +12,7 @@ import colorama
 from sky import clouds as sky_clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
@@ -23,6 +24,8 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+
+logger = sky_logging.init_logger(__name__)
 
 
 def check_capabilities(
@@ -345,18 +348,38 @@ def get_cached_enabled_clouds_or_refresh(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
+    active_workspace = skypilot_config.get_active_workspace()
+    allowed_clouds_changed = False
+    cached_allowed_clouds = global_user_state.get_allowed_clouds(
+        active_workspace)
+    skypilot_config_allowed_clouds = skypilot_config.get_nested(
+        ('allowed_clouds',), [])
+    if sorted(cached_allowed_clouds) != sorted(skypilot_config_allowed_clouds):
+        for cloud in skypilot_config_allowed_clouds:
+            # refresh the allowed clouds if any cloud allowed in config
+            # is not in the cached allowed clouds.
+            if cloud not in cached_allowed_clouds:
+                logger.debug(
+                    f'Allowed clouds changed from {cached_allowed_clouds} '
+                    f'to {skypilot_config_allowed_clouds}')
+                allowed_clouds_changed = True
+                break
+
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        capability, skypilot_config.get_active_workspace())
-    if not cached_enabled_clouds:
+        capability, active_workspace)
+    if not cached_enabled_clouds or allowed_clouds_changed:
         try:
             check_capability(capability, quiet=True)
+            if allowed_clouds_changed:
+                global_user_state.set_allowed_clouds(
+                    skypilot_config_allowed_clouds, active_workspace)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
         cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-            capability, skypilot_config.get_active_workspace())
+            capability, active_workspace)
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
