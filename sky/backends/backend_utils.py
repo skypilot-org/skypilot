@@ -842,7 +842,10 @@ def write_cluster_config(
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
-    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    try:
+        old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    except ValueError:
+        old_yaml_content = None
     if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
@@ -1259,8 +1262,6 @@ def ssh_credential_from_yaml(
     if cluster_yaml is None:
         return dict()
     config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
-    if not config:
-        return dict()
     auth_section = config['auth']
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()

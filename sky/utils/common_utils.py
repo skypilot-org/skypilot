@@ -430,12 +430,6 @@ def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     return config
 
 
-def read_yaml_str(yaml_str: Optional[str]) -> Dict[str, Any]:
-    if yaml_str is None:
-        return dict()
-    return yaml.safe_load(yaml_str)
-
-
 def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
     stream = io.StringIO(yaml_str)
     config = yaml.safe_load_all(stream)

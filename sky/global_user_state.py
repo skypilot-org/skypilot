@@ -22,6 +22,7 @@ from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
+import yaml
 
 from sky import models
 from sky import sky_logging
@@ -1116,11 +1117,13 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     if row is None:
         # If the cluster yaml is not in the database, check if it exists
         # on the local file system and migrate it to the database.
+        # TODO(syang): remove this check once we have a way to migrate the
+        # cluster from file to database. Remove on v0.12.0.
         if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
             with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
-                yaml = f.read()
-            set_cluster_yaml(cluster_name, yaml)
-            return yaml
+                yaml_str = f.read()
+            set_cluster_yaml(cluster_name, yaml_str)
+            return yaml_str
         return None
     return row.yaml
 
@@ -1130,11 +1133,13 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
 
     It is assumed that the cluster yaml file is named as <cluster_name>.yml.
     """
-    yaml = get_cluster_yaml_str(cluster_yaml_path)
-    return common_utils.read_yaml_str(yaml)
+    yaml_str = get_cluster_yaml_str(cluster_yaml_path)
+    if yaml_str is None:
+        raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
+    return yaml.safe_load(yaml_str)
 
 
-def set_cluster_yaml(cluster_name: str, yaml: str) -> None:
+def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
     """Set the cluster yaml in the database."""
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -1146,10 +1151,10 @@ def set_cluster_yaml(cluster_name: str, yaml: str) -> None:
         else:
             raise ValueError('Unsupported database dialect')
         insert_stmnt = insert_func(cluster_yaml_table).values(
-            cluster_name=cluster_name, yaml=yaml)
+            cluster_name=cluster_name, yaml=yaml_str)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[cluster_yaml_table.c.cluster_name],
-            set_={cluster_yaml_table.c.yaml: yaml})
+            set_={cluster_yaml_table.c.yaml: yaml_str})
         session.execute(do_update_stmt)
         session.commit()
 
