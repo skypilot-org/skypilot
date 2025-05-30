@@ -13,7 +13,7 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
@@ -585,7 +585,7 @@ def stream_logs_by_id(job_id: int,
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
-                    read_from: Union[TextIO, List[str]] = f
+                    read_from: Union[TextIO, Deque[str]] = f
                     if tail is not None:
                         assert tail > 0
                         # Read only the last 'tail' lines using deque
