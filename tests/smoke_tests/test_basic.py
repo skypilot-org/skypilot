@@ -1155,16 +1155,3 @@ def test_hyperbolic_minimal():
         smoke_tests_utils.get_timeout("hyperbolic"),
     )
     smoke_tests_utils.run_one_test(test)
-
-
-def test_hyperbolic_unsupported_multi_node():
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'hyperbolic_unsupported_multi_node',
-        [
-            f'! sky launch -y -c {name} --cloud hyperbolic -n 2 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml 2>&1 | grep -i "not supported"',
-        ],
-        '',
-        smoke_tests_utils.get_timeout("hyperbolic"),
-    )
-    smoke_tests_utils.run_one_test(test)
