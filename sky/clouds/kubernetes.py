@@ -75,6 +75,9 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported in '
+             'Kubernetes.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
