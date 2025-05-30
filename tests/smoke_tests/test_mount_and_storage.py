@@ -138,7 +138,7 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'using_file_mounts_with_env_vars',
         test_commands,
-        (f'sky down -y {name} {name}-2',
+        (f'sky down -y {name} {name}-2; '
          f'sky storage delete -y {storage_name} {storage_name}-2'),
         timeout=20 * 60,  # 20 mins
     )
@@ -629,14 +629,12 @@ exclude.py
                 timeout=60),
         ]
 
-        teardown_commands = [
-            f'sky down -y {name}', f'sky jobs cancel -y {jobs_name}'
-        ]
+        teardown_command = f'sky down -y {name}; sky jobs cancel -y {jobs_name}'
 
         test = smoke_tests_utils.Test(
             'skyignore_exclusion_test',
             test_commands,
-            teardown_commands,
+            teardown_command,
             smoke_tests_utils.get_timeout(generic_cloud, 15 * 60),  # 15 mins
         )
         smoke_tests_utils.run_one_test(test)

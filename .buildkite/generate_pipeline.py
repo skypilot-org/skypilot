@@ -57,7 +57,8 @@ CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KUBERNETES
+    'kubernetes': QUEUE_KUBERNETES,
+    'ssh': QUEUE_GENERIC_CLOUD
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
