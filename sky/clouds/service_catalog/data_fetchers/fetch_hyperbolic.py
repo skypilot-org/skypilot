@@ -6,7 +6,6 @@ Usage:
 
 import argparse
 import csv
-import json
 import os
 
 import requests
@@ -38,81 +37,38 @@ def create_catalog() -> None:
         if not response.ok:
             raise RuntimeError(f'API request failed: {response.text}')
         instances = response.json()['vms']
-        print('API Response for first instance:',
-              json.dumps(instances[0], indent=2))
-        print('GpuInfo from API:',
-              json.dumps(instances[0].get('GpuInfo', {}), indent=2))
     except requests.exceptions.RequestException as request_error:
         raise RuntimeError(f'Failed to fetch instance data: {request_error}'
                           ) from request_error
 
-    # Deduplicate instances by type and region, keeping the cheapest
-    unique_instances = {}
-    for instance in instances:
-        instance_type = instance.get('InstanceType')
-        region = instance.get('Region', 'default')
-        key = (instance_type, region)
-
-        # Convert price to float for comparison
-        try:
-            current_price = float(instance.get('Price', float('inf')))
-        except (ValueError, TypeError):
-            current_price = float('inf')
-
-        # Keep the instance with the lowest price
-        if key not in unique_instances:
-            unique_instances[key] = instance
-        else:
-            existing_price = float(unique_instances[key].get(
-                'Price', float('inf')))
-            if current_price < existing_price:
-                unique_instances[key] = instance
-
     os.makedirs('hyperbolic', exist_ok=True)
-    with open('hyperbolic/vms.csv', 'w', newline='', encoding='utf-8') as f:
-        fieldnames = [
-            'InstanceType', 'AcceleratorCount', 'AcceleratorName', 'MemoryGiB',
-            'StorageGiB', 'vCPUs', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
-        for instance in unique_instances.values():
-            try:
-                entry = instance.copy()
-                # Add default region if not present
-                if 'Region' not in entry:
-                    entry['Region'] = 'default'
-                # Add empty SpotPrice
-                entry['SpotPrice'] = ''
-                # Format GpuInfo to match expected format
-                gpu_info = instance.get('GpuInfo', {})
-                if gpu_info:
-                    # TODO: Update this once catalog endpoint returns
-                    # data in SkyPilot's expected format
-                    formatted_gpu_info = {
-                        'Gpus': [{
-                            'Name': gpu_info['model'],
-                            'Manufacturer': 'NVIDIA',
-                            'Count': str(instance['AcceleratorCount']) + '.0',
-                            'MemoryInfo': {
-                                'SizeInMiB': gpu_info['ram']
-                            }
-                        }],
-                        'TotalGpuMemoryInMiB': gpu_info['ram'] *
-                                               instance['AcceleratorCount']
-                    }
-                    # Convert to string representation that can be parsed by
-                    # ast.literal_eval
-                    # pylint: disable=invalid-string-quote
-                    gpu_info_str = json.dumps(formatted_gpu_info).replace(
-                        '"', "'")
-                    # Ensure the GpuInfo field is properly quoted in the CSV
-                    entry['GpuInfo'] = gpu_info_str
-                writer.writerow(entry)
-            except (KeyError, ValueError) as instance_error:
-                instance_type = instance.get('InstanceType', 'unknown')
-                print(f'Error processing {instance_type}: {instance_error}')
+    with open('hyperbolic/vms.csv', 'w', encoding='utf-8') as f:
+        writer = csv.writer(f, delimiter=',', quotechar='"')
+        writer.writerow([
+            'InstanceType',
+            'AcceleratorName',
+            'AcceleratorCount',
+            'vCPUs',
+            'MemoryGiB',
+            'StorageGiB',
+            'Price',
+            'Region',
+            'GpuInfo',
+            'SpotPrice',
+        ])
+        for instance in instances:
+            writer.writerow([
+                instance.get('InstanceType'),
+                instance.get('AcceleratorName'),
+                instance.get('AcceleratorCount'),
+                instance.get('vCPUs'),
+                instance.get('MemoryGiB'),
+                instance.get('StorageGiB'),
+                instance.get('Price'),
+                instance.get('Region', 'default'),
+                str(instance.get('GpuInfo', {})),
+                instance.get('SpotPrice', ''),
+            ])
 
 
 if __name__ == '__main__':
