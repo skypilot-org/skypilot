@@ -64,6 +64,7 @@ repos:
     rev: v2.14.5  # Match the version from requirements
     hooks:
     -   id: pylint
+        language_version: python3.11 # pylint doesn't support python 3.12 until v3.0.0
         additional_dependencies:
             - pylint-quotes==0.2.3  # Match the version from requirements
         name: pylint
