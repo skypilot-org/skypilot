@@ -578,11 +578,6 @@ class Kubernetes(clouds.Cloud):
             timeout,
             override_configs=resources.cluster_config_overrides)
 
-        # Set environment variables for the pod. Note that SkyPilot env vars
-        # are set separately when the task is run. These env vars are
-        # independent of the SkyPilot task to be run.
-        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
-
         # Check if this cluster supports high performance networking and
         # configure IPC_LOCK capability for clusters like Nebius that support it
         k8s_ipc_lock_capability = False
