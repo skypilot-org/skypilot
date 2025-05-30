@@ -13,7 +13,7 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
@@ -546,7 +546,9 @@ def cancel_job_by_name(job_name: str,
     return f'{job_name!r} {msg}'
 
 
-def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
+def stream_logs_by_id(job_id: int,
+                      follow: bool = True,
+                      tail: Optional[int] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
     Returns:
@@ -583,7 +585,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
-                    for line in f:
+                    read_from: Union[TextIO, Deque[str]] = f
+                    if tail is not None:
+                        assert tail > 0
+                        # Read only the last 'tail' lines using deque
+                        read_from = collections.deque(f, maxlen=tail)
+                    for line in read_from:
                         if log_lib.LOG_FILE_START_STREAMING_AT in line:
                             start_streaming = True
                         if start_streaming:
@@ -644,10 +651,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
+            tail_param = tail if tail is not None else 0
             returncode = backend.tail_logs(handle,
                                            job_id=None,
                                            managed_job_id=job_id,
-                                           follow=follow)
+                                           follow=follow,
+                                           tail=tail_param)
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
@@ -784,7 +793,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
 def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
                 controller: bool = False,
-                follow: bool = True) -> Tuple[str, int]:
+                follow: bool = True,
+                tail: Optional[int] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
     Returns:
@@ -855,7 +865,12 @@ def stream_logs(job_id: Optional[int],
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
             # Note: we do not need to care about start_stream_at here, since
             # that should be in the job log printed above.
-            for line in f:
+            read_from: Union[TextIO, Deque[str]] = f
+            if tail is not None:
+                assert tail > 0
+                # Read only the last 'tail' lines efficiently using deque
+                read_from = collections.deque(f, maxlen=tail)
+            for line in read_from:
                 print(line, end='')
             # Flush.
             print(end='', flush=True)
@@ -907,7 +922,7 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow)
+    return stream_logs_by_id(job_id, follow, tail)
 
 
 def dump_managed_job_queue() -> str:
@@ -1370,10 +1385,16 @@ class ManagedJobCodeGen:
                     job_name: Optional[str],
                     job_id: Optional[int],
                     follow: bool = True,
-                    controller: bool = False) -> str:
+                    controller: bool = False,
+                    tail: Optional[int] = None) -> str:
         code = textwrap.dedent(f"""\
-        result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
-                                follow={follow}, controller={controller})
+        if managed_job_version < 6:
+            # Versions before 5 did not support tail parameter
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

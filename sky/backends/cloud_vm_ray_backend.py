@@ -3950,11 +3950,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
                               controller: bool = False,
-                              follow: bool = True) -> int:
+                              follow: bool = True,
+                              tail: Optional[int] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller)
+            job_name, job_id, follow, controller, tail)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

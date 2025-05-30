@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
@@ -27,8 +27,8 @@ function JobDetails() {
   const [scrollExecuted, setScrollExecuted] = useState(false);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [domReady, setDomReady] = useState(false);
-  const [logsRefreshKey, setLogsRefreshKey] = useState(0);
-  const [controllerLogsRefreshKey, setControllerLogsRefreshKey] = useState(0);
+  const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
+  const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -109,9 +109,9 @@ function JobDetails() {
       // Trigger job data refresh
       setRefreshTrigger((prev) => prev + 1);
       // Trigger logs refresh
-      setLogsRefreshKey((prev) => prev + 1);
+      setRefreshLogsFlag((prev) => prev + 1);
       // Trigger controller logs refresh
-      setControllerLogsRefreshKey((prev) => prev + 1);
+      setRefreshControllerLogsFlag((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -121,11 +121,11 @@ function JobDetails() {
 
   // Individual refresh handlers for logs
   const handleLogsRefresh = () => {
-    setLogsRefreshKey((prev) => prev + 1);
+    setRefreshLogsFlag((prev) => prev + 1);
   };
 
   const handleControllerLogsRefresh = () => {
-    setControllerLogsRefreshKey((prev) => prev + 1);
+    setRefreshControllerLogsFlag((prev) => prev + 1);
   };
 
   if (!router.isReady) {
@@ -204,6 +204,7 @@ function JobDetails() {
                     setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
+                    refreshFlag={0}
                   />
                 </div>
               </Card>
@@ -237,13 +238,13 @@ function JobDetails() {
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
-                    key={logsRefreshKey}
                     jobData={detailJobData}
                     activeTab="logs"
                     setIsLoadingLogs={setIsLoadingLogs}
                     setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
+                    refreshFlag={refreshLogsFlag}
                   />
                 </div>
               </Card>
@@ -277,13 +278,13 @@ function JobDetails() {
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
-                    key={controllerLogsRefreshKey}
                     jobData={detailJobData}
                     activeTab="controllerlogs"
                     setIsLoadingLogs={setIsLoadingLogs}
                     setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                     isLoadingLogs={isLoadingLogs}
                     isLoadingControllerLogs={isLoadingControllerLogs}
+                    refreshFlag={refreshControllerLogsFlag}
                   />
                 </div>
               </Card>
@@ -306,11 +307,68 @@ function JobDetailsContent({
   setIsLoadingControllerLogs,
   isLoadingLogs,
   isLoadingControllerLogs,
+  refreshFlag,
 }) {
-  const [logs, setLogs] = useState([]);
-  const [controllerLogs, setControllerLogs] = useState([]);
+  // Change from array to string for better performance
+  const [logs, setLogs] = useState('');
+  const [controllerLogs, setControllerLogs] = useState('');
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
+
+  // Add state for tracking incremental refresh
+  const [currentLogLength, setCurrentLogLength] = useState(0);
+  const [currentControllerLogLength, setCurrentControllerLogLength] =
+    useState(0);
+  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+  const [isRefreshingControllerLogs, setIsRefreshingControllerLogs] =
+    useState(false);
+
+  // Add state for streaming indicators
+  const [hasStartedLoading, setHasStartedLoading] = useState(false);
+  const [hasReceivedFirstChunk, setHasReceivedFirstChunk] = useState(false);
+
+  // Add refs to track active requests and prevent duplicates
+  const activeLogsRequest = useRef(null);
+  const activeControllerLogsRequest = useRef(null);
+
+  // Auto-scroll refs
+  const logsContainerRef = useRef(null);
+  const controllerLogsContainerRef = useRef(null);
+
+  // Performance optimization refs
+  const logsBatchRef = useRef('');
+  const controllerLogsBatchRef = useRef('');
+  const updateTimeoutRef = useRef(null);
+  const lastUpdateTimeRef = useRef(0);
+
+  // Configuration for performance
+  const BATCH_UPDATE_INTERVAL = 100; // Batch updates every 100ms
+  const THROTTLE_INTERVAL = 50; // Minimum time between updates
+
+  // Custom hook for auto-scrolling
+  const scrollToBottom = useCallback((logType) => {
+    const containerRef =
+      logType === 'logs' ? logsContainerRef : controllerLogsContainerRef;
+
+    if (!containerRef.current) return;
+
+    // Try multiple ways to find the scrollable container
+    const attempts = [
+      () => containerRef.current.querySelector('.logs-container'),
+      () => containerRef.current.querySelector('[class*="logs-container"]'),
+      () => containerRef.current.querySelector('div[style*="overflow"]'),
+      () => containerRef.current, // Fallback to the ref itself
+    ];
+
+    for (const attempt of attempts) {
+      const container = attempt();
+      if (container && container.scrollHeight > container.clientHeight) {
+        container.scrollTop = container.scrollHeight;
+        console.log(`Auto-scrolled ${logType} to bottom`); // Debug log
+        break;
+      }
+    }
+  }, []);
 
   const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
   const PRE_START_STATUSES = ['PENDING', 'SUBMITTED'];
@@ -434,33 +492,66 @@ function JobDetailsContent({
 
   // Clear logs when activeTab changes or when jobData.id changes
   useEffect(() => {
-    setLogs([]);
+    setLogs('');
+    setCurrentLogLength(0);
+    setHasReceivedFirstChunk(false);
   }, [activeTab, jobData.id]);
 
   useEffect(() => {
-    setControllerLogs([]);
+    setControllerLogs('');
+    setCurrentControllerLogLength(0);
+    setHasReceivedFirstChunk(false);
   }, [activeTab, jobData.id]);
 
-  // Define a function to handle both log types
+  // Define a function to handle both log types with simplified logic
   const fetchLogs = useCallback(
-    (logType, jobId, setLogs, setIsLoading) => {
+    (logType, jobId, setLogs, setIsLoading, isRefreshing = false) => {
+      // Check if there's already an active request for this log type
+      const activeRequestRef =
+        logType === 'logs' ? activeLogsRequest : activeControllerLogsRequest;
+
+      if (activeRequestRef.current) {
+        console.log(`Request already active for ${logType}, skipping...`);
+        return () => {};
+      }
+
       let active = true;
       const controller = new AbortController();
 
       // Don't fetch logs if job is in pending state
       if (logType === 'logs' && (isPending || isRecovering)) {
         setIsLoading(false);
+        if (isRefreshing) {
+          setIsRefreshingLogs(false);
+        }
         return () => {};
       }
 
       // Don't fetch controller logs if job is in pre-start state
       if (logType === 'controllerlogs' && isPreStart) {
         setIsLoading(false);
+        if (isRefreshing) {
+          setIsRefreshingControllerLogs(false);
+        }
         return () => {};
       }
 
-      if (activeTab === logType && jobId) {
+      if (jobId) {
+        // Mark request as active
+        activeRequestRef.current = controller;
+
         setIsLoading(true);
+        setHasStartedLoading(true);
+
+        // If refreshing, clear and restart
+        if (isRefreshing) {
+          setLogs('');
+          if (logType === 'logs') {
+            setCurrentLogLength(0);
+          } else {
+            setCurrentControllerLogLength(0);
+          }
+        }
 
         streamManagedJobLogs({
           jobId: jobId,
@@ -469,13 +560,41 @@ function JobDetailsContent({
           onNewLog: (log) => {
             if (active) {
               const strippedLog = formatLogs(log);
-              setLogs((prevLogs) => [...prevLogs, strippedLog]);
+
+              // Set first chunk received flag for immediate display
+              if (!hasReceivedFirstChunk) {
+                setHasReceivedFirstChunk(true);
+              }
+
+              // Use batched updates for performance
+              updateLogsWithBatching(logType, strippedLog);
+
+              // Update length tracking
+              if (logType === 'logs') {
+                setCurrentLogLength((prev) => prev + strippedLog.length);
+              } else {
+                setCurrentControllerLogLength(
+                  (prev) => prev + strippedLog.length
+                );
+              }
             }
           },
         })
           .then(() => {
             if (active) {
               setIsLoading(false);
+              if (isRefreshing) {
+                if (logType === 'logs') {
+                  setIsRefreshingLogs(false);
+                } else {
+                  setIsRefreshingControllerLogs(false);
+                }
+              }
+
+              // Final scroll to bottom when loading completes
+              requestAnimationFrame(() => {
+                scrollToBottom(logType);
+              });
             }
           })
           .catch((error) => {
@@ -484,48 +603,266 @@ function JobDetailsContent({
               if (error.name !== 'AbortError') {
                 console.error(`Error streaming ${logType}:`, error);
                 if (error.message) {
-                  setLogs((prevLogs) => [
-                    ...prevLogs,
-                    `Error fetching logs: ${error.message}`,
-                  ]);
+                  setLogs(
+                    (prevLogs) =>
+                      prevLogs + `Error fetching logs: ${error.message}\n`
+                  );
                 }
               }
               setIsLoading(false);
+              if (isRefreshing) {
+                if (logType === 'logs') {
+                  setIsRefreshingLogs(false);
+                } else {
+                  setIsRefreshingControllerLogs(false);
+                }
+              }
+            }
+          })
+          .finally(() => {
+            console.log(`Cleaning up ${logType} request`);
+            active = false;
+
+            // Abort the controller if it matches the current one
+            if (activeRequestRef.current === controller) {
+              activeRequestRef.current.abort();
+              activeRequestRef.current = null;
+            }
+
+            // Clear any pending batch updates for this log type
+            if (logType === 'logs') {
+              logsBatchRef.current = '';
+            } else {
+              controllerLogsBatchRef.current = '';
+            }
+
+            // Clear update timeout
+            if (updateTimeoutRef.current) {
+              clearTimeout(updateTimeoutRef.current);
+              updateTimeoutRef.current = null;
             }
           });
 
         // Return cleanup function
         return () => {
+          console.log(`Cleaning up ${logType} request`);
           active = false;
+
+          // Abort the controller if it matches the current one
+          if (activeRequestRef.current === controller) {
+            activeRequestRef.current.abort();
+            activeRequestRef.current = null;
+          }
+
+          // Clear any pending batch updates for this log type
+          if (logType === 'logs') {
+            logsBatchRef.current = '';
+          } else {
+            controllerLogsBatchRef.current = '';
+          }
+
+          // Clear update timeout
+          if (updateTimeoutRef.current) {
+            clearTimeout(updateTimeoutRef.current);
+            updateTimeoutRef.current = null;
+          }
         };
       }
       return () => {
         active = false;
       };
     },
-    [activeTab, isPending, isPreStart, isRecovering]
+    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk]
   );
 
-  // Only fetch logs when actually viewing the logs tab
+  // Fetch both logs and controller logs in parallel, regardless of activeTab
   useEffect(() => {
-    const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
-    return cleanup;
-  }, [activeTab, jobData.id, fetchLogs, setIsLoadingLogs]);
+    // Cancel any existing request
+    if (activeLogsRequest.current) {
+      activeLogsRequest.current.abort();
+      activeLogsRequest.current = null;
+    }
 
-  // Only fetch controller logs when actually viewing the controller logs tab
+    // Only fetch if not in pending/recovering state
+    if (!isPending && !isRecovering) {
+      const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
+      return cleanup;
+    }
+  }, [jobData.id, fetchLogs, setIsLoadingLogs, isPending, isRecovering]);
+
   useEffect(() => {
-    const cleanup = fetchLogs(
-      'controllerlogs',
-      jobData.id,
-      setControllerLogs,
-      setIsLoadingControllerLogs
-    );
-    return cleanup;
-  }, [activeTab, jobData.id, fetchLogs, setIsLoadingControllerLogs]);
+    // Cancel any existing request
+    if (activeControllerLogsRequest.current) {
+      activeControllerLogsRequest.current.abort();
+      activeControllerLogsRequest.current = null;
+    }
+
+    // Only fetch if not in pre-start state
+    if (!isPreStart) {
+      const cleanup = fetchLogs(
+        'controllerlogs',
+        jobData.id,
+        setControllerLogs,
+        setIsLoadingControllerLogs
+      );
+      return cleanup;
+    }
+  }, [jobData.id, fetchLogs, setIsLoadingControllerLogs, isPreStart]);
+
+  // Handle refresh for logs
+  useEffect(() => {
+    if (refreshFlag > 0 && activeTab === 'logs') {
+      // Cancel any existing request
+      if (activeLogsRequest.current) {
+        activeLogsRequest.current.abort();
+        activeLogsRequest.current = null;
+      }
+
+      setIsRefreshingLogs(true);
+      const cleanup = fetchLogs(
+        'logs',
+        jobData.id,
+        setLogs,
+        setIsLoadingLogs,
+        true // isRefreshing = true
+      );
+      return cleanup;
+    }
+  }, [refreshFlag, activeTab, jobData.id, fetchLogs, setIsLoadingLogs]);
+
+  // Handle refresh for controller logs
+  useEffect(() => {
+    if (refreshFlag > 0 && activeTab === 'controllerlogs') {
+      // Cancel any existing request
+      if (activeControllerLogsRequest.current) {
+        activeControllerLogsRequest.current.abort();
+        activeControllerLogsRequest.current = null;
+      }
+
+      setIsRefreshingControllerLogs(true);
+      const cleanup = fetchLogs(
+        'controllerlogs',
+        jobData.id,
+        setControllerLogs,
+        setIsLoadingControllerLogs,
+        true // isRefreshing = true
+      );
+      return cleanup;
+    }
+  }, [
+    refreshFlag,
+    activeTab,
+    jobData.id,
+    fetchLogs,
+    setIsLoadingControllerLogs,
+  ]);
+
+  // Comprehensive cleanup when component unmounts or user navigates away
+  useEffect(() => {
+    return () => {
+      console.log('Cleaning up managed job log requests...');
+
+      // Abort all active log requests
+      if (activeLogsRequest.current) {
+        activeLogsRequest.current.abort();
+        activeLogsRequest.current = null;
+      }
+
+      if (activeControllerLogsRequest.current) {
+        activeControllerLogsRequest.current.abort();
+        activeControllerLogsRequest.current = null;
+      }
+
+      // Clear all timeouts
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
+
+      // Clear any pending batches
+      logsBatchRef.current = '';
+      controllerLogsBatchRef.current = '';
+
+      // Reset loading states to prevent any UI inconsistencies
+      setIsLoadingLogs(false);
+      setIsLoadingControllerLogs(false);
+      setIsRefreshingLogs(false);
+      setIsRefreshingControllerLogs(false);
+    };
+  }, []); // Empty dependency array means this runs only on unmount
+
+  // Handle page visibility changes to pause streaming when tab is not active
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('Page hidden - pausing log streaming for performance');
+
+        // Optionally abort active requests when page is hidden
+        // Uncomment if you want to completely stop streaming when tab is not visible
+        /*
+        if (activeLogsRequest.current) {
+          activeLogsRequest.current.abort();
+          activeLogsRequest.current = null;
+        }
+        if (activeControllerLogsRequest.current) {
+          activeControllerLogsRequest.current.abort();
+          activeControllerLogsRequest.current = null;
+        }
+        */
+
+        // Clear any pending batch updates to reduce background processing
+        if (updateTimeoutRef.current) {
+          clearTimeout(updateTimeoutRef.current);
+          updateTimeoutRef.current = null;
+        }
+      } else {
+        console.log('Page visible - resuming normal operation');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Auto-scroll to bottom when logs change or tab changes
+  useEffect(() => {
+    const performScroll = () => {
+      if (
+        (activeTab === 'logs' && logs) ||
+        (activeTab === 'controllerlogs' && controllerLogs)
+      ) {
+        scrollToBottom(activeTab === 'logs' ? 'logs' : 'controllerlogs');
+      }
+    };
+
+    // Use requestAnimationFrame for better timing after DOM updates
+    requestAnimationFrame(() => {
+      requestAnimationFrame(performScroll); // Double RAF to ensure DOM is updated
+    });
+  }, [activeTab, logs, controllerLogs, scrollToBottom]);
+
+  // Performance-optimized log update function
+  const updateLogsWithBatching = useCallback(
+    (logType, newChunk) => {
+      const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
+
+      // Simple string append - no batching needed with backend tail
+      setLogsFunction((prevLogs) => prevLogs + newChunk);
+
+      // Auto-scroll after update
+      requestAnimationFrame(() => {
+        scrollToBottom(logType);
+      });
+    },
+    [scrollToBottom]
+  );
 
   if (activeTab === 'logs') {
     return (
-      <div className="max-h-96 overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
         {isPending ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>
@@ -538,13 +875,15 @@ function JobDetailsContent({
               Waiting for the job to recover, please refresh after a while
             </span>
           </div>
+        ) : hasReceivedFirstChunk || logs ? (
+          <LogFilter logs={logs} />
         ) : isLoadingLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
-            <span>Loading...</span>
+            <span>Loading logs...</span>
           </div>
         ) : (
-          <LogFilter logs={logs.join('')} />
+          <LogFilter logs={logs} />
         )}
       </div>
     );
@@ -552,7 +891,10 @@ function JobDetailsContent({
 
   if (activeTab === 'controllerlogs') {
     return (
-      <div className="max-h-96 overflow-y-auto">
+      <div
+        className="max-h-96 overflow-y-auto"
+        ref={controllerLogsContainerRef}
+      >
         {isPreStart ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>
@@ -560,13 +902,15 @@ function JobDetailsContent({
               after a while
             </span>
           </div>
+        ) : hasReceivedFirstChunk || controllerLogs ? (
+          <LogFilter logs={controllerLogs} controller={true} />
         ) : isLoadingControllerLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
-            <span>Loading...</span>
+            <span>Loading logs...</span>
           </div>
         ) : (
-          <LogFilter logs={controllerLogs.join('')} controller={true} />
+          <LogFilter logs={controllerLogs} controller={true} />
         )}
       </div>
     );
