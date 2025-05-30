@@ -88,18 +88,19 @@ def create_catalog() -> None:
                 # Format GpuInfo to match expected format
                 gpu_info = instance.get('GpuInfo', {})
                 if gpu_info:
+                    # TODO: Update this once catalog endpoint returns
+                    # data in SkyPilot's expected format
                     formatted_gpu_info = {
                         'Gpus': [{
-                            'Name': instance.get('AcceleratorName', ''),
+                            'Name': gpu_info['model'],
                             'Manufacturer': 'NVIDIA',
-                            'Count': str(instance.get('AcceleratorCount', 1)) +
-                                     '.0',
+                            'Count': str(instance['AcceleratorCount']) + '.0',
                             'MemoryInfo': {
-                                'SizeInMiB': gpu_info.get('ram', 0)
+                                'SizeInMiB': gpu_info['ram']
                             }
                         }],
-                        'TotalGpuMemoryInMiB': gpu_info.get(
-                            'ram', 0) * instance.get('AcceleratorCount', 1)
+                        'TotalGpuMemoryInMiB': gpu_info['ram'] *
+                                               instance['AcceleratorCount']
                     }
                     # Convert to string representation that can be parsed by
                     # ast.literal_eval
