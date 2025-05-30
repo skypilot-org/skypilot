@@ -10,6 +10,7 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
+from sky.utils import resources_utils
 
 logger = logging.getLogger(__name__)
 
@@ -788,7 +789,8 @@ def _configure_subnet(region: str, cluster_name: str,
     default_interfaces = []
     enable_gpu_direct = config.provider_config.get('enable_gpu_direct', False)
     enable_gvnic = config.provider_config.get('enable_gvnic', False)
-    if enable_gpu_direct:
+    network_tier = config.provider_config.get('network_tier', 'standard')
+    if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
         if not enable_gvnic:
             logger.warning(
                 'Enable GPU Direct requires gvnic to be enabled, enabling gvnic'

@@ -25,6 +25,9 @@ class Vast(clouds.Cloud):
              'are non-trivial on Vast.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Vast.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is currently not supported on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
