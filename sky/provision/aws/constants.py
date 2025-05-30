@@ -5,12 +5,12 @@ import textwrap
 # Based on the table in the EFA README
 EFA_SUPPORTED_INSTANCE_TYPES = [
     'p4d.24xlarge',
-    'p4de.24xlarge', 
+    'p4de.24xlarge',
     'p5.48xlarge',
     'p5e.48xlarge',
     'p5en.48xlarge',
     'g5.8xlarge',
-    'g5.12xlarge', 
+    'g5.12xlarge',
     'g5.16xlarge',
     'g5.24xlarge',
     'g5.48xlarge',
@@ -20,7 +20,7 @@ EFA_SUPPORTED_INSTANCE_TYPES = [
     'g4dn.metal',
     'g6.8xlarge',
     'g6.12xlarge',
-    'g6.16xlarge', 
+    'g6.16xlarge',
     'g6.24xlarge',
     'g6.48xlarge',
     'g6e.8xlarge',
@@ -128,4 +128,4 @@ EFA_DOCKER_OPTIONS = [
     '--env NCCL_P2P_NET_CHUNKSIZE=524288',
     '--env NCCL_ALGO=Ring',
     '--env NCCL_PROTO=Simple',
-] 
+]

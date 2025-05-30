@@ -480,6 +480,12 @@ class Kubernetes(clouds.Cloud):
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
 
+        # Set environment variables for the pod. Note that SkyPilot env vars
+        # are set separately when the task is run. These env vars are
+        # independent of the SkyPilot task to be run.
+        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+
+        # Setup GPU/TPU labels and resource keys.
         k8s_acc_label_key = None
         k8s_acc_label_values = None
         k8s_topology_label_key = None
@@ -501,6 +507,17 @@ class Kubernetes(clouds.Cloud):
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
         else:
+            # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
+            # maintain GPU isolation. This is to override the default behavior
+            # of Nvidia device plugin which would expose all GPUs to the pod
+            # when no GPUs are requested.
+            # Note that NVIDIA_VISIBLE_DEVICES is different from
+            # CUDA_VISIBLE_DEVICES - the latter is used to control which GPUs
+            # are visible to the application and is set inside the pod, while
+            # the former is used to control which GPUs are visible to the pod
+            # through the nvidia runtime.
+            # See: https://github.com/NVIDIA/k8s-device-plugin/issues/61
+            k8s_env_vars['NVIDIA_VISIBLE_DEVICES'] = 'none'
             avoid_label_keys = kubernetes_utils.get_accelerator_label_keys(
                 context)
             if len(avoid_label_keys) == 0:
