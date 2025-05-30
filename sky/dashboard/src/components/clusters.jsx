@@ -470,7 +470,9 @@ export function ClusterTable({
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
-                    <TableCell>{formatAutostop(item.autostop, item.to_down)}</TableCell>
+                    <TableCell>
+                      {formatAutostop(item.autostop, item.to_down)}
+                    </TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
