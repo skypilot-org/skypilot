@@ -406,12 +406,12 @@ Following tabs describe how to configure credentials for different clouds on the
 
             workspaces:
 
-              serviceaccount-1:
+              team-a:
                 nebius:
                   credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
                   tenant_id: tenant-rrww0kh3nnfo7v0dgw
 
-              serviceaccount-2:
+              team-b:
                 nebius:
                   credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
                   tenant_id: tenant-52czfp5clbtq0er1ol
