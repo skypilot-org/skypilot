@@ -354,50 +354,6 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
                       default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
 
 
-def get_default_role() -> str:
-    return get_nested(keys=('rbac', 'default_role'), default_value='admin')
-
-
-def get_role_permissions(
-) -> Dict[str, Dict[str, Dict[str, List[Dict[str, str]]]]]:
-    """Get all role permissions from config.
-
-    Returns:
-        Dictionary containing all roles and their permissions configuration.
-        Example:
-        {
-            'admin': {
-                'permissions': {
-                    'black_list': []
-                }
-            },
-            'user': {
-                'permissions': {
-                    'black_list': [
-                        {'path': '/workspaces/config', 'method': 'POST'},
-                        {'path': '/workspaces/update', 'method': 'POST'}
-                    ]
-                }
-            }
-        }
-    """
-    # Get all roles from the config
-    roles = get_nested(('rbac', 'roles'), default_value={})
-    result: Dict[str, Dict[str, Dict[str, List[Dict[str, str]]]]] = {}
-    for role, permissions in roles.items():
-        # Ensure the permissions structure has the correct format
-        if not permissions or 'permissions' not in permissions:
-            result[role.lower()] = {'permissions': {'black_list': []}}
-            continue
-
-        # Ensure black_list exists in permissions
-        if 'black_list' not in permissions['permissions']:
-            permissions['permissions']['black_list'] = []
-
-        result[role.lower()] = permissions
-    return result
-
-
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key set to value.
 

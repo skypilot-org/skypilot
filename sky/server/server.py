@@ -34,7 +34,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
@@ -43,7 +42,6 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
-from sky.server import rbac
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -51,6 +49,8 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import rbac
+from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -102,6 +102,22 @@ logger = sky_logging.init_logger(__name__)
 # response will block other requests from being processed.
 
 
+class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle RBAC."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        user_id = await _get_user_id(request)
+        if user_id is None:
+            return await call_next(request)
+
+        # Check the role permission
+        if users_rest.permission_service.check_permission(
+                user_id, request.url.path, request.method):
+            raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+
+        return await call_next(request)
+
+
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
@@ -115,6 +131,25 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
+async def _get_user_id(request: fastapi.Request) -> Optional[str]:
+    if 'X-Auth-Request-Email' in request.headers:
+        user_name = request.headers['X-Auth-Request-Email']
+        user_hash = hashlib.md5(
+            user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        return user_hash
+    body = await request.body()
+    if body:
+        try:
+            original_json = json.loads(body)
+        except json.JSONDecodeError as e:
+            logger.error(f'Error parsing request JSON: {e}')
+        else:
+            if ('env_vars' in original_json and
+                    constants.USER_ID_ENV_VAR in original_json['env_vars']):
+                return original_json['env_vars'][constants.USER_ID_ENV_VAR]
+    return None
+
+
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     if 'X-Auth-Request-Email' not in request.headers:
         return None
@@ -123,7 +158,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash,
                        name=user_name,
-                       role=skypilot_config.get_default_role())
+                       role=rbac.get_default_role())
 
 
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -135,20 +170,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Add user to database if auth_user is present
         if auth_user is not None:
             global_user_state.add_or_update_user(auth_user)
-            # Check the role permission
-            # TODO(hailong): how to handle the case where auth_user is None?
-            user_info = global_user_state.get_user(auth_user.id)
-            if user_info is None:
-                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
-            role_name = user_info.role
-            if not role_name:
-                # Default to admin role to keep backward compatibility
-                role_name = rbac.RoleName.ADMIN.value
-            role_info = global_user_state.get_role(role_name)
-            if role_info is None:
-                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
-            if not role_info.has_permission(request.url.path, request.method):
-                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+            users_rest.permission_service.add_role(auth_user.id, auth_user.role)
 
         body = await request.body()
         if auth_user and body:
@@ -282,8 +304,10 @@ app.add_middleware(
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(RBACMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(users_rest.router, prefix='/users', tags=['users'])
 app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
@@ -851,20 +875,6 @@ async def logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
-
-
-@app.get('/users')
-async def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
-    user_list = global_user_state.get_all_users()
-    return [user.to_dict() for user in user_list]
-
-
-@app.post('/users/update')
-async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
-    """Updates the user role."""
-    global_user_state.update_user(user_update_body.user_id,
-                                  user_update_body.role)
 
 
 @app.post('/download_logs')

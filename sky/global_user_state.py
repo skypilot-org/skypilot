@@ -71,13 +71,6 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('role', sqlalchemy.Text, server_default='admin'),
 )
 
-role_table = sqlalchemy.Table(
-    'roles',
-    Base.metadata,
-    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('black_list', sqlalchemy.Text),
-)
-
 cluster_table = sqlalchemy.Table(
     'clusters',
     Base.metadata,
@@ -296,62 +289,13 @@ def create_table():
         session.commit()
 
 
-def add_or_update_role(role: models.Role):
-    """Store the role and its permissions."""
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
-        else:
-            raise ValueError('Unsupported database dialect')
-        # Convert black_list to JSON string
-        black_list_json = json.dumps(role.black_list)
-        insert_stmnt = insert_func(role_table).values(
-            name=role.name, black_list=black_list_json)
-        do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[role_table.c.name],
-            set_={role_table.c.black_list: black_list_json})
-        session.execute(do_update_stmt)
-        session.commit()
-
-
-def init_role_records():
-    from sky.server import rbac  # pylint: disable=import-outside-toplevel
-    for role, permissions in rbac.get_role_permissions().items():
-        role_record = models.Role(
-            name=role, black_list=permissions['permissions']['black_list'])
-        add_or_update_role(role_record)
-
-
 create_table()
-init_role_records()
-
-
-def get_role(role_name: str) -> models.Role:
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(role_table).filter_by(name=role_name).first()
-    if row is None:
-        return models.Role(name=role_name, black_list=[])
-    # Parse black_list from JSON string
-    black_list = json.loads(row.black_list) if row.black_list else []
-    return models.Role(name=row.name, black_list=black_list)
 
 
 def update_user(user_id: str, role: str):
     """Store the mapping from user hash to user name for display purposes."""
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-            update_func = sqlite.update
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            update_func = postgresql.update
-        else:
-            raise ValueError('Unsupported database dialect')
-        update_stmnt = update_func(user_table).where(
+        update_stmnt = sqlalchemy.update(user_table).where(
             user_table.c.id == user_id).values(role=role)
         session.execute(update_stmnt)
         session.commit()
@@ -385,7 +329,7 @@ def get_user(user_id: str) -> models.User:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
-        return models.User(id=user_id)
+        return models.User(id=user_id, role='')
     return models.User(id=row.id, name=row.name, role=row.role)
 
 

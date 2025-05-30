@@ -47,6 +47,7 @@ from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
+from sky.users import rbac
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
@@ -230,7 +231,8 @@ def override_request_env_and_config(
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                       name=request_body.env_vars[constants.USER_ENV_VAR])
+                       name=request_body.env_vars[constants.USER_ENV_VAR],
+                       role=rbac.get_default_role())
     global_user_state.add_or_update_user(user)
     # Force color to be enabled.
     os.environ['CLICOLOR_FORCE'] = '1'

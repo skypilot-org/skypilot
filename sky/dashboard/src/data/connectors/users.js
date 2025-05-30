@@ -37,6 +37,7 @@ export async function getUsers() {
       data.map((user) => ({
         userId: user.id,
         username: user.name,
+        role: user.role,
       })) || []
     );
   } catch (error) {

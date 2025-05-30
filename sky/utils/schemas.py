@@ -1228,7 +1228,7 @@ def get_config_schema():
                                 'required': [],
                                 'additionalProperties': False,
                                 'properties': {
-                                    'black_list': {
+                                    'blocklist': {
                                         'type': 'array',
                                         'items': {
                                             'type': 'object',
