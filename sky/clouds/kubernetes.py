@@ -109,17 +109,6 @@ class Kubernetes(clouds.Cloud):
         context = resources.region
         if context is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
-        # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
-            context)
-        if is_exec_auth:
-            assert isinstance(message, str), message
-            # Controllers cannot spin up new pods with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to down itself with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.AUTODOWN] = message
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
@@ -540,20 +529,17 @@ class Kubernetes(clouds.Cloud):
             # If remote_identity is not a dict, use
             k8s_service_account_name = remote_identity
 
-        if (k8s_service_account_name ==
-                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-            # SA name doesn't matter since automounting credentials is disabled
-            k8s_service_account_name = 'default'
-            k8s_automount_sa_token = 'false'
-        elif (k8s_service_account_name ==
-              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
-            # Use the default service account
+        lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+        sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
+
+        if k8s_service_account_name == lc or k8s_service_account_name == sa:
+            # Use the default service account if remote identity is not set.
+            # For LOCAL_CREDENTIALS, this is for in-cluster authentication
+            # which needs a serviceaccount (specifically for SSH node pools)
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
-            k8s_automount_sa_token = 'true'
-        else:
-            # User specified a custom service account
-            k8s_automount_sa_token = 'true'
+
+        k8s_automount_sa_token = 'true'
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -851,9 +837,13 @@ class Kubernetes(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
+            converted = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(
+                os.path.expanduser(CREDENTIAL_PATH))
+
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+            return {DEFAULT_KUBECONFIG_PATH: converted}
         else:
             return {}
 
