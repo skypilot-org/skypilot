@@ -13,7 +13,7 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
@@ -585,22 +585,16 @@ def stream_logs_by_id(job_id: int,
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
-                    if tail is not None and tail > 0:
-                        # Read only the last 'tail' lines efficiently using
-                        # deque
-                        lines = collections.deque(f, maxlen=tail)
-                        for line in lines:
-                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                                start_streaming = True
-                            if start_streaming:
-                                print(line, end='', flush=True)
-                    else:
-                        # Read all lines
-                        for line in f:
-                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                                start_streaming = True
-                            if start_streaming:
-                                print(line, end='', flush=True)
+                    read_from: Union[TextIO, List[str]] = f
+                    if tail is not None:
+                        assert tail > 0
+                        # Read only the last 'tail' lines using deque
+                        read_from = collections.deque(f, maxlen=tail)
+                    for line in read_from:
+                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (f'{colorama.Fore.YELLOW}'
@@ -871,7 +865,8 @@ def stream_logs(job_id: Optional[int],
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
             # Note: we do not need to care about start_stream_at here, since
             # that should be in the job log printed above.
-            if tail is not None and tail > 0:
+            if tail is not None:
+                assert tail > 0
                 # Read only the last 'tail' lines efficiently using deque
                 lines = collections.deque(f, maxlen=tail)
                 for line in lines:

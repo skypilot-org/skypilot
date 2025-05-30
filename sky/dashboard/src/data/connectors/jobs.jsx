@@ -194,7 +194,7 @@ export async function streamManagedJobLogs({
   signal,
   onNewLog,
 }) {
-  // Use intelligent timeout based on activity, not arbitrary time limit
+  // Measure timeout from last received data, not from start of request.
   const inactivityTimeout = 30000; // 30 seconds of no data activity
   let lastActivity = Date.now();
   let timeoutId;
