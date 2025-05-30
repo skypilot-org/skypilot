@@ -18,20 +18,22 @@ logger = sky_logging.init_logger(__name__)
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
-                      head_only: bool = False) -> Dict[str, Any]:
+                      head_only: bool = False) -> Dict[str, Dict[str, Any]]:
     logger.debug(f'Filtering instances: cluster={cluster_name_on_cloud}, '
                  f'status={status_filters}')
     _ = head_only  # Mark as intentionally unused
 
     # Filter by cluster name using metadata
     instances = utils.list_instances(
-        metadata={'skypilot': {'cluster_name': cluster_name_on_cloud}})
+        metadata={'skypilot': {
+            'cluster_name': cluster_name_on_cloud
+        }})
 
     # Normalize status filters to lowercase
     if status_filters is not None:
         status_filters = [s.lower() for s in status_filters]
 
-    filtered_instances = {}
+    filtered_instances: Dict[str, Dict[str, Any]] = {}
     for instance_id, instance in instances.items():
         try:
             # Check status filter
@@ -329,7 +331,10 @@ def query_instances(
     """Returns the status of the specified instances for Hyperbolic."""
     del provider_config, non_terminated_only  # unused
     # Fetch all instances for this cluster
-    instances = utils.list_instances(metadata={'skypilot': {'cluster_name': cluster_name_on_cloud}})
+    instances = utils.list_instances(
+        metadata={'skypilot': {
+            'cluster_name': cluster_name_on_cloud
+        }})
     if not instances:
         # No instances found: return empty dict to indicate fully deleted
         return {}

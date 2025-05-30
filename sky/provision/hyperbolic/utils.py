@@ -178,7 +178,10 @@ class HyperbolicClient:
                     f'Instance {instance_id} failed to reach ONLINE state')
 
             # Get instance details to get SSH command
-            instances = self.list_instances(metadata={'skypilot': {'cluster_name': name}})
+            instances = self.list_instances(
+                metadata={'skypilot': {
+                    'cluster_name': name
+                }})
             instance = instances.get(instance_id)
             if not instance:
                 raise HyperbolicError(
@@ -200,7 +203,7 @@ class HyperbolicClient:
     def list_instances(
         self,
         status: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None
+        metadata: Optional[Dict[str, Dict[str, str]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status and metadata."""
         endpoint = '/v1/marketplace/instances'
@@ -227,10 +230,13 @@ class HyperbolicClient:
                     continue
 
                 if metadata:
-                    skypilot_metadata = metadata.get('skypilot', {})
+                    skypilot_metadata: Dict[str,
+                                            str] = metadata.get('skypilot', {})
                     cluster_name = skypilot_metadata.get('cluster_name', '')
-                    instance_skypilot = instance.get('userMetadata', {}).get('skypilot', {})
-                    if not instance_skypilot.get('cluster_name', '').startswith(cluster_name):
+                    instance_skypilot = instance.get('userMetadata',
+                                                     {}).get('skypilot', {})
+                    if not instance_skypilot.get('cluster_name',
+                                                 '').startswith(cluster_name):
                         logger.debug(
                             f'Skipping instance {instance.get("id")} - '
                             f'skypilot metadata {instance_skypilot} '
@@ -342,8 +348,9 @@ def launch_instance(gpu_model: str, gpu_count: int,
 
 
 def list_instances(
-        status: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
+    status: Optional[str] = None,
+    metadata: Optional[Dict[str, Dict[str, str]]] = None
+) -> Dict[str, Dict[str, Any]]:
     """List all instances, optionally filtered by status and metadata."""
     return get_client().list_instances(status=status, metadata=metadata)
 
