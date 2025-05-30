@@ -715,6 +715,7 @@ def write_cluster_config(
     # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name)
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
