@@ -327,9 +327,9 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[dict] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[str]]:
+) -> Dict[str, Optional['status_lib.ClusterStatus']]:
     """Returns the status of the specified instances for Hyperbolic."""
-    del provider_config, non_terminated_only  # unused
+    del provider_config  # unused
     # Fetch all instances for this cluster
     instances = utils.list_instances(
         metadata={'skypilot': {
@@ -338,9 +338,21 @@ def query_instances(
     if not instances:
         # No instances found: return empty dict to indicate fully deleted
         return {}
-    statuses: Dict[str, Optional[str]] = {}
+
+    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
     for instance_id, instance in instances.items():
-        statuses[instance_id] = instance.get('status', 'unknown').lower()
+        try:
+            raw_status = instance.get('status', 'unknown').lower()
+            hyperbolic_status = utils.HyperbolicInstanceStatus.from_raw_status(
+                raw_status)
+            status = hyperbolic_status.to_cluster_status()
+            if non_terminated_only and status is None:
+                continue
+            statuses[instance_id] = status
+        except utils.HyperbolicError as e:
+            logger.warning(
+                f'Failed to parse status for instance {instance_id}: {e}')
+            continue
     return statuses
 
 
