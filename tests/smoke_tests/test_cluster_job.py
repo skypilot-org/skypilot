@@ -1940,9 +1940,6 @@ def test_gcp_network_tier():
 def test_gcp_network_tier_with_gpu():
     """Test GCP network_tier=best with GPU to verify GPU Direct functionality."""
     name = smoke_tests_utils.get_cluster_name() + '-gpu-best'
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.GCP.max_cluster_name_length())
-    region = 'us-central1'
 
     test = smoke_tests_utils.Test(
         'gcp-network-tier-best-gpu',
