@@ -1135,7 +1135,7 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     """
     yaml_str = get_cluster_yaml_str(cluster_yaml_path)
     if yaml_str is None:
-        return dict()
+        raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
     return yaml.safe_load(yaml_str)
 
 
