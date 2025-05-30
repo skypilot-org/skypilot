@@ -865,16 +865,13 @@ def stream_logs(job_id: Optional[int],
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
             # Note: we do not need to care about start_stream_at here, since
             # that should be in the job log printed above.
+            read_from: Union[TextIO, Deque[str]] = f
             if tail is not None:
                 assert tail > 0
                 # Read only the last 'tail' lines efficiently using deque
-                lines = collections.deque(f, maxlen=tail)
-                for line in lines:
-                    print(line, end='')
-            else:
-                # Read all lines
-                for line in f:
-                    print(line, end='')
+                read_from = collections.deque(f, maxlen=tail)
+            for line in read_from:
+                print(line, end='')
             # Flush.
             print(end='', flush=True)
 
@@ -1391,7 +1388,7 @@ class ManagedJobCodeGen:
                     controller: bool = False,
                     tail: Optional[int] = None) -> str:
         code = textwrap.dedent(f"""\
-        if managed_job_version < 5:
+        if managed_job_version < 6:
             # Versions before 5 did not support tail parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller})
