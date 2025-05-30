@@ -1058,7 +1058,7 @@ export function Status2Actions({
   );
 }
 
-export function ClusterJobs({ clusterName, clusterJobData, loading }) {
+export function ClusterJobs({ clusterName, clusterJobData, loading, refreshClusterJobsOnly }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
     key: null,
@@ -1152,12 +1152,24 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
       <Card>
         <div className="flex items-center justify-between p-4">
           <h3 className="text-lg font-semibold">Cluster Jobs</h3>
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
+          <div className="flex items-center">
+            {loading && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading jobs...</span>
+              </div>
+            )}
+            {refreshClusterJobsOnly && (
+              <button
+                onClick={refreshClusterJobsOnly}
+                disabled={loading}
+                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center text-sm ml-2"
+              >
+                <RotateCwIcon className="w-4 h-4 mr-1" />
+                Refresh Jobs
+              </button>
+            )}
+          </div>
         </div>
         <Table>
           <TableHeader>
