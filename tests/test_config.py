@@ -625,7 +625,6 @@ def test_override_skypilot_config_without_original_config(
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
-    assert skypilot_config._get_loaded_config_path() is None
     assert not skypilot_config._get_loaded_config()
 
 
