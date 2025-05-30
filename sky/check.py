@@ -257,7 +257,7 @@ def check_capabilities(
         # Check all workspaces
         workspaces_to_check = available_workspaces
 
-        hide_per_cloud_details_flag = (not verbose and
+        hide_per_cloud_details_flag = (not verbose and clouds is None and
                                        len(workspaces_to_check) > 1)
 
         for ws_name in workspaces_to_check:

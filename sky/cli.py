@@ -4563,7 +4563,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
-    managed_jobs.dashboard()
+    sdk.dashboard(starting_page='jobs')
 
 
 @cli.command(cls=_DocumentedCodeCommand)

@@ -183,22 +183,50 @@ Cancel a managed job:
   of the failure. For more details related to provisioning, check :code:`sky jobs logs --controller <job_id>`.
 
 
-Jobs dashboard
-~~~~~~~~~~~~~~
+Viewing jobs in dashboard
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
+The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all managed jobs.
 
-.. code-block:: console
 
-  $ sky jobs dashboard
+.. image:: ../images/dashboard-managed-jobs.png
+  :width: 800
+  :alt: Managed jobs dashboard
 
-This automatically opens a browser tab to show the dashboard:
+The UI shows the same information as the CLI ``sky jobs queue -au``.
 
-.. image:: ../images/managed-jobs-dashboard.png
 
-The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
-especially useful when there are many in-progress jobs to monitor, which the
-terminal-based CLI may need more than one page to display.
+.. _job-priority:
+
+Job queueing and priority
+-------------------------
+
+Job queueing and priority are supported by managed jobs.
+
+
+Specify job priority by setting the ``job.priority`` field in the job YAML.
+
+.. code-block:: yaml
+
+  job:
+    # Priority of the job, between 0 and 1000 (default: 500).
+    #
+    # A lower value means that the job is higher priority. High priority jobs
+    # are scheduled sooner and will block lower priority jobs from starting
+    # until the high priority jobs have started.
+    priority: 500
+
+
+All jobs are submitted to a queue. When the scheduler is selecting the next job
+to schedule, it will select the highest priority job.
+
+If a high priority job is still launching, lower priority jobs will not be
+scheduled (i.e., stay in pending).
+
+.. image:: https://i.imgur.com/8H8ictY.png
+  :width: 800
+  :alt: Job queueing and priority
+
 
 
 .. _spot-jobs:
@@ -583,10 +611,10 @@ To see your current jobs controller, use :code:`sky status`.
   $ sky status --refresh
 
   Clusters
-  NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED     
-  my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago   
-  my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago   
-  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, r6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago    
+  NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
+  my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago
+  my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago
+  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, r6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
 
   Managed jobs
   No in-progress managed jobs.
