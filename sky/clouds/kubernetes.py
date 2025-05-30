@@ -950,15 +950,17 @@ class Kubernetes(clouds.Cloud):
         ]
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
     def _cluster_supports_high_performance_networking(cls,
                                                       context: str) -> bool:
         """Check if the cluster supports high performance networking.
 
-        Currently detects Nebius clusters by checking for nebius.com/ labels on
-        cluster nodes.
+        Currently detects Nebius clusters by checking for nebius.com/ labels
+        on cluster nodes.
 
         Args:
             context: The Kubernetes context to check.
+
         Returns:
             True if the cluster supports high performance networking.
         """
