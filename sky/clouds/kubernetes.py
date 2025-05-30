@@ -953,6 +953,7 @@ class Kubernetes(clouds.Cloud):
     def _cluster_supports_high_performance_networking(cls,
                                                       context: str) -> bool:
         """Check if the cluster supports high performance networking.
+
         Currently detects Nebius clusters by checking for nebius.com/ labels on
         cluster nodes.
 
