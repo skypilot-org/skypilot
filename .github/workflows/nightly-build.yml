@@ -178,7 +178,6 @@ jobs:
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
 
           if [[ "${{ needs.wait-for-buildkite-aws.result }}" == "failure" || "${{ needs.wait-for-buildkite-kubernetes.result }}" == "failure" ]]; then
-            BUILDKITE_MSG=""
             if [[ "${{ needs.wait-for-buildkite-aws.result }}" == "failure" ]]; then
               BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number-aws.outputs.build_number }}|Buildkite Log(--aws)>"
             fi
