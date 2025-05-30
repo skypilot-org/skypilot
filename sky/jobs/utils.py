@@ -1388,13 +1388,15 @@ class ManagedJobCodeGen:
 
     @classmethod
     def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
-                    workspace) -> str:
+                    workspace: str, entrypoint: str) -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             set_job_info_kwargs = {{'workspace': {workspace!r}}}
             if managed_job_version < 4:
                 set_job_info_kwargs = {{}}
+            if managed_job_version >= 5:
+                set_job_info_kwargs['entrypoint'] = {entrypoint!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)

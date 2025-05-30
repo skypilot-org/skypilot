@@ -5,7 +5,13 @@
  */
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import {
@@ -45,6 +51,8 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
