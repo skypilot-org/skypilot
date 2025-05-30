@@ -152,6 +152,12 @@ def pytest_addoption(parser):
         default=False,
         help='Run tests for Postgres Backend',
     )
+    parser.addoption(
+        '--no-resource-heavy',
+        action='store_true',
+        default=False,
+        help='Skip tests marked as resource_heavy',
+    )
 
 
 def pytest_configure(config):
@@ -197,6 +203,8 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_resource_heavy'] = pytest.mark.skip(
+        reason='skipped, because --no-resource-heavy option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -232,6 +240,12 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
+
+        # Skip tests marked as resource_heavy if --no-resource-heavy is set
+        marks = [mark.name for mark in item.iter_markers()]
+        if 'resource_heavy' in marks and config.getoption(
+                '--no-resource-heavy'):
+            item.add_marker(skip_marks['no_resource_heavy'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
