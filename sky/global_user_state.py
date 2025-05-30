@@ -155,6 +155,13 @@ cluster_yaml_table = sqlalchemy.Table(
     sqlalchemy.Column('yaml', sqlalchemy.Text),
 )
 
+config_yaml_table = sqlalchemy.Table(
+    'config_yaml',
+    Base.metadata,
+    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('yaml', sqlalchemy.Text),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -1196,4 +1203,31 @@ def remove_cluster_yaml(cluster_name: str):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).delete()
+        session.commit()
+
+
+def get_config_yaml(key: str) -> Optional[str]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_yaml_table).filter_by(key=key).first()
+    if row:
+        return row.yaml
+    return None
+
+
+def set_config_yaml(key: str, yaml_str: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(config_yaml_table).values(key=key,
+                                                             yaml=yaml_str)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_yaml_table.c.key],
+            set_={config_yaml_table.c.yaml: yaml_str})
+        session.execute(do_update_stmt)
         session.commit()
