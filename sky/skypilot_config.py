@@ -648,8 +648,8 @@ def override_skypilot_config(
             skip_none=False)
         _set_config_overridden(True)
         _set_loaded_config(config)
-        _set_loaded_config_path(
-            _get_loaded_config_path() + override_config_path)
+        _set_loaded_config_path(_get_loaded_config_path() +
+                                override_config_path)
         yield
     except exceptions.InvalidSkyPilotConfigError as e:
         with ux_utils.print_exception_no_traceback():
