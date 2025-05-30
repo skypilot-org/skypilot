@@ -38,6 +38,10 @@ def create_catalog() -> None:
         if not response.ok:
             raise RuntimeError(f'API request failed: {response.text}')
         instances = response.json()['vms']
+        print('API Response for first instance:',
+              json.dumps(instances[0], indent=2))
+        print('GpuInfo from API:',
+              json.dumps(instances[0].get('GpuInfo', {}), indent=2))
     except requests.exceptions.RequestException as request_error:
         raise RuntimeError(f'Failed to fetch instance data: {request_error}'
                           ) from request_error
@@ -68,7 +72,7 @@ def create_catalog() -> None:
     with open('hyperbolic/vms.csv', 'w', newline='', encoding='utf-8') as f:
         fieldnames = [
             'InstanceType', 'AcceleratorCount', 'AcceleratorName', 'MemoryGiB',
-            'StorageGiB', 'vCPUs', 'Price', 'Region', 'GpuInfo'
+            'StorageGiB', 'vCPUs', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -79,10 +83,31 @@ def create_catalog() -> None:
                 # Add default region if not present
                 if 'Region' not in entry:
                     entry['Region'] = 'default'
-                # Use GpuInfo directly from the API response
-                entry['GpuInfo'] = json.dumps(instance.get('GpuInfo', {}),
-                                              ensure_ascii=False).replace(
-                                                  '"', "'")  # pylint: disable=invalid-string-quote
+                # Add empty SpotPrice
+                entry['SpotPrice'] = ''
+                # Format GpuInfo to match expected format
+                gpu_info = instance.get('GpuInfo', {})
+                if gpu_info:
+                    formatted_gpu_info = {
+                        'Gpus': [{
+                            'Name': instance.get('AcceleratorName', ''),
+                            'Manufacturer': 'NVIDIA',
+                            'Count': str(instance.get('AcceleratorCount', 1)) +
+                                     '.0',
+                            'MemoryInfo': {
+                                'SizeInMiB': gpu_info.get('ram', 0)
+                            }
+                        }],
+                        'TotalGpuMemoryInMiB': gpu_info.get(
+                            'ram', 0) * instance.get('AcceleratorCount', 1)
+                    }
+                    # Convert to string representation that can be parsed by
+                    # ast.literal_eval
+                    # pylint: disable=invalid-string-quote
+                    gpu_info_str = json.dumps(formatted_gpu_info).replace(
+                        '"', "'")
+                    # Ensure the GpuInfo field is properly quoted in the CSV
+                    entry['GpuInfo'] = gpu_info_str
                 writer.writerow(entry)
             except (KeyError, ValueError) as instance_error:
                 instance_type = instance.get('InstanceType', 'unknown')
