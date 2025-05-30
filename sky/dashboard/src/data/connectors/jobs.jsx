@@ -11,7 +11,7 @@ import dashboardCache from '@/lib/cache';
 // Configuration
 const DEFAULT_TAIL_LINES = 1000;
 
-export async function getManagedJobs({ allUsers = true, jobIds = null } = {}) {
+export async function getManagedJobs({ allUsers = true } = {}) {
   try {
     const response = await fetch(`${ENDPOINT}/jobs/queue`, {
       method: 'POST',
@@ -158,16 +158,7 @@ export async function getManagedJobs({ allUsers = true, jobIds = null } = {}) {
       };
     });
 
-    // Filter by job IDs if provided (client-side filtering since API doesn't support it)
-    let filteredJobs = jobData;
-    if (jobIds && Array.isArray(jobIds) && jobIds.length > 0) {
-      const jobIdStrings = jobIds.map((id) => String(id));
-      filteredJobs = jobData.filter((job) =>
-        jobIdStrings.includes(String(job.id))
-      );
-    }
-
-    return { jobs: filteredJobs, controllerStopped: false };
+    return { jobs: jobData, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     return { jobs: [], controllerStopped: false };
@@ -200,7 +191,7 @@ export function useManagedJobDetails(refreshTrigger = 0) {
   return { jobData, loading };
 }
 
-// New hook for individual job details that creates a unique cache key
+// Hook for individual job details that reuses the main jobs cache
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -213,13 +204,32 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
       try {
         setLoadingJobData(true);
-        // Use cached fetching with job ID filter to create unique cache key
-        const data = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true, jobIds: [jobId] },
+
+        // Always get all jobs data (cache handles freshness automatically)
+        const allJobsData = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
         ]);
-        setJobData(data);
+
+        // Filter for the specific job client-side
+        const job = allJobsData?.jobs?.find(
+          (j) => String(j.id) === String(jobId)
+        );
+
+        if (job) {
+          setJobData({
+            jobs: [job],
+            controllerStopped: allJobsData.controllerStopped || false,
+          });
+        } else {
+          // Job not found in the results
+          setJobData({
+            jobs: [],
+            controllerStopped: allJobsData.controllerStopped || false,
+          });
+        }
       } catch (error) {
         console.error('Error fetching single managed job data:', error);
+        setJobData({ jobs: [], controllerStopped: false });
       } finally {
         setLoadingJobData(false);
       }

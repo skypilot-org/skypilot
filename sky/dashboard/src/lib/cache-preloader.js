@@ -99,10 +99,7 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        // Use isBackgroundRequest: true for preloader to prevent interference
-        promises.push(
-          dashboardCache.get(fn, args, { isBackgroundRequest: true })
-        );
+        promises.push(dashboardCache.get(fn, args));
       } else if (functionName === 'getEnabledClouds') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
@@ -123,9 +120,7 @@ class CachePreloader {
       if (force) {
         dashboardCache.invalidate(getWorkspaces);
       }
-      const workspacesData = await dashboardCache.get(getWorkspaces, [], {
-        isBackgroundRequest: true,
-      });
+      const workspacesData = await dashboardCache.get(getWorkspaces, []);
       const workspaceNames = Object.keys(workspacesData || {});
 
       // Then load enabled clouds for each workspace
@@ -133,9 +128,7 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(getEnabledClouds, [wsName]);
         }
-        return dashboardCache.get(getEnabledClouds, [wsName], {
-          isBackgroundRequest: true,
-        });
+        return dashboardCache.get(getEnabledClouds, [wsName]);
       });
 
       await Promise.allSettled(promises);
@@ -195,11 +188,9 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        return dashboardCache
-          .get(fn, args, { isBackgroundRequest: true })
-          .catch((error) => {
-            console.error(`[CachePreloader] Failed to preload ${name}:`, error);
-          });
+        return dashboardCache.get(fn, args).catch((error) => {
+          console.error(`[CachePreloader] Failed to preload ${name}:`, error);
+        });
       }
     );
 
@@ -214,7 +205,6 @@ class CachePreloader {
     return {
       ...dashboardCache.getStats(),
       isPreloading: this.isPreloading,
-      preloadPromises: this.preloadPromises.size,
     };
   }
 
