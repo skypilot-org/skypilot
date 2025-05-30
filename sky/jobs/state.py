@@ -121,7 +121,8 @@ def create_table(cursor, conn):
         env_file_path TEXT,
         user_hash TEXT,
         workspace TEXT DEFAULT NULL,
-        priority INTEGER DEFAULT 500)""")
+        priority INTEGER DEFAULT 500,
+        entrypoint TEXT DEFAULT NULL)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -151,6 +152,7 @@ def create_table(cursor, conn):
                                  'INTEGER',
                                  value_to_replace_existing_entries=500)
 
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'entrypoint', 'TEXT')
     conn.commit()
 
 
@@ -209,6 +211,7 @@ columns = [
     'user_hash',
     'workspace',
     'priority',
+    'entrypoint',
 ]
 
 
@@ -412,14 +415,15 @@ class ManagedJobScheduleState(enum.Enum):
 
 
 # === Status transition functions ===
-def set_job_info(job_id: int, name: str, workspace: str):
+def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO job_info
-            (spot_job_id, name, schedule_state, workspace)
-            VALUES (?, ?, ?, ?)""",
-            (job_id, name, ManagedJobScheduleState.INACTIVE.value, workspace))
+            (spot_job_id, name, schedule_state, workspace, entrypoint)
+            VALUES (?, ?, ?, ?, ?)""",
+            (job_id, name, ManagedJobScheduleState.INACTIVE.value, workspace,
+             entrypoint))
 
 
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
@@ -1008,7 +1012,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                 job_dict['schedule_state'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
-            
+
             # Add YAML content and command for managed jobs
             dag_yaml_path = job_dict.get('dag_yaml_path')
             if dag_yaml_path:
@@ -1017,12 +1021,12 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                         job_dict['dag_yaml'] = f.read()
                 except (FileNotFoundError, IOError, OSError):
                     job_dict['dag_yaml'] = None
-                
+
                 # Generate a command that could be used to launch this job
                 # Format: sky jobs launch <yaml_path>
             else:
                 job_dict['dag_yaml'] = None
-            
+
             jobs.append(job_dict)
         return jobs
 

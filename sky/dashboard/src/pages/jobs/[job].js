@@ -325,9 +325,9 @@ function JobDetailsContent({
   };
 
   const toggleYamlDocExpanded = (index) => {
-    setExpandedYamlDocs(prev => ({
+    setExpandedYamlDocs((prev) => ({
       ...prev,
-      [index]: !prev[index]
+      [index]: !prev[index],
     }));
   };
 
@@ -338,7 +338,7 @@ function JobDetailsContent({
       // Split the YAML into multiple documents
       const documents = [];
       const parts = yamlString.split(/^---$/m);
-      
+
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i].trim();
         if (part && part !== '') {
@@ -347,7 +347,8 @@ function JobDetailsContent({
       }
 
       // Skip the first document (which is typically just the task name)
-      const docsToFormat = documents.length > 1 ? documents.slice(1) : documents;
+      const docsToFormat =
+        documents.length > 1 ? documents.slice(1) : documents;
 
       // Format each document
       const formattedDocs = docsToFormat.map((doc, index) => {
@@ -407,11 +408,13 @@ function JobDetailsContent({
     } catch (e) {
       console.error('YAML formatting error:', e);
       // If parsing fails, return the original string as single document
-      return [{
-        index: 0,
-        content: yamlString,
-        preview: 'Invalid YAML',
-      }];
+      return [
+        {
+          index: 0,
+          content: yamlString,
+          preview: 'Invalid YAML',
+        },
+      ];
     }
   };
 
@@ -631,95 +634,95 @@ function JobDetailsContent({
       </div>
 
       {/* Entrypoint section - spans both columns */}
-      {(jobData.dag_command || jobData.dag_yaml) && (
+      {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
-          <div className="text-gray-600 font-medium text-base">
-            Entrypoint
-          </div>
+          <div className="text-gray-600 font-medium text-base">Entrypoint</div>
 
           <div className="space-y-4 mt-3">
             {/* Launch Command */}
-            {jobData.dag_command && (
+            {jobData.entrypoint && (
               <div>
                 <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
                   <code className="text-sm text-gray-800 font-mono break-all">
-                    {jobData.dag_command}
+                    {jobData.entrypoint}
                   </code>
                 </div>
               </div>
             )}
 
             {/* Task YAML - Collapsible */}
-            {jobData.dag_yaml &&
-              jobData.dag_yaml !== '{}' && (
-                <div>
-                  <button
-                    onClick={toggleYamlExpanded}
-                    className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                  >
-                    <div className="flex items-center">
-                      {isYamlExpanded ? (
-                        <ChevronDownIcon className="w-4 h-4 mr-1" />
-                      ) : (
-                        <ChevronRightIcon className="w-4 h-4 mr-1" />
-                      )}
-                      <span className="text-base">
-                        Show SkyPilot YAML
-                      </span>
-                    </div>
-                  </button>
+            {jobData.dag_yaml && jobData.dag_yaml !== '{}' && (
+              <div>
+                <button
+                  onClick={toggleYamlExpanded}
+                  className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                >
+                  <div className="flex items-center">
+                    {isYamlExpanded ? (
+                      <ChevronDownIcon className="w-4 h-4 mr-1" />
+                    ) : (
+                      <ChevronRightIcon className="w-4 h-4 mr-1" />
+                    )}
+                    <span className="text-base">Show SkyPilot YAML</span>
+                  </div>
+                </button>
 
-                  {isYamlExpanded && (
-                    <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                      {(() => {
-                        const yamlDocs = formatYaml(jobData.dag_yaml);
-                        if (yamlDocs.length === 0) {
-                          return <div className="text-gray-500">No YAML available</div>;
-                        } else if (yamlDocs.length === 1) {
-                          // Single document - show directly
-                          return (
-                            <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
-                              {yamlDocs[0].content}
-                            </pre>
-                          );
-                        } else {
-                          // Multiple documents - show with collapsible sections
-                          return (
-                            <div className="space-y-4">
-                              {yamlDocs.map((doc, index) => (
-                                <div key={index} className="border-b border-gray-200 pb-4 last:border-b-0">
-                                  <button
-                                    onClick={() => toggleYamlDocExpanded(index)}
-                                    className="flex items-center justify-between w-full text-left focus:outline-none"
-                                  >
-                                    <div className="flex items-center">
-                                      {expandedYamlDocs[index] ? (
-                                        <ChevronDownIcon className="w-4 h-4 mr-2" />
-                                      ) : (
-                                        <ChevronRightIcon className="w-4 h-4 mr-2" />
-                                      )}
-                                      <span className="text-sm font-medium text-gray-700">
-                                        Task {index + 1}: {doc.preview}
-                                      </span>
-                                    </div>
-                                  </button>
-                                  {expandedYamlDocs[index] && (
-                                    <div className="mt-3 ml-6">
-                                      <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
-                                        {doc.content}
-                                      </pre>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          );
-                        }
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
+                {isYamlExpanded && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                    {(() => {
+                      const yamlDocs = formatYaml(jobData.dag_yaml);
+                      if (yamlDocs.length === 0) {
+                        return (
+                          <div className="text-gray-500">No YAML available</div>
+                        );
+                      } else if (yamlDocs.length === 1) {
+                        // Single document - show directly
+                        return (
+                          <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                            {yamlDocs[0].content}
+                          </pre>
+                        );
+                      } else {
+                        // Multiple documents - show with collapsible sections
+                        return (
+                          <div className="space-y-4">
+                            {yamlDocs.map((doc, index) => (
+                              <div
+                                key={index}
+                                className="border-b border-gray-200 pb-4 last:border-b-0"
+                              >
+                                <button
+                                  onClick={() => toggleYamlDocExpanded(index)}
+                                  className="flex items-center justify-between w-full text-left focus:outline-none"
+                                >
+                                  <div className="flex items-center">
+                                    {expandedYamlDocs[index] ? (
+                                      <ChevronDownIcon className="w-4 h-4 mr-2" />
+                                    ) : (
+                                      <ChevronRightIcon className="w-4 h-4 mr-2" />
+                                    )}
+                                    <span className="text-sm font-medium text-gray-700">
+                                      Task {index + 1}: {doc.preview}
+                                    </span>
+                                  </div>
+                                </button>
+                                {expandedYamlDocs[index] && (
+                                  <div className="mt-3 ml-6">
+                                    <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                                      {doc.content}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

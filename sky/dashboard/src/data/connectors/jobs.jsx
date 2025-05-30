@@ -150,7 +150,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           : null,
         events: events,
         dag_yaml: job.dag_yaml,
-        dag_command: job.dag_command,
+        entrypoint: job.entrypoint,
       };
     });
     return { jobs: jobData, controllerStopped: false };
