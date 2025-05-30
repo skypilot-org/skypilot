@@ -245,6 +245,12 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               Email{getSortDirection('fullEmail')}
             </TableHead>
             <TableHead
+              onClick={() => requestSort('role')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+            >
+              Role{getSortDirection('role')}
+            </TableHead>
+            <TableHead
               onClick={() => requestSort('clusterCount')}
               className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
@@ -256,12 +262,6 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
             >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
-            <TableHead
-              onClick={() => requestSort('role')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
-            >
-              Role{getSortDirection('role')}
-            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -272,28 +272,6 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               </TableCell>
               <TableCell className="truncate" title={user.fullEmail}>
                 {user.fullEmail}
-              </TableCell>
-              <TableCell>
-                {user.clusterCount > 0 ? (
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                    {user.clusterCount}
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                    0
-                  </span>
-                )}
-              </TableCell>
-              <TableCell>
-                {user.jobCount > 0 ? (
-                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                    {user.jobCount}
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                    0
-                  </span>
-                )}
               </TableCell>
               <TableCell className="truncate" title={user.role}>
                 <div className="flex items-center gap-2">
@@ -335,6 +313,28 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                     </>
                   )}
                 </div>
+              </TableCell>
+              <TableCell>
+                {user.clusterCount > 0 ? (
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                    {user.clusterCount}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
+              </TableCell>
+              <TableCell>
+                {user.jobCount > 0 ? (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                    {user.jobCount}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
               </TableCell>
             </TableRow>
           ))}
