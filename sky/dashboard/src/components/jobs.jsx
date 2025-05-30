@@ -1153,12 +1153,6 @@ export function ClusterJobs({ clusterName, clusterJobData, loading, refreshClust
         <div className="flex items-center justify-between p-4">
           <h3 className="text-lg font-semibold">Cluster Jobs</h3>
           <div className="flex items-center">
-            {loading && (
-              <div className="flex items-center mr-2">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading jobs...</span>
-              </div>
-            )}
             {refreshClusterJobsOnly && (
               <button
                 onClick={refreshClusterJobsOnly}
@@ -1226,7 +1220,19 @@ export function ClusterJobs({ clusterName, clusterJobData, loading, refreshClust
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedData.length > 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={9}
+                  className="text-center py-12 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={24} className="mr-2" />
+                    <span>Loading cluster jobs...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow

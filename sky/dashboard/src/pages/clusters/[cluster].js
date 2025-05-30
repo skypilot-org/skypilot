@@ -381,14 +381,12 @@ function ActiveTab({ clusterData, clusterJobData, clusterJobsLoading, refreshClu
 
       {/* Jobs Table */}
       <div className="mb-8">
-        {clusterJobData && (
-          <ClusterJobs
-            clusterName={clusterData.cluster}
-            clusterJobData={clusterJobData}
-            loading={clusterJobsLoading}
-            refreshClusterJobsOnly={refreshClusterJobsOnly}
-          />
-        )}
+        <ClusterJobs
+          clusterName={clusterData.cluster}
+          clusterJobData={clusterJobData}
+          loading={clusterJobsLoading}
+          refreshClusterJobsOnly={refreshClusterJobsOnly}
+        />
       </div>
     </div>
   );
