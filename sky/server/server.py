@@ -113,7 +113,8 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Check the role permission
         if users_rest.permission_service.check_permission(
                 user_id, request.url.path, request.method):
-            raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+            return fastapi.responses.JSONResponse(
+                status_code=403, content={'detail': 'Forbidden'})
 
         return await call_next(request)
 
@@ -289,6 +290,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
@@ -304,7 +306,6 @@ app.add_middleware(
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
-app.add_middleware(RBACMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 app.include_router(users_rest.router, prefix='/users', tags=['users'])
