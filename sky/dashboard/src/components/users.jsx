@@ -24,7 +24,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, PenIcon, CheckIcon, XIcon } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
@@ -239,12 +239,6 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               Name{getSortDirection('usernameDisplay')}
             </TableHead>
             <TableHead
-              onClick={() => requestSort('role')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
-            >
-              Role{getSortDirection('role')}
-            </TableHead>
-            <TableHead
               onClick={() => requestSort('fullEmail')}
               className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
@@ -262,7 +256,12 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
             >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
-            <TableHead className="w-1/5 text-right">Actions</TableHead>
+            <TableHead
+              onClick={() => requestSort('role')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+            >
+              Role{getSortDirection('role')}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -270,20 +269,6 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
             <TableRow key={user.userId}>
               <TableCell className="truncate" title={user.username}>
                 {user.usernameDisplay}
-              </TableCell>
-              <TableCell className="truncate" title={user.role}>
-                {editingUserId === user.userId ? (
-                  <select
-                    value={currentEditingRole}
-                    onChange={(e) => setCurrentEditingRole(e.target.value)}
-                    className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                  >
-                    <option value="user">user</option>
-                    <option value="admin">admin</option>
-                  </select>
-                ) : (
-                  user.role
-                )}
               </TableCell>
               <TableCell className="truncate" title={user.fullEmail}>
                 {user.fullEmail}
@@ -310,33 +295,46 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                   </span>
                 )}
               </TableCell>
-              <TableCell className="text-right space-x-1">
-                {editingUserId === user.userId ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleSaveEdit(user.userId)}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleCancelEdit}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleEditClick(user.userId, user.role)}
-                  >
-                    Edit
-                  </Button>
-                )}
+              <TableCell className="truncate" title={user.role}>
+                <div className="flex items-center gap-2">
+                  {editingUserId === user.userId ? (
+                    <>
+                      <select
+                        value={currentEditingRole}
+                        onChange={(e) => setCurrentEditingRole(e.target.value)}
+                        className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                      >
+                        <option value="admin">admin</option>
+                        <option value="user">user</option>
+                      </select>
+                      <button
+                        onClick={() => handleSaveEdit(user.userId)}
+                        className="text-green-600 hover:text-green-800 p-1"
+                        title="Save"
+                      >
+                        <CheckIcon className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className="text-gray-500 hover:text-gray-700 p-1"
+                        title="Cancel"
+                      >
+                        <XIcon className="h-4 w-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{user.role}</span>
+                      <button
+                        onClick={() => handleEditClick(user.userId, user.role)}
+                        className="text-gray-400 hover:text-sky-blue p-1"
+                        title="Edit role"
+                      >
+                        <PenIcon className="h-3 w-3" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
