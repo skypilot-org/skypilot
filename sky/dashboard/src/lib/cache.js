@@ -21,26 +21,28 @@ class DashboardCache {
    * @param {Object} [options={}] - Cache options
    * @param {number} [options.ttl] - Time to live in milliseconds
    * @param {boolean} [options.refreshOnAccess] - Whether to refresh TTL on cache access (default: true)
+   * @param {boolean} [options.isBackgroundRequest] - Whether this is a background request (default: false)
    * @returns {Promise} - The cached or fresh data
    */
   async get(fetchFunction, args = [], options = {}) {
     const ttl = options.ttl || DEFAULT_CACHE_TTL;
-    const refreshOnAccess = options.refreshOnAccess !== false; // Default to true
+    const refreshOnAccess = options.refreshOnAccess === true; // Change default to false
+    const isBackgroundRequest = options.isBackgroundRequest === true; // New option to identify background requests
     const key = this._generateKey(fetchFunction, args);
     const functionName = fetchFunction.name || 'anonymous';
 
     const cachedItem = this.cache.get(key);
     const now = Date.now();
 
-    // If we have cached data and it's not stale, return it and refresh in background
+    // If we have cached data and it's not stale, return it
     if (cachedItem && now - cachedItem.lastUpdated < ttl) {
       const age = Math.round((now - cachedItem.lastUpdated) / 1000);
       this._debug(
-        `Cache HIT for ${functionName} (age: ${age}s, TTL: ${Math.round(ttl / 1000)}s)`
+        `Cache HIT for ${functionName} (age: ${age}s, TTL: ${Math.round(ttl / 1000)}s)${isBackgroundRequest ? ' [BACKGROUND]' : ''}`
       );
 
       // Update the lastUpdated timestamp to extend the cache life on access
-      if (refreshOnAccess) {
+      if (refreshOnAccess && !isBackgroundRequest) {
         this.cache.set(key, {
           data: cachedItem.data,
           lastUpdated: now,
@@ -48,16 +50,39 @@ class DashboardCache {
         this._debug(`Cache TTL refreshed for ${functionName}`);
       }
 
-      // Launch background refresh if we're not already refreshing
-      if (!this.backgroundJobs.has(key)) {
-        this._refreshInBackground(fetchFunction, args, key);
+      // Only trigger background refresh for foreground requests, not background ones
+      // This prevents background jobs from triggering more background jobs
+      if (!isBackgroundRequest) {
+        // Launch background refresh only if cache is older than half TTL
+        // This prevents too frequent background refreshes
+        const halfTTL = ttl / 2;
+        if (
+          now - cachedItem.lastUpdated > halfTTL &&
+          !this.backgroundJobs.has(key)
+        ) {
+          this._debug(
+            `Triggering background refresh for ${functionName} (age > half TTL)`
+          );
+          this._refreshInBackground(fetchFunction, args, key);
+        }
       }
 
       return cachedItem.data;
     }
 
     // If data is stale or doesn't exist, fetch fresh data
+    // But if this is a background request and we have stale data, return stale data instead of fetching
+    if (isBackgroundRequest && cachedItem) {
+      this._debug(
+        `Background request returning stale data for ${functionName}`
+      );
+      return cachedItem.data;
+    }
+
     try {
+      this._debug(
+        `Cache MISS for ${functionName} - fetching fresh data${isBackgroundRequest ? ' [BACKGROUND]' : ''}`
+      );
       const freshData = await fetchFunction(...args);
 
       // Update cache with fresh data
@@ -66,6 +91,9 @@ class DashboardCache {
         lastUpdated: now,
       });
 
+      this._debug(
+        `Cache updated for ${functionName}${isBackgroundRequest ? ' [BACKGROUND]' : ''}`
+      );
       return freshData;
     } catch (error) {
       // If fetch fails and we have stale data, return stale data
@@ -181,25 +209,32 @@ class DashboardCache {
    * @private
    */
   _refreshInBackground(fetchFunction, args, key) {
+    // Check if we already have a background job running for this key
+    if (this.backgroundJobs.has(key)) {
+      this._debug(`Background job already running for ${key}, skipping`);
+      return; // Don't start another background job if one is already running
+    }
+
     // Mark that we have a background job running for this key
     this.backgroundJobs.set(key, true);
+    this._debug(`Starting background refresh for ${key}`);
 
-    // Execute the refresh asynchronously
-    fetchFunction(...args)
-      .then((freshData) => {
-        // Update cache with fresh data
-        this.cache.set(key, {
-          data: freshData,
-          lastUpdated: Date.now(),
+    // Add a small delay to let any ongoing foreground requests complete
+    setTimeout(() => {
+      // Execute the refresh asynchronously with background request flag
+      this.get(fetchFunction, args, { isBackgroundRequest: true })
+        .then((freshData) => {
+          this._debug(`Background refresh completed for ${key}`);
+        })
+        .catch((error) => {
+          console.warn(`Background refresh failed for ${key}:`, error);
+        })
+        .finally(() => {
+          // Remove the background job marker
+          this.backgroundJobs.delete(key);
+          this._debug(`Background job finished for ${key}`);
         });
-      })
-      .catch((error) => {
-        console.warn(`Background refresh failed for ${key}:`, error);
-      })
-      .finally(() => {
-        // Remove the background job marker
-        this.backgroundJobs.delete(key);
-      });
+    }, 100); // 100ms delay to avoid immediate conflicts
   }
 
   /**

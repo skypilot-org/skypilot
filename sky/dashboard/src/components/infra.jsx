@@ -35,7 +35,11 @@ export function InfrastructureSection({
   contextStats = {},
   isSSH = false, // To differentiate between SSH and Kubernetes
 }) {
-  if (isLoading && !isDataLoaded) {
+  // Add defensive check for contexts
+  const safeContexts = contexts || [];
+
+  // Show loading spinner while data is being fetched
+  if (isLoading || !isDataLoaded) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -49,7 +53,8 @@ export function InfrastructureSection({
     );
   }
 
-  if (isDataLoaded && contexts.length === 0) {
+  // Only show "no data" message after data has been loaded and confirmed empty
+  if (isDataLoaded && safeContexts.length === 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -62,15 +67,15 @@ export function InfrastructureSection({
     );
   }
 
-  if (isDataLoaded && contexts.length > 0) {
+  if (isDataLoaded && safeContexts.length > 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
           <div className="flex items-center mb-4">
             <h3 className="text-lg font-semibold">{title}</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {contexts.length}{' '}
-              {contexts.length === 1
+              {safeContexts.length}{' '}
+              {safeContexts.length === 1
                 ? isSSH
                   ? 'pool'
                   : 'context'
@@ -106,9 +111,9 @@ export function InfrastructureSection({
                     </tr>
                   </thead>
                   <tbody
-                    className={`bg-white divide-y divide-gray-200 ${contexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                    className={`bg-white divide-y divide-gray-200 ${safeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
                   >
-                    {contexts.map((context) => {
+                    {safeContexts.map((context) => {
                       const gpus = groupedPerContextGPUs[context] || [];
                       const nodes = groupedPerNodeGPUs[context] || [];
                       const totalGpus = gpus.reduce(
@@ -180,7 +185,7 @@ export function InfrastructureSection({
                               </span>
                             )}
                           </td>
-                          <td className="p-3">{nodes.length}</td>
+                          <td className="p-3">{(nodes || []).length}</td>
                           <td className="p-3">{gpuTypes || '-'}</td>
                           <td className="p-3">{totalGpus}</td>
                         </tr>
@@ -190,7 +195,7 @@ export function InfrastructureSection({
                 </table>
               </div>
             </div>
-            {gpus.length > 0 && (
+            {gpus && gpus.length > 0 && (
               <div>
                 <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
                   <table className="min-w-full text-sm">
@@ -352,7 +357,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
             })}
           </div>
 
-          {nodesInContext.length > 0 && (
+          {nodesInContext && nodesInContext.length > 0 && (
             <>
               <h4 className="text-lg font-semibold mb-4">Nodes</h4>
               <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
@@ -432,36 +437,73 @@ export function GPUs() {
         // Use the shared getInfraData function
         const infraData = await dashboardCache.get(getInfraData);
 
-        const { gpuData, cloudData } = infraData;
+        const { gpuData, cloudData } = infraData || {};
 
-        // Set GPU data
-        const {
-          allContextNames: fetchedAllKubeContextNames,
-          allGPUs: fetchedAllGPUs,
-          perContextGPUs: fetchedPerContextGPUs,
-          perNodeGPUs: fetchedPerNodeGPUs,
-          contextStats: fetchedContextStats,
-        } = gpuData;
+        // Set GPU data with defensive checks
+        if (gpuData) {
+          const {
+            allContextNames: fetchedAllKubeContextNames,
+            allGPUs: fetchedAllGPUs,
+            perContextGPUs: fetchedPerContextGPUs,
+            perNodeGPUs: fetchedPerNodeGPUs,
+            contextStats: fetchedContextStats,
+          } = gpuData;
 
-        setAllKubeContextNames(fetchedAllKubeContextNames || []);
-        setAllGPUs(fetchedAllGPUs || []);
-        setPerContextGPUs(fetchedPerContextGPUs || []);
-        setPerNodeGPUs(fetchedPerNodeGPUs || []);
-        setContextStats(fetchedContextStats || {});
-        setKubeDataLoaded(true);
+          setAllKubeContextNames(fetchedAllKubeContextNames || []);
+          setAllGPUs(fetchedAllGPUs || []);
+          setPerContextGPUs(fetchedPerContextGPUs || []);
+          setPerNodeGPUs(fetchedPerNodeGPUs || []);
+          setContextStats(fetchedContextStats || {});
+          setKubeDataLoaded(true);
+        } else if (infraData && infraData.gpuData === null) {
+          // Data was explicitly null (not just missing)
+          setAllKubeContextNames([]);
+          setAllGPUs([]);
+          setPerContextGPUs([]);
+          setPerNodeGPUs([]);
+          setContextStats({});
+          setKubeDataLoaded(true);
+        } else if (!infraData) {
+          // If no data at all, still need to clear loading eventually
+          console.log('No infra data received from cache');
+        }
 
-        // Set cloud data
-        setCloudInfraData(cloudData?.clouds || []);
-        setTotalClouds(cloudData?.totalClouds || 0);
-        setEnabledClouds(cloudData?.enabledClouds || 0);
-        setCloudDataLoaded(true);
+        // Set cloud data with defensive checks
+        if (cloudData) {
+          setCloudInfraData(cloudData.clouds || []);
+          setTotalClouds(cloudData.totalClouds || 0);
+          setEnabledClouds(cloudData.enabledClouds || 0);
+          setCloudDataLoaded(true);
+        } else if (infraData && infraData.cloudData === null) {
+          // Data was explicitly null (not just missing)
+          setCloudInfraData([]);
+          setTotalClouds(0);
+          setEnabledClouds(0);
+          setCloudDataLoaded(true);
+        } else if (!infraData) {
+          // If no data at all, still need to clear loading eventually
+          console.log('No cloud data received from cache');
+        }
       } catch (error) {
         console.error('Error in fetchData:', error);
-        // Potentially set error states for UI more explicitly
+        // On error, we should still mark data as loaded but with empty values
+        setAllKubeContextNames([]);
+        setAllGPUs([]);
+        setPerContextGPUs([]);
+        setPerNodeGPUs([]);
+        setContextStats({});
+        setCloudInfraData([]);
+        setTotalClouds(0);
+        setEnabledClouds(0);
+        setKubeDataLoaded(true);
+        setCloudDataLoaded(true);
       } finally {
-        // Always clear loading states, regardless of showLoadingIndicators
-        setKubeLoading(false);
-        setCloudLoading(false);
+        // Always clear loading states when showLoadingIndicators is true
+        // This prevents infinite loading state
+        if (options.showLoadingIndicators) {
+          setKubeLoading(false);
+          setCloudLoading(false);
+        }
 
         // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
         if (isInitialLoad && options.showLoadingIndicators) {
@@ -482,6 +524,9 @@ export function GPUs() {
     // This calls the fetchData version defined when isInitialLoad is true.
     // That fetchData will then set isInitialLoad to false within its finally block.
     const initializeData = async () => {
+      // Enable cache debug mode temporarily
+      dashboardCache.setDebugMode(true);
+
       // Trigger cache preloading for infra page and background preload other pages
       await cachePreloader.preloadForPage('infra');
 
@@ -507,11 +552,24 @@ export function GPUs() {
     };
   }, []); // Remove REFRESH_INTERVAL as it's a constant
 
+  // Reset states when component unmounts
+  useEffect(() => {
+    return () => {
+      // Don't invalidate cache on unmount - this was causing premature cache invalidation
+      // Cache should only be invalidated on manual refresh or TTL expiration
+      // Reset loading states for fresh load next time
+      setKubeDataLoaded(false);
+      setCloudDataLoaded(false);
+      setIsInitialLoad(true);
+    };
+  }, []);
+
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs);
+    // Only invalidate cache entry specific to the infra page
     dashboardCache.invalidate(getInfraData);
+    // Don't invalidate shared cache entries that other pages depend on
+    // dashboardCache.invalidate(getClusters);
+    // dashboardCache.invalidate(getManagedJobs);
 
     if (refreshDataRef.current) {
       refreshDataRef.current({ showLoadingIndicators: true });
@@ -519,9 +577,12 @@ export function GPUs() {
   };
 
   // Calculate summary data
-  const totalGpuTypes = allGPUs.length;
-  const grandTotalGPUs = allGPUs.reduce((sum, gpu) => sum + gpu.gpu_total, 0);
-  const grandTotalFreeGPUs = allGPUs.reduce(
+  const totalGpuTypes = (allGPUs || []).length;
+  const grandTotalGPUs = (allGPUs || []).reduce(
+    (sum, gpu) => sum + gpu.gpu_total,
+    0
+  );
+  const grandTotalFreeGPUs = (allGPUs || []).reduce(
     (sum, gpu) => sum + gpu.gpu_free,
     0
   );
@@ -541,6 +602,9 @@ export function GPUs() {
 
   // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
+    if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
+      return [];
+    }
     const contexts = allKubeContextNames.filter((context) =>
       context.startsWith('ssh-')
     );
@@ -548,6 +612,9 @@ export function GPUs() {
   }, [allKubeContextNames]);
 
   const kubeContexts = React.useMemo(() => {
+    if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
+      return [];
+    }
     const contexts = allKubeContextNames.filter(
       (context) => !context.startsWith('ssh-')
     );
@@ -556,7 +623,7 @@ export function GPUs() {
 
   // Filter GPUs by context type (SSH vs Kubernetes)
   const sshGPUs = React.useMemo(() => {
-    if (!perContextGPUs) return [];
+    if (!perContextGPUs || !allGPUs) return [];
 
     // Create a map of GPU names from SSH contexts
     const sshGpuNames = new Set();
@@ -571,7 +638,7 @@ export function GPUs() {
   }, [allGPUs, perContextGPUs]);
 
   const kubeGPUs = React.useMemo(() => {
-    if (!perContextGPUs) return [];
+    if (!perContextGPUs || !allGPUs) return [];
 
     // Create a map of GPU names from Kubernetes contexts
     const kubeGpuNames = new Set();
@@ -646,7 +713,7 @@ export function GPUs() {
   };
 
   const renderCloudInfrastructure = () => {
-    if (cloudLoading && !cloudDataLoaded) {
+    if (cloudLoading || !cloudDataLoaded) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -669,7 +736,7 @@ export function GPUs() {
               {enabledClouds} of {totalClouds} enabled
             </span>
           </div>
-          {cloudInfraData.length === 0 ? (
+          {!cloudInfraData || cloudInfraData.length === 0 ? (
             <p className="text-sm text-gray-500">
               No enabled clouds available.
             </p>
@@ -793,6 +860,9 @@ export function GPUs() {
   // Check if any data is currently loading
   const isAnyLoading = kubeLoading || cloudLoading;
 
+  // Check if all data has been loaded at least once
+  const isAllDataLoaded = kubeDataLoaded && cloudDataLoaded && !isInitialLoad;
+
   return (
     <Layout highlighted="infra">
       <div className="flex items-center justify-between mb-4 h-5">
@@ -848,7 +918,17 @@ export function GPUs() {
         </div>
       </div>
 
-      {renderKubernetesTab()}
+      {/* Show loading spinner for entire page if initial load */}
+      {!isAllDataLoaded ? (
+        <div className="flex flex-col items-center justify-center py-32">
+          <CircularProgress size={32} className="mb-4" />
+          <span className="text-gray-500 text-lg">
+            Loading infrastructure data...
+          </span>
+        </div>
+      ) : (
+        renderKubernetesTab()
+      )}
     </Layout>
   );
 }
@@ -858,7 +938,10 @@ function CloudGpuTable({ data, title }) {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
 
-  if (!data || data.length === 0) {
+  // Add defensive check for data
+  const safeData = data || [];
+
+  if (safeData.length === 0) {
     return (
       <>
         <h3 className="text-lg font-semibold mb-3">{title}</h3>
@@ -869,10 +952,10 @@ function CloudGpuTable({ data, title }) {
     );
   }
 
-  const totalPages = Math.ceil(data.length / pageSize);
+  const totalPages = Math.ceil(safeData.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = Math.min(startIndex + pageSize, data.length);
-  const paginatedData = data.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + pageSize, safeData.length);
+  const paginatedData = safeData.slice(startIndex, endIndex);
 
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -914,7 +997,7 @@ function CloudGpuTable({ data, title }) {
         </table>
       </div>
       {/* Pagination controls */}
-      {data.length > pageSize && (
+      {safeData.length > pageSize && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -948,7 +1031,7 @@ function CloudGpuTable({ data, title }) {
               </div>
             </div>
             <div>
-              {startIndex + 1} – {endIndex} of {data.length}
+              {startIndex + 1} – {endIndex} of {safeData.length}
             </div>
             <div className="flex items-center space-x-2">
               <button

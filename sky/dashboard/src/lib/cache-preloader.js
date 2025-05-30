@@ -15,7 +15,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    getManagedJobs: { fn: getManagedJobs, args: [] },
+    getManagedJobs: { fn: getManagedJobs, args: [{ allUsers: true }] },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
     getUsersWithCounts: { fn: getUsersWithCounts, args: [] },
@@ -99,7 +99,10 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        promises.push(dashboardCache.get(fn, args));
+        // Use isBackgroundRequest: true for preloader to prevent interference
+        promises.push(
+          dashboardCache.get(fn, args, { isBackgroundRequest: true })
+        );
       } else if (functionName === 'getEnabledClouds') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
@@ -120,7 +123,9 @@ class CachePreloader {
       if (force) {
         dashboardCache.invalidate(getWorkspaces);
       }
-      const workspacesData = await dashboardCache.get(getWorkspaces);
+      const workspacesData = await dashboardCache.get(getWorkspaces, [], {
+        isBackgroundRequest: true,
+      });
       const workspaceNames = Object.keys(workspacesData || {});
 
       // Then load enabled clouds for each workspace
@@ -128,7 +133,9 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(getEnabledClouds, [wsName]);
         }
-        return dashboardCache.get(getEnabledClouds, [wsName]);
+        return dashboardCache.get(getEnabledClouds, [wsName], {
+          isBackgroundRequest: true,
+        });
       });
 
       await Promise.allSettled(promises);
@@ -188,9 +195,11 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        return dashboardCache.get(fn, args).catch((error) => {
-          console.error(`[CachePreloader] Failed to preload ${name}:`, error);
-        });
+        return dashboardCache
+          .get(fn, args, { isBackgroundRequest: true })
+          .catch((error) => {
+            console.error(`[CachePreloader] Failed to preload ${name}:`, error);
+          });
       }
     );
 

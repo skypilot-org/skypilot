@@ -219,7 +219,9 @@ export function ManagedJobs() {
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs);
+        const jobsResponse = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(
@@ -241,9 +243,10 @@ export function ManagedJobs() {
   }, []);
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getManagedJobs);
-    dashboardCache.invalidate(getClusters);
+    // Only invalidate cache entries specific to the jobs page
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    // Don't invalidate getClusters as it's shared with other pages
+    // dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getWorkspaces);
 
     if (refreshDataRef.current) {
@@ -378,13 +381,15 @@ export function ManagedJobsTable({
     try {
       // Fetch both jobs and clusters data in parallel
       const [jobsResponse, clustersData] = await Promise.all([
-        dashboardCache.get(getManagedJobs),
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
         dashboardCache.get(getClusters),
       ]);
 
-      const { jobs, controllerStopped } = jobsResponse;
+      // Always process the response, even if it's null
+      const { jobs = [], controllerStopped = false } = jobsResponse || {};
+
       // for the clusters, check if there is a cluster that `isJobController`
-      const jobControllerCluster = clustersData.find((c) =>
+      const jobControllerCluster = clustersData?.find((c) =>
         isJobController(c.cluster)
       );
       const jobControllerClusterStatus = jobControllerCluster
@@ -402,13 +407,16 @@ export function ManagedJobsTable({
 
       setData(jobs);
       setControllerStopped(isControllerStopped);
+      setIsInitialLoad(false);
     } catch (err) {
       console.error('Error fetching data:', err);
+      // Still set data to empty array on error to show proper UI
       setData([]);
+      setControllerStopped(false);
+      setIsInitialLoad(false);
     } finally {
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
-      setIsInitialLoad(false);
     }
   }, [setLoading]);
 
@@ -423,6 +431,9 @@ export function ManagedJobsTable({
     setData([]);
     let isCurrent = true;
 
+    // Enable cache debug mode temporarily
+    dashboardCache.setDebugMode(true);
+
     fetchData();
 
     const interval = setInterval(() => {
@@ -434,13 +445,15 @@ export function ManagedJobsTable({
     return () => {
       isCurrent = false;
       clearInterval(interval);
+      // Don't invalidate cache on component unmount - this causes premature cache invalidation
+      // Cache should only be invalidated on manual refresh or TTL expiration
     };
   }, [refreshInterval, fetchData]);
 
   // Reset to first page when activeTab changes or when data changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, data.length]);
+  }, [activeTab, data?.length]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
@@ -465,10 +478,11 @@ export function ManagedJobsTable({
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
-    const active = data.filter((item) =>
+    const safeData = data || [];
+    const active = safeData.filter((item) =>
       statusGroups.active.includes(item.status)
     ).length;
-    const finished = data.filter((item) =>
+    const finished = safeData.filter((item) =>
       statusGroups.finished.includes(item.status)
     ).length;
     return { active, finished };
@@ -554,7 +568,8 @@ export function ManagedJobsTable({
 
   // Update status counts when data changes
   useEffect(() => {
-    const counts = data.reduce((acc, job) => {
+    const safeData = data || [];
+    const counts = safeData.reduce((acc, job) => {
       acc[job.status] = (acc[job.status] || 0) + 1;
       return acc;
     }, {});
@@ -583,7 +598,7 @@ export function ManagedJobsTable({
         <div className="flex flex-wrap items-center text-sm mb-1">
           <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
-            {!loading && data.length === 0 && !isInitialLoad && (
+            {!loading && (!data || data.length === 0) && !isInitialLoad && (
               <span className="text-gray-500 mr-2">No jobs found</span>
             )}
             {Object.entries(statusCounts).map(([status, count]) => (
@@ -605,7 +620,7 @@ export function ManagedJobsTable({
                 </span>
               </button>
             ))}
-            {data.length > 0 && (
+            {data && data.length > 0 && (
               <div className="flex items-center ml-2 gap-2">
                 <span className="text-gray-500">(</span>
                 <button
@@ -727,7 +742,7 @@ export function ManagedJobsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && isInitialLoad ? (
+            {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
                   colSpan={13}
@@ -901,7 +916,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls */}
-      {sortedData.length > 0 && (
+      {sortedData && sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -1058,7 +1073,12 @@ export function Status2Actions({
   );
 }
 
-export function ClusterJobs({ clusterName, clusterJobData, loading, refreshClusterJobsOnly }) {
+export function ClusterJobs({
+  clusterName,
+  clusterJobData,
+  loading,
+  refreshClusterJobsOnly,
+}) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
     key: null,
@@ -1307,7 +1327,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading, refreshClust
         </Table>
       </Card>
 
-      {sortedData.length > 0 && (
+      {sortedData && sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -1423,10 +1443,11 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 }
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
-  const isTruncated = text.length > 50;
+  const safeText = text || '';
+  const isTruncated = safeText.length > 50;
   const isExpanded = expandedRowId === rowId;
   // Always show truncated text in the table cell
-  const displayText = isTruncated ? `${text.substring(0, 50)}` : text;
+  const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
   const buttonRef = useRef(null);
 
   const handleClick = (e) => {

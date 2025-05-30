@@ -51,14 +51,14 @@ function ClusterDetails() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const isMobile = useMobile();
-  const { 
-    clusterData, 
-    clusterJobData, 
-    loading, 
+  const {
+    clusterData,
+    clusterJobData,
+    loading,
     clusterDetailsLoading,
     clusterJobsLoading,
     refreshData,
-    refreshClusterJobsOnly
+    refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
 
   // Update isInitialLoad when cluster details are first loaded (not waiting for jobs)
@@ -179,7 +179,12 @@ function ClusterDetails() {
   );
 }
 
-function ActiveTab({ clusterData, clusterJobData, clusterJobsLoading, refreshClusterJobsOnly }) {
+function ActiveTab({
+  clusterData,
+  clusterJobData,
+  clusterJobsLoading,
+  refreshClusterJobsOnly,
+}) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
 
   const toggleYamlExpanded = () => {

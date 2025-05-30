@@ -6,11 +6,12 @@ import {
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
+import dashboardCache from '@/lib/cache';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 1000;
 
-export async function getManagedJobs({ allUsers = true } = {}) {
+export async function getManagedJobs({ allUsers = true, jobIds = null } = {}) {
   try {
     const response = await fetch(`${ENDPOINT}/jobs/queue`, {
       method: 'POST',
@@ -156,7 +157,17 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         entrypoint: job.entrypoint,
       };
     });
-    return { jobs: jobData, controllerStopped: false };
+
+    // Filter by job IDs if provided (client-side filtering since API doesn't support it)
+    let filteredJobs = jobData;
+    if (jobIds && Array.isArray(jobIds) && jobIds.length > 0) {
+      const jobIdStrings = jobIds.map((id) => String(id));
+      filteredJobs = jobData.filter((job) =>
+        jobIdStrings.includes(String(job.id))
+      );
+    }
+
+    return { jobs: filteredJobs, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     return { jobs: [], controllerStopped: false };
@@ -173,6 +184,7 @@ export function useManagedJobDetails(refreshTrigger = 0) {
     async function fetchJobData() {
       try {
         setLoadingJobData(true);
+        // Revert to non-cached version for Solution 1 comparison
         const data = await getManagedJobs({ allUsers: true });
         setJobData(data);
       } catch (error) {
@@ -184,6 +196,37 @@ export function useManagedJobDetails(refreshTrigger = 0) {
 
     fetchJobData();
   }, [refreshTrigger]);
+
+  return { jobData, loading };
+}
+
+// New hook for individual job details that creates a unique cache key
+export function useSingleManagedJob(jobId, refreshTrigger = 0) {
+  const [jobData, setJobData] = useState(null);
+  const [loadingJobData, setLoadingJobData] = useState(true);
+
+  const loading = loadingJobData;
+
+  useEffect(() => {
+    async function fetchJobData() {
+      if (!jobId) return;
+
+      try {
+        setLoadingJobData(true);
+        // Use cached fetching with job ID filter to create unique cache key
+        const data = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true, jobIds: [jobId] },
+        ]);
+        setJobData(data);
+      } catch (error) {
+        console.error('Error fetching single managed job data:', error);
+      } finally {
+        setLoadingJobData(false);
+      }
+    }
+
+    fetchJobData();
+  }, [jobId, refreshTrigger]);
 
   return { jobData, loading };
 }
