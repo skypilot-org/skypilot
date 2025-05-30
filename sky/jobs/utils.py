@@ -921,14 +921,14 @@ def dump_managed_job_queue() -> str:
     lowest_blocking_priority_value = 1000
     for job in jobs:
         if job['schedule_state'] not in (
-            # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with lower
-            # priority.
-            managed_job_state.ManagedJobScheduleState.LAUNCHING,
-            managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF,
-            # It's possible for a WAITING/ALIVE_WAITING job to be ready to
-            # launch, but the scheduler just hasn't run yet.
-            managed_job_state.ManagedJobScheduleState.WAITING,
-            managed_job_state.ManagedJobScheduleState.ALIVE_WAITING,
+                # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with
+                # lower priority.
+                managed_job_state.ManagedJobScheduleState.LAUNCHING,
+                managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF,
+                # It's possible for a WAITING/ALIVE_WAITING job to be ready to
+                # launch, but the scheduler just hasn't run yet.
+                managed_job_state.ManagedJobScheduleState.WAITING,
+                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING,
         ):
             # This job will not block others.
             continue
@@ -936,7 +936,6 @@ def dump_managed_job_queue() -> str:
         priority = job.get('priority')
         if priority is not None and priority < lowest_blocking_priority_value:
             lowest_blocking_priority_value = priority
-
 
     for job in jobs:
         end_at = job['end_at']
@@ -984,7 +983,8 @@ def dump_managed_job_queue() -> str:
             state_details = 'In backoff, waiting for resources'
         elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
             priority = job.get('priority')
-            if priority is not None and priority > lowest_blocking_priority_value:
+            if (priority is not None and
+                    priority > lowest_blocking_priority_value):
                 # Job is lower priority than some other blocking job.
                 state_details = 'Waiting for higher priority jobs to launch'
             else:
