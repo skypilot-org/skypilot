@@ -509,7 +509,6 @@ export function ManagedJobsTable({
     activeTab,
     selectedStatuses,
     showAllMode,
-    statusGroups,
     workspaceFilter,
   ]);
 
