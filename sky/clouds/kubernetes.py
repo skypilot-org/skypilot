@@ -955,6 +955,7 @@ class Kubernetes(clouds.Cloud):
         """Check if the cluster supports high performance networking.
         Currently detects Nebius clusters by checking for nebius.com/ labels on
         cluster nodes.
+
         Args:
             context: The Kubernetes context to check.
         Returns:
