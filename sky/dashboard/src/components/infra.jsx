@@ -489,7 +489,7 @@ export function GPUs() {
     };
 
     initializeData();
-  }, []); // Empty dependency array ensures this runs once on mount.
+  }, [fetchData]); // Include fetchData dependency
 
   // Effect for interval refresh.
   useEffect(() => {
@@ -505,7 +505,7 @@ export function GPUs() {
       isCurrent = false;
       clearInterval(interval);
     };
-  }, [REFRESH_INTERVAL]); // Depends only on REFRESH_INTERVAL.
+  }, []); // Remove REFRESH_INTERVAL as it's a constant
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched

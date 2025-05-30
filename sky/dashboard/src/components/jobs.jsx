@@ -504,14 +504,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    statusGroups,
-    workspaceFilter,
-  ]);
+  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
