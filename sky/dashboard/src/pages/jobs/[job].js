@@ -3,7 +3,7 @@ import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
-import { useManagedJobDetails } from '@/data/connectors/jobs';
+import { useSingleManagedJob } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
@@ -19,7 +19,7 @@ function JobDetails() {
   const router = useRouter();
   const { job: jobId, tab } = router.query;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { jobData, loading } = useManagedJobDetails(refreshTrigger);
+  const { jobData, loading } = useSingleManagedJob(jobId, refreshTrigger);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);

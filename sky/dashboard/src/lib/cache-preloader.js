@@ -15,7 +15,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    getManagedJobs: { fn: getManagedJobs, args: [] },
+    getManagedJobs: { fn: getManagedJobs, args: [{ allUsers: true }] },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
     getUsersWithCounts: { fn: getUsersWithCounts, args: [] },
@@ -205,7 +205,6 @@ class CachePreloader {
     return {
       ...dashboardCache.getStats(),
       isPreloading: this.isPreloading,
-      preloadPromises: this.preloadPromises.size,
     };
   }
 
