@@ -60,6 +60,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 import filelock
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -262,9 +263,20 @@ def get_server_config() -> config_utils.Config:
 
     # load the server config file
     if os.path.exists(server_config_path):
+        # if a file is found, we assume it is a valid config file.
         server_config = parse_and_validate_config_file(server_config_path)
+        # save the config to db.
+        global_user_state.set_config_yaml(
+            server_config_path, common_utils.dump_yaml_str(dict(server_config)))
     else:
-        server_config = config_utils.Config()
+        #if no file is found, attempt to load the config from db.
+        config_yaml = global_user_state.get_config_yaml(server_config_path)
+        if config_yaml:
+            server_config = config_utils.Config.from_dict(
+                yaml.safe_load(config_yaml))
+        else:
+            server_config = config_utils.Config()
+
     return server_config
 
 
@@ -488,21 +500,12 @@ def _reload_config_as_server() -> None:
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
 
-    overrides: List[config_utils.Config] = []
     server_config = get_server_config()
-    if server_config:
-        overrides.append(server_config)
 
-    # layer the configs on top of each other based on priority
-    overlaid_server_config: config_utils.Config = config_utils.Config()
-    for override in overrides:
-        overlaid_server_config = overlay_skypilot_config(
-            original_config=overlaid_server_config, override_configs=override)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(
-            f'server config: \n'
-            f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
-    _set_loaded_config(overlaid_server_config)
+        logger.debug(f'server config: \n'
+                     f'{common_utils.dump_yaml_str(dict(server_config))}')
+    _set_loaded_config(server_config)
 
 
 def _reload_config_as_client() -> None:
