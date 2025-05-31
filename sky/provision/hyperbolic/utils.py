@@ -11,12 +11,9 @@ from sky import authentication
 from sky import sky_logging
 from sky.utils import status_lib
 
-# Module-level constants
-CREDENTIALS_PATH = '~/.hyperbolic/api_key'
-
-#TODO consolidate these URLs and update to prod endpoint
-CASTLE_BASE_URL = 'https://api.dev-hyperbolic.xyz'  #'http://localhost:8080'
-GATEWAY_BASE_URL = 'https://api.dev-hyperbolic.xyz'  #'http://localhost:8000'
+#TODO update to prod endpoint
+BASE_URL = 'https://api.dev-hyperbolic.xyz'
+API_KEY_PATH = '~/.hyperbolic/api_key'
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
@@ -80,13 +77,13 @@ class HyperbolicClient:
 
     def __init__(self):
         """Initialize the Hyperbolic client with API credentials."""
-        cred_path = os.path.expanduser(CREDENTIALS_PATH)
+        cred_path = os.path.expanduser(API_KEY_PATH)
         if not os.path.exists(cred_path):
             raise RuntimeError(f'API key not found at {cred_path}')
         with open(cred_path, 'r', encoding='utf-8') as f:
             self.api_key = f.read().strip()
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
-        self.api_url = GATEWAY_BASE_URL
+        self.api_url = BASE_URL
 
     def _make_request(
             self,
@@ -94,13 +91,7 @@ class HyperbolicClient:
             endpoint: str,
             payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make an API request to Hyperbolic."""
-        # Select base URL based on endpoint version
-        if endpoint.startswith('/v2/'):
-            base_url = CASTLE_BASE_URL
-        else:
-            base_url = GATEWAY_BASE_URL
-
-        url = f'{base_url}{endpoint}'
+        url = f'{BASE_URL}{endpoint}'
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
