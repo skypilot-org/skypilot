@@ -315,6 +315,12 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserUpdateBody(RequestBody):
+    """The request body for the user update endpoint."""
+    user_id: str
+    role: str
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]

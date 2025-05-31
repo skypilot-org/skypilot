@@ -25,7 +25,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
 
     sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
 
-    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+    monkeypatch.setattr(global_user_state, 'SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
     global_user_state.create_table()

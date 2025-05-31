@@ -49,6 +49,8 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import rbac
+from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -100,6 +102,23 @@ logger = sky_logging.init_logger(__name__)
 # response will block other requests from being processed.
 
 
+class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle RBAC."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        user_id = await _get_user_id(request)
+        if user_id is None:
+            return await call_next(request)
+
+        # Check the role permission
+        if users_rest.permission_service.check_permission(
+                user_id, request.url.path, request.method):
+            return fastapi.responses.JSONResponse(
+                status_code=403, content={'detail': 'Forbidden'})
+
+        return await call_next(request)
+
+
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
@@ -113,13 +132,34 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
+async def _get_user_id(request: fastapi.Request) -> Optional[str]:
+    if 'X-Auth-Request-Email' in request.headers:
+        user_name = request.headers['X-Auth-Request-Email']
+        user_hash = hashlib.md5(
+            user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        return user_hash
+    body = await request.body()
+    if body:
+        try:
+            original_json = json.loads(body)
+        except json.JSONDecodeError as e:
+            logger.error(f'Error parsing request JSON: {e}')
+        else:
+            if ('env_vars' in original_json and
+                    constants.USER_ID_ENV_VAR in original_json['env_vars']):
+                return original_json['env_vars'][constants.USER_ID_ENV_VAR]
+    return None
+
+
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     if 'X-Auth-Request-Email' not in request.headers:
         return None
     user_name = request.headers['X-Auth-Request-Email']
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    return models.User(id=user_hash, name=user_name)
+    return models.User(id=user_hash,
+                       name=user_name,
+                       role=rbac.get_default_role())
 
 
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -131,6 +171,8 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Add user to database if auth_user is present
         if auth_user is not None:
             global_user_state.add_or_update_user(auth_user)
+            user_info = global_user_state.get_user(auth_user.id)
+            users_rest.permission_service.add_role(user_info.id, user_info.role)
 
         body = await request.body()
         if auth_user and body:
@@ -249,6 +291,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
@@ -266,6 +309,7 @@ app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(users_rest.router, prefix='/users', tags=['users'])
 app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
@@ -833,13 +877,6 @@ async def logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
-
-
-@app.get('/users')
-async def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
-    user_list = global_user_state.get_all_users()
-    return [user.to_dict() for user in user_list]
 
 
 @app.post('/download_logs')

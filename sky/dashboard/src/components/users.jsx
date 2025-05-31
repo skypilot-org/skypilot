@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useRef,
 } from 'react';
+import PropTypes from 'prop-types';
 import { CircularProgress } from '@mui/material';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -23,10 +24,11 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { RotateCwIcon, ExternalLinkIcon } from 'lucide-react';
+import { RotateCwIcon, PenIcon, CheckIcon, XIcon } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
+import { ENDPOINT } from '@/data/connectors/constants';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
@@ -89,6 +91,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     key: 'username',
     direction: 'ascending',
   });
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [currentEditingRole, setCurrentEditingRole] = useState('');
 
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
@@ -154,7 +158,68 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     return '';
   };
 
-  if (isLoading && usersWithCounts.length === 0) {
+  const handleEditClick = async (userId, currentRole) => {
+    try {
+      // Get current user's role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      console.log('data', data);
+      const currentUserRole = data.role;
+
+      if (currentUserRole === 'user') {
+        alert(`${data.name} is logged in as user, cannot edit user role.`);
+        return;
+      }
+
+      setEditingUserId(userId);
+      setCurrentEditingRole(currentRole);
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingUserId(null);
+    setCurrentEditingRole('');
+  };
+
+  const handleSaveEdit = async (userId) => {
+    if (!userId || !currentEditingRole) {
+      console.error('User ID or role is missing.');
+      alert('Error: User ID or role is missing.');
+      return;
+    }
+    setIsLoading(true); // Or use parent setLoading
+    try {
+      const response = await fetch(`${ENDPOINT}/users/update`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: userId, role: currentEditingRole }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to update role');
+      }
+      // Invalidate cache before fetching new data
+      dashboardCache.invalidate(getUsersWithCounts);
+      await fetchDataAndProcess(true); // Refresh data
+      handleCancelEdit(); // Exit edit mode
+    } catch (error) {
+      console.error('Failed to update user role:', error);
+      alert(`Error updating role: ${error.message}`);
+    } finally {
+      setIsLoading(false); // Or use parent setLoading
+    }
+  };
+
+  if (isLoading && usersWithCounts.length === 0 && !hasInitiallyLoaded) {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
@@ -189,25 +254,31 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
           <TableRow>
             <TableHead
               onClick={() => requestSort('usernameDisplay')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
               Name{getSortDirection('usernameDisplay')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('fullEmail')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
               Email{getSortDirection('fullEmail')}
             </TableHead>
             <TableHead
+              onClick={() => requestSort('role')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+            >
+              Role{getSortDirection('role')}
+            </TableHead>
+            <TableHead
               onClick={() => requestSort('clusterCount')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
               Clusters{getSortDirection('clusterCount')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('jobCount')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/4"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
@@ -221,6 +292,47 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               </TableCell>
               <TableCell className="truncate" title={user.fullEmail}>
                 {user.fullEmail}
+              </TableCell>
+              <TableCell className="truncate" title={user.role}>
+                <div className="flex items-center gap-2">
+                  {editingUserId === user.userId ? (
+                    <>
+                      <select
+                        value={currentEditingRole}
+                        onChange={(e) => setCurrentEditingRole(e.target.value)}
+                        className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                      >
+                        <option value="admin">admin</option>
+                        <option value="user">user</option>
+                      </select>
+                      <button
+                        onClick={() => handleSaveEdit(user.userId)}
+                        className="text-green-600 hover:text-green-800 p-1"
+                        title="Save"
+                      >
+                        <CheckIcon className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className="text-gray-500 hover:text-gray-700 p-1"
+                        title="Cancel"
+                      >
+                        <XIcon className="h-4 w-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{user.role}</span>
+                      <button
+                        onClick={() => handleEditClick(user.userId, user.role)}
+                        className="text-gray-400 hover:text-sky-blue p-1"
+                        title="Edit role"
+                      >
+                        <PenIcon className="h-3 w-3" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </TableCell>
               <TableCell>
                 {user.clusterCount > 0 ? (
@@ -251,3 +363,11 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     </Card>
   );
 }
+
+UsersTable.propTypes = {
+  refreshInterval: PropTypes.number.isRequired,
+  setLoading: PropTypes.func.isRequired,
+  refreshDataRef: PropTypes.shape({
+    current: PropTypes.func,
+  }).isRequired,
+};
