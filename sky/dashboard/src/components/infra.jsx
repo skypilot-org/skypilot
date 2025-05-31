@@ -524,9 +524,6 @@ export function GPUs() {
     // This calls the fetchData version defined when isInitialLoad is true.
     // That fetchData will then set isInitialLoad to false within its finally block.
     const initializeData = async () => {
-      // Enable cache debug mode temporarily
-      dashboardCache.setDebugMode(true);
-
       // Trigger cache preloading for infra page and background preload other pages
       await cachePreloader.preloadForPage('infra');
 
@@ -565,11 +562,10 @@ export function GPUs() {
   }, []);
 
   const handleRefresh = () => {
-    // Only invalidate cache entry specific to the infra page
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidate(getInfraData);
-    // Don't invalidate shared cache entries that other pages depend on
-    // dashboardCache.invalidate(getClusters);
-    // dashboardCache.invalidate(getManagedJobs);
 
     if (refreshDataRef.current) {
       refreshDataRef.current({ showLoadingIndicators: true });

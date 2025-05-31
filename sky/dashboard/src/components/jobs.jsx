@@ -219,9 +219,7 @@ export function ManagedJobs() {
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
-        ]);
+        const jobsResponse = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(
@@ -243,10 +241,8 @@ export function ManagedJobs() {
   }, []);
 
   const handleRefresh = () => {
-    // Only invalidate cache entries specific to the jobs page
+    // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    // Don't invalidate getClusters as it's shared with other pages
-    // dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getWorkspaces);
 
     if (refreshDataRef.current) {
@@ -430,9 +426,6 @@ export function ManagedJobsTable({
   useEffect(() => {
     setData([]);
     let isCurrent = true;
-
-    // Enable cache debug mode temporarily
-    dashboardCache.setDebugMode(true);
 
     fetchData();
 

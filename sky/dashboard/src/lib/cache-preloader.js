@@ -120,7 +120,7 @@ class CachePreloader {
       if (force) {
         dashboardCache.invalidate(getWorkspaces);
       }
-      const workspacesData = await dashboardCache.get(getWorkspaces, []);
+      const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
 
       // Then load enabled clouds for each workspace
