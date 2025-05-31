@@ -30,6 +30,8 @@ class RunPod(clouds.Cloud):
              'are non-trivial on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on RunPod. To read data '
              'from object stores on RunPod, use `mode: COPY` to copy the data '

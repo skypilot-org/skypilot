@@ -97,7 +97,11 @@ export async function getClusters({ clusterNames = null } = {}) {
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
         workspace: cluster.workspace,
+        autostop: cluster.autostop,
+        to_down: cluster.to_down,
         jobs: [],
+        command: cluster.last_creation_command || cluster.last_use,
+        task_yaml: cluster.last_creation_yaml || '{}',
         events: [
           {
             time: new Date(cluster.launched_at * 1000),

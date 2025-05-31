@@ -93,7 +93,14 @@ spec:
           {{- if .Values.nebiusCredentials.enabled }}
           echo "Setting up Nebius credentials..."
           mkdir -p /root/.nebius
-          ln -sf /root/.nebius_credentials/credentials.json /root/.nebius/credentials.json
+          # Link all files from .nebius_credentials to .nebius
+          # In workspace, it is possible to use multiple credentials files. We need to link all of them to .nebius
+          for file in /root/.nebius_credentials/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ln -sf "$file" "/root/.nebius/$filename"
+            fi
+          done
           echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
           # Create a Nebius profile for the nebius CLI to use as default
           nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
@@ -179,8 +186,7 @@ spec:
         {{- end }}
         {{- if .Values.nebiusCredentials.enabled }}
         - name: nebius-credentials
-          mountPath: /root/.nebius_credentials/credentials.json
-          subPath: credentials.json
+          mountPath: /root/.nebius_credentials
         {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}

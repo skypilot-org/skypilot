@@ -504,14 +504,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    statusGroups,
-    workspaceFilter,
-  ]);
+  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -1213,12 +1206,6 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('priority')}
-              >
-                Priority{getSortDirection('priority')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources')}
               >
                 Resources{getSortDirection('resources')}
@@ -1270,7 +1257,6 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
-                    <TableCell>{item.priority}</TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions
@@ -1292,7 +1278,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
                   No jobs found

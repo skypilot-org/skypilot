@@ -119,6 +119,11 @@ _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
 _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 
+# From https://cloud.google.com/compute/docs/gpus/gpudirect
+# A specific image is used to ensure that the the GPU is configured with TCPX support.
+_NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
+                         'nccl-plugin-gpudirecttcpx')
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -505,6 +510,8 @@ class GCP(clouds.Cloud):
             False,
             override_configs=resources.cluster_config_overrides)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
+        network_tier = r.network_tier
+        resources_vars['network_tier'] = network_tier
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
@@ -539,8 +546,8 @@ class GCP(clouds.Cloud):
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if enable_gpu_direct:
-                    image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
+                if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
+                    image_id = _NETWORK_GCP_IMAGE_ID
                 else:
                     if acc == 'K80':
                         # Though the image is called cu113, it actually has later
@@ -630,7 +637,7 @@ class GCP(clouds.Cloud):
             ('gcp', 'placement_policy'),
             None,
             override_configs=resources.cluster_config_overrides)
-        if enable_gpu_direct:
+        if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
             user_data += constants.GPU_DIRECT_TCPX_USER_DATA
             docker_run_options += constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
             if placement_policy is None:

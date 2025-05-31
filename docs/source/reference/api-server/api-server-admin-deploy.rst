@@ -355,6 +355,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: bash
 
+            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
@@ -363,6 +364,39 @@ Following tabs describe how to configure credentials for different clouds on the
               --set-file nebiusCredentials.credentialsJson=$HOME/.nebius/credentials.json
 
         The chart will create a secret named ``nebius-credentials`` automatically.
+
+        .. dropdown:: Use multiple credential files for workspaces
+
+            If you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files:
+
+            .. code-block:: bash
+
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  --namespace $NAMESPACE \
+                  --reuse-values \
+                  --set nebiusCredentials.enabled=true \
+                  --set nebiusCredentials.tenantId=YOUR_TENANT_ID \
+                  --set-file nebiusCredentials.credentialsFiles.credentials.json=$HOME/.nebius/credentials.json \
+                  --set-file nebiusCredentials.credentialsFiles.serviceaccount-1-credentials.json=$HOME/.nebius/serviceaccount-1-credentials.json \
+                  --set-file nebiusCredentials.credentialsFiles.serviceaccount-2-credentials.json=$HOME/.nebius/serviceaccount-2-credentials.json
+
+            Files in this secret will be linked to `~/.nebius/` in the container. You can then reference them in your workspace configuration:
+
+            .. code-block:: yaml
+
+                # SkyPilot config
+
+                workspaces:
+
+                  team-a:
+                    nebius:
+                      credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
+                      tenant_id: tenant-rrww0kh3nnfo7v0dgw
+
+                  team-b:
+                    nebius:
+                      credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
+                      tenant_id: tenant-52czfp5clbtq0er1ol
 
         .. dropdown:: Use existing Nebius credentials
 

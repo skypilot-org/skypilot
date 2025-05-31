@@ -7,6 +7,9 @@ import {
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 
+// Configuration
+const DEFAULT_TAIL_LINES = 1000;
+
 export async function getManagedJobs({ allUsers = true } = {}) {
   try {
     const response = await fetch(`${ENDPOINT}/jobs/queue`, {
@@ -149,6 +152,8 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           ? new Date(job.submitted_at * 1000)
           : null,
         events: events,
+        dag_yaml: job.dag_yaml,
+        entrypoint: job.entrypoint,
       };
     });
     return { jobs: jobData, controllerStopped: false };
@@ -189,28 +194,50 @@ export async function streamManagedJobLogs({
   signal,
   onNewLog,
 }) {
-  const timeout = 10000; // Default timeout of 10 seconds
+  // Measure timeout from last received data, not from start of request.
+  const inactivityTimeout = 30000; // 30 seconds of no data activity
+  let lastActivity = Date.now();
+  let timeoutId;
 
-  // Create a timeout promise that resolves after the specified time
-  const timeoutPromise = new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ timeout: true });
-    }, timeout);
-  });
+  // Create an activity-based timeout promise
+  const createTimeoutPromise = () => {
+    return new Promise((resolve) => {
+      const checkActivity = () => {
+        const timeSinceLastActivity = Date.now() - lastActivity;
+
+        if (timeSinceLastActivity >= inactivityTimeout) {
+          resolve({ timeout: true });
+        } else {
+          // Check again after remaining time
+          timeoutId = setTimeout(
+            checkActivity,
+            inactivityTimeout - timeSinceLastActivity
+          );
+        }
+      };
+
+      timeoutId = setTimeout(checkActivity, inactivityTimeout);
+    });
+  };
+
+  const timeoutPromise = createTimeoutPromise();
 
   // Create the fetch promise
   const fetchPromise = (async () => {
     try {
+      const requestBody = {
+        controller: controller,
+        follow: false,
+        job_id: jobId,
+        tail: DEFAULT_TAIL_LINES,
+      };
+
       const response = await fetch(`${ENDPOINT}/jobs/logs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          controller: controller,
-          follow: false,
-          job_id: jobId,
-        }),
+        body: JSON.stringify(requestBody),
         // Only use the signal if it's provided
         ...(signal ? { signal } : {}),
       });
@@ -222,14 +249,27 @@ export async function streamManagedJobLogs({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+
+          // Update activity timestamp when we receive data
+          lastActivity = Date.now();
+
           const chunk = new TextDecoder().decode(value);
           onNewLog(chunk);
         }
       } finally {
         reader.cancel();
+        // Clear the timeout when streaming completes successfully
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
       }
       return { timeout: false };
     } catch (error) {
+      // Clear timeout on any error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
       // If this was an abort, just return silently
       if (error.name === 'AbortError') {
         return { timeout: false };
@@ -238,13 +278,19 @@ export async function streamManagedJobLogs({
     }
   })();
 
-  // Race the fetch against the timeout
+  // Race the fetch against the activity-based timeout
   const result = await Promise.race([fetchPromise, timeoutPromise]);
-  // If we timed out, just return silently without throwing an error
+
+  // Clear any remaining timeout
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  // If we timed out due to inactivity, show a more informative message
   if (result.timeout) {
     showToast(
-      `Log request for job ${jobId} timed out after ${timeout}ms`,
-      'error'
+      `Log request for job ${jobId} timed out after ${inactivityTimeout / 1000}s of inactivity`,
+      'warning'
     );
     return;
   }

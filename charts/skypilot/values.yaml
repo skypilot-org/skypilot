@@ -47,18 +47,20 @@ apiService:
   #  my-box:
   #    hosts:
   #      - hostname_in_ssh_config
-# Optional secret that contains SSH keys for the API server to use, all the entries
-# in the secret will be mounted to ~/.ssh/ directory in the API server.
-sshKeySecret: null
-# Map of SSH key file names to their contents. If set, the chart will create a
-# secret automatically and mount the keys to ~/.ssh/.
-sshKeys: {}
-# sshKeys:
-#   id_rsa: |-
-#     -----BEGIN RSA PRIVATE KEY-----
-#     ...
-#   id_rsa.pub: |
-#     ssh-rsa AAAA...
+  
+
+  # Optional secret that contains SSH keys for the API server to use, all the entries
+  # in the secret will be mounted to ~/.ssh/ directory in the API server.
+  sshKeySecret: null
+  # Map of SSH key file names to their contents. If set, the chart will create a
+  # secret automatically and mount the keys to ~/.ssh/.
+  sshKeys: {}
+  # sshKeys:
+  #   id_rsa: |-
+  #     -----BEGIN RSA PRIVATE KEY-----
+  #     ...
+  #   id_rsa.pub: |
+  #     ssh-rsa AAAA...
   
 
   # Skip resource check for the API server, not recommended for production deployment
@@ -302,6 +304,25 @@ nebiusCredentials:
   # Content of the Nebius credentials JSON. If provided, a secret will be created
   # and referenced by `nebiusSecretName`.
   credentialsJson: null
+  # Map of credential file names to their contents. If set, the chart will create a
+  # secret automatically with multiple credential files.
+  credentialsFiles: {}
+  # credentialsFiles:
+  #   credentials.json: |
+  #     {
+  #       "service_account_id": "...",
+  #       "private_key": "..."
+  #     }
+  #   serviceaccount-1-credentials.json: |
+  #     {
+  #       "service_account_id": "...",
+  #       "private_key": "..."
+  #     }
+  #   serviceaccount-2-credentials.json: |
+  #     {
+  #       "service_account_id": "...",
+  #       "private_key": "..."
+  #     }
 
 # Set securityContext for the api pod
 podSecurityContext: {}
