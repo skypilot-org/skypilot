@@ -219,7 +219,9 @@ export function ManagedJobs() {
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        const jobsResponse = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(

@@ -175,7 +175,9 @@ export function useManagedJobDetails(refreshTrigger = 0) {
     async function fetchJobData() {
       try {
         setLoadingJobData(true);
-        const data = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        const data = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
         setJobData(data);
       } catch (error) {
         console.error('Error fetching managed job data:', error);
@@ -205,7 +207,9 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
         setLoadingJobData(true);
 
         // Always get all jobs data (cache handles freshness automatically)
-        const allJobsData = await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        const allJobsData = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
 
         // Filter for the specific job client-side
         const job = allJobsData?.jobs?.find(
