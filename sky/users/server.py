@@ -1,5 +1,6 @@
 """REST API for workspace management."""
 
+import hashlib
 from typing import Any, Dict, List
 
 import fastapi
@@ -9,6 +10,7 @@ from sky import sky_logging
 from sky.server.requests import payloads
 from sky.users import permission
 from sky.users import rbac
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -23,6 +25,18 @@ async def users() -> List[Dict[str, Any]]:
     """Gets all users."""
     user_list = global_user_state.get_all_users()
     return [user.to_dict() for user in user_list]
+
+
+@router.get('/role')
+async def get_current_user_role(request: fastapi.Request):
+    """Get current user's role."""
+    if 'X-Auth-Request-Email' not in request.headers:
+        return {'name': '', 'role': rbac.RoleName.ADMIN.value}
+    user_name = request.headers['X-Auth-Request-Email']
+    user_hash = hashlib.md5(
+        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    user_info = global_user_state.get_user(user_hash)
+    return {'name': user_info.name, 'role': user_info.role}
 
 
 @router.post('/update')

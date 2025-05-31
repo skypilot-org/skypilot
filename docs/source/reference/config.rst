@@ -148,20 +148,6 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
-    :ref:`roles <config-yaml-rbac-roles>`:
-      user:
-        permissions:
-          blocklist:
-            - path: /workspaces/config
-              method: POST
-            - path: /workspaces/update
-              method: POST
-            - path: /workspaces/create
-              method: POST
-            - path: /workspaces/delete
-              method: POST
-            - path: /users/update
-              method: POST
 
 Fields
 ----------
@@ -1256,36 +1242,6 @@ RBAC configuration (optional).
 Default role for users (optional).
 
 If not specified, the default role is ``admin``.
-
-.. _config-yaml-rbac-roles:
-
-``rbac.roles``
-~~~~~~~~~~~~~~
-
-Role permissions configuration (optional).
-
-If not specified, the default role permissions with blocklist will be set for the ``user`` role.
-
-Example:
-
-.. code-block:: yaml
-
-  rbac:
-    default_role: admin
-    roles:
-      user:
-        permissions:
-          blocklist:
-            - path: /workspaces/config
-              method: POST
-            - path: /workspaces/update
-              method: POST
-            - path: /workspaces/create
-              method: POST
-            - path: /workspaces/delete
-              method: POST
-            - path: /users/update
-              method: POST
 
 
 .. toctree::

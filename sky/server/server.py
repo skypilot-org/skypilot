@@ -171,7 +171,8 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Add user to database if auth_user is present
         if auth_user is not None:
             global_user_state.add_or_update_user(auth_user)
-            users_rest.permission_service.add_role(auth_user.id, auth_user.role)
+            user_info = global_user_state.get_user(auth_user.id)
+            users_rest.permission_service.add_role(user_info.id, user_info.role)
 
         body = await request.body()
         if auth_user and body:

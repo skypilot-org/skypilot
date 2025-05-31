@@ -15,7 +15,7 @@ class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        engine = global_user_state._SQLALCHEMY_ENGINE
+        engine = global_user_state.SQLALCHEMY_ENGINE
         adapter = sqlalchemy_adapter.Adapter(engine)
         model_path = os.path.join(os.path.dirname(__file__), 'model.conf')
         enforcer = casbin.Enforcer(model_path, adapter)

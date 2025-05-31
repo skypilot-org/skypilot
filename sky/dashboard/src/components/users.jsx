@@ -158,9 +158,29 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     return '';
   };
 
-  const handleEditClick = (userId, currentRole) => {
-    setEditingUserId(userId);
-    setCurrentEditingRole(currentRole);
+  const handleEditClick = async (userId, currentRole) => {
+    try {
+      // Get current user's role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      console.log('data', data);
+      const currentUserRole = data.role;
+
+      if (currentUserRole === 'user') {
+        alert(`${data.name} is logged in as user, cannot edit user role.`);
+        return;
+      }
+
+      setEditingUserId(userId);
+      setCurrentEditingRole(currentRole);
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      alert(`Error: ${error.message}`);
+    }
   };
 
   const handleCancelEdit = () => {

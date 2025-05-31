@@ -1215,44 +1215,6 @@ def get_config_schema():
             'default_role': {
                 'type': 'string',
             },
-            'roles': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'patternProperties': {
-                    # Any role name is allowed as a key
-                    '^.*$': {
-                        'type': 'object',
-                        'required': [],
-                        'additionalProperties': False,
-                        'properties': {
-                            'permissions': {
-                                'type': 'object',
-                                'required': [],
-                                'additionalProperties': False,
-                                'properties': {
-                                    'blocklist': {
-                                        'type': 'array',
-                                        'items': {
-                                            'type': 'object',
-                                            'required': ['path', 'method'],
-                                            'additionalProperties': False,
-                                            'properties': {
-                                                'path': {
-                                                    'type': 'string',
-                                                },
-                                                'method': {
-                                                    'type': 'string',
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
         },
     }
 
