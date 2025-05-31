@@ -243,7 +243,11 @@ Following tabs describe how to configure credentials for different clouds on the
 
         The chart will create a secret named ``aws-credentials`` automatically.
 
-        .. dropdown:: Use existing AWS credentials
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret aws-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing AWS credentials secret
 
             You can also set the following values to use a secret that already contains your AWS credentials:
 
@@ -277,7 +281,11 @@ Following tabs describe how to configure credentials for different clouds on the
 
         The chart will create a secret named ``gcp-credentials`` automatically.
 
-        .. dropdown:: Use existing GCP credentials
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret gcp-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing GCP credentials secret
 
             You can also set the following values to use a secret that already contains your GCP credentials:
 
@@ -305,7 +313,11 @@ Following tabs describe how to configure credentials for different clouds on the
 
         The chart will create a secret named ``runpod-credentials`` automatically.
 
-        .. dropdown:: Use existing RunPod credentials
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret runpod-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing RunPod credentials secret
 
             You can also set the following values to use a secret that already contains your RunPod API key:
 
@@ -333,7 +345,11 @@ Following tabs describe how to configure credentials for different clouds on the
 
         The chart will create a secret named ``lambda-credentials`` automatically.
 
-        .. dropdown:: Use existing Lambda credentials
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret lambda-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing Lambda credentials secret
 
             You can also set the following values to use a secret that already contains your Lambda credentials:
 
@@ -398,7 +414,7 @@ Following tabs describe how to configure credentials for different clouds on the
                       credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
                       tenant_id: tenant-52czfp5clbtq0er1ol
 
-        .. dropdown:: Use existing Nebius credentials
+        .. dropdown:: Use existing Nebius credentials secret
 
             You can also set the following values to use a secret that already contains your Nebius credentials:
 
