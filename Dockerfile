@@ -27,7 +27,7 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     # Install uv and skypilot
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
-    ~/.local/bin/uv pip install skypilot-nightly[all] --system && \
+    ~/.local/bin/uv pip install skypilot[all]==0.10.0 --system && \
     # Cleanup all caches to reduce the image size
     conda clean -afy && \
     ~/.local/bin/uv cache clean && \
