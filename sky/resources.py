@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
+from sky.clouds.utils import gcp_utils
 from sky.provision import docker_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -325,6 +326,16 @@ class Resources:
                         f'{", ".join(supported_tiers)}.')
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
+
+        # TODO(maknee):
+        # This is a hack to set the image id for the best network tier.
+        # We should find a better way to do this.
+        # Perhaps by injecting into resources while provisioning.
+        if isinstance(self._cloud, clouds.GCP):
+            if self._network_tier == resources_utils.NetworkTier.BEST:
+                self._image_id = {
+                    self._region: gcp_utils.get_gcp_gpu_direct_image_id()
+                }
 
         if ports is not None:
             if isinstance(ports, tuple):

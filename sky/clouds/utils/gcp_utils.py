@@ -190,3 +190,7 @@ def get_minimal_storage_permissions() -> List[str]:
     permissions += constants.GCP_MINIMAL_PERMISSIONS
 
     return permissions
+
+
+def get_gcp_gpu_direct_image_id() -> str:
+    return constants.GCP_GPU_DIRECT_IMAGE_ID
