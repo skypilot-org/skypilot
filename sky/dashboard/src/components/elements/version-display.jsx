@@ -10,19 +10,18 @@ export function VersionDisplay() {
     fetch(`${ENDPOINT}/api/health`)
       .then((res) => res.json())
       .then((data) => {
-        console.log('Health API response:', data); // Debug logging
         if (data.version) {
           setVersion(data.version);
         }
         if (data.commit) {
           setCommit(data.commit);
-          console.log('Commit found:', data.commit); // Debug logging
-        } else {
-          console.log('No commit found in response'); // Debug logging
         }
       })
       .catch((error) => {
-        console.error('Error fetching version:', error);
+        console.error(
+          'Error fetching API server version and commit hash:',
+          error
+        );
       });
   }, []);
 
