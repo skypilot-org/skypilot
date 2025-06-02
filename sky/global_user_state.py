@@ -266,7 +266,7 @@ def create_table():
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'clusters',
-            'user_hasha',
+            'user_hash',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL',
             value_to_replace_existing_entries=common_utils.get_user_hash())
