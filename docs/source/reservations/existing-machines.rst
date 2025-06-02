@@ -227,6 +227,6 @@ Details: Prerequisites
 
 * Debian-based OS (tested on Debian 11)
 * SSH access from SkyPilot API server host to all remote machines
-* All machines in a SSH Node Pool must have network access to each other
+* All machines in a SSH Node Pool must have private network access to each other (e.g: same VPC)
 
 
