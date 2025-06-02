@@ -6,6 +6,7 @@ import {
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
+import dashboardCache from '@/lib/cache';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 1000;
@@ -156,6 +157,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         entrypoint: job.entrypoint,
       };
     });
+
     return { jobs: jobData, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
@@ -173,7 +175,9 @@ export function useManagedJobDetails(refreshTrigger = 0) {
     async function fetchJobData() {
       try {
         setLoadingJobData(true);
-        const data = await getManagedJobs({ allUsers: true });
+        const data = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
         setJobData(data);
       } catch (error) {
         console.error('Error fetching managed job data:', error);
@@ -184,6 +188,56 @@ export function useManagedJobDetails(refreshTrigger = 0) {
 
     fetchJobData();
   }, [refreshTrigger]);
+
+  return { jobData, loading };
+}
+
+// Hook for individual job details that reuses the main jobs cache
+export function useSingleManagedJob(jobId, refreshTrigger = 0) {
+  const [jobData, setJobData] = useState(null);
+  const [loadingJobData, setLoadingJobData] = useState(true);
+
+  const loading = loadingJobData;
+
+  useEffect(() => {
+    async function fetchJobData() {
+      if (!jobId) return;
+
+      try {
+        setLoadingJobData(true);
+
+        // Always get all jobs data (cache handles freshness automatically)
+        const allJobsData = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
+
+        // Filter for the specific job client-side
+        const job = allJobsData?.jobs?.find(
+          (j) => String(j.id) === String(jobId)
+        );
+
+        if (job) {
+          setJobData({
+            jobs: [job],
+            controllerStopped: allJobsData.controllerStopped || false,
+          });
+        } else {
+          // Job not found in the results
+          setJobData({
+            jobs: [],
+            controllerStopped: allJobsData.controllerStopped || false,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching single managed job data:', error);
+        setJobData({ jobs: [], controllerStopped: false });
+      } finally {
+        setLoadingJobData(false);
+      }
+    }
+
+    fetchJobData();
+  }, [jobId, refreshTrigger]);
 
   return { jobData, loading };
 }
