@@ -703,7 +703,7 @@ class RayCodeGen:
                     # Find the first non-137 return code and its index
                     non_137 = next((i, r) for i, r in enumerate(returncodes) if r != 137)
                     # +1 because the worker rank is 0-based, but I think the worker number is 1-based
-                    reason = f'(Worker {{non_137[0] + 1}} failed with return code {{non_137[1]}}, SkyPilot cleaned the processes on other nodes with return code 137)'
+                    reason = f'(A Worker failed with return code {{non_137[1]}}, SkyPilot cleaned up the processes on other nodes with return code 137)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
