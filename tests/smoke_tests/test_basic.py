@@ -487,7 +487,7 @@ def test_jobs_launch_and_logs(generic_cloud: str):
 
 
 # ---------- Testing YAML Specs ----------
-# Our sky storage requires credentials to check the bucket existance when
+# Our sky storage requires credentials to check the bucket existence when
 # loading a task from the yaml file, so we cannot make it a unit test.
 class TestYamlSpecs:
     # TODO(zhwu): Add test for `to_yaml_config` for the Storage object.

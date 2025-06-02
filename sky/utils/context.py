@@ -19,7 +19,7 @@ class Context(object):
     This is a wrapper around `contextvars.ContextVar` that provides a typed
     interface for the SkyPilot specific context variables that can be accessed
     at any layer of the call stack. ContextVar is coroutine local, an empty
-    Context will be intialized for each coroutine when it is created.
+    Context will be initialized for each coroutine when it is created.
 
     Adding a new context variable for a new feature is as simple as:
     1. Add a new instance variable to the Context class.
