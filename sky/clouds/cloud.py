@@ -631,7 +631,7 @@ class Cloud:
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure.
+        """Whether a resource needs cleanup after preemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,

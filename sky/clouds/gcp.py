@@ -120,7 +120,7 @@ _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 
 # From https://cloud.google.com/compute/docs/gpus/gpudirect
-# A specific image is used to ensure that the the GPU is configured with TCPX support.
+# A specific image is used to ensure that the GPU is configured with TCPX support.
 _NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
                          'nccl-plugin-gpudirecttcpx')
 
@@ -1065,7 +1065,7 @@ class GCP(clouds.Cloud):
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure."""
+        """Whether a resource needs cleanup after preemption or failure."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
