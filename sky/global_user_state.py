@@ -302,28 +302,37 @@ def create_table():
         session.commit()
 
 
+if _SQLALCHEMY_ENGINE is None:
+    if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
+        # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set,
+        # use it as the database URI.
+        logger.debug('using db URI from '
+                     f'{constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
+        _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+            os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
+    else:
+        _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
+    create_table()
+
+
 def _init_db(func):
     """Initialize the database."""
 
-    def _init_db_helper():
-        global _SQLALCHEMY_ENGINE
-        if _SQLALCHEMY_ENGINE is not None:
-            return
-        if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
-            # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set,
-            # use it as the database URI.
-            logger.debug('using db URI from '
-                         f'{constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
-            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-                os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
-        else:
-            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
-                                                          _DB_PATH)
-        create_table()
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        _init_db_helper()
+        # global _SQLALCHEMY_ENGINE
+        # if _SQLALCHEMY_ENGINE is None:
+        #     if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
+        #         # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set,
+        #         # use it as the database URI.
+        #         logger.debug('using db URI from '
+        #                  f'{constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
+        #         _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+        #        os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
+        #     else:
+        #         _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
+        #                                                         _DB_PATH)
+        #     create_table()
         return func(*args, **kwargs)
 
     return wrapper
