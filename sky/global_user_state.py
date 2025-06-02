@@ -12,7 +12,6 @@ import os
 import pathlib
 import pickle
 import re
-import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -48,7 +47,6 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_DB_INIT_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -311,21 +309,17 @@ def _init_db(func):
         global _SQLALCHEMY_ENGINE
         if _SQLALCHEMY_ENGINE is not None:
             return
-        with _DB_INIT_LOCK:
-            if not _SQLALCHEMY_ENGINE:
-                if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
-                    # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set,
-                    # use it as the database URI.
-                    logger.debug(
-                        'using db URI from '
-                        f'{constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
-                    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-                        os.environ.get(
-                            constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
-                else:
-                    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
-                                                                  _DB_PATH)
-                create_table()
+        if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
+            # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set,
+            # use it as the database URI.
+            logger.debug('using db URI from '
+                         f'{constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
+            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+                os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
+        else:
+            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
+                                                          _DB_PATH)
+        create_table()
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
