@@ -172,6 +172,7 @@ def _glob_to_similar(glob_pattern):
 
 
 def create_table():
+    assert _SQLALCHEMY_ENGINE is not None
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
