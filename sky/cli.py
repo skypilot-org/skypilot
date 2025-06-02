@@ -1958,7 +1958,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
     if show_managed_jobs:
-        managed_jobs_queue_request_id = managed_jobs.queue(refresh=refresh,
+        managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
                                                            skip_finished=True,
                                                            all_users=all_users)
     show_endpoints = endpoints or endpoint is not None
