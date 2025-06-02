@@ -134,7 +134,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 disk_size=config.node_config['DiskSize'],
                 user_data=config.node_config['UserData'],
                 associate_public_ip_address=(
+                associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'run_instances error: {e}')
+            raise
+        logger.info(f'Launched instance {instance_id}.')
+        created_instance_ids.append(instance_id)
+        if head_instance_id is None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise

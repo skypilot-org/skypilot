@@ -27,6 +27,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -57,9 +58,10 @@ _MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(replica_id: int,
-                   task_yaml_path: str,
+                   service_task_yaml_path: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
+                   retry_until_up: bool = True,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -71,8 +73,13 @@ def launch_cluster(replica_id: int,
             or some error happened before provisioning and will happen again
             if retry.
     """
+    if resources_override is not None:
+        logger.info(f'Scaling up replica (id: {replica_id}) cluster '
+                    f'{cluster_name} with resources override: '
+                    f'{resources_override}')
     try:
-        config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        config = common_utils.read_yaml(
+            os.path.expanduser(service_task_yaml_path))
         task = sky.Task.from_yaml_config(config)
         if resources_override is not None:
             resources = task.resources
@@ -98,7 +105,7 @@ def launch_cluster(replica_id: int,
             usage_lib.messages.usage.set_internal()
             execution.launch(task,
                              cluster_name,
-                             retry_until_up=True,
+                             retry_until_up=retry_until_up,
                              _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
@@ -167,9 +174,9 @@ def terminate_cluster(cluster_name: str,
             time.sleep(gap_seconds)
 
 
-def _get_resources_ports(task_yaml: str) -> str:
+def _get_resources_ports(service_task_yaml_path: str) -> str:
     """Get the resources ports used by the task."""
-    task = sky.Task.from_yaml(task_yaml)
+    task = sky.Task.from_yaml(service_task_yaml_path)
     # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
     assert task.service is not None, task
@@ -177,7 +184,7 @@ def _get_resources_ports(task_yaml: str) -> str:
     return task.service.ports
 
 
-def _should_use_spot(task_yaml: str,
+def _should_use_spot(service_task_yaml_path: str,
                      resource_override: Optional[Dict[str, Any]]) -> bool:
     """Get whether the task should use spot."""
     if resource_override is not None:
@@ -185,7 +192,7 @@ def _should_use_spot(task_yaml: str,
         if use_spot_override is not None:
             assert isinstance(use_spot_override, bool)
             return use_spot_override
-    task = sky.Task.from_yaml(task_yaml)
+    task = sky.Task.from_yaml(service_task_yaml_path)
     spot_use_resources = [
         resources for resources in task.resources if resources.use_spot
     ]
@@ -246,14 +253,10 @@ class ReplicaStatusProperty:
     preempted: bool = False
     # Whether the replica is purged.
     purged: bool = False
-
-    def remove_terminated_replica(self) -> bool:
-        """Whether to remove the replica record from the replica table.
-
-        If not, the replica will stay in the replica table permanently to
-        notify the user that something is wrong with the user code / setup.
-        """
-        return self.is_scale_down
+    # Whether the replica failed to launch due to spot availability.
+    # This is only possible when spot placer is enabled, so the retry until up
+    # is set to True and it can fail immediately due to spot availability.
+    failed_spot_availability: bool = False
 
     def unrecoverable_failure(self) -> bool:
         """Whether the replica fails and cannot be recovered.
@@ -385,10 +388,12 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 0
+    _VERSION = 2
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, version: int) -> None:
+                 is_spot: bool, location: Optional[spot_placer.Location],
+                 version: int, resources_override: Optional[Dict[str,
+                                                                 Any]]) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
@@ -398,6 +403,12 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
         self.is_spot: bool = is_spot
+        self.location: Optional[Dict[str, Optional[str]]] = (
+            location.to_pickleable() if location is not None else None)
+        self.resources_override: Optional[Dict[str, Any]] = resources_override
+
+    def get_spot_location(self) -> Optional[spot_placer.Location]:
+        return spot_placer.Location.from_pickleable(self.location)
 
     def handle(
         self,
@@ -483,6 +494,7 @@ class ReplicaInfo:
                 f'version={self.version}, '
                 f'replica_port={self.replica_port}, '
                 f'is_spot={self.is_spot}, '
+                f'location={self.location}, '
                 f'status={self.status}, '
                 f'launched_at={info_dict["launched_at"]}{handle_str})')
         return info
@@ -557,6 +569,12 @@ class ReplicaInfo:
             # Treated similar to on-demand instances.
             self.is_spot = False
 
+        if version < 1:
+            self.location = None
+
+        if version < 2:
+            self.resources_override = None
+
         self.__dict__.update(state)
 
 
@@ -617,9 +635,12 @@ class SkyPilotReplicaManager(ReplicaManager):
     """
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 task_yaml_path: str) -> None:
+                 service_task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
-        self._task_yaml_path = task_yaml_path
+        self.service_task_yaml_path = service_task_yaml_path
+        task = sky.Task.from_yaml(service_task_yaml_path)
+        self._spot_placer: Optional[spot_placer.SpotPlacer] = (
+            spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down pid in the replica table, to make the
         # manager more persistent. Current blocker is that we need to manually
         # poll the Process (by join or is_launch), otherwise, it will never
@@ -635,10 +656,51 @@ class SkyPilotReplicaManager(ReplicaManager):
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
 
+        self._recover_replica_operations()
+
+    def _recover_replica_operations(self):
+        """Let's see are there something to do for ReplicaManager in a
+        recovery run"""
+        assert (not self._launch_process_pool and not self._down_process_pool
+               ), 'We should not have any running processes in a recovery run'
+
+        # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
+        # _launch_replica.
+        # We prioritize PROVISIONING replicas since they were previously
+        # launched but may have been interrupted and need to be restarted.
+        # This is why we process PENDING replicas only after PROVISIONING
+        # replicas.
+        to_up_replicas = serve_state.get_replicas_at_status(
+            self._service_name, serve_state.ReplicaStatus.PROVISIONING)
+        to_up_replicas.extend(
+            serve_state.get_replicas_at_status(
+                self._service_name, serve_state.ReplicaStatus.PENDING))
+
+        for replica_info in to_up_replicas:
+            # It should be robust enough for `execution.launch` to handle cases
+            # where the provisioning is partially done.
+            # So we mock the original request based on all call sites,
+            # including SkyServeController._run_autoscaler.
+            self._launch_replica(
+                replica_info.replica_id,
+                resources_override=replica_info.resources_override)
+
+        for replica_info in serve_state.get_replicas_at_status(
+                self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
+            self._terminate_replica(
+                replica_info.replica_id,
+                sync_down_logs=False,
+                replica_drain_delay_seconds=0,
+                purge=replica_info.status_property.purged,
+                is_scale_down=replica_info.status_property.is_scale_down)
+
     ################################
     # Replica management functions #
     ################################
 
+    # Adding lock here to make sure spot placer's current locations are
+    # consistent with the replicas' status.
+    @with_lock
     def _launch_replica(
         self,
         replica_id: int,
@@ -653,19 +715,42 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        use_spot = _should_use_spot(self.service_task_yaml_path,
+                                    resources_override)
+        retry_until_up = True
+        location = None
+        if use_spot and self._spot_placer is not None:
+            # For spot placer, we don't retry until up so any launch failed
+            # due to availability issue will be handled by the placer.
+            retry_until_up = False
+            # TODO(tian): Currently, the resources_override can only be
+            # `use_spot=True/False`, which will not cause any conflict with
+            # spot placer's cloud, region & zone. When we add more resources
+            # to the resources_override, we need to make sure they won't
+            # conflict with the spot placer's selection.
+            if resources_override is None:
+                resources_override = {}
+            current_spot_locations: List[spot_placer.Location] = []
+            for info in serve_state.get_replica_infos(self._service_name):
+                if info.is_spot:
+                    spot_location = info.get_spot_location()
+                    if spot_location is not None:
+                        current_spot_locations.append(spot_location)
+            location = self._spot_placer.select_next_location(
+                current_spot_locations)
+            resources_override.update(location.to_dict())
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(replica_id, self._task_yaml_path, cluster_name,
-                  resources_override),
+            args=(replica_id, self.service_task_yaml_path, cluster_name,
+                  resources_override, retry_until_up),
         )
-        replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
+        replica_port = _get_resources_ports(self.service_task_yaml_path)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           self.latest_version)
+                           location, self.latest_version, resources_override)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -682,6 +767,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                            replica_drain_delay_seconds: int,
                            is_scale_down: bool = False,
                            purge: bool = False) -> None:
+        left_in_record = not (is_scale_down or purge)
+        if left_in_record:
+            assert sync_down_logs, (
+                'For the replica left in the record, '
+                'the logs should always be synced down. '
+                'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_process_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
@@ -814,6 +905,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
         info.status_property.preempted = True
+        if self._spot_placer is not None:
+            spot_location = info.get_spot_location()
+            assert spot_location is not None
+            self._spot_placer.set_preemptive(spot_location)
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
         self._terminate_replica(info.replica_id,
@@ -834,7 +929,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         the fly. If any of them finished, it will update the status of the
         corresponding replica.
         """
-        for replica_id, p in list(self._launch_process_pool.items()):
+        # To avoid `dictionary changed size during iteration` error.
+        launch_process_pool_snapshot = list(self._launch_process_pool.items())
+        for replica_id, p in launch_process_pool_snapshot:
             if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
@@ -868,6 +965,23 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
+                    if self._spot_placer is not None and info.is_spot:
+                        # TODO(tian): Currently, we set the location to
+                        # preemptive if the launch process failed. This is
+                        # because if the error is not related to the
+                        # availability of the location, then all locations
+                        # should failed for same reason. So it does not matter
+                        # which location is preemptive or not, instead, all
+                        # locations would fail. We should implement a log parser
+                        # to detect if the error is actually related to the
+                        # availability of the location later.
+                        location = info.get_spot_location()
+                        assert location is not None
+                        if p.exitcode != 0:
+                            self._spot_placer.set_preemptive(location)
+                            info.status_property.failed_spot_availability = True
+                        else:
+                            self._spot_placer.set_active(location)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:
@@ -876,7 +990,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-        for replica_id, p in list(self._down_process_pool.items()):
+        down_process_pool_snapshot = list(self._down_process_pool.items())
+        for replica_id, p in down_process_pool_snapshot:
             if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')
@@ -918,6 +1033,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     removal_reason = 'for version outdated'
                 elif info.status_property.purged:
                     removal_reason = 'for purge'
+                elif info.status_property.failed_spot_availability:
+                    removal_reason = 'for spot availability failure'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
@@ -1175,11 +1292,11 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
             return
-        task_yaml_path = serve_utils.generate_task_yaml_file_name(
+        service_task_yaml_path = serve_utils.generate_task_yaml_file_name(
             self._service_name, version)
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
-        self._task_yaml_path = task_yaml_path
+        self.service_task_yaml_path = service_task_yaml_path
         self._update_mode = update_mode
 
         # Reuse all replicas that have the same config as the new version
@@ -1187,7 +1304,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
-        new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        new_config = common_utils.read_yaml(
+            os.path.expanduser(service_task_yaml_path))
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
         if new_config.get('file_mounts', None) != {}:
@@ -1198,10 +1316,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         for info in replica_infos:
             if info.version < version and not info.is_terminal:
                 # Assume user does not change the yaml file on the controller.
-                old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
-                    self._service_name, info.version)
+                old_service_task_yaml_path = (
+                    serve_utils.generate_task_yaml_file_name(
+                        self._service_name, info.version))
                 old_config = common_utils.read_yaml(
-                    os.path.expanduser(old_task_yaml_path))
+                    os.path.expanduser(old_service_task_yaml_path))
                 for key in ['service']:
                     old_config.pop(key)
                 # Bump replica version if all fields except for service are

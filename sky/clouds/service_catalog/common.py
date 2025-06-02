@@ -8,7 +8,6 @@ import typing
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
-import requests
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -21,8 +20,10 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
+    import requests
 else:
     pd = adaptors_common.LazyImport('pandas')
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -196,6 +197,8 @@ def read_catalog(filename: str,
         with filelock.FileLock(meta_path + '.lock'):
             if _need_update():
                 url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+                url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+                headers = {'User-Agent': 'SkyPilot/0.7'}
                 update_frequency_str = ''
                 if pull_frequency_hours is not None:
                     update_frequency_str = (
@@ -205,8 +208,13 @@ def read_catalog(filename: str,
                             f'Updating {cloud} catalog: {filename}') +
                         f'{update_frequency_str}'):
                     try:
-                        r = requests.get(url=url,
-                                         headers={'User-Agent': 'SkyPilot/0.7'})
+                        r = requests.get(url=url, headers=headers)
+                        if r.status_code == 429:
+                            # fallback to s3 mirror, github introduced rate
+                            # limit after 2025-05, see
+                            # https://github.com/skypilot-org/skypilot/issues/5438
+                            # for more details
+                            r = requests.get(url=url_fallback, headers=headers)
                         r.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         error_str = (f'Failed to fetch {cloud} catalog '

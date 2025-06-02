@@ -1,0 +1,35 @@
+envs:
+  MODEL_NAME: Qwen/Qwen3-235B-A22B-FP8
+
+service:
+  # Specifying the path to the endpoint to check the readiness of the replicas.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+    initial_delay_seconds: 1200
+  # How many replicas to manage.
+  replicas: 2
+  
+
+resources:
+  accelerators: {A100:8, A100-80GB:4, A100-80GB:8, H100:8, H200:8}
+  disk_size: 1024
+  disk_tier: best
+  memory: 32+
+  ports: 8000
+
+setup: |
+  uv pip install "sglang>=0.4.6"
+
+run: |
+  export PATH=$PATH:/sbin
+  export SGL_ENABLE_JIT_DEEPGEMM=1
+  # --tp 4 is required even with 8 GPUs, as the output size
+  # of qwen3 is not divisible by quantization block_n=128
+  python3 -m sglang.launch_server --model $MODEL_NAME \
+    --tp 4 --reasoning-parser qwen3 --port 8000 --host 0.0.0.0

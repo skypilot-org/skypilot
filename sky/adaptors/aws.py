@@ -28,15 +28,24 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
-import functools
 import logging
 import threading
 import time
-from typing import Any, Callable
+import typing
+from typing import Callable, Literal, Optional, TypeVar
 
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import boto3
+    _ = boto3  # Supress pylint use before assignment error
+    import mypy_boto3_ec2
+    import mypy_boto3_iam
+    import mypy_boto3_s3
+    import mypy_boto3_service_quotas
+    import mypy_boto3_sts
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
                          'Try pip install "skypilot[aws]"')
@@ -44,6 +53,8 @@ boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 _LAZY_MODULES = (boto3, botocore)
+
+T = TypeVar('T')
 
 logger = logging.getLogger(__name__)
 _session_creation_lock = threading.RLock()
@@ -60,23 +71,13 @@ class _ThreadLocalLRUCache(threading.local):
 
     def __init__(self, maxsize=32):
         super().__init__()
-        self.cache = annotations.lru_cache(scope='global', maxsize=maxsize)
+        self.cache = annotations.lru_cache(scope='request', maxsize=maxsize)
 
 
 def _thread_local_lru_cache(maxsize=32):
     # Create thread-local storage for the LRU cache
     local_cache = _ThreadLocalLRUCache(maxsize)
-
-    def decorator(func):
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            # Use the thread-local LRU cache
-            return local_cache.cache(func)(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
+    return local_cache.cache
 
 
 def _assert_kwargs_builtin_type(kwargs):
@@ -84,8 +85,8 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
-def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
-                       object_name: str) -> Any:
+def _create_aws_object(creation_fn_or_cls: Callable[[], T],
+                       object_name: str) -> T:
     """Create an AWS object.
 
     Args:
@@ -134,6 +135,25 @@ def session(check_credentials: bool = True):
     return s
 
 
+# New typing overloads can be added as needed.
+@typing.overload
+def resource(service_name: Literal['ec2'],
+             **kwargs) -> 'mypy_boto3_ec2.ServiceResource':
+    ...
+
+
+@typing.overload
+def resource(service_name: Literal['s3'],
+             **kwargs) -> 'mypy_boto3_s3.ServiceResource':
+    ...
+
+
+@typing.overload
+def resource(service_name: Literal['iam'],
+             **kwargs) -> 'mypy_boto3_iam.ServiceResource':
+    ...
+
+
 # Avoid caching the resource/client objects. If we are using the assumed role,
 # the credentials will be automatically rotated, but the cached resource/client
 # object will only refresh the credentials with a fixed 15 minutes interval,
@@ -153,7 +173,7 @@ def resource(service_name: str, **kwargs):
     """
     _assert_kwargs_builtin_type(kwargs)
 
-    max_attempts = kwargs.pop('max_attempts', None)
+    max_attempts: Optional[int] = kwargs.pop('max_attempts', None)
     if max_attempts is not None:
         config = botocore_config().Config(
             retries={'max_attempts': max_attempts})
@@ -167,6 +187,28 @@ def resource(service_name: str, **kwargs):
     return _create_aws_object(
         lambda: session(check_credentials=check_credentials).resource(
             service_name, **kwargs), 'resource')
+
+
+# New typing overloads can be added as needed.
+@typing.overload
+def client(service_name: Literal['s3'], **kwargs) -> 'mypy_boto3_s3.Client':
+    pass
+
+
+@typing.overload
+def client(service_name: Literal['ec2'], **kwargs) -> 'mypy_boto3_ec2.Client':
+    pass
+
+
+@typing.overload
+def client(service_name: Literal['sts'], **kwargs) -> 'mypy_boto3_sts.Client':
+    pass
+
+
+@typing.overload
+def client(service_name: Literal['service-quotas'],
+           **kwargs) -> 'mypy_boto3_service_quotas.Client':
+    pass
 
 
 def client(service_name: str, **kwargs):

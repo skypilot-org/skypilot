@@ -89,3 +89,16 @@ run: |
     --enable-torch-compile \
     --torch-compile-max-bs 8 \
     $HEAD_NODE_ARGS
+
+# Optional: Service configuration for SkyServe deployment
+# This will be ignored when deploying with `sky launch`
+service:
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe:
+    path: /health
+    # Allow up to 1 hour for cold start
+    initial_delay_seconds: 3600
+  # Autoscaling from 0 to 2 replicas
+  replica_policy:
+    min_replicas: 0
+    max_replicas: 2

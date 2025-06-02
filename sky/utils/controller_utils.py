@@ -72,6 +72,7 @@ class _ControllerSpec:
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
+    default_autostop_config: Dict[str, Any]
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -118,7 +119,8 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
             'Failed to connect to jobs controller, please try again later.'),
-        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES)
+        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES,
+        default_autostop_config=managed_job_constants.CONTROLLER_AUTOSTOP)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
@@ -148,7 +150,8 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'),
-        default_resources_config=serve_constants.CONTROLLER_RESOURCES)
+        default_resources_config=serve_constants.CONTROLLER_RESOURCES,
+        default_autostop_config=serve_constants.CONTROLLER_AUTOSTOP)
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -165,14 +168,27 @@ class Controllers(enum.Enum):
         # we may not know the exact name, because we are missing the server-side
         # common.SERVER_ID. So, we will assume anything that matches the prefix
         # is a controller.
+        prefix = None
         if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
             controller = cls.SKY_SERVE_CONTROLLER
+            prefix = common.SKY_SERVE_CONTROLLER_PREFIX
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
+            prefix = common.JOB_CONTROLLER_PREFIX
         if controller is not None and name != controller.value.cluster_name:
             # The client-side cluster_name is not accurate. Assume that `name`
             # is the actual cluster name, so need to set the controller's
             # cluster name to the input name.
+
+            # Assert that the cluster name is well-formed. It should be
+            # {prefix}{hash}, where prefix is set above, and hash is a valid
+            # user hash.
+            assert prefix is not None, prefix
+            assert name.startswith(prefix), name
+            assert common_utils.is_valid_user_hash(name[len(prefix):]), (name,
+                                                                         prefix)
+
+            # Update the cluster name.
             controller.value.cluster_name = name
         return controller
 
@@ -188,6 +204,30 @@ class Controllers(enum.Enum):
             if controller.value.controller_type == controller_type:
                 return controller
         return None
+
+
+def high_availability_specified(cluster_name: Optional[str],
+                                skip_warning: bool = True) -> bool:
+    """Check if the controller high availability is specified in user config.
+    """
+    controller = Controllers.from_name(cluster_name)
+    if controller is None:
+        return False
+
+    if skypilot_config.loaded():
+        high_availability = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller',
+             'high_availability'), False)
+        if high_availability:
+            if controller.value.controller_type != 'serve':
+                if not skip_warning:
+                    print(f'{colorama.Fore.RED}High availability controller is'
+                          'only supported for SkyServe controller. It cannot'
+                          f'be enabled for {controller.value.name}.'
+                          f'Skipping this flag.{colorama.Style.RESET_ALL}')
+            else:
+                return True
+    return False
 
 
 # Install cli dependencies. Not using SkyPilot wheels because the wheel
@@ -262,8 +302,9 @@ def _get_cloud_dependencies_installation_commands(
                 '  ARCH="amd64"; '
                 'fi && '
                 '(command -v kubectl &>/dev/null || '
-                '("https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" '
-                '&& sudo install -o root -g root -m 0755 '
+                '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
+                '/bin/linux/$ARCH/kubectl" && '
+                'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
@@ -389,7 +430,6 @@ def download_and_stream_latest_job_log(
             f'Failed to stream the logs for the user program at '
             f'{log_file}: {common_utils.format_exception(e)}',
             exc_info=True)
-        # Return the log_file anyway.
 
     return log_file
 
@@ -477,6 +517,30 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
+        # Compatibility with the old way of specifying the controller autostop
+        # config. TODO(cooperc): Remove this before 0.12.0.
+        custom_controller_autostop_config = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller', 'autostop'), None)
+        if custom_controller_autostop_config is not None:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Warning: Config value '
+                f'`{controller.value.controller_type}.controller.autostop` '
+                'is deprecated. Please use '
+                f'`{controller.value.controller_type}.controller.resources.'
+                f'autostop` instead.{colorama.Style.RESET_ALL}')
+            # Only set the autostop config if it is not already specified.
+            if controller_resources_config_copied.get('autostop') is None:
+                controller_resources_config_copied['autostop'] = (
+                    custom_controller_autostop_config)
+            else:
+                logger.warning(f'{colorama.Fore.YELLOW}Ignoring the old '
+                               'config, since it is already specified in '
+                               f'resources.{colorama.Style.RESET_ALL}')
+    # Set the default autostop config for the controller, if not already
+    # specified.
+    if controller_resources_config_copied.get('autostop') is None:
+        controller_resources_config_copied['autostop'] = (
+            controller.value.default_autostop_config)
 
     try:
         controller_resources = resources.Resources.from_yaml_config(
@@ -507,7 +571,10 @@ def get_controller_resources(
     if controller_record is not None:
         handle = controller_record.get('handle', None)
         if handle is not None:
-            controller_resources_to_use = handle.launched_resources
+            # Use the existing resources, but override the autostop config with
+            # the one currently specified in the config.
+            controller_resources_to_use = handle.launched_resources.copy(
+                autostop=controller_resources_config_copied.get('autostop'))
 
     # If the controller and replicas are from the same cloud (and region/zone),
     # it should provide better connectivity. We will let the controller choose
@@ -568,8 +635,9 @@ def get_controller_resources(
     controller_zone = controller_resources_to_use.zone
 
     # Filter clouds if controller_resources_to_use.cloud is specified.
-    filtered_clouds = ({controller_cloud} if controller_cloud is not None else
-                       requested_clouds_with_region_zone.keys())
+    filtered_clouds: Set[str] = {controller_cloud
+                                } if controller_cloud is not None else set(
+                                    requested_clouds_with_region_zone.keys())
 
     # Filter regions and zones and construct the result.
     result: Set[resources.Resources] = set()
@@ -578,15 +646,17 @@ def get_controller_resources(
                                                         {None: {None}})
 
         # Filter regions if controller_resources_to_use.region is specified.
-        filtered_regions = ({controller_region} if controller_region is not None
-                            else regions.keys())
+        filtered_regions: Set[Optional[str]] = ({
+            controller_region
+        } if controller_region is not None else set(regions.keys()))
 
         for region in filtered_regions:
             zones = regions.get(region, {None})
 
             # Filter zones if controller_resources_to_use.zone is specified.
-            filtered_zones = ({controller_zone}
-                              if controller_zone is not None else zones)
+            filtered_zones: Set[Optional[str]] = ({
+                controller_zone
+            } if controller_zone is not None else set(zones))
 
             # Create combinations of cloud, region, and zone.
             for zone in filtered_zones:
@@ -629,7 +699,7 @@ def _setup_proxy_command_on_controller(
     # NOTE: suppose that we have a controller in old VPC, then user
     # changes 'vpc_name' in the config and does a 'job launch' /
     # 'serve up'. In general, the old controller may not successfully
-    # launch the job in the new VPC. This happens if the two VPCs don’t
+    # launch the job in the new VPC. This happens if the two VPCs don't
     # have peering set up. Like other places in the code, we assume
     # properly setting up networking is user's responsibilities.
     # TODO(zongheng): consider adding a basic check that checks
@@ -916,7 +986,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 name=bucket_name,
                 source=local_fm_path,
                 persistent=False,
-                mode=storage_lib.StorageMode.MOUNT,
+                mode=storage_lib.DEFAULT_STORAGE_MODE,
                 stores=stores,
                 _is_sky_managed=not bucket_wth_prefix,
                 _bucket_sub_path=file_mounts_tmp_subpath)
@@ -1025,7 +1095,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # it was handled in step 6.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
-        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+        if (storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES and
                 not storage_obj.source):
             # Construct source URL with first store type and storage name
             # E.g., s3://my-storage-name
@@ -1043,7 +1113,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
-                'mode': storage_lib.StorageMode.MOUNT.value,
+                'mode': storage_obj.mode.value,
                 # We enable force delete to allow the controller to delete
                 # the object store in case persistent is set to False.
                 '_force_delete': True

@@ -1,7 +1,7 @@
 workdir: .
 
 resources:
-  cloud: aws
+  infra: aws
 
 num_nodes: 2  # Total number of nodes (1 head + 1 worker)
 

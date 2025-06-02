@@ -11,3 +11,4 @@ spec:
       protocol: TCP
   selector:
     app: {{ .Release.Name }}-api
+    skypilot.co/ready: "true"

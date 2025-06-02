@@ -59,6 +59,8 @@ class Cudo(clouds.Cloud):
             ('Spot is not supported, as Cudo API does not implement spot.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Custom disk tier is currently not supported on Cudo Compute'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported on Cudo Compute'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             ('Image ID is currently not supported on Cudo. '),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
@@ -68,6 +70,8 @@ class Cudo(clouds.Cloud):
             'Cudo Compute cannot host a controller as it does not '
             'autostopping, which will leave the controller to run indefinitely.'
         ),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported on Cudo.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
@@ -199,8 +203,9 @@ class Cudo(clouds.Cloud):
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         del zones, cluster_name  # unused
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -267,7 +272,8 @@ class Cudo(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
         try:

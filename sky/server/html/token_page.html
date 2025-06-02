@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyPilot API Server Login</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f8f9fa;
+            color: #202124;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 48px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+        }
+        .logo {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+        .logo svg {
+            width: 100%;
+            height: 100%;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 20px;
+            color: #202124;
+        }
+        p {
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 20px;
+            color: #5f6368;
+        }
+        .user-identifier {
+            font-size: 12px; /* Smaller font size */
+            color: #80868b;  /* Lighter color */
+            margin-bottom: 8px; /* Adjusted margin */
+        }
+        .code-block {
+            background-color: #f1f3f4;
+            border: 1px solid #dadce0;
+            border-radius: 4px;
+            padding: 16px;
+            margin-top: 24px;
+            margin-bottom: 24px;
+            margin-left: auto;
+            margin-right: auto;
+            text-align: left;
+            word-break: break-all;
+            white-space: pre-wrap;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            max-width: 480px;
+        }
+        #token-box { /* Specifically for the token */
+            height: auto;
+            min-height: 6em; /* Ensure it's a reasonable size */
+            max-height: 15em; /* Prevent it from getting too large */
+            overflow-y: auto;
+        }
+        .copy-button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 10px;
+        }
+        .copy-button:hover {
+            background-color: #287ae6;
+        }
+        .copy-button:active {
+            background-color: #1b66c9;
+        }
+        .footer-text {
+            font-size: 12px;
+            color: #5f6368;
+            margin-top: 30px;
+        }
+        .local-port-info {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <!-- SkyPilot Logo Icon -->
+            <svg viewBox="0 0 50 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M25.1258 30.8274L19.2842 31.6783L33.8316 46.2268L31.492 37.1925L25.1258 30.8274Z" fill="#372F8A"/>
+                <path d="M46.9433 0.000976562L0.719727 13.1148L15.2661 27.6601L16.633 21.3925L10.3728 15.1323L40.183 6.74118C40.183 6.74118 46.102 0.855027 46.9444 0.00203721L46.9433 0.000976562Z" fill="#372F8A"/>
+                <path d="M40.1821 6.74021L31.4922 37.1925L33.8318 46.2257L46.9445 0C46.1022 0.85299 40.1831 6.73915 40.1831 6.73915L40.1821 6.74021Z" fill="#372F8A"/>
+                <path d="M21.3356 25.6089L19.2842 31.6783L25.1258 30.8275L30.3741 16.6011L30.3275 16.617L21.3356 25.6089Z" fill="#195D7F"/>
+                <path d="M16.632 21.3918L15.2651 27.6605L21.3357 25.6091L30.3276 16.6172L16.632 21.3918Z" fill="#39A4DD"/>
+            </svg>
+        </div>
+        <h1 class="no-local-port">Sign in to SkyPilot CLI</h1>
+        <h1 class="local-port-info">Successfully signed into SkyPilot CLI</h1>
+        <p class="user-identifier">USER_PLACEHOLDER</p>
+        <!-- display token info by default -->
+        <p class="no-local-port">You are seeing this page because a SkyPilot command requires authentication.</p>
+        <p class="no-local-port">Please copy the following token and paste it into your SkyPilot CLI prompt:</p>
+        <div id="token-box" class="code-block no-local-port">SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER</div>
+        <button id="copy-btn" class="copy-button no-local-port">Copy Token</button>
+        <p class="footer-text no-local-port">You can close this tab after copying the token.</p>
+
+        <!-- don't display local port info unless successful -->
+        <p class="local-port-info">You can now close this tab.</p>
+    </div>
+
+    <script>
+        const tokenBox = document.getElementById('token-box');
+        const copyBtn  = document.getElementById('copy-btn');
+
+        function selectToken() {
+            // For <pre> or <div>, create a range to select its content
+            const range = document.createRange();
+            range.selectNodeContents(tokenBox);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        // Optional: Select the token when the page loads or when token box is clicked
+        tokenBox.addEventListener('click', selectToken);
+        window.addEventListener('load', selectToken);
+
+        copyBtn.addEventListener('click', () => {
+            selectToken(); // Select the text
+            try {
+                document.execCommand('copy');
+                copyBtn.textContent = 'Copied!';
+            } catch (err) {
+                copyBtn.textContent = 'Error!';
+                console.error('Failed to copy text: ', err);
+            }
+            setTimeout(() => {
+                copyBtn.textContent = 'Copy Token';
+            }, 2000);
+        });
+
+        function hideTokenInfo() {
+            const noLocalPortElems = document.querySelectorAll('.no-local-port');
+            noLocalPortElems.forEach(elem => {
+                elem.style.display = 'none';
+            });
+            const localPortInfoElems = document.querySelectorAll('.local-port-info');
+            localPortInfoElems.forEach(elem => {
+                elem.classList.remove('local-port-info');
+            });
+        }
+
+        if (window.location.search.includes('local_port=')) {
+            const uri = `http://localhost:${window.location.search.split('local_port=')[1]}`;
+            fetch(uri, {
+                method: 'POST',
+                body: 'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER'
+            }).then(hideTokenInfo)
+        }
+    </script>
+</body>
+</html>

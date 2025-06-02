@@ -6,16 +6,15 @@ with the backend functions. The benefit of having the default values in the
 payloads is that a user can find the default values in the Restful API docs.
 """
 import getpass
-import json
 import os
+import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-
-import pydantic
 
 from sky import admin_policy
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.server import common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
@@ -25,7 +24,29 @@ from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import registry
 
+if typing.TYPE_CHECKING:
+    import pydantic
+else:
+    pydantic = adaptors_common.LazyImport('pydantic')
+
 logger = sky_logging.init_logger(__name__)
+
+# These non-skypilot environment variables will be updated from the local
+# environment on each request when running a local API server.
+# We should avoid adding variables here, but we should include credential-
+# related variables.
+EXTERNAL_LOCAL_ENV_VARS = [
+    # Allow overriding the AWS authentication.
+    'AWS_PROFILE',
+    'AWS_DEFAULT_PROFILE',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    # Allow overriding the GCP authentication.
+    'GOOGLE_APPLICATION_CREDENTIALS',
+    # Allow overriding the kubeconfig.
+    'KUBECONFIG',
+]
 
 
 @annotations.lru_cache(scope='global')
@@ -33,6 +54,8 @@ def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
         if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+            env_vars[env_var] = os.environ[env_var]
+        if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
@@ -42,27 +65,20 @@ def request_body_env_vars() -> dict:
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     return env_vars
 
 
 def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
+    if annotations.is_on_api_server:
+        return {}
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
-    # server endpoint on the server side. This avoids the warning below.
+    # server endpoint on the server side. This avoids the warning at
+    # server-side.
     config.pop_nested(('api_server',), default_value=None)
-    ignored_key_values = {}
-    for nested_key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
-        value = config.pop_nested(nested_key, default_value=None)
-        if value is not None:
-            ignored_key_values['.'.join(nested_key)] = value
-    if ignored_key_values:
-        logger.debug(f'The following keys ({json.dumps(ignored_key_values)}) '
-                     'are specified in the client SkyPilot config at '
-                     f'{skypilot_config.loaded_config_path()!r}. '
-                     'This will be ignored. If you want to specify it, '
-                     'please modify it on server side or contact your '
-                     'administrator.')
     return config
 
 
@@ -73,6 +89,11 @@ class RequestBody(pydantic.BaseModel):
     entrypoint_command: str = ''
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
+
+    # Allow extra fields in the request body, which is useful for backward
+    # compatibility, i.e., we can add new fields to the request body without
+    # breaking the existing old API server.
+    model_config = pydantic.ConfigDict(extra='allow')
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -110,8 +131,15 @@ class RequestBody(pydantic.BaseModel):
 
 class CheckBody(RequestBody):
     """The request body for the check endpoint."""
-    clouds: Optional[Tuple[str, ...]]
-    verbose: bool
+    clouds: Optional[Tuple[str, ...]] = None
+    verbose: bool = False
+    workspace: Optional[str] = None
+
+
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None
+    expand: bool = False
 
 
 class DagRequestBody(RequestBody):
@@ -335,8 +363,8 @@ class JobsQueueBody(RequestBody):
 
 class JobsCancelBody(RequestBody):
     """The request body for the jobs cancel endpoint."""
-    name: Optional[str]
-    job_ids: Optional[List[int]]
+    name: Optional[str] = None
+    job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
 
@@ -348,6 +376,7 @@ class JobsLogsBody(RequestBody):
     follow: bool = True
     controller: bool = False
     refresh: bool = False
+    tail: Optional[int] = None
 
 
 class RequestCancelBody(RequestBody):
@@ -413,6 +442,15 @@ class ServeLogsBody(RequestBody):
     follow: bool = True
 
 
+class ServeDownloadLogsBody(RequestBody):
+    """The request body for the serve download logs endpoint."""
+    service_name: str
+    local_dir: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    replica_ids: Optional[List[int]] = None
+
+
 class ServeStatusBody(RequestBody):
     """The request body for the serve status endpoint."""
     service_names: Optional[Union[str, List[str]]]
@@ -420,9 +458,10 @@ class ServeStatusBody(RequestBody):
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
     """The request body for the realtime GPU availability endpoint."""
-    context: Optional[str]
-    name_filter: Optional[str]
-    quantity_filter: Optional[int]
+    context: Optional[str] = None
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
+    is_ssh: Optional[bool] = None
 
 
 class KubernetesNodeInfoRequestBody(RequestBody):
@@ -459,6 +498,13 @@ class LocalUpBody(RequestBody):
     ssh_key: Optional[str] = None
     cleanup: bool = False
     context_name: Optional[str] = None
+    password: Optional[str] = None
+
+
+class SSHUpBody(RequestBody):
+    """The request body for the SSH up/down endpoints."""
+    infra: Optional[str] = None
+    cleanup: bool = False
 
 
 class ServeTerminateReplicaBody(RequestBody):
@@ -494,3 +540,30 @@ class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
+
+
+class UpdateWorkspaceBody(RequestBody):
+    """The request body for updating a specific workspace configuration."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class CreateWorkspaceBody(RequestBody):
+    """The request body for creating a new workspace."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class DeleteWorkspaceBody(RequestBody):
+    """The request body for deleting a workspace."""
+    workspace_name: str
+
+
+class UpdateConfigBody(RequestBody):
+    """The request body for updating the entire SkyPilot configuration."""
+    config: Dict[str, Any]
+
+
+class GetConfigBody(RequestBody):
+    """The request body for getting the entire SkyPilot configuration."""
+    pass
