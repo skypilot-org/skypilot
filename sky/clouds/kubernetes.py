@@ -618,6 +618,8 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_SETUP_SCRIPT_PATH),
             'k8s_high_availability_deployment_run_script_dir':
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_restarting_signal_file':
+                (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,

@@ -639,12 +639,14 @@ available_node_types:
                 /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && {{k8s_high_availability_deployment_setup_script_path}} > /tmp/controller_recovery_setup_commands.log 2>&1"
                 echo "=== Controller setup commands completed for recovery ==="
 
+                touch {{k8s_high_availability_restarting_signal_file}}
                 for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
                   echo "=== Controller task run for service (file: $file) completed for recovery ==="
                 done
+                rm {{k8s_high_availability_restarting_signal_file}}
               fi
 
               touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
