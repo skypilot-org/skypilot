@@ -15,7 +15,7 @@ from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
-from sky.provision.gcp import gcp_constants
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
@@ -1164,8 +1164,8 @@ class Resources:
             ValueError: if the attribute is invalid.
         """
 
-        if isinstance(self._cloud, clouds.GCP):
-            if self._image_id is None and self._network_tier == resources_utils.NetworkTier.BEST:
+        if self._image_id is None and isinstance(self._cloud, clouds.GCP):
+            if self._network_tier == resources_utils.NetworkTier.BEST:
                 self._image_id = {
                     self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
                 }

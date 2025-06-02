@@ -543,7 +543,7 @@ class GCP(clouds.Cloud):
                 resources_vars['gpu_count'] = acc_count
                 if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
                     # The actual image id is set in resources.py (see _try_validate_image_id)
-                    # and reference GCP_GPU_DIRECT_IMAGE_ID 
+                    # and reference GCP_GPU_DIRECT_IMAGE_ID
                     image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
                     if acc == 'K80':
