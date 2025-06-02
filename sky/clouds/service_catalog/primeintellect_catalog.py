@@ -29,17 +29,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('primeintellect', _df, region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Primeintellect does not support zones.')
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
-
-
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
@@ -63,11 +52,6 @@ def get_default_instance_type(cpus: Optional[str] = None,
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
-
-
-def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
 def get_instance_type_for_accelerator(
