@@ -389,6 +389,33 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --from-file=credentials.json=$HOME/.nebius/credentials.json
 
+        Optionally, if you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files, following the pattern ``--from-file=<filename>=$HOME/.nebius/<filename>``. Files in this secret will be linked to `~/.nebius/` in the container.
+
+        .. code-block:: bash
+
+            kubectl create secret generic nebius-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials.json=$HOME/.nebius/credentials.json \
+              --from-file=serviceaccount-1-credentials.json=$HOME/.nebius/serviceaccount-1-credentials.json \
+              --from-file=serviceaccount-2-credentials.json=$HOME/.nebius/serviceaccount-2-credentials.json
+
+
+        .. code-block:: yaml
+
+            # SkyPilot config
+
+            workspaces:
+
+              team-a:
+                nebius:
+                  credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
+                  tenant_id: tenant-rrww0kh3nnfo7v0dgw
+
+              team-b:
+                nebius:
+                  credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
+                  tenant_id: tenant-52czfp5clbtq0er1ol
+
         When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
 
         .. code-block:: bash
@@ -417,7 +444,7 @@ Following tabs describe how to configure credentials for different clouds on the
         :sync: ssh-node-pools-tab
 
         SkyPilot can configure a set of existing machines to be used as a :ref:`SSH Node Pool <existing-machines>`.
-        
+
         To configure SSH node pools for the API server, create your SSH Node Pool :ref:`configuration file <defining-ssh-node-pools>` ``ssh_node_pools.yaml`` and set the :ref:`apiService.sshNodePools <helm-values-apiService-sshNodePools>` to the file path:
 
         .. code-block:: bash
@@ -446,13 +473,13 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --reuse-values \
               --set apiService.sshKeySecret=$SECRET_NAME
-        
+
         After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
 
         .. note::
 
            SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
-   
+
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
@@ -471,21 +498,68 @@ In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2
 
 Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
+Optional: Setting the SkyPilot config
+--------------------------------------
 
+To modify your SkyPilot config, you can access the SkyPilot dashboard: ``http://<api-server-url>/dashboard/config``.
+
+.. image:: ../../images/workspaces/config.png
+
+
+.. dropdown:: Set the config with helm deployment during the first deployment
+
+    The Helm chart supports setting the global SkyPilot config YAML file on the API server when the API server is deployed for the first time. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
+
+    To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+
+    .. code-block:: bash
+
+        # Create the config.yaml file
+        cat <<EOF > config.yaml
+        admin_policy: admin_policy_examples.AddLabelsPolicy
+
+        jobs:
+        controller:
+            resources:
+                cpus: 2+
+
+        allowed_clouds:
+        - aws
+        - kubernetes
+
+        kubernetes:
+        allowed_contexts:
+            - my-context
+            - my-other-context
+        EOF
+
+        # Install the API server with the config file
+        # --reuse-values keeps the Helm chart values set in the previous step
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set-file apiService.config=config.yaml
+
+    You can also directly set config values in the ``values.yaml`` file, e.g.:
+
+    .. code-block:: yaml
+
+        apiService:
+        config: |
+            allowed_clouds:
+            - aws
+            - kubernetes
+
+
+    .. note::
+
+        ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
 
 Upgrade the API server
 -----------------------
 
 Refer to :ref:`sky-api-server-upgrade` for how to upgrade the API server.
 
-.. _update-sky-config:
-
-Optional: Update SkyPilot configuration
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``apiService.config`` will be IGNORED during an upgrade. To update your SkyPilot config, go to http://<api-server-url>/dashboard/config
-
-.. image:: ../../images/workspaces/config.png
 
 
 Uninstall
@@ -568,52 +642,9 @@ Once the EBS CSI driver is installed, the default ``gp2`` storage class will be 
 
 .. _sky-api-server-config:
 
-Setting the SkyPilot config
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
 
-To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 
-.. code-block:: bash
-
-    # Create the config.yaml file
-    cat <<EOF > config.yaml
-    admin_policy: admin_policy_examples.AddLabelsPolicy
-
-    jobs:
-      controller:
-        resources:
-            cpus: 2+
-
-    allowed_clouds:
-      - aws
-      - kubernetes
-
-    kubernetes:
-      allowed_contexts:
-        - my-context
-        - my-other-context
-    EOF
-
-    # Install the API server with the config file
-    # --reuse-values keeps the Helm chart values set in the previous step
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-      --namespace $NAMESPACE \
-      --reuse-values \
-      --set-file apiService.config=config.yaml
-
-You can also directly set config values in the ``values.yaml`` file, e.g.:
-
-.. code-block:: yaml
-
-    apiService:
-      config: |
-        allowed_clouds:
-        - aws
-        - kubernetes
-
-To apply a new config, rerun ``helm upgrade`` with the updated ``values.yaml`` file.
 
 Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -682,28 +713,29 @@ If you want to use an existing service account and permissions that meet the :re
       --set rbac.create=false \
       --set rbac.serviceAccountName=my-existing-service-account
 
+
 .. _sky-migrate-legacy-service:
 
-Migrate from legacy NodePort service
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. dropdown:: Migrate from legacy NodePort service
 
-If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
 
-- Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
+    If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
 
-  Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
+    - Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
 
-- Disable the legacy NodePort service:
+    Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
 
-  Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
+    - Disable the legacy NodePort service:
 
-.. note::
+    Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
 
-    Make sure there is no clients using the NodePort service before disabling it.
+    .. note::
 
-.. note::
+        Make sure there is no clients using the NodePort service before disabling it.
 
-    Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
+    .. note::
+
+        Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-helm-multiple-deploy:
 
@@ -723,7 +755,7 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
         --namespace $NAMESPACE \
         --reuse-values \
         --set ingress.path=/first-server
-    
+
     # The second API server, reusing the existing ingress controller and using a different path
     ANOTHER_RELEASE_NAME=skypilot2
     ANOTHER_NAMESPACE=skypilot2
@@ -834,3 +866,4 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Advanced: Use OAuth/Okta Proxy <examples/api-server-auth-proxy>
+    Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>

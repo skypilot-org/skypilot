@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import pickle
+import re
 import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -18,8 +19,10 @@ import uuid
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
+import yaml
 
 from sky import models
 from sky import sky_logging
@@ -43,7 +46,14 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
-_SQLALCHEMY_ENGINE = sqlalchemy.create_engine(f'sqlite:///{_DB_PATH}')
+if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
+    # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set, use it as the database URI.
+    logger.debug(
+        f'using db URI from {constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
+    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+        os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
+else:
+    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
 
 Base = declarative.declarative_base()
 
@@ -87,6 +97,12 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('workspace',
                       sqlalchemy.Text,
                       server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('last_creation_yaml',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_creation_command',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -124,6 +140,41 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
 )
 
+ssh_key_table = sqlalchemy.Table(
+    'ssh_key',
+    Base.metadata,
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('ssh_public_key', sqlalchemy.Text),
+    sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
+)
+
+cluster_yaml_table = sqlalchemy.Table(
+    'cluster_yaml',
+    Base.metadata,
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('yaml', sqlalchemy.Text),
+)
+
+
+def _glob_to_similar(glob_pattern):
+    """Converts a glob pattern to a PostgreSQL LIKE pattern."""
+
+    # Escape special LIKE characters that are not special in glob
+    glob_pattern = glob_pattern.replace('%', '\\%').replace('_', '\\_')
+
+    # Convert glob wildcards to LIKE wildcards
+    like_pattern = glob_pattern.replace('*', '%').replace('?', '_')
+
+    # Handle character classes, including negation
+    def replace_char_class(match):
+        group = match.group(0)
+        if group.startswith('[!'):
+            return '[^' + group[2:-1] + ']'
+        return group
+
+    like_pattern = re.sub(r'\[(!)?.*?\]', replace_char_class, like_pattern)
+    return like_pattern
+
 
 def create_table():
     # Enable WAL mode to avoid locking issues.
@@ -152,31 +203,52 @@ def create_table():
     # the latest version of SkyPilot.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Add autostop column to clusters table
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters', 'autostop',
-                                                'INTEGER DEFAULT -1')
+        db_utils.add_column_to_table_sqlalchemy(session,
+                                                'clusters',
+                                                'autostop',
+                                                sqlalchemy.Integer(),
+                                                default_statement='DEFAULT -1')
 
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters', 'metadata',
-                                                'TEXT DEFAULT \'{}\'')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'metadata',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT \'{}\'')
 
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters', 'to_down',
-                                                'INTEGER DEFAULT 0')
+        db_utils.add_column_to_table_sqlalchemy(session,
+                                                'clusters',
+                                                'to_down',
+                                                sqlalchemy.Integer(),
+                                                default_statement='DEFAULT 0')
 
         # The cloud identity that created the cluster.
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters', 'owner',
-                                                'TEXT')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'owner',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
 
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters',
-                                                'cluster_hash',
-                                                'TEXT DEFAULT null')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'cluster_hash',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
 
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters',
-                                                'storage_mounts_metadata',
-                                                'BLOB DEFAULT null')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'storage_mounts_metadata',
+            sqlalchemy.LargeBinary(),
+            default_statement='DEFAULT NULL')
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'clusters',
             'cluster_ever_up',
-            'INTEGER DEFAULT 0',
+            sqlalchemy.Integer(),
+            default_statement='DEFAULT 0',
             # Set the value to 1 so that all the existing clusters before #2977
             # are considered as ever up, i.e:
             #   existing cluster's default (null) -> 1;
@@ -185,30 +257,54 @@ def create_table():
             # clusters were never really UP, setting it to 1 means they won't be
             # auto-deleted during any failover.
             value_to_replace_existing_entries=1)
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters',
-                                                'status_updated_at',
-                                                'INTEGER DEFAULT null')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'status_updated_at',
+            sqlalchemy.Integer(),
+            default_statement='DEFAULT NULL')
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'clusters',
             'user_hash',
-            'TEXT DEFAULT null',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL',
             value_to_replace_existing_entries=common_utils.get_user_hash())
-        db_utils.add_column_to_table_sqlalchemy(session, 'clusters',
-                                                'config_hash',
-                                                'TEXT DEFAULT null')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'config_hash',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
 
-        db_utils.add_column_to_table_sqlalchemy(session, 'cluster_history',
-                                                'user_hash',
-                                                'TEXT DEFAULT null')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'user_hash',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
 
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'clusters',
             'workspace',
-            'TEXT DEFAULT \'default\'',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT \'default\'',
             value_to_replace_existing_entries=constants.
             SKYPILOT_DEFAULT_WORKSPACE)
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'last_creation_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL',
+        )
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'clusters',
+            'last_creation_command',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -223,20 +319,18 @@ def add_or_update_user(user: models.User):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_stmnt = sqlite.insert(user_table).values(id=user.id,
-                                                            name=user.name)
-            do_update_stmt = insert_stmnt.on_conflict_do_update(
-                index_elements=[user_table.c.id],
-                set_={user_table.c.name: user.name})
-            session.execute(do_update_stmt)
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
+            insert_func = postgresql.insert
         else:
-            session.rollback()
             raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(user_table).values(id=user.id,
+                                                      name=user.name)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[user_table.c.id],
+            set_={user_table.c.name: user.name})
+        session.execute(do_update_stmt)
         session.commit()
 
 
@@ -259,7 +353,8 @@ def add_or_update_cluster(cluster_name: str,
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True,
-                          config_hash: Optional[str] = None):
+                          config_hash: Optional[str] = None,
+                          task_config: Optional[Dict[str, Any]] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -270,6 +365,8 @@ def add_or_update_cluster(cluster_name: str,
             be marked as INIT, otherwise it will be marked as UP.
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
+        config_hash: Configuration hash for the cluster.
+        task_config: The config of the task being launched.
     """
     # TODO(zhwu): have to be imported here to avoid circular import.
     from sky import skypilot_config  # pylint: disable=import-outside-toplevel
@@ -345,79 +442,77 @@ def add_or_update_cluster(cluster_name: str,
             conditional_values.update({
                 'workspace': active_workspace,
             })
+        if (is_launch and not cluster_row or
+                cluster_row.status != status_lib.ClusterStatus.UP.value):
+            conditional_values.update({
+                'last_creation_yaml': common_utils.dump_yaml_str(task_config)
+                                      if task_config else None,
+                'last_creation_command': last_use,
+            })
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_stmnt = sqlite.insert(cluster_table).values(
-                name=cluster_name,
-                **conditional_values,
-                handle=handle,
-                status=status.value,
-                # set metadata to server default ('{}')
-                # set owner to server default (null)
-                cluster_hash=cluster_hash,
-                # set storage_mounts_metadata to server default (null)
-                status_updated_at=status_updated_at,
-            )
-            do_update_stmt = insert_stmnt.on_conflict_do_update(
-                index_elements=[cluster_table.c.name],
-                set_={
-                    **conditional_values,
-                    cluster_table.c.handle: handle,
-                    cluster_table.c.status: status.value,
-                    # do not update metadata value
-                    # do not update owner value
-                    cluster_table.c.cluster_hash: cluster_hash,
-                    # do not update storage_mounts_metadata
-                    cluster_table.c.status_updated_at: status_updated_at,
-                    # do not update user_hash
-                })
-            session.execute(do_update_stmt)
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
+            insert_func = postgresql.insert
         else:
             session.rollback()
             raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(cluster_table).values(
+            name=cluster_name,
+            **conditional_values,
+            handle=handle,
+            status=status.value,
+            # set metadata to server default ('{}')
+            # set owner to server default (null)
+            cluster_hash=cluster_hash,
+            # set storage_mounts_metadata to server default (null)
+            status_updated_at=status_updated_at,
+        )
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[cluster_table.c.name],
+            set_={
+                **conditional_values,
+                cluster_table.c.handle: handle,
+                cluster_table.c.status: status.value,
+                # do not update metadata value
+                # do not update owner value
+                cluster_table.c.cluster_hash: cluster_hash,
+                # do not update storage_mounts_metadata
+                cluster_table.c.status_updated_at: status_updated_at,
+                # do not update user_hash
+            })
+        session.execute(do_update_stmt)
 
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
 
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_stmnt = sqlite.insert(cluster_history_table).values(
-                cluster_hash=cluster_hash,
-                name=cluster_name,
-                num_nodes=launched_nodes,
-                requested_resources=pickle.dumps(requested_resources),
-                launched_resources=pickle.dumps(launched_resources),
-                usage_intervals=pickle.dumps(usage_intervals),
-                user_hash=user_hash)
-            do_update_stmt = insert_stmnt.on_conflict_do_update(
-                index_elements=[cluster_history_table.c.cluster_hash],
-                set_={
-                    cluster_history_table.c.name: cluster_name,
-                    cluster_history_table.c.num_nodes: launched_nodes,
-                    cluster_history_table.c.requested_resources:
-                        pickle.dumps(requested_resources),
-                    cluster_history_table.c.launched_resources:
-                        pickle.dumps(launched_resources),
-                    cluster_history_table.c.usage_intervals:
-                        pickle.dumps(usage_intervals),
-                    cluster_history_table.c.user_hash: user_hash
-                })
-            session.execute(do_update_stmt)
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
-        else:
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(cluster_history_table).values(
+            cluster_hash=cluster_hash,
+            name=cluster_name,
+            num_nodes=launched_nodes,
+            requested_resources=pickle.dumps(requested_resources),
+            launched_resources=pickle.dumps(launched_resources),
+            usage_intervals=pickle.dumps(usage_intervals),
+            user_hash=user_hash)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[cluster_history_table.c.cluster_hash],
+            set_={
+                cluster_history_table.c.name: cluster_name,
+                cluster_history_table.c.num_nodes: launched_nodes,
+                cluster_history_table.c.requested_resources:
+                    pickle.dumps(requested_resources),
+                cluster_history_table.c.launched_resources:
+                    pickle.dumps(launched_resources),
+                cluster_history_table.c.usage_intervals:
+                    pickle.dumps(usage_intervals),
+                cluster_history_table.c.user_hash: user_hash
+            })
+        session.execute(do_update_stmt)
+
         session.commit()
 
 
@@ -504,9 +599,9 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
                 cluster_table.c.name.op('GLOB')(cluster_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            # postgres does not support GLOB
-            raise ValueError('Unsupported database dialect')
+            rows = session.query(cluster_table).filter(
+                cluster_table.c.name.op('SIMILAR TO')(
+                    _glob_to_similar(cluster_name))).all()
         else:
             raise ValueError('Unsupported database dialect')
     return [row.name for row in rows]
@@ -740,7 +835,10 @@ def get_cluster_from_name(
         'user_name': get_user(user_hash).name,
         'config_hash': row.config_hash,
         'workspace': row.workspace,
+        'last_creation_yaml': row.last_creation_yaml,
+        'last_creation_command': row.last_creation_command,
     }
+
     return record
 
 
@@ -771,6 +869,8 @@ def get_clusters() -> List[Dict[str, Any]]:
             'user_name': get_user(user_hash).name,
             'config_hash': row.config_hash,
             'workspace': row.workspace,
+            'last_creation_yaml': row.last_creation_yaml,
+            'last_creation_command': row.last_creation_command,
         }
 
         records.append(record)
@@ -849,21 +949,19 @@ def set_enabled_clouds(enabled_clouds: List[str],
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_stmnt = sqlite.insert(config_table).values(
-                key=_get_enabled_clouds_key(cloud_capability, workspace),
-                value=json.dumps(enabled_clouds))
-            do_update_stmt = insert_stmnt.on_conflict_do_update(
-                index_elements=[config_table.c.key],
-                set_={config_table.c.value: json.dumps(enabled_clouds)})
-            session.execute(do_update_stmt)
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
+            insert_func = postgresql.insert
         else:
-            session.rollback()
             raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(config_table).values(
+            key=_get_enabled_clouds_key(cloud_capability, workspace),
+            value=json.dumps(enabled_clouds))
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_table.c.key],
+            set_={config_table.c.value: json.dumps(enabled_clouds)})
+        session.execute(do_update_stmt)
         session.commit()
 
 
@@ -888,29 +986,27 @@ def add_or_update_storage(storage_name: str,
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_stmnt = sqlite.insert(storage_table).values(
-                name=storage_name,
-                handle=handle,
-                last_use=last_use,
-                launched_at=storage_launched_at,
-                status=storage_status.value)
-            do_update_stmt = insert_stmnt.on_conflict_do_update(
-                index_elements=[storage_table.c.name],
-                set_={
-                    storage_table.c.handle: handle,
-                    storage_table.c.last_use: last_use,
-                    storage_table.c.launched_at: storage_launched_at,
-                    storage_table.c.status: storage_status.value
-                })
-            session.execute(do_update_stmt)
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            session.rollback()
-            raise ValueError('Unsupported database dialect')
+            insert_func = postgresql.insert
         else:
-            session.rollback()
             raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(storage_table).values(
+            name=storage_name,
+            handle=handle,
+            last_use=last_use,
+            launched_at=storage_launched_at,
+            status=storage_status.value)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[storage_table.c.name],
+            set_={
+                storage_table.c.handle: handle,
+                storage_table.c.last_use: last_use,
+                storage_table.c.launched_at: storage_launched_at,
+                storage_table.c.status: storage_status.value
+            })
+        session.execute(do_update_stmt)
         session.commit()
 
 
@@ -973,9 +1069,9 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
                 storage_table.c.name.op('GLOB')(storage_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            # TODO(syang) support postgres dialect
-            # postgres does not support GLOB
-            raise ValueError('Unsupported database dialect')
+            rows = session.query(storage_table).filter(
+                storage_table.c.name.op('SIMILAR TO')(
+                    _glob_to_similar(storage_name))).all()
         else:
             raise ValueError('Unsupported database dialect')
     return [row.name for row in rows]
@@ -1002,3 +1098,102 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': status_lib.StorageStatus[row.status],
         })
     return records
+
+
+def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(ssh_key_table).filter_by(
+            user_hash=user_hash).first()
+    if row:
+        return row.ssh_public_key, row.ssh_private_key, True
+    return '', '', False
+
+
+def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(ssh_key_table).values(
+            user_hash=user_hash,
+            ssh_public_key=ssh_public_key,
+            ssh_private_key=ssh_private_key)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[ssh_key_table.c.user_hash],
+            set_={
+                ssh_key_table.c.ssh_public_key: ssh_public_key,
+                ssh_key_table.c.ssh_private_key: ssh_private_key
+            })
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
+    """Get the cluster yaml from the database or the local file system.
+    If the cluster yaml is not in the database, check if it exists on the
+    local file system and migrate it to the database.
+
+    It is assumed that the cluster yaml file is named as <cluster_name>.yml.
+    """
+    if cluster_yaml_path is None:
+        raise ValueError('Attempted to read a None YAML.')
+    cluster_file_name = os.path.basename(cluster_yaml_path)
+    cluster_name, _ = os.path.splitext(cluster_file_name)
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_yaml_table).filter_by(
+            cluster_name=cluster_name).first()
+    if row is None:
+        # If the cluster yaml is not in the database, check if it exists
+        # on the local file system and migrate it to the database.
+        # TODO(syang): remove this check once we have a way to migrate the
+        # cluster from file to database. Remove on v0.12.0.
+        if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
+            with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+                yaml_str = f.read()
+            set_cluster_yaml(cluster_name, yaml_str)
+            return yaml_str
+        return None
+    return row.yaml
+
+
+def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
+    """Get the cluster yaml as a dictionary from the database.
+
+    It is assumed that the cluster yaml file is named as <cluster_name>.yml.
+    """
+    yaml_str = get_cluster_yaml_str(cluster_yaml_path)
+    if yaml_str is None:
+        raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
+    return yaml.safe_load(yaml_str)
+
+
+def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
+    """Set the cluster yaml in the database."""
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(cluster_yaml_table).values(
+            cluster_name=cluster_name, yaml=yaml_str)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[cluster_yaml_table.c.cluster_name],
+            set_={cluster_yaml_table.c.yaml: yaml_str})
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+def remove_cluster_yaml(cluster_name: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(cluster_yaml_table).filter_by(
+            cluster_name=cluster_name).delete()
+        session.commit()

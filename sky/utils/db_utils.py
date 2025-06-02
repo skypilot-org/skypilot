@@ -88,58 +88,46 @@ def add_column_to_table_sqlalchemy(
     session: 'Session',
     table_name: str,
     column_name: str,
-    column_type: str,
+    column_type: sqlalchemy.types.TypeEngine,
+    default_statement: Optional[str] = None,
     copy_from: Optional[str] = None,
     value_to_replace_existing_entries: Optional[Any] = None,
 ):
     """Add a column to a table."""
-    dialect = session.bind.dialect
-    if dialect.name == SQLAlchemyDialect.SQLITE.value:
-        try:
+    # column type may be different for different dialects.
+    # for example, sqlite uses BLOB for LargeBinary
+    # while postgres uses BYTEA.
+    column_type_str = column_type.compile(dialect=session.bind.dialect)
+    default_statement_str = (f' {default_statement}'
+                             if default_statement is not None else '')
+    try:
+        session.execute(
+            sqlalchemy.text(f'ALTER TABLE {table_name} '
+                            f'ADD COLUMN {column_name} {column_type_str}'
+                            f'{default_statement_str}'))
+        if copy_from is not None:
             session.execute(
-                sqlalchemy.text(f'ALTER TABLE {table_name} '
-                                f'ADD COLUMN {column_name} {column_type}'))
-            if copy_from is not None:
-                session.execute(
-                    sqlalchemy.text(f'UPDATE {table_name} '
-                                    f'SET {column_name} = {copy_from}'))
-            if value_to_replace_existing_entries is not None:
-                session.execute(
-                    sqlalchemy.text(f'UPDATE {table_name} '
-                                    f'SET {column_name} = :replacement_value '
-                                    f'WHERE {column_name} IS NULL'),
-                    {'replacement_value': value_to_replace_existing_entries})
-        except sqlalchemy_exc.OperationalError as e:
-            if 'duplicate column name' in str(e):
-                pass
-            else:
-                raise
-    elif dialect.name == SQLAlchemyDialect.POSTGRESQL.value:
-        # TODO(syang) support postgres dialect
-        session.rollback()
-        raise ValueError('Unsupported database dialect')
-    else:
-        session.rollback()
-        raise ValueError('Unsupported database dialect')
+                sqlalchemy.text(f'UPDATE {table_name} '
+                                f'SET {column_name} = {copy_from}'))
+        if value_to_replace_existing_entries is not None:
+            session.execute(
+                sqlalchemy.text(f'UPDATE {table_name} '
+                                f'SET {column_name} = :replacement_value '
+                                f'WHERE {column_name} IS NULL'),
+                {'replacement_value': value_to_replace_existing_entries})
+    #sqlite
+    except sqlalchemy_exc.OperationalError as e:
+        if 'duplicate column name' in str(e):
+            pass
+        else:
+            raise
+    #postgressql
+    except sqlalchemy_exc.ProgrammingError as e:
+        if 'already exists' in str(e):
+            pass
+        else:
+            raise
     session.commit()
-
-
-def rename_column(
-    cursor: 'sqlite3.Cursor',
-    conn: 'sqlite3.Connection',
-    table_name: str,
-    old_name: str,
-    new_name: str,
-):
-    """Rename a column in a table."""
-    # NOTE: This only works for sqlite3 >= 3.25.0. Be careful to use this.
-
-    for row in cursor.execute(f'PRAGMA table_info({table_name})'):
-        if row[1] == old_name:
-            cursor.execute(f'ALTER TABLE {table_name} '
-                           f'RENAME COLUMN {old_name} to {new_name}')
-            break
-    conn.commit()
 
 
 class SQLiteConn(threading.local):

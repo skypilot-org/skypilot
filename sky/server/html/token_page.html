@@ -100,6 +100,9 @@
             color: #5f6368;
             margin-top: 30px;
         }
+        .local-port-info {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -114,14 +117,18 @@
                 <path d="M16.632 21.3918L15.2651 27.6605L21.3357 25.6091L30.3276 16.6172L16.632 21.3918Z" fill="#39A4DD"/>
             </svg>
         </div>
-        <h1>Sign in to SkyPilot CLI</h1>
+        <h1 class="no-local-port">Sign in to SkyPilot CLI</h1>
+        <h1 class="local-port-info">Successfully signed into SkyPilot CLI</h1>
         <p class="user-identifier">USER_PLACEHOLDER</p>
-        <p>You are seeing this page because a SkyPilot command requires authentication.</p>
-        <p>Please copy the following token and paste it into your SkyPilot CLI prompt:</p>
-        <div id="token-box" class="code-block">SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER</div>
-        <button id="copy-btn" class="copy-button">Copy Token</button>
+        <!-- display token info by default -->
+        <p class="no-local-port">You are seeing this page because a SkyPilot command requires authentication.</p>
+        <p class="no-local-port">Please copy the following token and paste it into your SkyPilot CLI prompt:</p>
+        <div id="token-box" class="code-block no-local-port">SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER</div>
+        <button id="copy-btn" class="copy-button no-local-port">Copy Token</button>
+        <p class="footer-text no-local-port">You can close this tab after copying the token.</p>
 
-        <p class="footer-text">You can close this tab after copying the token.</p>
+        <!-- don't display local port info unless successful -->
+        <p class="local-port-info">You can now close this tab.</p>
     </div>
 
     <script>
@@ -154,6 +161,25 @@
                 copyBtn.textContent = 'Copy Token';
             }, 2000);
         });
+
+        function hideTokenInfo() {
+            const noLocalPortElems = document.querySelectorAll('.no-local-port');
+            noLocalPortElems.forEach(elem => {
+                elem.style.display = 'none';
+            });
+            const localPortInfoElems = document.querySelectorAll('.local-port-info');
+            localPortInfoElems.forEach(elem => {
+                elem.classList.remove('local-port-info');
+            });
+        }
+
+        if (window.location.search.includes('local_port=')) {
+            const uri = `http://localhost:${window.location.search.split('local_port=')[1]}`;
+            fetch(uri, {
+                method: 'POST',
+                body: 'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER'
+            }).then(hideTokenInfo)
+        }
     </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-name: pypi-publish-nightly
+name: nightly-build
 on:
   schedule:
     - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
@@ -119,7 +119,7 @@ jobs:
     secrets: inherit
 
   publish-and-validate-pypi:
-    needs: [publish-and-validate-test-pypi]
+    needs: [nightly-build-pypi, publish-and-validate-test-pypi]
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot-nightly
