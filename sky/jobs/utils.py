@@ -176,6 +176,11 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
     Note: we expect that job_id, if provided, refers to a nonterminal job or a
     job that has not completed its cleanup (schedule state not DONE).
     """
+    # TODO(tian): Change this to restart the controller process. For now we just
+    # disabled it because we want to avoid caveats of infinite restart of last
+    # controller process that fully occupied the controller VM.
+    # pylint: disable=unreachable
+    return
 
     def _cleanup_job_clusters(job_id: int) -> Optional[str]:
         """Clean up clusters for a job. Returns error message if any.

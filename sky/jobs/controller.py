@@ -152,6 +152,20 @@ class JobsController:
         Other exceptions may be raised depending on the backend.
         """
 
+        latest_task_id, status = managed_job_state.get_latest_task_id_status(
+            self._job_id)
+        is_recovery = False
+        if (latest_task_id is not None and
+                status != managed_job_state.ManagedJobStatus.PENDING):
+            assert latest_task_id >= task_id, (latest_task_id, task_id)
+            if latest_task_id > task_id:
+                logger.info(f'Task {task_id} ({task.name}) has already '
+                            'been executed. Skipping...')
+                return True
+            if latest_task_id == task_id:
+                # Start recovery.
+                is_recovery = True
+
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
         if task.run is None:
@@ -171,42 +185,48 @@ class JobsController:
             return True
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
-        submitted_at = time.time()
-        if task_id == 0:
-            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
-                self._backend.run_timestamp)
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id)
-        managed_job_state.set_starting(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            submitted_at,
-            resources_str=backend_utils.get_task_resources_str(
-                task, is_managed_job=True),
-            specs={
-                'max_restarts_on_errors':
-                    self._strategy_executor.max_restarts_on_errors
-            },
-            callback_func=callback_func)
-        logger.info(
-            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
-            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+        if not is_recovery:
+            submitted_at = time.time()
+            if task_id == 0:
+                submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                    self._backend.run_timestamp)
+            managed_job_state.set_starting(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str=backend_utils.get_task_resources_str(
+                    task, is_managed_job=True),
+                specs={
+                    'max_restarts_on_errors':
+                        self._strategy_executor.max_restarts_on_errors
+                },
+                callback_func=callback_func)
+            logger.info(f'Submitted managed job {self._job_id} '
+                        f'(task: {task_id}, name: {task.name!r}); '
+                        f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
-        logger.info('Started monitoring.')
+            logger.info('Started monitoring.')
 
-        remote_job_submitted_at = self._strategy_executor.launch()
-        assert remote_job_submitted_at is not None, remote_job_submitted_at
+            remote_job_submitted_at = self._strategy_executor.launch()
+            assert remote_job_submitted_at is not None, remote_job_submitted_at
 
-        managed_job_state.set_started(job_id=self._job_id,
-                                      task_id=task_id,
-                                      start_time=remote_job_submitted_at,
-                                      callback_func=callback_func)
+            managed_job_state.set_started(job_id=self._job_id,
+                                          task_id=task_id,
+                                          start_time=remote_job_submitted_at,
+                                          callback_func=callback_func)
 
         while True:
+            if is_recovery:
+                last_status = managed_job_state.get_job_status_with_task_id(
+                    job_id=self._job_id, task_id=task_id)
+                if last_status is not None and last_status.is_terminal():
+                    return True
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
@@ -221,8 +241,12 @@ class JobsController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = managed_job_utils.get_job_status(
-                self._backend, cluster_name)
+            try:
+                job_status = managed_job_utils.get_job_status(
+                    self._backend, cluster_name)
+            except (exceptions.FetchClusterInfoError, exceptions.CommandError):
+                logger.info('Failed to fetch the job status. Start recovery...')
+                job_status = None
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 success_end_time = managed_job_utils.try_to_get_job_end_time(

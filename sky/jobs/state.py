@@ -573,6 +573,9 @@ def set_started(job_id: int, task_id: int, start_time: float,
 def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
+    # Originally, we force the status to be RUNNING before setting to RECOVERING
+    # After adding the HA job controller, it is possible that the jobs came from
+    # any status to recovering. So we skip the status check here.
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -580,10 +583,8 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
                 status=(?), job_duration=job_duration+(?)-last_recovered_at
                 WHERE spot_job_id=(?) AND
                 task_id=(?) AND
-                status=(?) AND
                 end_at IS null""",
-            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id,
-             ManagedJobStatus.RUNNING.value))
+            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
@@ -935,6 +936,17 @@ def _get_all_task_ids_statuses(
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
+def get_job_status_with_task_id(job_id: int,
+                                task_id: int) -> Optional[ManagedJobStatus]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        status = cursor.execute(
+            """\
+            SELECT status FROM spot
+            WHERE spot_job_id=(?) AND task_id=(?)""",
+            (job_id, task_id)).fetchone()
+        return ManagedJobStatus(status[0]) if status else None
+
+
 def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
@@ -1084,8 +1096,15 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 
 
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
-                          user_hash: str, priority: int) -> None:
-    """Do not call without holding the scheduler lock."""
+                          user_hash: str, priority: int) -> bool:
+    """Do not call without holding the scheduler lock.
+
+    Returns: Whether this is a recovery run or not.
+        If this is a recovery run, the job may already be in the WAITING state
+        and the update will not change the schedule_state (hence the
+        updated_count will be 0). In this case, we return True.
+        Otherwise, we return False.
+    """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
@@ -1095,7 +1114,9 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
             (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
              env_file_path, user_hash, priority, job_id,
              ManagedJobScheduleState.INACTIVE.value)).rowcount
-        assert updated_count == 1, (job_id, updated_count)
+        # For a recovery run, the job may already be in the WAITING state.
+        assert updated_count <= 1, (job_id, updated_count)
+        return updated_count == 0
 
 
 def scheduler_set_launching(job_id: int,
