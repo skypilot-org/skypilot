@@ -3,9 +3,8 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
 from sky import clouds
+from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
@@ -15,8 +14,12 @@ from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
+    import requests
+
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 _CLOUD_VSPHERE = 'vsphere'
 _CREDENTIAL_FILES = [
@@ -49,8 +52,13 @@ class Vsphere(clouds.Cloud):
             (f'Spot instances are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            (f'High availability controllers are not supported on {_REPR}.'),
     }
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 80  # The name can't exceeds 80 characters
@@ -181,8 +189,10 @@ class Vsphere(clouds.Cloud):
         del cluster_name, dryrun  # unused
         assert zones is not None, (region, zones)
         zone_names = [zone.name for zone in zones]
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -254,7 +264,8 @@ class Vsphere(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         vSphere's compute service."""
 

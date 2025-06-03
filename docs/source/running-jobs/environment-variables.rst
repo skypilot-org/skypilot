@@ -6,7 +6,7 @@ Secrets and Environment Variables
 
 Environment variables are a powerful way to pass configuration and secrets to your tasks. There are two types of environment variables in SkyPilot:
 
-- :ref:`User-specified environment variables <user-specified-env-vars>`: Passed by users to tasks, useful for secrets and configurations.
+- :ref:`User-specified environment variables <user-specified-env-vars>`: Passed by users to tasks, useful for secrets and configuration.
 - :ref:`SkyPilot environment variables <sky-env-vars>`: Predefined by SkyPilot with information about the current cluster and task.
 
 .. _user-specified-env-vars:
@@ -14,7 +14,7 @@ Environment variables are a powerful way to pass configuration and secrets to yo
 User-specified environment variables
 ------------------------------------------------------------------
 
-User-specified environment variables are useful for passing secrets and any arguments or configurations needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
+User-specified environment variables are useful for passing secrets and any arguments or configuration needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
 
 You can specify environment variables to be made available to a task in several ways:
 
@@ -105,7 +105,7 @@ Using in ``setup`` and ``run``
 
 All user-specified environment variables are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
 
-For example, this is useful for passing secrets (see below) or passing configurations:
+For example, this is useful for passing secrets (see below) or passing configuration:
 
 .. code-block:: yaml
 
@@ -227,7 +227,7 @@ Environment variables for ``run``
        Each task's logs are stored on the cluster at ``~/sky_logs/${SKYPILOT_TASK_ID%%_*}/tasks/*.log``.
 
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
-       recoveries of that job will have the same ID value. The ID is in the format "sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>", where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a managed spot job. Read more :ref:`here <spot-jobs-end-to-end>`.
+       recoveries of that job will have the same ID value. The ID is in the format "sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>", where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a managed spot job.
      - sky-2023-07-06-21-18-31-563597_myclus_1
 
        For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0

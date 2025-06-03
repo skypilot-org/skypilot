@@ -5,9 +5,9 @@ from typing import Dict, List, Optional, Union
 import webbrowser
 
 import click
-import requests
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
@@ -20,7 +20,11 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
+    import requests
+
     import sky
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -42,6 +46,7 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        priority: Priority of the managed job.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -78,6 +83,7 @@ def launch(
         f'{server_common.get_server_url()}/jobs/launch',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -134,6 +140,7 @@ def queue(refresh: bool,
         f'{server_common.get_server_url()}/jobs/queue',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response=response)
 
@@ -173,6 +180,7 @@ def cancel(
         f'{server_common.get_server_url()}/jobs/cancel',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response=response)
 
@@ -184,6 +192,7 @@ def tail_logs(name: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
+              tail: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails logs of managed jobs.
 
@@ -196,6 +205,7 @@ def tail_logs(name: Optional[str] = None,
         follow: Whether to follow the logs.
         controller: Whether to tail logs from the jobs controller.
         refresh: Whether to restart the jobs controller if it is stopped.
+        tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
 
@@ -214,12 +224,14 @@ def tail_logs(name: Optional[str] = None,
         follow=follow,
         controller=controller,
         refresh=refresh,
+        tail=tail,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     request_id = server_common.get_request_id(response)
     return sdk.stream_response(request_id, response, output_stream)
@@ -263,6 +275,7 @@ def download_logs(
         f'{server_common.get_server_url()}/jobs/download_logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     job_id_remote_path_dict = sdk.stream_and_get(
         server_common.get_request_id(response))

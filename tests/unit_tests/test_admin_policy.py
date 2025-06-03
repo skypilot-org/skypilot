@@ -34,12 +34,18 @@ def task():
     return sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
 
 
+def _load_task(task: sky.Task, config_path: str) -> sky.Task:
+    os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
+    importlib.reload(skypilot_config)
+    return task
+
+
 def _load_task_and_apply_policy(
     task: sky.Task,
     config_path: str,
     idle_minutes_to_autostop: Optional[int] = None,
 ) -> Tuple[sky.Dag, config_utils.Config]:
-    os.environ['SKYPILOT_CONFIG'] = config_path
+    os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
@@ -81,11 +87,11 @@ def test_use_spot_for_all_gpus_policy(add_example_policy_paths, task):
 
 
 def test_add_labels_policy(add_example_policy_paths, task):
-    dag, _ = _load_task_and_apply_policy(
-        task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
-    assert 'app' in skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata', 'labels'),
-        {}), ('label should be set')
+    task = _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
+    with admin_policy_utils.apply_and_use_config_in_current_request(task):
+        assert 'app' in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should be set')
 
 
 def test_reject_all_policy(add_example_policy_paths, task):
@@ -180,7 +186,7 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
 @mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
             return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
 def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
-    _, config = _load_task_and_apply_policy(
+    dag, config = _load_task_and_apply_policy(
         task,
         os.path.join(POLICY_PATH, 'dynamic_kubernetes_contexts_update.yaml'))
 
@@ -189,7 +195,11 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
         None) == ['kind-skypilot', 'kind-skypilot2'
                  ], 'Kubernetes allowed contexts should be updated'
 
+    with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+        assert skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'),
+            None) == ['kind-skypilot', 'kind-skypilot2'
+                     ], 'Global skypilot config should be updated'
     assert skypilot_config.get_nested(
         ('kubernetes', 'allowed_contexts'),
-        None) == ['kind-skypilot',
-                  'kind-skypilot2'], 'Global skypilot config should be updated'
+        None) is None, 'Global skypilot config should be restored after request'

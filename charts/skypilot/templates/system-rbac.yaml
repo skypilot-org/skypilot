@@ -1,0 +1,63 @@
+{{/* Policies for managing skypilot system components */}}
+{{- if and .Values.rbac.create .Values.rbac.manageSystemComponents }}
+{{- $namespace := "skypilot-system" }}
+{{- include "skypilot.ensureNamespace" $namespace -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-system-role
+  namespace: {{ $namespace }}
+rules:
+  - apiGroups: [ "apps" ]
+    resources: [ "daemonsets" ]
+    verbs: [ "*" ]
+{{- if .Values.rbac.manageRbacPolicies}}
+  - apiGroups: [ "rbac.authorization.k8s.io" ]
+    resources: [ "roles", "rolebindings" ]
+    verbs: [ "*" ]
+  - apiGroups: [ "" ]
+    resources: [ "serviceaccounts" ]
+    verbs: [ "*" ]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-system-role-binding
+  namespace: {{ $namespace }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "skypilot.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ .Release.Name }}-system-role
+  apiGroup: rbac.authorization.k8s.io
+---
+{{/* If API server is going to configure RBAC policies for controllers, the permission to manage skypilot-system namespace is also needed */}}
+{{- if .Values.rbac.manageRbacPolicies }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-system-cluster-role
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "namespaces" ]
+    resourceNames: [ {{ $namespace }} ]
+    verbs: [ "get", "list", "watch", "create" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-system-cluster-role-binding
+subjects:
+- kind: ServiceAccount
+  name: {{ include "skypilot.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Name }}-system-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

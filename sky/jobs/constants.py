@@ -1,5 +1,5 @@
 """Constants used for Managed Jobs."""
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 from sky.skylet import constants as skylet_constants
 
@@ -23,6 +23,13 @@ CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
     'disk_size': 50
 }
 
+# Autostop config for the jobs controller. These are the default values for
+# jobs.controller.autostop in ~/.sky/config.yaml.
+CONTROLLER_AUTOSTOP: Dict[str, Any] = {
+    'idle_minutes': 10,
+    'down': False,
+}
+
 # TODO(zhwu): This is no longer accurate, after #4592, which increases the
 # length of user hash appended to the cluster name from 4 to 8 chars. This makes
 # the cluster name on GCP being wrapped twice. However, we cannot directly
@@ -40,7 +47,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 3
+MANAGED_JOBS_VERSION = 6
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes
@@ -63,3 +70,5 @@ DASHBOARD_SETUP_CMD = (
     f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
     '>> ~/.sky/job-dashboard.log 2>&1 &); '
     'fi')
+
+DEFAULT_PRIORITY = 500

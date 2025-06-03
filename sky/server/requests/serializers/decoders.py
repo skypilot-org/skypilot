@@ -12,7 +12,6 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.server import constants as server_constants
 from sky.skylet import job_lib
-from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
@@ -135,16 +134,6 @@ def decode_cost_report(
     return return_value
 
 
-@register_decoders('enabled_clouds')
-def decode_enabled_clouds(return_value: List[str]) -> List['clouds.Cloud']:
-    clouds = []
-    for cloud_name in return_value:
-        cloud = registry.CLOUD_REGISTRY.from_str(cloud_name)
-        assert cloud is not None, return_value
-        clouds.append(cloud)
-    return clouds
-
-
 @register_decoders('list_accelerators')
 def decode_list_accelerators(
     return_value: Dict[str, List[List[Any]]]
@@ -188,8 +177,5 @@ def decode_job_status(
 
 @register_decoders('kubernetes_node_info')
 def decode_kubernetes_node_info(
-        return_value: Dict[str, Any]) -> Dict[str, models.KubernetesNodeInfo]:
-    return {
-        node_name: models.KubernetesNodeInfo(**node_info)
-        for node_name, node_info in return_value.items()
-    }
+        return_value: Dict[str, Any]) -> models.KubernetesNodesInfo:
+    return models.KubernetesNodesInfo.from_dict(return_value)

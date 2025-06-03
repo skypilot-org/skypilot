@@ -44,7 +44,9 @@ _DUMP_RAY_PORTS = (
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
-    '"from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
+    '"from sky import sky_logging\n'
+    'with sky_logging.silent(): '
+    'from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
     '2> /dev/null || echo 6379);'
     f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
     'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
@@ -499,7 +501,7 @@ def start_skylet_on_head_node(cluster_name: str,
 def _internal_file_mounts(file_mounts: Dict,
                           runner: command_runner.CommandRunner,
                           log_path: str) -> None:
-    if file_mounts is None or not file_mounts:
+    if not file_mounts:
         return
 
     for dst, src in file_mounts.items():

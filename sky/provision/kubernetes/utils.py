@@ -12,15 +12,14 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
-import jinja2
-import yaml
-
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
@@ -38,8 +37,24 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import jinja2
+    import yaml
+
     from sky import backends
     from sky import resources as resources_lib
+else:
+    jinja2 = adaptors_common.LazyImport('jinja2')
+    yaml = adaptors_common.LazyImport('yaml')
+
+# Please be careful when changing this.
+# When mounting, Kubernetes changes the ownership of the parent directory
+# to root:root.
+# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # pylint: disable=line-too-long
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
+# Path where the persistent volume for HA controller is mounted.
+# TODO(andy): Consider using dedicated path like `/var/skypilot`
+# and store all data that needs to be persisted in future.
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
@@ -155,7 +170,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     # or 403 (Forbidden)
                     if (isinstance(e, kubernetes.api_exception()) and
                             e.status in (401, 403)):
-                        raise
+                        # Raise KubeAPIUnreachableError exception so that the
+                        # optimizer/provisioner can failover to other clouds.
+                        raise exceptions.KubeAPIUnreachableError(
+                            f'Kubernetes API error: {str(e)}') from e
                     if attempt < max_retries - 1:
                         sleep_time = backoff.current_backoff()
                         logger.debug(f'Kubernetes API call {func.__name__} '
@@ -226,7 +244,7 @@ class GPULabelFormatter:
         raise NotImplementedError
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
+    def get_label_values(cls, accelerator: str) -> List[str]:
         """Given a GPU type, returns the label value to be used"""
         raise NotImplementedError
 
@@ -265,7 +283,8 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
-    if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB'):
+    if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB',
+                       'B200'):
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
         # have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
@@ -293,10 +312,10 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         return [cls.LABEL_KEY]
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
+    def get_label_values(cls, accelerator: str) -> List[str]:
         # For SkyPilot formatter, we use the accelerator str directly.
         # See sky.utils.kubernetes.gpu_labeler.
-        return accelerator.lower()
+        return [accelerator.lower()]
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
@@ -333,8 +352,8 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
         return [cls.LABEL_KEY]
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return accelerator.upper()
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        return [accelerator.upper()]
 
     @classmethod
     def match_label_key(cls, label_key: str) -> bool:
@@ -420,8 +439,8 @@ class GKELabelFormatter(GPULabelFormatter):
         return count_to_topology
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_accelerator_name(accelerator)
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        return [get_gke_accelerator_name(accelerator)]
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -454,7 +473,7 @@ class GFDLabelFormatter(GPULabelFormatter):
     https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
 
     This LabelFormatter can't be used in autoscaling clusters since accelerators
-    may map to multiple label, so we're not implementing `get_label_value`
+    may map to multiple label, so we're not implementing `get_label_values`
     """
 
     LABEL_KEY = 'nvidia.com/gpu.product'
@@ -468,10 +487,10 @@ class GFDLabelFormatter(GPULabelFormatter):
         return [cls.LABEL_KEY]
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        """An accelerator can map to many Nvidia GFD labels
-        (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
-        As a result, we do not support get_label_value for GFDLabelFormatter."""
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        # An accelerator can map to many Nvidia GFD labels
+        # (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
+        # TODO implement get_label_values for GFDLabelFormatter
         raise NotImplementedError
 
     @classmethod
@@ -962,8 +981,12 @@ def check_instance_fits(context: Optional[str],
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
-            if (node_cpus >= candidate_instance_type.cpus and
-                    node_memory_gb >= candidate_instance_type.memory):
+            # We don't consider nodes that have exactly the same amount of
+            # CPU or memory as the candidate instance type.
+            # This is to account for the fact that each node always has some
+            # amount kube-system pods running on it and consuming resources.
+            if (node_cpus > candidate_instance_type.cpus and
+                    node_memory_gb > candidate_instance_type.memory):
                 return True, None
         return False, (
             'Maximum resources found on a single node: '
@@ -1014,15 +1037,17 @@ def check_instance_fits(context: Optional[str],
         # met.
         assert acc_count is not None, (acc_type, acc_count)
         try:
-            gpu_label_key, gpu_label_val, _, _ = (
-                get_accelerator_label_key_value(context, acc_type, acc_count))
+            gpu_label_key, gpu_label_values, _, _ = (
+                get_accelerator_label_key_values(context, acc_type, acc_count))
+            if gpu_label_values is None:
+                gpu_label_values = []
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
         # Get the set of nodes that have the GPU type
         gpu_nodes = [
             node for node in nodes if gpu_label_key in node.metadata.labels and
-            node.metadata.labels[gpu_label_key] == gpu_label_val
+            node.metadata.labels[gpu_label_key] in gpu_label_values
         ]
         if not gpu_nodes:
             return False, f'No GPU nodes found with {acc_type} on the cluster'
@@ -1064,12 +1089,22 @@ def check_instance_fits(context: Optional[str],
         return fits, reason
 
 
-def get_accelerator_label_key_value(
+def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
+    """Returns the label keys that should be avoided for scheduling
+    CPU-only tasks.
+    """
+    label_formatter, _ = detect_gpu_label_formatter(context)
+    if label_formatter is None:
+        return []
+    return label_formatter.get_label_keys()
+
+
+def get_accelerator_label_key_values(
     context: Optional[str],
     acc_type: str,
     acc_count: int,
     check_mode=False
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[Optional[str], Optional[List[str]], Optional[str], Optional[str]]:
     """Returns the label key and value for the given GPU/TPU type.
 
     Args:
@@ -1089,7 +1124,9 @@ def get_accelerator_label_key_value(
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
                 (nvidia.com/gpu, google.com/tpu)
-            - The cluster does not have GPU/TPU labels setup correctly
+            - The cluster has GPU/TPU resources, but no node in the cluster has
+              an accelerator label.
+            - The cluster has a node with an invalid accelerator label value.
             - The cluster doesn't have any nodes with acc_type GPU/TPU
     """
     # Check if the cluster has GPU resources
@@ -1100,6 +1137,11 @@ def get_accelerator_label_key_value(
     #  zero nodes and may not have any GPU nodes yet. In the future, we should
     #  support pollingthe clusters for autoscaling information, such as the
     #  node pools configured etc.
+
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
+    cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
+    context_display_name = context.lstrip('ssh-') if (
+        context and is_ssh_node_pool) else context
 
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
@@ -1121,7 +1163,7 @@ def get_accelerator_label_key_value(
             tpu_topology_label_key = formatter.get_tpu_topology_label_key()
             tpu_topology_label_value = formatter.get_tpu_topology_label_value(
                 acc_type, acc_count)
-        return formatter.get_label_key(acc_type), formatter.get_label_value(
+        return formatter.get_label_key(acc_type), formatter.get_label_values(
             acc_type), tpu_topology_label_key, tpu_topology_label_value
 
     has_gpus, cluster_resources = detect_accelerator_resource(context)
@@ -1140,13 +1182,17 @@ def get_accelerator_label_key_value(
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
-                raise exceptions.ResourcesUnavailableError(
-                    'Could not detect GPU labels in Kubernetes cluster. '
-                    'If this cluster has GPUs, please ensure GPU nodes have '
-                    'node labels of either of these formats: '
-                    f'{supported_formats}. Please refer to '
-                    'the documentation on how to set up node labels.'
-                    f'{suffix}')
+                msg = (f'Could not detect GPU labels in {cloud_name}.')
+                if not is_ssh_node_pool:
+                    msg += (' Run `sky check ssh` to debug.')
+                else:
+                    msg += (
+                        ' If this cluster has GPUs, please ensure GPU nodes have '
+                        'node labels of either of these formats: '
+                        f'{supported_formats}. Please refer to '
+                        'the documentation on how to set up node labels.')
+                msg += f'{suffix}'
+                raise exceptions.ResourcesUnavailableError(msg)
         else:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
@@ -1157,7 +1203,7 @@ def get_accelerator_label_key_value(
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
-                                f'Node {node_name!r} in Kubernetes cluster has '
+                                f'Node {node_name!r} in {cloud_name} has '
                                 f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
@@ -1200,12 +1246,12 @@ def get_accelerator_label_key_value(
                                 # different topologies that maps to identical
                                 # number of TPU chips.
                                 if tpu_topology_chip_count == acc_count:
-                                    return (label, value, topology_label_key,
+                                    return (label, [value], topology_label_key,
                                             topology_value)
                                 else:
                                     continue
                         else:
-                            return label, value, None, None
+                            return label, [value], None, None
 
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
@@ -1221,10 +1267,10 @@ def get_accelerator_label_key_value(
                 # TODO(Doyoung): Update the error message raised with the
                 # multi-host TPU support.
                 raise exceptions.ResourcesUnavailableError(
-                    'Could not find any node in the Kubernetes cluster '
+                    f'Could not find any node in the {cloud_name} '
                     f'with {acc_type}. Please ensure at least one node in the '
                     f'cluster has {acc_type} and node labels are setup '
-                    'correctly. Please refer to the documentration for more. '
+                    'correctly. Please refer to the documentation for more. '
                     f'{suffix}. Note that multi-host TPU podslices are '
                     'currently not unsupported.')
     else:
@@ -1234,15 +1280,24 @@ def get_accelerator_label_key_value(
             if env_options.Options.SHOW_DEBUG_INFO.get():
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
-            raise exceptions.ResourcesUnavailableError(
-                f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
-                f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
-                ' contains GPUs, please ensure GPU drivers are installed on '
-                'the node. Check if the GPUs are setup correctly by running '
-                '`kubectl describe nodes` and looking for the '
-                f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
-                'Please refer to the documentation on how to set up GPUs.'
-                f'{suffix}')
+            if is_ssh_node_pool:
+                msg = (
+                    f'Could not detect GPUs in SSH Node Pool '
+                    f'\'{context_display_name}\'. If this cluster contains '
+                    'GPUs, please ensure GPU drivers are installed on the node '
+                    'and re-run '
+                    f'`sky ssh up --infra {context_display_name}`. {suffix}')
+            else:
+                msg = (
+                    f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
+                    f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
+                    ' contains GPUs, please ensure GPU drivers are installed on '
+                    'the node. Check if the GPUs are setup correctly by running '
+                    '`kubectl describe nodes` and looking for the '
+                    f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
+                    'Please refer to the documentation on how to set up GPUs.'
+                    f'{suffix}')
+            raise exceptions.ResourcesUnavailableError(msg)
     assert False, 'This should not be reached'
 
 
@@ -1284,7 +1339,8 @@ def get_external_ip(network_mode: Optional[
 
 
 def check_credentials(context: Optional[str],
-                      timeout: int = kubernetes.API_TIMEOUT) -> \
+                      timeout: int = kubernetes.API_TIMEOUT,
+                      run_optional_checks: bool = False) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -1325,10 +1381,19 @@ def check_credentials(context: Optional[str],
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
+    # optional checks.
+    try:
+        _ = _get_kubeconfig_path()
+    except ValueError as e:
+        return False, f'{common_utils.format_exception(e, use_bracket=True)}'
+
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
+    if not run_optional_checks:
+        return True, None
+
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
-
     _, exec_msg = is_kubeconfig_exec_auth(context)
 
     # We now check if GPUs are available and labels are set correctly on the
@@ -1337,16 +1402,36 @@ def check_credentials(context: Optional[str],
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
-    try:
-        get_accelerator_label_key_value(context,
-                                        acc_type='',
-                                        acc_count=0,
-                                        check_mode=True)
-    except exceptions.ResourcesUnavailableError as e:
-        # If GPUs are not available, we return cluster as enabled (since it can
-        # be a CPU-only cluster) but we also return the exception message which
-        # serves as a hint for how to enable GPU access.
-        gpu_msg = str(e)
+    unlabeled_nodes = get_unlabeled_accelerator_nodes(context)
+    if unlabeled_nodes:
+        gpu_msg = (f'Cluster has {len(unlabeled_nodes)} nodes with '
+                   f'accelerators that are not labeled. '
+                   f'To label the nodes, run '
+                   f'`python -m sky.utils.kubernetes.gpu_labeler '
+                   f'--context {context}`')
+    else:
+        try:
+            # This function raises a ResourcesUnavailableError in three cases:
+            # 1. If no node in cluster has GPU/TPU resource in its capacity.
+            #    (e.g. google.com/tpu, nvidia.com/gpu)
+            # 2. If at least one node in cluster has GPU/TPU resource in its
+            #    capacity, but no node in the cluster has an accelerator label.
+            # 3. If an accelerator label on a node is invalid.
+            # Exception 2 is a special case of a cluster having at least one
+            # unlabelled node, which is caught in
+            # `get_unlabeled_accelerator_nodes`.
+            # Therefore, if `get_unlabeled_accelerator_nodes` detects unlabelled
+            # nodes, we skip this check.
+            get_accelerator_label_key_values(context,
+                                             acc_type='',
+                                             acc_count=0,
+                                             check_mode=True)
+        except exceptions.ResourcesUnavailableError as e:
+            # If GPUs are not available, we return cluster as enabled
+            # (since it can be a CPU-only cluster) but we also return the
+            # exception message which serves as a hint for how to enable
+            # GPU access.
+            gpu_msg = str(e)
     if exec_msg and gpu_msg:
         return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
     elif gpu_msg:
@@ -1441,7 +1526,7 @@ def is_kubeconfig_exec_auth(
         return False, None
 
     # Get active context and user from kubeconfig using k8s api
-    all_contexts, current_context = k8s.config.list_kube_config_contexts()
+    all_contexts, current_context = kubernetes.list_kube_config_contexts()
     context_obj = current_context
     if context is not None:
         for c in all_contexts:
@@ -1455,9 +1540,8 @@ def is_kubeconfig_exec_auth(
     # K8s api does not provide a mechanism to get the user details from the
     # context. We need to load the kubeconfig file and parse it to get the
     # user details.
-    kubeconfig_path = os.path.expanduser(
-        os.getenv('KUBECONFIG',
-                  k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+    kubeconfig_path = _get_kubeconfig_path()
+
     # Load the kubeconfig file as a dictionary
     with open(kubeconfig_path, 'r', encoding='utf-8') as f:
         kubeconfig = yaml.safe_load(f)
@@ -1498,7 +1582,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     """
     k8s = kubernetes.kubernetes
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
+        _, current_context = kubernetes.list_kube_config_contexts()
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
         return None
@@ -1534,7 +1618,7 @@ def get_all_kube_context_names() -> List[str]:
     k8s = kubernetes.kubernetes
     context_names = []
     try:
-        all_contexts, _ = k8s.config.list_kube_config_contexts()
+        all_contexts, _ = kubernetes.list_kube_config_contexts()
         # all_contexts will always have at least one context. If kubeconfig
         # does not have any contexts defined, it will raise ConfigException.
         context_names = [context['name'] for context in all_contexts]
@@ -1577,7 +1661,7 @@ def get_kube_config_context_namespace(
                 return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
-        contexts, current_context = k8s.config.list_kube_config_contexts()
+        contexts, current_context = kubernetes.list_kube_config_contexts()
         if context_name is None:
             context = current_context
         else:
@@ -1671,9 +1755,16 @@ class KubernetesInstanceType:
     @staticmethod
     def is_valid_instance_type(name: str) -> bool:
         """Returns whether the given name is a valid instance type."""
+        # Before https://github.com/skypilot-org/skypilot/pull/4756,
+        # the accelerators are appended with format "--{a}{type}",
+        # e.g. "4CPU--16GB--1V100".
+        # Check both patterns to keep backward compatibility.
+        # TODO(romilb): Backward compatibility, remove after 0.11.0.
+        prev_pattern = re.compile(
+            r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
         pattern = re.compile(
             r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--[\w\d-]+:\d+)?$')
-        return bool(pattern.match(name))
+        return bool(pattern.match(name)) or bool(prev_pattern.match(name))
 
     @classmethod
     def _parse_instance_type(
@@ -1690,6 +1781,11 @@ class KubernetesInstanceType:
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
         )
         match = pattern.match(name)
+        # TODO(romilb): Backward compatibility, remove after 0.11.0.
+        prev_pattern = re.compile(
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
+        )
+        prev_match = prev_pattern.match(name)
         if match:
             cpus = float(match.group('cpus'))
             memory = float(match.group('memory'))
@@ -1699,6 +1795,19 @@ class KubernetesInstanceType:
                 accelerator_count = int(accelerator_count)
                 # This is to revert the accelerator types with spaces back to
                 # the original format.
+                accelerator_type = str(accelerator_type).replace('_', ' ')
+            else:
+                accelerator_count = None
+                accelerator_type = None
+            return cpus, memory, accelerator_count, accelerator_type
+        # TODO(romilb): Backward compatibility, remove after 0.11.0.
+        elif prev_match:
+            cpus = float(prev_match.group('cpus'))
+            memory = float(prev_match.group('memory'))
+            accelerator_count = prev_match.group('accelerator_count')
+            accelerator_type = prev_match.group('accelerator_type')
+            if accelerator_count:
+                accelerator_count = int(accelerator_count)
                 accelerator_type = str(accelerator_type).replace('_', ' ')
             else:
                 accelerator_count = None
@@ -2114,32 +2223,35 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     return content
 
 
-def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'nc' are installed"""
+def check_port_forward_mode_dependencies(
+        raise_error: bool = True) -> Optional[List[str]]:
+    """Checks if 'socat' and 'nc' are installed
 
-    # Construct runtime errors
-    socat_default_error = RuntimeError(
-        f'`socat` is required to setup Kubernetes cloud with '
+    Args:
+        raise_error: set to true when the dependencies need to be present.
+            set to false for `sky check`, where reason strings are compiled
+            at the end.
+
+    Returns: the reasons list if there are missing dependencies.
+    """
+
+    # errors
+    socat_message = (
+        '`socat` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install socat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install socat')
-    netcat_default_error = RuntimeError(
-        f'`nc` is required to setup Kubernetes cloud with '
+        'default networking mode and it is not installed. ')
+    netcat_default_message = (
+        '`nc` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install netcat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
-    mac_installed_error = RuntimeError(
-        f'The default MacOS `nc` is installed. However, for '
+        'default networking mode and it is not installed. ')
+    netcat_macos_message = (
+        'The default MacOS `nc` is installed. However, for '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode, GNU netcat is required. '
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
+        'default networking mode, GNU netcat is required. ')
+
+    # save
+    reasons = []
+    required_binaries = []
 
     # Ensure socat is installed
     try:
@@ -2148,8 +2260,8 @@ def check_port_forward_mode_dependencies() -> None:
                        stderr=subprocess.DEVNULL,
                        check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
-        with ux_utils.print_exception_no_traceback():
-            raise socat_default_error from None
+        required_binaries.append('socat')
+        reasons.append(socat_message)
 
     # Ensure netcat is installed
     #
@@ -2164,15 +2276,28 @@ def check_port_forward_mode_dependencies() -> None:
             netcat_output.stderr)
 
         if nc_mac_installed:
-            with ux_utils.print_exception_no_traceback():
-                raise mac_installed_error from None
+            required_binaries.append('netcat')
+            reasons.append(netcat_macos_message)
         elif netcat_output.returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise netcat_default_error from None
+            required_binaries.append('netcat')
+            reasons.append(netcat_default_message)
 
     except FileNotFoundError:
-        with ux_utils.print_exception_no_traceback():
-            raise netcat_default_error from None
+        required_binaries.append('netcat')
+        reasons.append(netcat_default_message)
+
+    if required_binaries:
+        reasons.extend([
+            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+            f'  $ sudo apt install {" ".join(required_binaries)}',
+            'On MacOS, install with: ',
+            f'  $ brew install {" ".join(required_binaries)}',
+        ])
+        if raise_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('\n'.join(reasons))
+        return reasons
+    return None
 
 
 def get_endpoint_debug_message() -> str:
@@ -2450,9 +2575,52 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
 
 
+def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
+    """Gets a list of unlabeled GPU nodes in the cluster.
+
+    This function returns a list of nodes that have GPU resources but no label
+    that indicates the accelerator type.
+
+    Args:
+        context: The context to check.
+
+    Returns:
+        List[Any]: List of unlabeled nodes with accelerators.
+    """
+    nodes = get_kubernetes_nodes(context=context)
+    nodes_with_accelerator = []
+    for node in nodes:
+        if get_gpu_resource_key() in node.status.capacity:
+            nodes_with_accelerator.append(node)
+
+    label_formatter, _ = detect_gpu_label_formatter(context)
+    if not label_formatter:
+        return nodes_with_accelerator
+    else:
+        label_keys = label_formatter.get_label_keys()
+
+    unlabeled_nodes = []
+    for node in nodes_with_accelerator:
+        labeled = False
+        for label_key in label_keys:
+            if label_key in node.metadata.labels:
+                labeled = True
+                break
+        if not labeled:
+            unlabeled_nodes.append(node)
+
+    return unlabeled_nodes
+
+
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
+        context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
+
+    This function returns a model with node info map as a nested field. This
+    allows future extensions while keeping the client-server compatibility,
+    e.g. when adding a new field to the model, the legacy clients will not be
+    affected and new clients can opt-in new behavior if the new field is
+    presented.
 
     Currently only GPU resources are supported. The function returns the total
     number of GPUs available on the node and the number of free GPUs on the
@@ -2462,8 +2630,8 @@ def get_kubernetes_node_info(
     namespaces, the function will return free GPUs as -1.
 
     Returns:
-        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
-            key and the KubernetesNodeInfo object as value
+        KubernetesNodesInfo: A model that contains the node info map and other
+            information.
     """
     nodes = get_kubernetes_nodes(context=context)
     # Get the pods to get the real-time resource usage
@@ -2482,6 +2650,7 @@ def get_kubernetes_node_info(
         label_keys = lf.get_label_keys()
 
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
+    has_multi_host_tpu = False
 
     for node in nodes:
         accelerator_name = None
@@ -2518,6 +2687,7 @@ def get_kubernetes_node_info(
         # TODO(Doyoung): Remove the logic when adding support for
         # multi-host TPUs.
         if is_multi_host_tpu(node.metadata.labels):
+            has_multi_host_tpu = True
             continue
 
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
@@ -2525,8 +2695,15 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)})
+    hint = ''
+    if has_multi_host_tpu:
+        hint = ('(Note: Multi-host TPUs are detected and excluded from the '
+                'display as multi-host TPUs are not supported.)')
 
-    return node_info_dict
+    return models.KubernetesNodesInfo(
+        node_info_dict=node_info_dict,
+        hint=hint,
+    )
 
 
 def to_label_selector(tags):
@@ -2634,7 +2811,7 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
     namespace = get_namespace_from_config(provider_config)
     context = get_context_from_config(provider_config)
@@ -2769,15 +2946,6 @@ def is_multi_host_tpu(node_metadata_labels: dict) -> bool:
         # reflects the total across all hosts, while
         # node_tpu_chip_count reflects only the chips in a single node.
         if node_tpu_chip_count != topology_chip_count:
-            return True
-    return False
-
-
-def multi_host_tpu_exists_in_cluster(context: Optional[str] = None) -> bool:
-    """Checks if there exists a multi-host TPU within the cluster."""
-    nodes = get_kubernetes_nodes(context=context)
-    for node in nodes:
-        if is_multi_host_tpu(node.metadata.labels):
             return True
     return False
 
@@ -2930,3 +3098,20 @@ def get_gpu_resource_key():
     # Else use default.
     # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
+
+
+def _get_kubeconfig_path() -> str:
+    """Get the path to the kubeconfig file.
+    Parses `KUBECONFIG` env var if present, else uses the default path.
+    Currently, specifying multiple KUBECONFIG paths in the envvar is not
+    allowed, hence will raise a ValueError.
+    """
+    kubeconfig_path = os.path.expanduser(
+        os.getenv(
+            'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
+            KUBE_CONFIG_DEFAULT_LOCATION))
+    if len(kubeconfig_path.split(os.pathsep)) > 1:
+        raise ValueError('SkyPilot currently only supports one '
+                         'config file path with $KUBECONFIG. Current '
+                         f'path(s) are {kubeconfig_path}.')
+    return kubeconfig_path

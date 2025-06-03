@@ -42,12 +42,13 @@ class SkyServeController:
     """
 
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
-                 task_yaml: str, host: str, port: int) -> None:
+                 service_task_yaml: str, host: str, port: int) -> None:
         self._service_name = service_name
         self._replica_manager: replica_managers.ReplicaManager = (
-            replica_managers.SkyPilotReplicaManager(service_name=service_name,
-                                                    spec=service_spec,
-                                                    task_yaml_path=task_yaml))
+            replica_managers.SkyPilotReplicaManager(
+                service_name=service_name,
+                spec=service_spec,
+                service_task_yaml_path=service_task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._host = host
@@ -240,7 +241,9 @@ class SkyServeController:
 # TODO(tian): Probably we should support service that will stop the VM in
 # specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
-                   task_yaml: str, controller_host: str, controller_port: int):
-    controller = SkyServeController(service_name, service_spec, task_yaml,
-                                    controller_host, controller_port)
+                   service_task_yaml: str, controller_host: str,
+                   controller_port: int):
+    controller = SkyServeController(service_name, service_spec,
+                                    service_task_yaml, controller_host,
+                                    controller_port)
     controller.run()

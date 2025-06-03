@@ -25,10 +25,15 @@ class Vast(clouds.Cloud):
              'are non-trivial on Vast.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Vast.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is currently not supported on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Vast.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported on Vast.'),
     }
     #
     # Vast doesn't have a max cluster name limit. This number
@@ -159,17 +164,18 @@ class Vast(clouds.Cloud):
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name, num_nodes  # unused
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if r.image_id is None:
-            image_id = 'vastai/base:0.0.2'
-        elif r.extract_docker_image() is not None:
-            image_id = r.extract_docker_image()
+        if resources.image_id is None:
+            image_id: Optional[str] = 'vastai/base:0.0.2'
+        elif resources.extract_docker_image() is not None:
+            image_id = resources.extract_docker_image()
         else:
-            image_id = r.image_id[r.region]
+            image_id = resources.image_id[resources.region]
 
         return {
             'instance_type': resources.instance_type,
@@ -234,7 +240,8 @@ class Vast(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has valid credentials for
         Vast's compute service. """
         try:

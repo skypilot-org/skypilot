@@ -159,7 +159,7 @@ gcloud container node-pools delete "largecpu" --region ${REGION} --cluster ${CLU
 1. Create a EKS cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
    * Tip - to create an example GPU cluster for testing, this command will create a 3 node cluster with 1x T4-8cpu, 1x V100-8cpu and 1x 16cpu CPU-only node. It will also automatically update your kubeconfig file:
      ```bash
-     eksctl create -f tests/kubernetes/eks_test_cluster.yaml
+     eksctl create cluster -f tests/kubernetes/eks_test_cluster.yaml
      ```
 2. Verify by running `kubectl get nodes`. You should see your nodes.
 3. **If you want GPU support**, EKS clusters already come with GPU drivers setup. However, you'll need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:

@@ -9,8 +9,8 @@ History:
    file path resolution (by os.path.expanduser) when construct the file
    mounts. This bug will cause the created workder nodes located in different
    compartment and VCN than the header node if user specifies compartment_id
-   in the sky config file, because the ~/.sky/config.yaml is not sync-ed to the
-   remote machine.
+   in the sky config file, because the ~/.sky/config.yaml is not
+   sync-ed to the remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
  - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
@@ -23,7 +23,7 @@ History:
 import logging
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -69,19 +69,22 @@ class OCI(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        features = {
+        unsupported_features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.DOCKER_IMAGE:
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
-            features[clouds.CloudImplementationFeatures.STOP] = (
+            unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
                 f'Stopping spot instances is currently not supported on '
                 f'{cls._REPR}.')
-        return features
+        return unsupported_features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -210,10 +213,11 @@ class OCI(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Any]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
 
+        resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
@@ -242,7 +246,8 @@ class OCI(clouds.Cloud):
             image_id, os_type = image_id.replace(' ', '').split(':')
 
         cpus = resources.cpus
-        instance_type_arr = resources.instance_type.split(
+        original_instance_type = resources.instance_type
+        instance_type_arr = original_instance_type.split(
             oci_utils.oci_config.INSTANCE_TYPE_RES_SPERATOR)
         instance_type = instance_type_arr[0]
 
@@ -256,12 +261,12 @@ class OCI(clouds.Cloud):
         else:
             if cpus is None:
                 cpus, mems = OCI.get_vcpus_mem_from_instance_type(
-                    resources.instance_type)
+                    original_instance_type)
                 resources = resources.copy(
                     cpus=cpus,
                     memory=mems,
                 )
-            if cpus is None and resources.instance_type.startswith(
+            if cpus is None and original_instance_type.startswith(
                     oci_utils.oci_config.VM_PREFIX):
                 cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}'
 
@@ -270,7 +275,7 @@ class OCI(clouds.Cloud):
             # If zone is not specified, try to get the first zone.
             if zones is None:
                 regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type=resources.instance_type,
+                    instance_type=original_instance_type,
                     use_spot=resources.use_spot,
                     clouds='oci')
                 zones = [r for r in iter(regions) if r.name == region.name
@@ -310,7 +315,7 @@ class OCI(clouds.Cloud):
             # OS type is not determined yet. So try to get it from vms.csv
             image_str = self._get_image_str(
                 image_id=resources.image_id,
-                instance_type=resources.instance_type,
+                instance_type=original_instance_type,
                 region=region.name)
 
             # pylint: disable=import-outside-toplevel
@@ -396,13 +401,15 @@ class OCI(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         OCI's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         OCI's storage service."""
         # TODO(seungjin): Implement separate check for

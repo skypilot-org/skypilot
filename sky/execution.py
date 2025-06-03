@@ -159,9 +159,9 @@ def _execute(
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
       clone_disk_from: Optional[str]; if set, clone the disk from the specified
         cluster.
-      skip_unecessary_provisioning: bool; if True, compare the calculated
+      skip_unnecessary_provisioning: bool; if True, compare the calculated
         cluster config to the current cluster's config. If they match, shortcut
-        provisioning even if we have Stage.PROVISION.
+        provisioning and setup, even if we have Stage.PROVISION and Stage.SETUP.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -170,21 +170,70 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         if task.storage_mounts is not None:
             for storage in task.storage_mounts.values():
                 # Ensure the storage is constructed.
                 storage.construct()
-    dag, _ = admin_policy_utils.apply(
-        dag,
-        request_options=admin_policy.RequestOptions(
-            cluster_name=cluster_name,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            down=down,
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster_name,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            )) as dag:
+        return _execute_dag(
+            dag,
             dryrun=dryrun,
-        ))
+            down=down,
+            stream_logs=stream_logs,
+            handle=handle,
+            backend=backend,
+            retry_until_up=retry_until_up,
+            optimize_target=optimize_target,
+            stages=stages,
+            cluster_name=cluster_name,
+            detach_setup=detach_setup,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            no_setup=no_setup,
+            clone_disk_from=clone_disk_from,
+            skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            _quiet_optimizer=_quiet_optimizer,
+            _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+            _is_launched_by_sky_serve_controller=
+            _is_launched_by_sky_serve_controller)
+
+
+def _execute_dag(
+    dag: 'sky.Dag',
+    dryrun: bool,
+    down: bool,
+    stream_logs: bool,
+    handle: Optional[backends.ResourceHandle],
+    backend: Optional[backends.Backend],
+    retry_until_up: bool,
+    optimize_target: common.OptimizeTarget,
+    stages: Optional[List[Stage]],
+    cluster_name: Optional[str],
+    detach_setup: bool,
+    detach_run: bool,
+    idle_minutes_to_autostop: Optional[int],
+    no_setup: bool,
+    clone_disk_from: Optional[str],
+    skip_unnecessary_provisioning: bool,
+    # pylint: disable=invalid-name
+    _quiet_optimizer: bool,
+    _is_launched_by_jobs_controller: bool,
+    _is_launched_by_sky_serve_controller: bool,
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+    """Execute a DAG.
+
+    This is an internal helper function for _execute() and is expected to be
+    called only by _execute().
+    """
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -208,19 +257,62 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
+    is_controller_high_availability_supported = False
+
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+        if controller_utils.high_availability_specified(cluster_name,
+                                                        skip_warning=False):
+            requested_features.add(clouds.CloudImplementationFeatures.
+                                   HIGH_AVAILABILITY_CONTROLLERS)
+            # If we provision a cluster that supports high availability
+            # controllers, we can use the high availability controller.
+            is_controller_high_availability_supported = True
 
     # Add requested features from the task
     requested_features |= task.get_required_cloud_features()
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
+    # Figure out autostop config.
+    # Note: Ideally this can happen after provisioning, so we can check the
+    # autostop config from the launched resources. Before provisioning,
+    # we aren't sure which resources will be launched, and different
+    # resources may have different autostop configs.
     if isinstance(backend, backends.CloudVmRayBackend):
         if down and idle_minutes_to_autostop is None:
             # Use auto{stop,down} to terminate the cluster after the task is
             # done.
             idle_minutes_to_autostop = 0
+        elif not down and idle_minutes_to_autostop is None:
+            # No autostop config specified on command line, use the
+            # config from resources.
+            # TODO(cooperc): This should be done after provisioning, in order to
+            # support different autostop configs for different resources.
+            # Blockers:
+            # - Need autostop config to set requested_features before
+            #   provisioning.
+            # - Need to send info message about idle_minutes_to_autostop==0 here
+            # - Need to check if autostop is supported by the backend.
+            resources = list(task.resources)
+            for resource in resources:
+                if resource.autostop_config != resources[0].autostop_config:
+                    raise ValueError(
+                        'All resources must have the same autostop config.')
+            resource_autostop_config = resources[0].autostop_config
+
+            if resource_autostop_config is not None:
+                if resource_autostop_config.enabled:
+                    idle_minutes_to_autostop = (
+                        resource_autostop_config.idle_minutes)
+                    down = resource_autostop_config.down
+                else:
+                    # Autostop is explicitly disabled, so cancel it if it's
+                    # already set.
+                    assert not resource_autostop_config.enabled
+                    idle_minutes_to_autostop = -1
+                    down = False
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
                 # idle_minutes_to_autostop=0 can cause the following problem:
@@ -237,11 +329,12 @@ def _execute(
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
             if idle_minutes_to_autostop >= 0:
-                requested_features.add(
-                    clouds.CloudImplementationFeatures.AUTO_TERMINATE)
-                if not down:
+                if down:
                     requested_features.add(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTODOWN)
+                else:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
@@ -294,21 +387,27 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    backend.register_info(dag=dag,
-                          optimize_target=optimize_target,
-                          requested_features=requested_features)
+    backend.register_info(
+        dag=dag,
+        optimize_target=optimize_target,
+        requested_features=requested_features,
+        # That's because we want to do commands in task.setup and task.run again
+        # after K8S pod recovers from a crash.
+        # See `kubernetes-ray.yml.j2` for more details.
+        dump_final_script=is_controller_high_availability_supported)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
     try:
+        provisioning_skipped = False
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            handle = backend.provision(
+            (handle, provisioning_skipped) = backend.provision(
                 task,
                 task.best_resources,
                 dryrun=dryrun,
@@ -341,7 +440,11 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            backend.setup(handle, task, detach_setup=detach_setup)
+            if skip_unnecessary_provisioning and provisioning_skipped:
+                logger.debug('Unnecessary provisioning was skipped, so '
+                             'skipping setup as well.')
+            else:
+                backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -411,7 +514,7 @@ def launch(
             import sky
             task = sky.Task(run='echo hello SkyPilot')
             task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+                sky.Resources(infra='aws', accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
 
@@ -523,6 +626,8 @@ def launch(
                 Stage.PROVISION,
                 Stage.SYNC_WORKDIR,
                 Stage.SYNC_FILE_MOUNTS,
+                # Setup will be skipped if provisioning was skipped.
+                Stage.SETUP,
                 Stage.PRE_EXEC,
                 Stage.EXEC,
                 Stage.DOWN,
@@ -619,7 +724,7 @@ def exec(  # pylint: disable=redefined-builtin
         if dryrun.
     """
     entrypoint = task
-    entrypoint.validate(workdir_only=True)
+    entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
 

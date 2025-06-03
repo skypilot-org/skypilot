@@ -19,6 +19,9 @@ ALLOWED_TERMS = {
     'GUI',
     'AWS',
     'GCP',
+    'Nebius',
+    'Bonus',
+    'Infiniband',
     'Azure',
     'HF_TOKEN',
     'Ingress',
@@ -41,6 +44,7 @@ ALLOWED_TERMS = {
     'Samsung',
     'Google',
     'Amazon',
+    'Okta',
     # Framework names
     'vLLM',
     'TGI',
@@ -56,8 +60,8 @@ ALLOWED_TERMS = {
 MULTI_WORD_TERMS = {
     'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
     'Google Cloud', 'LoadBalancer Service', 'Dynamic Workload Scheduler',
-    'Sky Computing', 'VS Code', 'GCP Service Account', 'Cudo Compute',
-    'Samsung Cloud Platform'
+    'Sky Computing', 'VS Code', 'Cudo Compute', 'Samsung Cloud Platform',
+    'Node Pool', 'Node Pools', 'OAuth2 Proxy'
 }
 
 

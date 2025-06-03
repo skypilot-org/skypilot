@@ -68,10 +68,10 @@ task.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
 task.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
 task.set_resources({
     ##### Fully specified
-    # sky.Resources(sky.AWS(), 'p3.2xlarge'),
-    # sky.Resources(sky.GCP(), 'n1-standard-16'),
+    # sky.Resources(infra='aws', instance_type='p3.2xlarge'),
+    # sky.Resources(infra='gcp', instance_type='n1-standard-16'),
     # sky.Resources(
-    #     sky.GCP(),
+    #     infra='gcp',
     #     'n1-standard-8',
     #     # Options: 'V100', {'V100': <num>}.
     #     'V100',
@@ -79,16 +79,16 @@ task.set_resources({
     ##### Partially specified
     # sky.Resources(accelerators='T4'),
     # sky.Resources(accelerators={'T4': 8}, use_spot=True),
-    # sky.Resources(sky.AWS(), accelerators={'T4': 8}, use_spot=True),
-    # sky.Resources(sky.AWS(), accelerators='K80'),
-    # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
+    # sky.Resources(infra='aws', accelerators={'T4': 8}, use_spot=True),
+    # sky.Resources(infra='aws', accelerators='K80'),
+    # sky.Resources(infra='aws', accelerators='K80', use_spot=True),
     # sky.Resources(accelerators='tpu-v3-8'),
     # sky.Resources(accelerators='V100', use_spot=True),
     # sky.Resources(accelerators={'T4': 4}),
-    sky.Resources(sky.AWS(), accelerators='V100'),
-    # sky.Resources(sky.GCP(), accelerators={'V100': 4}),
-    # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
-    # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
+    sky.Resources(infra='aws', accelerators='V100'),
+    # sky.Resources(infra='gcp', accelerators={'V100': 4}),
+    # sky.Resources(infra='aws', accelerators='V100', use_spot=True),
+    # sky.Resources(infra='aws', accelerators={'V100': 8}),
 })
 
 # Optionally, specify a time estimator: Resources -> time in seconds.

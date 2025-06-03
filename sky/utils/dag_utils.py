@@ -1,6 +1,6 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
 import copy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import dag as dag_lib
 from sky import sky_logging
@@ -195,7 +195,9 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
         assert default_strategy is not None
         for resources in list(task_.resources):
             original_job_recovery = resources.job_recovery
-            job_recovery = {'strategy': default_strategy}
+            job_recovery: Dict[str, Optional[Union[str, int]]] = {
+                'strategy': default_strategy
+            }
             if isinstance(original_job_recovery, str):
                 job_recovery['strategy'] = original_job_recovery
             elif isinstance(original_job_recovery, dict):

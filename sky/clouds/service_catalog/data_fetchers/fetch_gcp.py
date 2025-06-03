@@ -60,8 +60,9 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
 
-# TPU V6e price for the following regions is missing in the SKUs.
-TPU_V6E_MISSING_REGIONS = ['us-central2', 'southamerica-west1']
+# Maximum price for TPU V6e is $691.2/hour. Here we set a higher price
+# so the failover will go to the region with precise pricing info first.
+TPU_V6E_MAX_PRICE = 700
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
@@ -178,9 +179,12 @@ TPU_V4_HOST_DF = pd.read_csv(
 # TODO(woosuk): Make this more robust.
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
 # Unsupported Series: 'f1', 'm2'
-SERIES_TO_DISCRIPTION = {
+SERIES_TO_DESCRIPTION = {
     'a2': 'A2 Instance',
     'a3': 'A3 Instance',
+    # TODO(zhwu): GCP does not have A4 instance in SKUs API yet. We keep it here
+    # for completeness.
+    'a4': 'A4 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
@@ -197,6 +201,7 @@ SERIES_TO_DISCRIPTION = {
     't2a': 'T2A Arm Instance',
     't2d': 'T2D AMD Instance',
 }
+
 creds, project_id = google.auth.default()
 gcp_client = discovery.build('compute', 'v1')
 tpu_client = discovery.build('tpu', 'v1')
@@ -333,7 +338,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
 
     # Drop the unsupported series.
     df = df[df['InstanceType'].str.startswith(
-        tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
+        tuple(f'{series}-' for series in SERIES_TO_DESCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.
@@ -351,7 +356,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
 
             # Check if the SKU is for the correct series.
             description = sku['description']
-            if SERIES_TO_DISCRIPTION[series].lower() not in description.lower():
+            if SERIES_TO_DESCRIPTION[series].lower() not in description.lower():
                 continue
             # Special check for M1 instances.
             if series == 'm1' and 'M3' in description:
@@ -433,10 +438,18 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
             gpu_name = gpu_name.upper()
             if 'H100-80GB' in gpu_name:
                 gpu_name = 'H100'
-            if 'H100-MEGA-80GB' in gpu_name:
+
+            if 'H100-MEGA' in gpu_name:
                 gpu_name = 'H100-MEGA'
                 if count != 8:
-                    # H100-MEGA only has 8 cards.
+                    continue
+            elif 'H200' in gpu_name:
+                gpu_name = 'H200'
+                if count != 8:
+                    continue
+            elif 'B200' in gpu_name:
+                gpu_name = 'B200'
+                if count != 8:
                     continue
             if 'VWS' in gpu_name:
                 continue
@@ -467,6 +480,8 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'A100': 40 * 1024,
         'H100': 80 * 1024,
         'H100-MEGA': 80 * 1024,
+        'H200': 141 * 1024,
+        'B200': 180 * 1024,
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
@@ -506,22 +521,30 @@ def get_gpu_df(skus: List[Dict[str, Any]],
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
         gpu_price = None
         for sku in gpu_skus:
+            row_gpu_name = row['AcceleratorName']
             if row['Region'] not in sku['serviceRegions']:
                 continue
             if sku['category']['usageType'] != ondemand_or_spot:
                 continue
 
-            gpu_names = [row['AcceleratorName']]
-            if gpu_names[0] == 'A100-80GB':
-                gpu_names = ['A100 80GB']
-            if gpu_names[0] == 'H100':
-                gpu_names = ['H100 80GB']
-            if gpu_names[0] == 'H100-MEGA':
+            gpu_names = [f'{row_gpu_name} GPU']
+            if row_gpu_name == 'A100-80GB':
+                gpu_names = ['A100 80GB GPU']
+            elif row_gpu_name == 'H100':
+                gpu_names = ['H100 80GB GPU']
+            elif row_gpu_name == 'H100-MEGA':
                 # Seems that H100-MEGA has two different descriptions in SKUs in
                 # different regions: 'H100 80GB Mega' and 'H100 80GB Plus'.
-                gpu_names = ['H100 80GB Mega', 'H100 80GB Plus']
-            if not any(f'{gpu_name} GPU' in sku['description']
-                       for gpu_name in gpu_names):
+                gpu_names = [
+                    'H100 80GB Mega GPU', 'H100 Mega 80GB GPU',
+                    'H100 80GB Plus GPU'
+                ]
+            elif row_gpu_name == 'H200':
+                gpu_names = ['H200 141GB GPU']
+            elif row_gpu_name == 'B200':
+                gpu_names = ['Nvidia B200 (1 gpu slice)']
+            if not any(
+                    gpu_name in sku['description'] for gpu_name in gpu_names):
                 continue
 
             unit_price = _get_unit_price(sku)
@@ -553,7 +576,7 @@ def _get_tpu_response_for_zone(zone: str) -> list:
     # Sometimes the response is empty ({}) even for enabled zones. Here we
     # retry the request for a few times.
     backoff = common_utils.Backoff(initial_backoff=1)
-    for _ in range(TPU_RETRY_CNT):
+    for retry_cnt in range(TPU_RETRY_CNT):
         tpus_request = (
             tpu_client.projects().locations().acceleratorTypes().list(
                 parent=parent))
@@ -569,6 +592,10 @@ def _get_tpu_response_for_zone(zone: str) -> list:
                 print(f'  An error occurred: {error}')
             # If error happens, fail early.
             return []
+        except TimeoutError:
+            print(f'  TimeoutError: Failed to fetch TPUs for zone {zone!r}, '
+                  f'retry {retry_cnt + 1} of {TPU_RETRY_CNT}')
+
         time_to_sleep = backoff.current_backoff()
         print(f'  Retry zone {zone!r} in {time_to_sleep} seconds...')
         time.sleep(time_to_sleep)
@@ -699,13 +726,12 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        if (tpu_name.startswith('tpu-v6e') and
-                tpu_region in TPU_V6E_MISSING_REGIONS):
-            if not spot:
-                tpu_price = 0.0
-        else:
-            assert spot or tpu_price is not None, (row, hidden_tpu,
-                                                   HIDDEN_TPU_DF)
+            # GCP's TPU V6e pricing info is not stable and there are some
+            # regions that are missing the pricing info. We set the price to
+            # the maximum price so the failover will go to the region with
+            # precise pricing info first.
+            if tpu_name.startswith('tpu-v6e'):
+                tpu_price = TPU_V6E_MAX_PRICE
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)

@@ -1,9 +1,8 @@
 """Admin policy utils."""
+import contextlib
 import copy
 import importlib
-import os
-import tempfile
-from typing import Optional, Tuple, Union
+from typing import Iterator, Optional, Tuple, Union
 
 import colorama
 
@@ -52,9 +51,31 @@ def _get_policy_cls(
     return policy_cls
 
 
+@contextlib.contextmanager
+def apply_and_use_config_in_current_request(
+    entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
+    request_options: Optional[admin_policy.RequestOptions] = None,
+) -> Iterator['dag_lib.Dag']:
+    """Applies an admin policy and override SkyPilot config for current request
+
+    This is a helper function of `apply()` that applies an admin policy and
+    overrides the SkyPilot config for the current request as a context manager.
+    The original SkyPilot config will be restored when the context manager is
+    exited.
+
+    Refer to `apply()` for more details.
+    """
+    original_config = skypilot_config.to_dict()
+    dag, mutated_config = apply(entrypoint, request_options)
+    if mutated_config != original_config:
+        with skypilot_config.replace_skypilot_config(mutated_config):
+            yield dag
+    else:
+        yield dag
+
+
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
-    use_mutated_config_in_current_request: bool = True,
     request_options: Optional[admin_policy.RequestOptions] = None,
 ) -> Tuple['dag_lib.Dag', config_utils.Config]:
     """Applies an admin policy (if registered) to a DAG or a task.
@@ -85,8 +106,7 @@ def apply(
         return dag, skypilot_config.to_dict()
 
     logger.info(f'Applying policy: {policy}')
-    original_config = skypilot_config.to_dict()
-    config = copy.deepcopy(original_config)
+    config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
 
@@ -125,22 +145,6 @@ def apply(
         v_idx = dag.tasks.index(v)
         mutated_dag.graph.add_edge(mutated_dag.tasks[u_idx],
                                    mutated_dag.tasks[v_idx])
-
-    if (use_mutated_config_in_current_request and
-            original_config != mutated_config):
-        with tempfile.NamedTemporaryFile(
-                delete=False,
-                mode='w',
-                prefix='policy-mutated-skypilot-config-',
-                suffix='.yaml') as temp_file:
-
-            common_utils.dump_yaml(temp_file.name, dict(**mutated_config))
-            os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
-            logger.debug(f'Updated SkyPilot config: {temp_file.name}')
-            # TODO(zhwu): This is not a clean way to update the SkyPilot config,
-            # because we are resetting the global context for a single DAG,
-            # which is conceptually weird.
-            importlib.reload(skypilot_config)
 
     logger.debug(f'Mutated user request: {mutated_user_request}')
     mutated_dag.policy_applied = True

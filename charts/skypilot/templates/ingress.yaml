@@ -12,13 +12,22 @@ metadata:
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: nginx
     {{- end }}
+    {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
+    # OAuth2 Proxy authentication
+    nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
+    nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
+    nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email
+    {{- else }}
+    # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" .Release.Name) }}
+    {{- end }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
     {{- if ne .Values.ingress.path "/" }}
     nginx.ingress.kubernetes.io/rewrite-target: /$2
+    skypilot.co/ingress-path: {{ .Values.ingress.path }}
     {{- end }}
     nginx.ingress.kubernetes.io/server-snippets: |
       location / {
@@ -38,7 +47,8 @@ spec:
   ingressClassName: nginx
   {{- end }}
   rules:
-  - http:
+  - host: {{ .Values.ingress.host }}
+    http:
       paths:
       {{- /* TODO(aylei): check whether this works for ingress-controllers other than nginx */}}
       - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}

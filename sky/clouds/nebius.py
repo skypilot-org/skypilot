@@ -1,24 +1,46 @@
 """ Nebius Cloud. """
-import logging
+import json
+import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import exceptions
+from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.clouds import service_catalog
+from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
-_CREDENTIAL_FILES = [
-    # credential files for Nebius
-    nebius.NEBIUS_TENANT_ID_FILENAME,
-    nebius.NEBIUS_IAM_TOKEN_FILENAME,
-    nebius.NEBIUS_PROJECT_ID_FILENAME,
-    nebius.NEBIUS_CREDENTIALS_FILENAME
-]
+_INDENT_PREFIX = '    '
+
+
+def nebius_profile_in_aws_cred_and_config() -> bool:
+    """Checks if Nebius Object Storage profile is set in aws credentials
+    and profile."""
+
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    nebius_profile_exists_in_credentials = False
+    if os.path.isfile(credentials_path):
+        with open(credentials_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if f'[{nebius.NEBIUS_PROFILE_NAME}]' in line:
+                    nebius_profile_exists_in_credentials = True
+
+    config_path = os.path.expanduser('~/.aws/config')
+    nebius_profile_exists_in_config = False
+    if os.path.isfile(config_path):
+        with open(config_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if f'[profile {nebius.NEBIUS_PROFILE_NAME}]' in line:
+                    nebius_profile_exists_in_config = True
+
+    return (nebius_profile_exists_in_credentials and
+            nebius_profile_exists_in_config)
 
 
 @registry.CLOUD_REGISTRY.register
@@ -26,20 +48,18 @@ class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            ('Autodown and Autostop not supported. Can\'t delete disk.'),
-        # Autostop functionality can be implemented, but currently,
-        # there is only a single flag for both autostop and autodown.
+        clouds.CloudImplementationFeatures.AUTODOWN:
+            ('Autodown not supported. Can\'t delete OS disk.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is currently not supported on {_REPR}. '
-             'You can try running docker command inside the '
-             '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tier is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported on Nebius.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported on Nebius.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
     # 63 - 8 - 5 = 50 characters since
@@ -169,12 +189,13 @@ class Nebius(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Any]:
         del dryrun, cluster_name
         assert zones is None, ('Nebius does not support zones', zones)
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
         platform, _ = resources.instance_type.split('_')
@@ -186,14 +207,36 @@ class Nebius(clouds.Cloud):
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
-        return {
+
+        config_fs = skypilot_config.get_nested(
+            ('nebius', region.name, 'filesystems'), [])
+        resources_vars_fs = []
+        for i, fs in enumerate(config_fs):
+            resources_vars_fs.append({
+                'filesystem_id': fs['filesystem_id'],
+                'filesystem_attach_mode': fs.get('attach_mode', 'READ_WRITE'),
+                'filesystem_mount_path': fs.get(
+                    'mount_path', f'/mnt/filesystem-skypilot-{i+1}'),
+                'filesystem_mount_tag': f'filesystem-skypilot-{i+1}'
+            })
+
+        resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
+            'filesystems': resources_vars_fs
         }
+
+        if acc_dict is not None:
+            # Nebius cloud's docker runtime information does not contain
+            # 'nvidia-container-runtime', causing no GPU option to be added to
+            # the docker run command. We patch this by adding it here.
+            resources_vars['docker_run_options'] = ['--gpus all']
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
@@ -250,18 +293,19 @@ class Nebius(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Nebius's compute service."""
-        logging.debug('Nebius cloud check credentials')
-        token_cred_msg = ('    Credentials can be set up by running: \n'\
-                    f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'\
-                          '    or generate  ~/.nebius/credentials.json')  # pylint: disable=line-too-long
+        token_cred_msg = (
+            f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
+            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
-        tenant_msg = ('   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                      f'        $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
-                      '   Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-                      f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
+        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
         sdk = nebius.sdk()
@@ -275,17 +319,46 @@ class Nebius(clouds.Cloud):
         except nebius.request_error() as e:
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
-                f'{token_cred_msg}'
+                f'{token_cred_msg} \n'
                 f'{tenant_msg}')
         return True, None
 
+    @classmethod
+    @annotations.lru_cache(scope='request')
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        """Checks if the user has access credentials to Nebius Object Storage.
+
+        Returns:
+            A tuple of a boolean value and a hint message where the bool
+            is True when credentials needed for Nebius Object Storage is set.
+            It is False when either of those are not set, which would hint
+            with a string on unset credential.
+        """
+        hints = None
+        if not nebius_profile_in_aws_cred_and_config():
+            hints = (f'[{nebius.NEBIUS_PROFILE_NAME}] profile '
+                     'is not set in ~/.aws/credentials.')
+        if hints:
+            hints += ' Run the following commands:'
+            if not nebius_profile_in_aws_cred_and_config():
+                hints += (
+                    f'\n{_INDENT_PREFIX}  $ pip install boto3'
+                    f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius')
+            hints += (
+                f'\n{_INDENT_PREFIX}For more info: '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius'  # pylint: disable=line-too-long
+            )
+        return (False, hints) if hints else (True, hints)
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         credential_file_mounts = {
-            f'~/.nebius/{filename}': f'~/.nebius/{filename}'
-            for filename in _CREDENTIAL_FILES
+            filepath: filepath
+            for filepath in nebius.get_credential_file_paths()
         }
-        credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
-
+        if nebius_profile_in_aws_cred_and_config():
+            credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
+            credential_file_mounts['~/.aws/config'] = '~/.aws/config'
         return credential_file_mounts
 
     @classmethod
@@ -301,3 +374,50 @@ class Nebius(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='nebius')
+
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """Returns the email address + project id of the active user."""
+        nebius_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('nebius'), sort_keys=True)
+        return cls._get_user_identities(nebius_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def _get_user_identities(
+            cls, workspace_config: Optional[str]) -> Optional[List[List[str]]]:
+        # We add workspace_config in args to avoid caching the identity for when
+        # different workspace configs are used.
+        del workspace_config  # Unused
+        sdk = nebius.sdk()
+        profile_client = nebius.iam().ProfileServiceClient(sdk)
+        profile = profile_client.get(nebius.iam().GetProfileRequest()).wait()
+        if profile.user_profile is not None:
+            if profile.user_profile.attributes is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a UserProfile, but has no attributes: '
+                    f'{profile.user_profile}')
+            if profile.user_profile.attributes.email is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a UserProfile, but has no email: '
+                    f'{profile.user_profile}')
+            return [[profile.user_profile.attributes.email]]
+        if profile.service_account_profile is not None:
+            if profile.service_account_profile.info is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'info: {profile.service_account_profile}')
+            if profile.service_account_profile.info.metadata is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'metadata: {profile.service_account_profile}')
+            if profile.service_account_profile.info.metadata.name is None:
+                raise exceptions.CloudUserIdentityError(
+                    'Nebius profile is a ServiceAccountProfile, but has no '
+                    f'name: {profile.service_account_profile}')
+            return [[profile.service_account_profile.info.metadata.name]]
+        if profile.anonymous_profile is not None:
+            return None
+        unknown_profile_type = profile.which_field_in_oneof('profile')
+        raise exceptions.CloudUserIdentityError(
+            f'Nebius profile is of an unknown type - {unknown_profile_type}')

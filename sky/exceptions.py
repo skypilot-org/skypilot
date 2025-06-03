@@ -180,6 +180,17 @@ class InvalidCloudConfigs(Exception):
     pass
 
 
+class InvalidCloudCredentials(Exception):
+    """Raised when the cloud credentials are invalid."""
+    pass
+
+
+class InconsistentHighAvailabilityError(Exception):
+    """Raised when the high availability property in the user config
+    is inconsistent with the actual cluster."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
@@ -211,7 +222,7 @@ class ManagedJobReachedMaxRetriesError(Exception):
 class ManagedJobStatusError(Exception):
     """Raised when a managed job task status update is invalid.
 
-    For instance, a RUNNING job cannot become SUBMITTED.
+    For instance, a RUNNING job cannot become PENDING.
     """
     pass
 
@@ -260,7 +271,7 @@ class CommandError(SkyPilotExcludeArgsBaseException):
                 # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
-                       f'{returncode}.\n{error_msg}')
+                       f'{returncode}.\n{error_msg}\n{detailed_reason}')
         super().__init__(message)
 
 
@@ -285,6 +296,11 @@ class ClusterDoesNotExist(ValueError):
     """Raise when trying to operate on a cluster that does not exist."""
     # This extends ValueError for compatibility reasons - we used to throw
     # ValueError instead of this.
+    pass
+
+
+class CachedClusterUnavailable(Exception):
+    """Raised when a cached cluster record is unavailable."""
     pass
 
 
@@ -472,6 +488,21 @@ class ApiServerConnectionError(RuntimeError):
             f'Try: curl {server_url}/api/health')
 
 
+class ApiServerAuthenticationError(RuntimeError):
+    """Raised when authentication is required for the API server."""
+
+    def __init__(self, server_url: str):
+        super().__init__(
+            f'Authentication required for SkyPilot API server at {server_url}. '
+            f'Please run:\n'
+            f'  sky api login -e {server_url}')
+
+
+class APIVersionMismatchError(RuntimeError):
+    """Raised when the API version mismatch."""
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 
@@ -547,3 +578,8 @@ class JobExitCode(enum.IntEnum):
 
         # Should not hit this case, but included to avoid errors
         return cls.FAILED
+
+
+class RequestAlreadyExistsError(Exception):
+    """Raised when a request is already exists."""
+    pass

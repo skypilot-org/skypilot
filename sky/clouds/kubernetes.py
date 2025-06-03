@@ -4,6 +4,8 @@ import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
+import colorama
+
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -35,6 +37,10 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
+# Shared directory to communicate with fusermount-server, refer to
+# addons/fuse-proxy/README.md for more details.
+_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
+
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
@@ -42,8 +48,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-
-    LEGACY_SINGLETON_REGION = 'kubernetes'
 
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
@@ -71,6 +75,9 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -110,15 +117,25 @@ class Kubernetes(clouds.Cloud):
             # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to terminate itself with exec auth.
+            # Pod does not have permissions to down itself with exec auth.
             unsupported_features[
-                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+                clouds.CloudImplementationFeatures.AUTODOWN] = message
+        unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
+            'Stopping clusters is not supported on Kubernetes.')
+        unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
+            'Auto-stop is not supported on Kubernetes.')
         # Allow spot instances if supported by the cluster
         try:
             spot_label_key, _ = kubernetes_utils.get_spot_label(context)
             if spot_label_key is not None:
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+            # Allow custom network tier if supported by the cluster
+            # (e.g., Nebius clusters with high performance networking)
+            if cls._cluster_supports_high_performance_networking(context):
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                    None)
         except exceptions.KubeAPIUnreachableError as e:
             cls._log_unreachable_context(context, str(e))
         return unsupported_features
@@ -143,7 +160,7 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def existing_allowed_contexts(cls) -> List[str]:
+    def existing_allowed_contexts(cls, silent: bool = False) -> List[str]:
         """Get existing allowed contexts.
 
         If None is returned in the list, it means that we are running in a pod
@@ -156,8 +173,19 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = set(all_contexts)
 
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
+        # Allowed_contexts specified for workspace should take precedence over
+        # the global allowed_contexts.
+        allowed_contexts = skypilot_config.get_workspace_cloud(
+            'kubernetes').get('allowed_contexts', None)
+        if allowed_contexts is None:
+            allowed_contexts = skypilot_config.get_nested(
+                ('kubernetes', 'allowed_contexts'), None)
+
+        # Exclude contexts starting with `ssh-`
+        # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
+        all_contexts = [
+            ctx for ctx in all_contexts if not ctx.startswith('ssh-')
+        ]
 
         if allowed_contexts is None:
             # Try kubeconfig if present
@@ -177,8 +205,12 @@ class Kubernetes(clouds.Cloud):
             if context in all_contexts:
                 existing_contexts.append(context)
             else:
+                # Skip SSH Node Pool contexts
+                if context.startswith('ssh-'):
+                    continue
                 skipped_contexts.append(context)
-        cls._log_skipped_contexts_once(tuple(skipped_contexts))
+        if not silent:
+            cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
 
     @classmethod
@@ -408,8 +440,9 @@ class Kubernetes(clouds.Cloud):
             context = region.name
         assert context is not None, 'No context found in kubeconfig'
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -423,38 +456,49 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        image_id_dict = resources.image_id
-        if image_id_dict is not None:
-            # Use custom image specified in resources
-            if None in image_id_dict:
-                image_id = image_id_dict[None]
+        def _get_image_id(resources: 'resources_lib.Resources') -> str:
+            image_id_dict = resources.image_id
+            if image_id_dict is not None:
+                # Use custom image specified in resources
+                if None in image_id_dict:
+                    image_id = image_id_dict[None]
+                else:
+                    assert resources.region in image_id_dict, image_id_dict
+                    image_id = image_id_dict[resources.region]
+                if image_id.startswith('docker:'):
+                    image_id = image_id[len('docker:'):]
             else:
-                assert resources.region in image_id_dict, image_id_dict
-                image_id = image_id_dict[resources.region]
-            if image_id.startswith('docker:'):
-                image_id = image_id[len('docker:'):]
-        else:
-            # Select image based on whether we are using GPUs or not.
-            image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-            # Get the container image ID from the service catalog.
-            image_id = service_catalog.get_image_id_from_tag(
-                image_id, clouds='kubernetes')
+                # Select image based on whether we are using GPUs or not.
+                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+                # Get the container image ID from the service catalog.
+                image_id = service_catalog.get_image_id_from_tag(
+                    image_id, clouds='kubernetes')
+            return image_id
+
+        image_id = _get_image_id(resources)
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
 
+        # Set environment variables for the pod. Note that SkyPilot env vars
+        # are set separately when the task is run. These env vars are
+        # independent of the SkyPilot task to be run.
+        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+
+        # Setup GPU/TPU labels and resource keys.
         k8s_acc_label_key = None
-        k8s_acc_label_value = None
+        k8s_acc_label_values = None
         k8s_topology_label_key = None
         k8s_topology_label_value = None
         k8s_resource_key = None
         tpu_requested = False
+        avoid_label_keys = None
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
         if acc_count > 0 and acc_type is not None:
-            (k8s_acc_label_key, k8s_acc_label_value, k8s_topology_label_key,
+            (k8s_acc_label_key, k8s_acc_label_values, k8s_topology_label_key,
              k8s_topology_label_value) = (
-                 kubernetes_utils.get_accelerator_label_key_value(
+                 kubernetes_utils.get_accelerator_label_key_values(
                      context, acc_type, acc_count))
             if (k8s_acc_label_key ==
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
@@ -462,7 +506,22 @@ class Kubernetes(clouds.Cloud):
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
-
+        else:
+            # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
+            # maintain GPU isolation. This is to override the default behavior
+            # of Nvidia device plugin which would expose all GPUs to the pod
+            # when no GPUs are requested.
+            # Note that NVIDIA_VISIBLE_DEVICES is different from
+            # CUDA_VISIBLE_DEVICES - the latter is used to control which GPUs
+            # are visible to the application and is set inside the pod, while
+            # the former is used to control which GPUs are visible to the pod
+            # through the nvidia runtime.
+            # See: https://github.com/NVIDIA/k8s-device-plugin/issues/61
+            k8s_env_vars['NVIDIA_VISIBLE_DEVICES'] = 'none'
+            avoid_label_keys = kubernetes_utils.get_accelerator_label_keys(
+                context)
+            if len(avoid_label_keys) == 0:
+                avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None)
 
         remote_identity = skypilot_config.get_nested(
@@ -519,10 +578,22 @@ class Kubernetes(clouds.Cloud):
             timeout,
             override_configs=resources.cluster_config_overrides)
 
-        # Set environment variables for the pod. Note that SkyPilot env vars
-        # are set separately when the task is run. These env vars are
-        # independent of the SkyPilot task to be run.
-        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        # Check if this cluster supports high performance networking and
+        # configure IPC_LOCK capability for clusters like Nebius that support it
+        k8s_ipc_lock_capability = False
+        if (resources.network_tier is not None and
+                resources.network_tier == resources_utils.NetworkTier.BEST):
+            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
+            unsupported_features = self._unsupported_features_for_resources(
+                resources)
+            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
+                not in unsupported_features:
+                k8s_ipc_lock_capability = True
+
+        if k8s_ipc_lock_capability:
+            k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
+            k8s_env_vars['UCX_NET_DEVICES'] = \
+                'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -534,6 +605,13 @@ class Kubernetes(clouds.Cloud):
             # cpus is <1.
             'num-cpus': str(max(int(cpus), 1)),
         }
+
+        # Get the storage class name for high availability controller's PVC
+        k8s_ha_storage_class_name = skypilot_config.get_nested(
+            ('kubernetes', 'high_availability', 'storage_class_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -545,14 +623,15 @@ class Kubernetes(clouds.Cloud):
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
-            'k8s_acc_label_value': k8s_acc_label_value,
+            'k8s_acc_label_values': k8s_acc_label_values,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': k8s_automount_sa_token,
             'k8s_fuse_device_required': fuse_device_required,
-            # Namespace to run the FUSE device manager in
+            # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,
@@ -567,6 +646,20 @@ class Kubernetes(clouds.Cloud):
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
                 custom_resources, custom_ray_options, no_restart=False),
+            'k8s_high_availability_deployment_volume_mount_name':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
+                ),
+            'k8s_high_availability_deployment_volume_mount_path':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                ),
+            'k8s_high_availability_deployment_setup_script_path':
+                (constants.PERSISTENT_SETUP_SCRIPT_PATH),
+            'k8s_high_availability_deployment_run_script_dir':
+                (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_storage_class_name':
+                (k8s_ha_storage_class_name),
+            'avoid_label_keys': avoid_label_keys,
+            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -603,7 +696,7 @@ class Kubernetes(clouds.Cloud):
             resource_list = []
             for instance_type in instance_list:
                 r = resources.copy(
-                    cloud=Kubernetes(),
+                    cloud=self.__class__(),
                     instance_type=instance_type,
                     accelerators=None,
                 )
@@ -655,9 +748,53 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_single_context(cls, context: str) -> Tuple[bool, str]:
+        """Check if the user has access credentials to a single SSH context."""
+
+        def _red_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.LIGHTRED_EX}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _dim_color(str_to_format: str) -> str:
+            return (f'{colorama.Style.DIM}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        def _bright_green_color(str_to_format: str) -> str:
+            return (f'{colorama.Fore.GREEN}'
+                    f'{str_to_format}'
+                    f'{colorama.Style.RESET_ALL}')
+
+        try:
+            check_result = kubernetes_utils.check_credentials(
+                context, run_optional_checks=True)
+            if check_result[0]:
+                if check_result[1] is not None:
+                    return True, (_bright_green_color('enabled.') +
+                                  _dim_color(f' Note: {check_result[1]}'))
+                else:
+                    return True, _bright_green_color('enabled.')
+            else:
+                assert check_result[1] is not None
+                return False, (_red_color('disabled.') +
+                               _dim_color(f' Reason: {check_result[1]}'))
+        except Exception as e:  # pylint: disable=broad-except
+            return False, _red_color(str(e))
+
+    @classmethod
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Kubernetes."""
+        # Check for port forward dependencies
+        reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
+        if reasons is not None:
+            formatted = '\n'.join(
+                [reasons[0]] +
+                [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
+            return (False, formatted)
+
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
@@ -674,25 +811,15 @@ class Kubernetes(clouds.Cloud):
             return (False, 'No available context found in kubeconfig. '
                     'Check if you have a valid kubeconfig file' +
                     check_skypilot_config_msg)
-        reasons = []
-        hints = []
+
+        ctx2text = {}
         success = False
         for context in existing_allowed_contexts:
-            try:
-                check_result = kubernetes_utils.check_credentials(context)
-                if check_result[0]:
-                    success = True
-                    if check_result[1] is not None:
-                        hints.append(f'Context {context}: {check_result[1]}')
-                else:
-                    reasons.append(f'Context {context}: {check_result[1]}')
-            except Exception as e:  # pylint: disable=broad-except
-                return (False, f'Credential check failed for {context}: '
-                        f'{common_utils.format_exception(e)}')
-        if success:
-            return (True, cls._format_credential_check_results(hints, reasons))
-        return (False, 'Failed to find available context with working '
-                'credentials. Details:\n' + '\n'.join(reasons))
+            suc, text = cls._check_single_context(context)
+            success = success or suc
+            ctx2text[context] = text
+
+        return success, ctx2text
 
     @classmethod
     def _format_credential_check_results(cls, hints: List[str],
@@ -735,12 +862,6 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region == self.LEGACY_SINGLETON_REGION:
-            # For backward compatibility, we allow the region to be set to the
-            # legacy singleton region.
-            # TODO: Remove this after 0.9.0.
-            return region, zone
-
         if region == kubernetes.in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
             # since there is no context name available.
@@ -771,11 +892,11 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
-        k8s = kubernetes.kubernetes
         identities = []
+        k8s = kubernetes.kubernetes
         try:
             all_contexts, current_context = (
-                k8s.config.list_kube_config_contexts())
+                kubernetes.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
             return None
         # Add current context at the head of the list
@@ -815,3 +936,37 @@ class Kubernetes(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def expand_infras(cls) -> List[str]:
+        return [
+            f'{cls.canonical_name()}/{c}'
+            for c in cls.existing_allowed_contexts(silent=True)
+        ]
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
+    def _cluster_supports_high_performance_networking(cls,
+                                                      context: str) -> bool:
+        """Check if the cluster supports high performance networking.
+
+        Currently detects Nebius clusters by checking for nebius.com/ labels
+        on cluster nodes.
+
+        Args:
+            context: The Kubernetes context to check.
+
+        Returns:
+            True if the cluster supports high performance networking.
+        """
+        try:
+            nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+            for node in nodes:
+                if node.metadata.labels:
+                    for label_key in node.metadata.labels.keys():
+                        if label_key.startswith('nebius.com/'):
+                            return True
+        except exceptions.KubeAPIUnreachableError:
+            # If we can't reach the cluster, assume no high perf networking
+            return False
+        return False
