@@ -354,6 +354,11 @@ class JobsLaunchBody(RequestBody):
         return kwargs
 
 
+class JobsJobStatusBody(RequestBody):
+    """The request body for the managed jobs job status endpoint."""
+    refresh: bool = False
+    job_ids: Optional[List[int]] = None
+
 class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False

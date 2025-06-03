@@ -452,6 +452,49 @@ def queue(refresh: bool,
 
     return jobs
 
+@usage_lib.entrypoint
+def jobs_job_status(refresh: bool,
+                    job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Get the status of jobs.
+
+    Args:
+        refresh: (bool) whether to refresh the jobs controller.
+        job_ids: (List[str]) job ids. If None, get the status of the last job.
+    Returns:
+        List[Dict[str, Any]]: A list of job statuses.
+    Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+            does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    handle = _maybe_restart_controller(refresh,
+                                       stopped_message='No in-progress '
+                                       'managed jobs.',
+                                       spinner_message='Checking '
+                                       'managed jobs')
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    returncode, job_table_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    if returncode != 0:
+        logger.error(job_table_payload + stderr)
+        raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                           f'{returncode}.\n{job_table_payload + stderr}')
+
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+
+    if job_ids:
+        jobs = list(filter(lambda job: job['job_id'] in job_ids, jobs))
+   
+    return jobs
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
