@@ -5,7 +5,8 @@ import time
 from typing import Any, Dict, List, Optional
 from venv import logger
 
-from sky import exceptions, sky_logging
+from sky import exceptions
+from sky import sky_logging
 from sky.authentication import _SSH_KEY_PATH_PREFIX
 from sky.provision import common
 from sky.provision.simplepod import utils
@@ -15,7 +16,6 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 _TIMEOUT_SECONDS = 600
-
 
 client = utils.SimplePodClient()
 
@@ -33,28 +33,29 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     running_instances = {
         instance['id']: instance
         for instance in client.list_instances()
-        if instance['name'].startswith(f'{cluster_name_on_cloud}_') and instance['status'] in ['running']
+        if instance['name'].startswith(f'{cluster_name_on_cloud}_') and
+        instance['status'] in ['running']
     }
 
     head_instance_id = next(
-        (inst_id for inst_id, inst in running_instances.items() if inst['name'].endswith('_head')),
-        None
-    )
+        (inst_id for inst_id, inst in running_instances.items()
+         if inst['name'].endswith('_head')), None)
 
     to_start_count = max(0, config.count - len(running_instances))
     if to_start_count == 0:
         if head_instance_id is None:
-            raise RuntimeError(f'Cluster {cluster_name_on_cloud} has no head node.')
-        logger.info(f'Cluster {cluster_name_on_cloud} already has {len(running_instances)} nodes, no need to start more.')
-        return common.ProvisionRecord(
-            provider_name='simplepod',
-            cluster_name=cluster_name_on_cloud,
-            region=region,
-            zone=None,
-            head_instance_id=head_instance_id,
-            resumed_instance_ids=[],
-            created_instance_ids=[]
+            raise RuntimeError(
+                f'Cluster {cluster_name_on_cloud} has no head node.')
+        logger.info(
+            f'Cluster {cluster_name_on_cloud} already has {len(running_instances)} nodes, no need to start more.'
         )
+        return common.ProvisionRecord(provider_name='simplepod',
+                                      cluster_name=cluster_name_on_cloud,
+                                      region=region,
+                                      zone=None,
+                                      head_instance_id=head_instance_id,
+                                      resumed_instance_ids=[],
+                                      created_instance_ids=[])
 
     created_instance_ids = []
     for _ in range(to_start_count):
@@ -81,14 +82,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 try:
                     client.delete_instance(inst_id)
                 except Exception as delete_error:
-                    logger.warning(f'Failed to delete instance {inst_id}: {delete_error}')
+                    logger.warning(
+                        f'Failed to delete instance {inst_id}: {delete_error}')
             raise
 
     assert head_instance_id is not None, 'head_instance_id should not be None'
 
     def are_instances_ready(instance_ids: List[str]) -> bool:
         instances = [client.get_instance(inst_id) for inst_id in instance_ids]
-        return all(inst and inst.get('status') in ['running', 'active'] for inst in instances)
+        return all(inst and inst.get('status') in ['running', 'active']
+                   for inst in instances)
 
     for _ in range(30):  # 5 minute timeout
         if are_instances_ready(created_instance_ids):
@@ -97,48 +100,48 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     else:
         raise TimeoutError('Timeout waiting for instances to be ready')
 
-    return common.ProvisionRecord(
-        provider_name='simplepod',
-        cluster_name=cluster_name_on_cloud,
-        region=region,
-        zone=None,
-        head_instance_id=head_instance_id,
-        resumed_instance_ids=[],
-        created_instance_ids=created_instance_ids
-    )
+    return common.ProvisionRecord(provider_name='simplepod',
+                                  cluster_name=cluster_name_on_cloud,
+                                  region=region,
+                                  zone=None,
+                                  head_instance_id=head_instance_id,
+                                  resumed_instance_ids=[],
+                                  created_instance_ids=created_instance_ids)
+
 
 def reboot_instance(self, instance_ids: List[str]) -> None:
-        """Reboot specified instances."""
-        try:
-            client.reboot_instances(instance_ids)
-        except Exception as e:
-            if hasattr(e, 'detail'):
-                raise exceptions.ResourcesUnavailableError(e.detail) from e
-            raise exceptions.ResourcesUnavailableError(
-                'Failed to reboot instances.') from e
+    """Reboot specified instances."""
+    try:
+        client.reboot_instances(instance_ids)
+    except Exception as e:
+        if hasattr(e, 'detail'):
+            raise exceptions.ResourcesUnavailableError(e.detail) from e
+        raise exceptions.ResourcesUnavailableError(
+            'Failed to reboot instances.') from e
 
 
 def start_instances(self, instance_ids: List[str]) -> None:
-        """Start specified instances."""
-        try:
-            for instance_id in instance_ids:
-                client.create_instance(instance_id)
-        except Exception as e:
-            if hasattr(e, 'detail'):
-                raise exceptions.ResourcesUnavailableError(e.detail) from e
-            raise exceptions.ResourcesUnavailableError(
-                'Failed to start instances.') from e
+    """Start specified instances."""
+    try:
+        for instance_id in instance_ids:
+            client.create_instance(instance_id)
+    except Exception as e:
+        if hasattr(e, 'detail'):
+            raise exceptions.ResourcesUnavailableError(e.detail) from e
+        raise exceptions.ResourcesUnavailableError(
+            'Failed to start instances.') from e
+
 
 def get_instance_status(self, instance_id: str) -> str:
-        """Get the status of a specific instance."""
-        try:
-            instance = client.get_instance(instance_id)
-            return instance.get('status', 'unknown')
-        except Exception as e:
-            if hasattr(e, 'detail'):
-                raise exceptions.ResourcesUnavailableError(e.detail) from e
-            raise exceptions.ResourcesUnavailableError(
-                'Failed to get instance status.') from e
+    """Get the status of a specific instance."""
+    try:
+        instance = client.get_instance(instance_id)
+        return instance.get('status', 'unknown')
+    except Exception as e:
+        if hasattr(e, 'detail'):
+            raise exceptions.ResourcesUnavailableError(e.detail) from e
+        raise exceptions.ResourcesUnavailableError(
+            'Failed to get instance status.') from e
 
 
 def terminate_instances(
@@ -163,6 +166,7 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
+
 
 def query_instances(
     cluster_name_on_cloud: str,
@@ -195,6 +199,7 @@ def query_instances(
 
     return statuses
 
+
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
@@ -213,6 +218,7 @@ def cleanup_ports(
 ) -> None:
     del cluster_name_on_cloud, ports, provider_config  # Unused.
 
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -230,8 +236,7 @@ def get_cluster_info(
                 internal_ip=instance_info['rig']['ip'],
                 external_ip=instance_info['rig']['ip'],
                 ssh_port=instance_info['ports']['direct'][1]['destPort'],
-                tags={}
-            )
+                tags={})
         ]
         if instance_info['name'].endswith('_head'):
             head_instance_id = instance_id
@@ -242,16 +247,18 @@ def get_cluster_info(
         provider_config=provider_config,
     )
 
+
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]] = None,
                       head_only: bool = True) -> Dict[str, Any]:
     """Filters instances based on cluster name, status, and type (head/worker)."""
-    status_filters = {s.lower() for s in status_filters} if status_filters else None
+    status_filters = {s.lower() for s in status_filters
+                     } if status_filters else None
 
     return {
         instance['id']: instance
         for instance in client.list_instances()
-        if instance['name'].startswith(cluster_name_on_cloud)
-        and (not status_filters or instance['status'].lower() in status_filters)
-        and (not head_only or 'head' in instance['name'])
+        if instance['name'].startswith(cluster_name_on_cloud) and
+        (not status_filters or instance['status'].lower() in status_filters) and
+        (not head_only or 'head' in instance['name'])
     }

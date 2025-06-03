@@ -18,6 +18,7 @@ import requests
 ENDPOINT = 'https://api.simplepod.ai/instances/market/list?rentalStatus=active&itemsPerPage=1000'
 DEFAULT_SIMPLEPOD_KEYS_PATH = os.path.expanduser('~/.simplepod/simplepod_keys')
 
+
 def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
     headers = {'X-AUTH-TOKEN': DEFAULT_SIMPLEPOD_KEYS_PATH}
     response = requests.get(ENDPOINT, headers=headers)
@@ -36,7 +37,8 @@ def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
             gpu_model = instance['gpuModel']
             gpu_count = int(instance['gpuCount'])
             vcpus = int(float(instance['cpuCoreCount']))  # Convert to int
-            memory = int(float(instance['systemMemory']) / 1024)  # Convert to int GiB
+            memory = int(float(instance['systemMemory']) /
+                         1024)  # Convert to int GiB
             price = float(instance['pricePerGpu'])
 
             # Region handling
@@ -71,6 +73,7 @@ def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
                     gpuinfo,  # GpuInfo
                 ])
 
+
 def get_api_key(cmdline_args: argparse.Namespace) -> str:
     """Get SimplePod API key from cmdline or DEFAULT_SIMPLEPOD_KEYS_PATH."""
     api_key = cmdline_args.api_key
@@ -92,6 +95,7 @@ def get_api_key(cmdline_args: argparse.Namespace) -> str:
                         break
     assert api_key is not None
     return api_key
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -2,22 +2,25 @@
 
 import json
 import os
-from sky.authentication import get_or_generate_keys
 from typing import Any, Dict, List, Optional
 import uuid
 
 import requests
 
+from sky.authentication import get_or_generate_keys
 from sky.utils import annotations
 
 ENDPOINT = 'https://api.simplepod.ai/'
 SIMPLEPOD_API_KEY_PATH = '~/.simplepod/simplepod_keys'
 
+
 class SimplePodError(Exception):
     """Raised when SimplePod API returns an error."""
+
     def __init__(self, message: str, code: int = 400):
         self.code = code
         super().__init__(message)
+
 
 def raise_simplepod_error(response: 'requests.Response') -> None:
     """Raise SimplePodError if appropriate."""
@@ -34,6 +37,7 @@ def raise_simplepod_error(response: 'requests.Response') -> None:
             code=status_code) from e
     raise SimplePodError(f'{message}', status_code)
 
+
 def read_api_key(path: str) -> str:
     """Read API key from file."""
     try:
@@ -49,6 +53,7 @@ def read_api_key(path: str) -> str:
             raise SimplePodError('No api_key found in credentials file')
     except FileNotFoundError:
         raise SimplePodError(f'Credentials file not found at {path}')
+
 
 class SimplePodClient:
     """SimplePod API Client"""
@@ -78,7 +83,8 @@ class SimplePodClient:
                 raise SimplePodError('Invalid API key') from e
             raise
 
-    def _make_request(self, method: str, path: str, **kwargs) -> requests.Response:
+    def _make_request(self, method: str, path: str,
+                      **kwargs) -> requests.Response:
         """Make HTTP request with error handling and retries.
 
         Args:
@@ -94,7 +100,10 @@ class SimplePodClient:
         """
         url = ENDPOINT.rstrip('/') + '/' + path.lstrip('/')
         try:
-            response = requests.request(method, url, headers=self.headers, **kwargs)
+            response = requests.request(method,
+                                        url,
+                                        headers=self.headers,
+                                        **kwargs)
             raise_simplepod_error(response)
             return response
         except requests.exceptions.RequestException as e:
@@ -107,7 +116,8 @@ class SimplePodClient:
 
     def list_available_instances(self) -> List[Dict[str, Any]]:
         """List available instances for rent."""
-        response = self._make_request('GET', 'instances/market/list?rentalStatus=active')
+        response = self._make_request(
+            'GET', 'instances/market/list?rentalStatus=active')
         return response.json()
 
     def create_instance(
@@ -139,7 +149,7 @@ class SimplePodClient:
         # 3. A100:1
         # 4. A100 1
 
-          # Download public key path
+        # Download public key path
         _, public_key_path = get_or_generate_keys()
 
         # Read public key from file
@@ -149,7 +159,8 @@ class SimplePodClient:
 
         if len(parts) >= 2 and parts[0].startswith('gpu_'):
             # Format: gpu_1x_rtx 3060 ti, gpu_1x_rtx a2000, or gpu_1x_p104-100
-            gpu_type = parts[0].replace('gpu_1x_', '') + ' ' + ' '.join(parts[1:])
+            gpu_type = parts[0].replace('gpu_1x_', '') + ' ' + ' '.join(
+                parts[1:])
             gpu_count = 1
         elif len(parts) == 1 and parts[0].startswith('gpu_1x_'):
             # Format: gpu_1x_p104-100 (single part)
@@ -169,23 +180,27 @@ class SimplePodClient:
 
         # First find an available instance matching requirements
         available = self.list_available_instances()
-        matching = [i for i in available
-                   if i['gpuModel'].lower() == gpu_type.lower() and i['gpuCount'] >= gpu_count]
+        matching = [
+            i for i in available
+            if i['gpuModel'].lower() == gpu_type.lower() and
+            i['gpuCount'] >= gpu_count
+        ]
 
         if not matching:
-            raise SimplePodError(f'No available instances found matching {gpu_type} with {gpu_count} GPUs')
+            raise SimplePodError(
+                f'No available instances found matching {gpu_type} with {gpu_count} GPUs'
+            )
 
         # Use first matching instance
         market_instance = matching[0]
         payload = {
             'gpuCount': gpu_count,
             'instanceMarket': f"/instances/market/{market_instance['id']}",
-            'startScript': (
-            "sudo apt update && sudo apt install rsync -y && "
-            "mkdir -p /root/.ssh && "
-            f"echo '{public_key}' > /root/.ssh/authorized_keys && "
-            "chmod 600 /root/.ssh/authorized_keys"
-            )
+            'startScript':
+                ("sudo apt update && sudo apt install rsync -y && "
+                 "mkdir -p /root/.ssh && "
+                 f"echo '{public_key}' > /root/.ssh/authorized_keys && "
+                 "chmod 600 /root/.ssh/authorized_keys")
         }
 
         if template_id:
@@ -234,12 +249,11 @@ class SimplePodClient:
             SimplePodError: If reboot fails
         """
         payload = {'instanceIds': instance_ids}
-        self._make_request(
-            'PATCH',
-            'instances/reboot',
-            json=payload,
-            headers=self.headers | {'Content-Type': 'application/merge-patch+json'}
-        )
+        self._make_request('PATCH',
+                           'instances/reboot',
+                           json=payload,
+                           headers=self.headers |
+                           {'Content-Type': 'application/merge-patch+json'})
 
     def update_instance(
         self,

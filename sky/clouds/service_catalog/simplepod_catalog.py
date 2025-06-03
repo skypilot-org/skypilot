@@ -24,8 +24,10 @@ _df = common.read_catalog('simplepod/vms.csv',
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
+
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
+
 
 def validate_region_zone(
         region: Optional[str],
@@ -34,6 +36,7 @@ def validate_region_zone(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('SimplePod Cloud does not support zones.')
     return common.validate_region_zone_impl('simplepod', _df, region, zone)
+
 
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = 0,
@@ -47,9 +50,11 @@ def get_hourly_cost(instance_type: str,
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
+
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+
 
 def get_default_instance_type(
         cpus: Optional[str] = None,
@@ -65,9 +70,11 @@ def get_default_instance_type(
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
                                                       memory_gb_or_ratio)
 
+
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+
 
 def get_instance_type_for_accelerator(
         acc_name: str,
@@ -94,13 +101,16 @@ def get_instance_type_for_accelerator(
                                                          region=region,
                                                          zone=zone)
 
+
 def regions() -> List['cloud.Region']:
     return common.get_region_zones(_df, use_spot=False)
+
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
+
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
@@ -116,6 +126,7 @@ def get_region_zones_for_instance_type(instance_type: str,
             other_region_list.append(region)
     return us_region_list + other_region_list
 
+
 def list_accelerators(
         gpus_only: bool,
         name_filter: Optional[str],
@@ -126,6 +137,7 @@ def list_accelerators(
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in SimplePod offering GPUs."""
     del require_price  # Unused.
-    return common.list_accelerators_impl('SimplePod', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+    return common.list_accelerators_impl('SimplePod', _df, gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

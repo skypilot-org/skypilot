@@ -38,7 +38,7 @@ class Simplepod(clouds.Cloud):
              'from object stores on {_REPR}, use `mode: COPY` to copy the data '
              'to local disk.'),
     }
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 120 # 120 characters limit for SimplePod cluster names
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 120  # 120 characters limit for SimplePod cluster names
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -125,23 +125,22 @@ class Simplepod(clouds.Cloud):
             from sky.provision.simplepod import utils
         except ImportError:
             return False, ('Failed to import simplepod. '
-                         'To install, run: pip install skypilot[simplepod]')
+                           'To install, run: pip install skypilot[simplepod]')
 
         # Check if API key file exists and can be read
         try:
             utils.SimplePodClient()
         except (utils.SimplePodError, FileNotFoundError) as e:
-            return False, (
-                'Failed to access SimplePod Cloud with credentials. '
-                'To configure credentials, go to:\n'
-                '    https://simplepod.ai/ \n'
-                'to generate API key and add the line\n'
-                '    api_key = [YOUR API KEY]\n'
-                'to ~/.simplepod/simplepod_keys')
+            return False, ('Failed to access SimplePod Cloud with credentials. '
+                           'To configure credentials, go to:\n'
+                           '    https://simplepod.ai/ \n'
+                           'to generate API key and add the line\n'
+                           '    api_key = [YOUR API KEY]\n'
+                           'to ~/.simplepod/simplepod_keys')
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify SimplePod Cloud credentials. '
-                         'Check your network connection '
-                         'and try again.')
+                           'Check your network connection '
+                           'and try again.')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -185,7 +184,8 @@ class Simplepod(clouds.Cloud):
         return status_list
 
     @classmethod
-    def _cloud_unsupported_features(cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.STOP: 'SimplePod does not support stopping instances',
             clouds.CloudImplementationFeatures.IMAGE_ID: 'SimplePod does not support custom images',
@@ -201,10 +201,10 @@ class Simplepod(clouds.Cloud):
 
     @classmethod
     def accelerator_in_region_or_zone(cls,
-                                    accelerator: str,
-                                    acc_count: int,
-                                    region: Optional[str] = None,
-                                    zone: Optional[str] = None) -> bool:
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
         return True  # Since SimplePod has dynamic availability
 
     @classmethod
@@ -212,8 +212,8 @@ class Simplepod(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='simplepod')
+        return service_catalog.get_vcpus_mem_from_instance_type(
+            instance_type, clouds='simplepod')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:

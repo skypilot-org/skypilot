@@ -2,12 +2,14 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+
 @dataclass
 class Region:
     """SimplePod region."""
     id: str
     name: str
     country: str
+
 
 @dataclass
 class Instance:
