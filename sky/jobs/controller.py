@@ -226,7 +226,7 @@ class JobsController:
             # monitoring if the job is in RUNNING state. For all other cases,
             # we will directly transit to recovering since we have no idea what
             # the cluster status is.
-            transit_to_recovering = False
+            force_transit_to_recovering = False
             if is_resume:
                 last_status = managed_job_state.get_job_status_with_task_id(
                     job_id=self._job_id, task_id=task_id)
@@ -234,7 +234,7 @@ class JobsController:
                     return (last_status ==
                             managed_job_state.ManagedJobStatus.SUCCEEDED)
                 if last_status != managed_job_state.ManagedJobStatus.RUNNING:
-                    transit_to_recovering = True
+                    force_transit_to_recovering = True
 
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -254,7 +254,7 @@ class JobsController:
             # recovering, we will set the job status to None, which will force
             # enter the recovering logic.
             job_status = None
-            if not transit_to_recovering:
+            if not force_transit_to_recovering:
                 try:
                     job_status = managed_job_utils.get_job_status(
                         self._backend, cluster_name)
