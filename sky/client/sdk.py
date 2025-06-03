@@ -342,10 +342,11 @@ def validate(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def dashboard() -> None:
+def dashboard(starting_page: Optional[str] = None) -> None:
     """Starts the dashboard for SkyPilot."""
     api_server_url = server_common.get_server_url()
-    url = server_common.get_dashboard_url(api_server_url)
+    url = server_common.get_dashboard_url(api_server_url,
+                                          starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
     webbrowser.open(url)
 
@@ -2021,6 +2022,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
             expires = int(time.time()) + 604800
             domain = str(parsed_url.hostname)
             domain_initial_dot = domain.startswith('.')
+            secure = parsed_url.scheme == 'https'
             if not domain_initial_dot:
                 domain = '.' + domain
 
@@ -2036,7 +2038,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                     domain_initial_dot=domain_initial_dot,
                     path='',
                     path_specified=False,
-                    secure=False,
+                    secure=secure,
                     expires=expires,
                     discard=False,
                     comment=None,
@@ -2045,9 +2047,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                 ))
 
         # Now that the cookies are parsed, save them to the cookie jar.
-        cookie_jar_path = os.path.expanduser(
-            server_common.get_api_cookie_jar_path())
-        cookie_jar.save(cookie_jar_path)
+        server_common.set_api_cookie_jar(cookie_jar)
 
         # If we have a user_hash, save it to the local file
         if user_hash is not None:

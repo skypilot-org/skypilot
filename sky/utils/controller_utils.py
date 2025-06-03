@@ -207,8 +207,7 @@ class Controllers(enum.Enum):
         return None
 
 
-def high_availability_specified(cluster_name: Optional[str],
-                                skip_warning: bool = True) -> bool:
+def high_availability_specified(cluster_name: Optional[str]) -> bool:
     """Check if the controller high availability is specified in user config.
     """
     controller = Controllers.from_name(cluster_name)
@@ -216,18 +215,9 @@ def high_availability_specified(cluster_name: Optional[str],
         return False
 
     if skypilot_config.loaded():
-        high_availability = skypilot_config.get_nested(
-            (controller.value.controller_type, 'controller',
-             'high_availability'), False)
-        if high_availability:
-            if controller.value.controller_type != 'serve':
-                if not skip_warning:
-                    print(f'{colorama.Fore.RED}High availability controller is'
-                          'only supported for SkyServe controller. It cannot'
-                          f'be enabled for {controller.value.name}.'
-                          f'Skipping this flag.{colorama.Style.RESET_ALL}')
-            else:
-                return True
+        return skypilot_config.get_nested((controller.value.controller_type,
+                                           'controller', 'high_availability'),
+                                          False)
     return False
 
 

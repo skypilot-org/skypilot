@@ -1128,9 +1128,10 @@ class TestStorageWithCredentials:
         # Stores for each object in the list must be added in the test.
         custom_source_names = ['"path With Spaces"', 'path With Spaces']
         storage_mult_obj = []
+        temp_dir = tempfile.TemporaryDirectory(suffix='skypilot-test')
         for name in custom_source_names:
-            src_path = os.path.expanduser(f'~/{name}')
-            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
+            src_path = pathlib.Path(temp_dir.name) / name
+            src_path.expanduser().mkdir(exist_ok=True)
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=src_path)
@@ -1144,6 +1145,7 @@ class TestStorageWithCredentials:
                     storage_obj.name)
                 if handle:
                     storage_obj.delete()
+            temp_dir.cleanup()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
