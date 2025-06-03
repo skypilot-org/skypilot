@@ -119,20 +119,6 @@ GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--env NCCL_SOCKET_IFNAME=eth0',
 ]
 
-# Extracted environment variables from GPU_DIRECT_TCPX_SPECIFIC_OPTIONS for Kubernetes use
-# These are the same environment variables as above but in dictionary format for easy consumption
-GPU_DIRECT_TCPX_ENV_VARS = {
-    'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64:/usr/local/tcpx/lib64',
-    'NCCL_GPUDIRECTTCPX_SOCKET_IFNAME': 'eth1,eth2,eth3,eth4',
-    'NCCL_GPUDIRECTTCPX_CTRL_DEV': 'eth0',
-    'NCCL_GPUDIRECTTCPX_TX_BINDINGS': 'eth1:8-21,112-125;eth2:8-21,112-125;eth3:60-73,164-177;eth4:60-73,164-177',
-    'NCCL_GPUDIRECTTCPX_RX_BINDINGS': 'eth1:22-35,126-139;eth2:22-35,126-139;eth3:74-87,178-191;eth4:74-87,178-191',
-    'NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS': '50000',
-    'NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX': '/run/tcpx',
-    'NCCL_GPUDIRECTTCPX_FORCE_ACK': '0',
-    'NCCL_SOCKET_IFNAME': 'eth0',
-}
-
 PD_EXTREME_IOPS = 20000
 DEFAULT_DISK_SIZE = 100
 NETWORK_STORAGE_TYPE = 'PERSISTENT'
