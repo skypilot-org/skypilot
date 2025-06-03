@@ -4,5 +4,5 @@ HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazon
 CATALOG_SCHEMA_VERSION = 'v7'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack','paperspace', 'do', 'nebius', 'ssh', 'simplepod')
-
+              'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
+              'paperspace', 'do', 'nebius', 'ssh', 'simplepod')

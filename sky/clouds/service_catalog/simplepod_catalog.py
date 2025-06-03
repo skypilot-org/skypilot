@@ -39,7 +39,7 @@ def validate_region_zone(
 
 
 def get_hourly_cost(instance_type: str,
-                    use_spot: bool = 0,
+                    use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
@@ -104,12 +104,6 @@ def get_instance_type_for_accelerator(
 
 def regions() -> List['cloud.Region']:
     return common.get_region_zones(_df, use_spot=False)
-
-
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
-    return common.get_region_zones(df, use_spot)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

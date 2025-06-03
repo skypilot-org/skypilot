@@ -219,36 +219,6 @@ class Simplepod(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
-    def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: 'resources_utils.ClusterName',
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name, dryrun  # Unused.
-        assert zones is None, 'SimplePod does not support zones.'
-
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        custom_resources = resources_utils.make_ray_custom_resources_str(
-            acc_dict)
-
-        resources_vars = {
-            'instance_type': resources.instance_type,
-            'custom_resources': custom_resources,
-            'region': region.name,
-        }
-
-        if acc_dict is not None:
-            # SimplePod's docker runtime information does not contain
-            # 'nvidia-container-runtime', causing no GPU option is added to
-            # the docker run command. We patch this by adding it here.
-            resources_vars['docker_run_options'] = ['--gpus all']
-
-        return resources_vars
-
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':

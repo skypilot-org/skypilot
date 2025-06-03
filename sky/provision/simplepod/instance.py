@@ -66,7 +66,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             instance_id = client.create_instance(
                 instance_type=config.node_config['InstanceType'],
                 name=instance_name,
-                ssh_key=config.node_config.get('SshKeyName', ''),
+                #ssh_key=config.node_config.get('SshKeyName', ''),
                 env_variables=config.node_config.get('UserData', None),
             )
             created_instance_ids.append(instance_id)
@@ -124,7 +124,7 @@ def start_instances(self, instance_ids: List[str]) -> None:
     """Start specified instances."""
     try:
         for instance_id in instance_ids:
-            client.create_instance(instance_id)
+            client.create_instance(instance_id, name=instance_id)
     except Exception as e:
         if hasattr(e, 'detail'):
             raise exceptions.ResourcesUnavailableError(e.detail) from e

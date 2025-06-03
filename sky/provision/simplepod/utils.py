@@ -124,7 +124,6 @@ class SimplePodClient:
         self,
         instance_type: str,
         name: str,
-        ssh_key: str,
         template_id: Optional[int] = None,
         env_variables: Optional[List[Dict[str, str]]] = None,
     ) -> str:
@@ -241,19 +240,21 @@ class SimplePodClient:
 
     def reboot_instances(self, instance_ids: List[str]) -> None:
         """Reboot one or more instances.
-
+    
         Args:
             instance_ids: List of instance IDs to reboot
-
+    
         Raises:
             SimplePodError: If reboot fails
         """
+        headers = {
+            **self.headers, 'Content-Type': 'application/merge-patch+json'
+        }
         payload = {'instanceIds': instance_ids}
         self._make_request('PATCH',
                            'instances/reboot',
                            json=payload,
-                           headers=self.headers |
-                           {'Content-Type': 'application/merge-patch+json'})
+                           headers=headers)
 
     def update_instance(
         self,
@@ -270,7 +271,7 @@ class SimplePodClient:
         if auto_renew is not None:
             payload['isAutoRenewOn'] = "true"
         if auto_renew_max_price is not None:
-            payload['priceAutoRenewMax'] = auto_renew_max_price
+            payload['priceAutoRenewMax'] = str(auto_renew_max_price)
         if name is not None:
             payload['name'] = name
         if notes is not None:
@@ -278,7 +279,7 @@ class SimplePodClient:
         if template_id is not None:
             payload['instanceTemplate'] = f'/instances/templates/{template_id}'
         if env_variables is not None:
-            payload['envVariables'] = env_variables
+            payload['envVariables'] = json.dumps(env_variables)
 
         if payload:
             self._make_request('PUT', f'instances/{instance_id}', json=payload)
