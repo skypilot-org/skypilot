@@ -885,3 +885,37 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-user-config'), None) is None
     assert skypilot_config.get_nested(
         ('gcp', 'labels', 'env-project-config'), None) is None
+
+
+def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_config.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            contexts:
+                contextA:
+                    autoscaler: gke
+                contextB:
+                    provision_timeout: 60
+            autoscaler: generic
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_config.yaml')
+    skypilot_config._reload_config()
+
+    # test autoscaler property
+    context_a_autoscaler = kubernetes_utils.get_config_property_value(
+        ('autoscaler',), context='contextA')
+    assert context_a_autoscaler == 'gke'
+    context_b_autoscaler = kubernetes_utils.get_config_property_value(
+        ('autoscaler',), context='contextB')
+    assert context_b_autoscaler == 'generic'
+
+    # test provision_timeout property
+    context_a_provision_timeout = kubernetes_utils.get_config_property_value(
+        ('provision_timeout',), context='contextA', default_value=10)
+    assert context_a_provision_timeout == 10
+    context_b_provision_timeout = kubernetes_utils.get_config_property_value(
+        ('provision_timeout',), context='contextB')
+    assert context_b_provision_timeout == 60
