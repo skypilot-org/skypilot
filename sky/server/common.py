@@ -636,13 +636,6 @@ def check_server_healthy_or_start_fn(
     api_server_status = None
     try:
         api_server_status = check_server_healthy()
-        logger.info(
-            f"{ux_utils.INDENT_SYMBOL}SkyPilot API server already exists at {get_server_url()}"
-        )
-        if port is not None and port != int(get_server_url().split(":")[-1]):
-            logger.info(
-                f"{ux_utils.INDENT_SYMBOL}To use a new port number, stop the existing server with sky api stop and run sky api start --port <port>"
-            )
         if api_server_status == ApiServerStatus.NEEDS_AUTH:
             endpoint = get_server_url()
             with ux_utils.print_exception_no_traceback():
