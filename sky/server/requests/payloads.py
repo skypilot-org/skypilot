@@ -359,6 +359,7 @@ class JobsJobStatusBody(RequestBody):
     refresh: bool = False
     job_ids: Optional[List[int]] = None
 
+
 class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False

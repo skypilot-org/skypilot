@@ -33,6 +33,7 @@ async def launch(request: fastapi.Request,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
+
 @router.post('/job_status')
 async def job_status(request: fastapi.Request,
                      jobs_job_status_body: payloads.JobsJobStatusBody) -> None:
@@ -42,10 +43,12 @@ async def job_status(request: fastapi.Request,
         request_name='jobs.job_status',
         request_body=jobs_job_status_body,
         func=core.jobs_job_status,
-        schedule_type=(api_requests.ScheduleType.LONG if jobs_job_status_body.refresh
-                       else api_requests.ScheduleType.SHORT),
+        schedule_type=(api_requests.ScheduleType.LONG
+                       if jobs_job_status_body.refresh else
+                       api_requests.ScheduleType.SHORT),
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
+
 
 @router.post('/queue')
 async def queue(request: fastapi.Request,

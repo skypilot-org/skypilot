@@ -452,9 +452,11 @@ def queue(refresh: bool,
 
     return jobs
 
+
 @usage_lib.entrypoint
-def jobs_job_status(refresh: bool,
-                    job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+def jobs_job_status(
+        refresh: bool,
+        job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
@@ -462,7 +464,22 @@ def jobs_job_status(refresh: bool,
         refresh: (bool) whether to refresh the jobs controller.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
     Returns:
-        List[Dict[str, Any]]: A list of job statuses.
+        [
+            {
+                'job_id': int,
+                'job_name': str,
+                'resources': str,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+                'user_name': (Optional[str]) job creator's user name,
+                'user_hash': (str) job creator's user hash,
+            }
+        ]
     Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
             does not exist.
@@ -492,9 +509,10 @@ def jobs_job_status(refresh: bool,
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if job_ids:
-        jobs = list(filter(lambda job: job['job_id'] in job_ids, jobs))
-   
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
+
     return jobs
+
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin

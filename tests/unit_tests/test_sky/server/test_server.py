@@ -11,11 +11,11 @@ import pytest
 import uvicorn
 
 from sky.server import server
+from sky.server.requests import payloads
+from sky.server.requests import requests as api_requests
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
-from sky.server.requests import payloads
-from sky.server.requests import requests as api_requests
 
 
 @mock.patch('uvicorn.run')
@@ -224,10 +224,11 @@ async def test_job_status():
     mock_request.state.request_id = 'test-request-id'
     mock_job_status_body = payloads.JobsJobStatusBody()
 
-    with mock.patch('sky.server.requests.executor.schedule_request') as mock_schedule:
+    with mock.patch(
+            'sky.server.requests.executor.schedule_request') as mock_schedule:
         # Call job_status endpoint without job_id
         await server.jobs_rest.job_status(mock_request, mock_job_status_body)
-        
+
         # Verify the executor was called with correct parameters
         mock_schedule.assert_called_once_with(
             request_id='test-request-id',
@@ -235,18 +236,18 @@ async def test_job_status():
             request_body=mock_job_status_body,
             func=mock.ANY,
             schedule_type=api_requests.ScheduleType.SHORT,
-            request_cluster_name=mock.ANY
-        )
+            request_cluster_name=mock.ANY)
 
     # Test with job_id filter
     mock_request = mock.MagicMock()
     mock_request.state.request_id = 'test-request-id-2'
     mock_job_status_body = payloads.JobsJobStatusBody(job_ids=[1, 2, 3])
 
-    with mock.patch('sky.server.requests.executor.schedule_request') as mock_schedule:
+    with mock.patch(
+            'sky.server.requests.executor.schedule_request') as mock_schedule:
         # Call job_status endpoint with job_ids
         await server.jobs_rest.job_status(mock_request, mock_job_status_body)
-        
+
         # Verify the executor was called with correct parameters
         mock_schedule.assert_called_once_with(
             request_id='test-request-id-2',
@@ -254,8 +255,7 @@ async def test_job_status():
             request_body=mock_job_status_body,
             func=mock.ANY,
             schedule_type=api_requests.ScheduleType.SHORT,
-            request_cluster_name=mock.ANY
-        )
-        
+            request_cluster_name=mock.ANY)
+
         # Verify the job_ids were passed correctly
         assert mock_job_status_body.job_ids == [1, 2, 3]
