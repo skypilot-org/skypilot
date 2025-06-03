@@ -1169,13 +1169,6 @@ class Resources:
             # Handle GPU Direct TCPX requirement for docker images
             if self._image_id is None:
                 # No custom image specified - use the default GPU Direct image
-                if not self._cloud.is_image_tag_valid(
-                        gcp_constants.GCP_GPU_DIRECT_IMAGE_ID, self._region):
-                    region_str = f' ({self._region})' if self._region else ''
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Image tag {gcp_constants.GCP_GPU_DIRECT_IMAGE_ID!r} is not valid for {self._cloud}{region_str}.'
-                        )
                 self._image_id = {
                     self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
                 }
