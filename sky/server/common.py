@@ -148,6 +148,25 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
     return cookie_jar
 
 
+def set_api_cookie_jar(cookie_jar: CookieJar,
+                       create_if_not_exists: bool = True) -> None:
+    """Updates the file cookie jar with the given cookie jar."""
+    cookie_path = get_api_cookie_jar_path()
+    if not cookie_path.exists() and not create_if_not_exists:
+        # if the file doesn't exist and we don't want to create it, do nothing
+        return
+    if not cookie_path.parent.exists():
+        cookie_path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_cookie_jar = MozillaCookieJar(cookie_path)
+    if cookie_path.exists():
+        file_cookie_jar.load()
+
+    for cookie in cookie_jar:
+        file_cookie_jar.set_cookie(cookie)
+    file_cookie_jar.save()
+
+
 def get_cookies_from_response(
         response: 'requests.Response') -> requests.cookies.RequestsCookieJar:
     """Returns the cookies from the API server response."""
@@ -158,24 +177,6 @@ def get_cookies_from_response(
             if cookie.domain in server_url:
                 cookies.set_cookie(cookie)
     return cookies
-
-
-def set_api_cookie_jar(cookie_jar: CookieJar,
-                       create_if_not_exists: bool = True) -> None:
-    """Updates the file cookie jar with the given cookie jar."""
-    cookie_path = get_api_cookie_jar_path()
-    if not cookie_path.exists() and create_if_not_exists:
-        cookie_path.parent.mkdir(parents=True, exist_ok=True)
-        cookie_path.touch()
-    elif not cookie_path.exists() and not create_if_not_exists:
-        # if the file doesn't exist and we don't want to create it, do nothing
-        return
-
-    file_cookie_jar = MozillaCookieJar(cookie_path)
-    file_cookie_jar.load()
-    for cookie in cookie_jar:
-        file_cookie_jar.set_cookie(cookie)
-    file_cookie_jar.save()
 
 
 @annotations.lru_cache(scope='global')
