@@ -700,10 +700,9 @@ class RayCodeGen:
                 if any(r == 139 for r in returncodes):
                     reason = '(likely due to Segmentation Fault)'
                 if any(r == 137 for r in returncodes):
-                    # Find the first non-137 return code and its index
-                    non_137 = next((i, r) for i, r in enumerate(returncodes) if r != 137)
-                    # +1 because the worker rank is 0-based, but I think the worker number is 1-based
-                    reason = f'(A Worker failed with return code {{non_137[1]}}, SkyPilot cleaned up the processes on other nodes with return code 137)'
+                    # Find the first non-137 return code
+                    non_137 = next(r for r in returncodes if r != 137)
+                    reason = f'(A Worker failed with return code {{non_137}}, SkyPilot cleaned up the processes on other nodes with return code 137)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
