@@ -15,9 +15,11 @@ from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# The buffer size for streaming logs.
+# When streaming log lines, buffer the lines in memory and flush them in chunks
+# to improve log tailing throughput. Buffer size is the max size bytes of each
+# chunk and the timeout threshold for flushing the buffer to ensure
+# responsiveness.
 _BUFFER_SIZE = 8 * 1024  # 8KB
-# The timeout for flushing the buffer.
 _BUFFER_TIMEOUT = 0.02  # 20ms
 _HEARTBEAT_INTERVAL = 30
 
@@ -42,6 +44,8 @@ async def log_streamer(request_id: Optional[str],
                        follow: bool = True) -> AsyncGenerator[str, None]:
     """Streams the logs of a request."""
 
+    # Buffer the lines in memory and flush them in chunks to improve log tailing
+    # throughput.
     buffer: List[str] = []
     buffer_bytes = 0
     last_flush_time = asyncio.get_event_loop().time()
