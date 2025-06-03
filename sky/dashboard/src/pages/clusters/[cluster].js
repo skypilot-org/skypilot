@@ -21,6 +21,27 @@ import {
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 
+// Helper function to format autostop information, similar to _get_autostop in CLI utils
+const formatAutostop = (autostop, toDown) => {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    autostopStr = autostop + 'm';
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+};
+
 function ClusterDetails() {
   const router = useRouter();
   const { cluster } = router.query; // Access the dynamic part of the URL
@@ -30,15 +51,22 @@ function ClusterDetails() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const isMobile = useMobile();
-  const { clusterData, clusterJobData, loading, refreshData } =
-    useClusterDetails({ cluster });
+  const {
+    clusterData,
+    clusterJobData,
+    loading,
+    clusterDetailsLoading,
+    clusterJobsLoading,
+    refreshData,
+    refreshClusterJobsOnly,
+  } = useClusterDetails({ cluster });
 
-  // Update isInitialLoad when data is first loaded
+  // Update isInitialLoad when cluster details are first loaded (not waiting for jobs)
   React.useEffect(() => {
-    if (!loading && isInitialLoad) {
+    if (!clusterDetailsLoading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading, isInitialLoad]);
+  }, [clusterDetailsLoading, isInitialLoad]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -85,7 +113,7 @@ function ClusterDetails() {
 
           <div className="text-sm flex items-center">
             <div className="text-sm flex items-center">
-              {(loading || isRefreshing) && (
+              {(clusterDetailsLoading || isRefreshing) && (
                 <div className="flex items-center mr-4">
                   <CircularProgress size={15} className="mt-0" />
                   <span className="ml-2 text-gray-500">Loading...</span>
@@ -99,7 +127,7 @@ function ClusterDetails() {
                   >
                     <button
                       onClick={handleManualRefresh}
-                      disabled={loading || isRefreshing}
+                      disabled={clusterDetailsLoading || isRefreshing}
                       className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                     >
                       <RotateCwIcon className="w-4 h-4 mr-1.5" />
@@ -119,16 +147,17 @@ function ClusterDetails() {
           </div>
         </div>
 
-        {loading && isInitialLoad ? (
+        {clusterDetailsLoading && isInitialLoad ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">Loading...</span>
+            <span className="text-gray-500">Loading cluster details...</span>
           </div>
         ) : clusterData ? (
           <ActiveTab
             clusterData={clusterData}
             clusterJobData={clusterJobData}
-            loading={loading || isRefreshing}
+            clusterJobsLoading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
           />
         ) : null}
 
@@ -150,7 +179,12 @@ function ClusterDetails() {
   );
 }
 
-function ActiveTab({ clusterData, clusterJobData, loading }) {
+function ActiveTab({
+  clusterData,
+  clusterJobData,
+  clusterJobsLoading,
+  refreshClusterJobsOnly,
+}) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
 
   const toggleYamlExpanded = () => {
@@ -285,6 +319,14 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                     : 'N/A'}
                 </div>
               </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Autostop
+                </div>
+                <div className="text-base mt-1">
+                  {formatAutostop(clusterData.autostop, clusterData.to_down)}
+                </div>
+              </div>
 
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
@@ -344,13 +386,12 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
 
       {/* Jobs Table */}
       <div className="mb-8">
-        {clusterJobData && (
-          <ClusterJobs
-            clusterName={clusterData.cluster}
-            clusterJobData={clusterJobData}
-            loading={loading}
-          />
-        )}
+        <ClusterJobs
+          clusterName={clusterData.cluster}
+          clusterJobData={clusterJobData}
+          loading={clusterJobsLoading}
+          refreshClusterJobsOnly={refreshClusterJobsOnly}
+        />
       </div>
     </div>
   );

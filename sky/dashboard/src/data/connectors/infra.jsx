@@ -102,16 +102,19 @@ export async function getCloudInfrastructure(clusters, jobs) {
 }
 
 /**
- * Shared function to get all infra data (GPU + Cloud) - used by both cache preloader and infra page
+ * Main function to get all infrastructure data.
+ * Uses cached data from clusters and jobs to avoid redundant API calls.
  */
 export async function getInfraData() {
   // Import here to avoid circular dependencies
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
+  const dashboardCache = (await import('@/lib/cache')).default;
 
+  // Use cache to get data instead of calling functions directly
   const [clustersData, jobsData] = await Promise.all([
-    getClusters(),
-    getManagedJobs(),
+    dashboardCache.get(getClusters),
+    dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
   ]);
 
   const clusters = clustersData || [];
