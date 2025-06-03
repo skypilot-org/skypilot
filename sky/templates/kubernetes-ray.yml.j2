@@ -273,6 +273,30 @@ available_node_types:
             {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
             skypilot-binpack: "gpu"
             {% endif %}
+        {% if k8s_gpu_direct_tcpx_support %}
+        annotations:
+          # GPUDirect-TCPX device injection annotations
+          devices.gke.io/container.tcpx-daemon: |+
+            - path: /dev/nvidia0
+            - path: /dev/nvidia1
+            - path: /dev/nvidia2
+            - path: /dev/nvidia3
+            - path: /dev/nvidia4
+            - path: /dev/nvidia5
+            - path: /dev/nvidia6
+            - path: /dev/nvidia7
+            - path: /dev/nvidiactl
+            - path: /dev/nvidia-uvm
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth1","network":"vpc1"},
+              {"interfaceName":"eth2","network":"vpc2"},
+              {"interfaceName":"eth3","network":"vpc3"},
+              {"interfaceName":"eth4","network":"vpc4"}
+            ]
+        {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
@@ -356,6 +380,21 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% if k8s_gpu_direct_tcpx_support %}
+        # GPU Direct TCPX volumes for high performance networking
+        - name: tcpx-socket
+          emptyDir: {}
+        - name: libraries
+          hostPath:
+            path: /home/kubernetes/bin/nvidia/lib64
+            type: DirectoryOrCreate
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: proc-sys
+          hostPath:
+            path: /proc/sys
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -372,6 +411,10 @@ available_node_types:
             {% if k8s_fuse_device_required %}
             - name: FUSERMOUNT_SHARED_DIR
               value: {{k8s_fusermount_shared_dir}}
+            {% endif %}
+            {% if k8s_gpu_direct_tcpx_support %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
             {% endif %}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
@@ -678,6 +721,14 @@ available_node_types:
           - name: fusermount-shared-dir
             mountPath: {{k8s_fusermount_shared_dir}}
           {% endif %}
+          {% if k8s_gpu_direct_tcpx_support %}
+          # GPU Direct TCPX volume mounts for high performance networking
+          - name: tcpx-socket
+            mountPath: /tmp
+          - name: libraries
+            mountPath: /usr/local/nvidia/lib64
+            readOnly: true
+          {% endif %}
           resources:
             requests:
               cpu: {{cpus}}
@@ -702,8 +753,44 @@ available_node_types:
             capabilities:
               add:
                 - IPC_LOCK
+                {% if k8s_gpu_direct_tcpx_support %}
+                - SYS_ADMIN
+                {% endif %}
           {% endif %}
 
+        # GPUDirect-TCPX daemon sidecar container
+        {% if k8s_gpu_direct_tcpx_support %}
+        - name: tcpx-daemon
+          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd-dev:v2.0.11
+          imagePullPolicy: Always
+          command:
+            - /tcpgpudmarxd/build/app/tcpgpudmarxd
+            - --gpu_nic_preset
+            - a3vm
+            - --gpu_shmem_type
+            - fd
+            - --uds_path
+            - /run/tcpx
+            - --setup_param
+            - "--verbose 128 2 0"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - name: libraries
+              mountPath: /usr/local/nvidia/lib64
+              readOnly: true
+            - name: tcpx-socket
+              mountPath: /run/tcpx
+            - name: sys
+              mountPath: /hostsysfs
+            - name: proc-sys
+              mountPath: /hostprocsysfs
+          env:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+        {% endif %}
 
       {% if high_availability %}
       pvc_spec:
