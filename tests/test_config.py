@@ -918,3 +918,8 @@ def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
     context_b_provision_timeout = kubernetes_utils.get_config_property_value(
         ('provision_timeout',), context='contextB')
     assert context_b_provision_timeout == 60
+
+    contexts = kubernetes_utils.get_custom_k8s_contexts_names()
+    assert len(contexts) == 2
+    assert contexts[0] == 'contextA'
+    assert contexts[1] == 'contextB'
