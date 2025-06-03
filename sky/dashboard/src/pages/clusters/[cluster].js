@@ -8,14 +8,39 @@ import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { RotateCwIcon } from 'lucide-react';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+} from '@/components/utils';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
 } from '@/components/elements/modals';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
+
+// Helper function to format autostop information, similar to _get_autostop in CLI utils
+const formatAutostop = (autostop, toDown) => {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    autostopStr = autostop + 'm';
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+};
 
 function ClusterDetails() {
   const router = useRouter();
@@ -26,15 +51,22 @@ function ClusterDetails() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const isMobile = useMobile();
-  const { clusterData, clusterJobData, loading, refreshData } =
-    useClusterDetails({ cluster });
+  const {
+    clusterData,
+    clusterJobData,
+    loading,
+    clusterDetailsLoading,
+    clusterJobsLoading,
+    refreshData,
+    refreshClusterJobsOnly,
+  } = useClusterDetails({ cluster });
 
-  // Update isInitialLoad when data is first loaded
+  // Update isInitialLoad when cluster details are first loaded (not waiting for jobs)
   React.useEffect(() => {
-    if (!loading && isInitialLoad) {
+    if (!clusterDetailsLoading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading, isInitialLoad]);
+  }, [clusterDetailsLoading, isInitialLoad]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -81,7 +113,7 @@ function ClusterDetails() {
 
           <div className="text-sm flex items-center">
             <div className="text-sm flex items-center">
-              {(loading || isRefreshing) && (
+              {(clusterDetailsLoading || isRefreshing) && (
                 <div className="flex items-center mr-4">
                   <CircularProgress size={15} className="mt-0" />
                   <span className="ml-2 text-gray-500">Loading...</span>
@@ -95,7 +127,7 @@ function ClusterDetails() {
                   >
                     <button
                       onClick={handleManualRefresh}
-                      disabled={loading || isRefreshing}
+                      disabled={clusterDetailsLoading || isRefreshing}
                       className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                     >
                       <RotateCwIcon className="w-4 h-4 mr-1.5" />
@@ -115,16 +147,17 @@ function ClusterDetails() {
           </div>
         </div>
 
-        {loading && isInitialLoad ? (
+        {clusterDetailsLoading && isInitialLoad ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">Loading...</span>
+            <span className="text-gray-500">Loading cluster details...</span>
           </div>
         ) : clusterData ? (
           <ActiveTab
             clusterData={clusterData}
             clusterJobData={clusterJobData}
-            loading={loading || isRefreshing}
+            clusterJobsLoading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
           />
         ) : null}
 
@@ -146,7 +179,67 @@ function ClusterDetails() {
   );
 }
 
-function ActiveTab({ clusterData, clusterJobData, loading }) {
+function ActiveTab({
+  clusterData,
+  clusterJobData,
+  clusterJobsLoading,
+  refreshClusterJobsOnly,
+}) {
+  const [isYamlExpanded, setIsYamlExpanded] = useState(false);
+
+  const toggleYamlExpanded = () => {
+    setIsYamlExpanded(!isYamlExpanded);
+  };
+
+  const formatYaml = (yamlString) => {
+    if (!yamlString) return 'No YAML available';
+
+    try {
+      // Parse the YAML string into an object
+      const parsed = yaml.load(yamlString);
+
+      // Re-serialize with pipe syntax for multiline strings
+      const formatted = yaml.dump(parsed, {
+        lineWidth: -1, // Disable line wrapping
+        styles: {
+          '!!str': 'literal', // Use pipe (|) syntax for multiline strings
+        },
+        quotingType: "'", // Use single quotes for strings that need quoting
+        forceQuotes: false, // Only quote when necessary
+        noRefs: true, // Disable YAML references
+        sortKeys: false, // Preserve original key order
+        condenseFlow: false, // Don't condense flow style
+        indent: 2, // Use 2 spaces for indentation
+      });
+
+      // Add blank lines between top-level sections for better readability
+      const lines = formatted.split('\n');
+      const result = [];
+      let prevIndent = -1;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const currentIndent = line.search(/\S/); // Find first non-whitespace
+
+        // Add blank line before new top-level sections (indent = 0)
+        if (currentIndent === 0 && prevIndent >= 0 && i > 0) {
+          result.push('');
+        }
+
+        result.push(line);
+        prevIndent = currentIndent;
+      }
+
+      return result.join('\n').trim();
+    } catch (e) {
+      console.error('YAML formatting error:', e);
+      // If parsing fails, return the original string
+      return yamlString;
+    }
+  };
+
+  const hasCreationArtifacts = clusterData?.command || clusterData?.task_yaml;
+
   return (
     <div>
       {/* Cluster Info Card */}
@@ -178,7 +271,32 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
               <div>
                 <div className="text-gray-600 font-medium text-base">Infra</div>
                 <div className="text-base mt-1">
-                  {clusterData.full_infra || clusterData.infra || 'N/A'}
+                  {clusterData.infra ? (
+                    <NonCapitalizedTooltip
+                      content={clusterData.full_infra || clusterData.infra}
+                      className="text-sm text-muted-foreground"
+                    >
+                      <span>
+                        <Link
+                          href="/infra"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {clusterData.cloud ||
+                            clusterData.infra.split('(')[0].trim()}
+                        </Link>
+                        {clusterData.infra.includes('(') && (
+                          <span>
+                            {' ' +
+                              clusterData.infra.substring(
+                                clusterData.infra.indexOf('(')
+                              )}
+                          </span>
+                        )}
+                      </span>
+                    </NonCapitalizedTooltip>
+                  ) : (
+                    'N/A'
+                  )}
                 </div>
               </div>
               <div>
@@ -201,20 +319,79 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                     : 'N/A'}
                 </div>
               </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Autostop
+                </div>
+                <div className="text-base mt-1">
+                  {formatAutostop(clusterData.autostop, clusterData.to_down)}
+                </div>
+              </div>
+
+              {/* Created by section - spans both columns */}
+              {hasCreationArtifacts && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    Entrypoint
+                  </div>
+
+                  <div className="space-y-4 mt-3">
+                    {/* Creation Command */}
+                    {clusterData.command && (
+                      <div>
+                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                          <code className="text-sm text-gray-800 font-mono break-all">
+                            {clusterData.command}
+                          </code>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Task YAML - Collapsible */}
+                    {clusterData.task_yaml &&
+                      clusterData.task_yaml !== '{}' && (
+                        <div>
+                          <button
+                            onClick={toggleYamlExpanded}
+                            className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                          >
+                            <div className="flex items-center">
+                              {isYamlExpanded ? (
+                                <ChevronDownIcon className="w-4 h-4 mr-1" />
+                              ) : (
+                                <ChevronRightIcon className="w-4 h-4 mr-1" />
+                              )}
+                              <span className="text-base">
+                                Show SkyPilot YAML
+                              </span>
+                            </div>
+                          </button>
+
+                          {isYamlExpanded && (
+                            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                              <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                                {formatYaml(clusterData.task_yaml)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Card>
       </div>
 
       {/* Jobs Table */}
-      <div>
-        {clusterJobData && (
-          <ClusterJobs
-            clusterName={clusterData.cluster}
-            clusterJobData={clusterJobData}
-            loading={loading}
-          />
-        )}
+      <div className="mb-8">
+        <ClusterJobs
+          clusterName={clusterData.cluster}
+          clusterJobData={clusterJobData}
+          loading={clusterJobsLoading}
+          refreshClusterJobsOnly={refreshClusterJobsOnly}
+        />
       </div>
     </div>
   );

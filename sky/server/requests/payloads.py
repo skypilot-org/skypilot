@@ -72,6 +72,8 @@ def request_body_env_vars() -> dict:
 
 def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
+    if annotations.is_on_api_server:
+        return {}
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
     # server endpoint on the server side. This avoids the warning at
@@ -87,6 +89,11 @@ class RequestBody(pydantic.BaseModel):
     entrypoint_command: str = ''
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
+
+    # Allow extra fields in the request body, which is useful for backward
+    # compatibility, i.e., we can add new fields to the request body without
+    # breaking the existing old API server.
+    model_config = pydantic.ConfigDict(extra='allow')
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -126,6 +133,13 @@ class CheckBody(RequestBody):
     """The request body for the check endpoint."""
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
+    workspace: Optional[str] = None
+
+
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None
+    expand: bool = False
 
 
 class DagRequestBody(RequestBody):
@@ -362,6 +376,7 @@ class JobsLogsBody(RequestBody):
     follow: bool = True
     controller: bool = False
     refresh: bool = False
+    tail: Optional[int] = None
 
 
 class RequestCancelBody(RequestBody):
@@ -525,3 +540,30 @@ class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
+
+
+class UpdateWorkspaceBody(RequestBody):
+    """The request body for updating a specific workspace configuration."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class CreateWorkspaceBody(RequestBody):
+    """The request body for creating a new workspace."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class DeleteWorkspaceBody(RequestBody):
+    """The request body for deleting a workspace."""
+    workspace_name: str
+
+
+class UpdateConfigBody(RequestBody):
+    """The request body for updating the entire SkyPilot configuration."""
+    config: Dict[str, Any]
+
+
+class GetConfigBody(RequestBody):
+    """The request body for getting the entire SkyPilot configuration."""
+    pass

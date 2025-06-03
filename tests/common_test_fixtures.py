@@ -279,9 +279,11 @@ def mock_job_table_one_job(monkeypatch):
             'recovery_count': 0,
             'failure_reason': '',
             'managed_job_id': '1',
+            'workspace': 'default',
             'task_id': 0,
             'task_name': 'test_task',
             'job_duration': 20,
+            'priority': 500,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 

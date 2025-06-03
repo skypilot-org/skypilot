@@ -246,11 +246,10 @@ def kill_process_with_grace_period(proc: GenericProcess,
         # The child process may have already been terminated.
         return
     except psutil.TimeoutExpired:
-        # Pass to finally to force kill the process.
-        pass
-    finally:
         logger.debug(f'Process {proc.pid} did not terminate after '
                      f'{grace_period} seconds')
+        # Continue to finally to force kill the process.
+    finally:
         # Attempt to force kill if the normal termination fails
         if not force:
             logger.debug(f'Force killing process {proc.pid}')

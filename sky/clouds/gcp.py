@@ -119,6 +119,11 @@ _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
 _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
 
+# From https://cloud.google.com/compute/docs/gpus/gpudirect
+# A specific image is used to ensure that the the GPU is configured with TCPX support.
+_NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
+                         'nccl-plugin-gpudirecttcpx')
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -505,6 +510,8 @@ class GCP(clouds.Cloud):
             False,
             override_configs=resources.cluster_config_overrides)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
+        network_tier = r.network_tier
+        resources_vars['network_tier'] = network_tier
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
@@ -539,8 +546,8 @@ class GCP(clouds.Cloud):
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if enable_gpu_direct:
-                    image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
+                if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
+                    image_id = _NETWORK_GCP_IMAGE_ID
                 else:
                     if acc == 'K80':
                         # Though the image is called cu113, it actually has later
@@ -630,7 +637,7 @@ class GCP(clouds.Cloud):
             ('gcp', 'placement_policy'),
             None,
             override_configs=resources.cluster_config_overrides)
-        if enable_gpu_direct:
+        if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
             user_data += constants.GPU_DIRECT_TCPX_USER_DATA
             docker_run_options += constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
             if placement_policy is None:
@@ -997,10 +1004,21 @@ class GCP(clouds.Cloud):
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
+        gcp_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('gcp'), sort_keys=True)
+        return cls._get_user_identities(gcp_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def _get_user_identities(
+            cls, workspace_config: Optional[str]) -> List[List[str]]:
+        # We add workspace_config in args to avoid caching the GCP identity
+        # for when different workspace configs are used. Use json.dumps to
+        # ensure the config is hashable.
+        del workspace_config  # Unused
+
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
                                   '--format="value(account)"')
@@ -1031,7 +1049,8 @@ class GCP(clouds.Cloud):
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
         # TODO: Return a list of identities in the profile when we support
-        #   automatic switching for GCP. Currently we only support one identity.
+        # automatic switching for GCP. Currently we only support one
+        # identity.
         return [[f'{account} [project_id={project_id}]']]
 
     @classmethod
@@ -1061,6 +1080,10 @@ class GCP(clouds.Cloud):
             return 'dryrun-project-id'
         # pylint: disable=import-outside-toplevel
         from google import auth  # type: ignore
+        config_project_id = skypilot_config.get_workspace_cloud('gcp').get(
+            'project_id', None)
+        if config_project_id:
+            return config_project_id
         _, project_id = auth.default()
         if project_id is None:
             raise exceptions.CloudUserIdentityError(

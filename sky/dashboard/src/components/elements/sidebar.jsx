@@ -13,13 +13,16 @@ import {
   ChipIcon,
   ServerIcon,
   BriefcaseIcon,
-  ServiceBellIcon,
   ExternalLinkIcon,
   GitHubIcon,
   SlackIcon,
   CommentFeedbackIcon,
+  BookDocIcon,
+  UserCircleIcon,
+  UsersIcon,
 } from '@/components/elements/icons';
-import { BASE_PATH } from '@/data/connectors/constants';
+import { Settings } from 'lucide-react';
+import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 
@@ -28,13 +31,29 @@ const SidebarContext = createContext(null);
 
 export function SidebarProvider({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [userEmail, setUserEmail] = useState(null);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
   };
 
+  useEffect(() => {
+    fetch(`${ENDPOINT}/api/health`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user && data.user.name) {
+          setUserEmail(data.user.name);
+        }
+      })
+      .catch((error) => {
+        console.error('Error fetching user data:', error);
+      });
+  }, []);
+
   return (
-    <SidebarContext.Provider value={{ isSidebarOpen, toggleSidebar }}>
+    <SidebarContext.Provider
+      value={{ isSidebarOpen, toggleSidebar, userEmail }}
+    >
       {children}
     </SidebarContext.Provider>
   );
@@ -56,8 +75,8 @@ export function SideBar({ highlighted = 'clusters' }) {
 
   // Common link style
   const linkStyle = (isHighlighted) => `
-        flex items-center space-x-2 
-        ${isHighlighted ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-700'} 
+        flex items-center space-x-2
+        ${isHighlighted ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-700'}
         relative z-10 py-2 px-4 rounded-sm
         hover:bg-gray-100 hover:text-blue-700 transition-colors
         cursor-pointer w-full
@@ -91,15 +110,6 @@ export function SideBar({ highlighted = 'clusters' }) {
               <BriefcaseIcon className="w-5 h-5 min-w-5" />
               <span>Jobs</span>
             </Link>
-            <div
-              className={`flex items-center space-x-2 text-gray-400 relative z-10 py-2 px-4 rounded-sm w-full`}
-            >
-              <ServiceBellIcon className="w-5 h-5 min-w-5" />
-              <span>Services</span>
-              <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-                Soon
-              </span>
-            </div>
           </div>
         </div>
       </nav>
@@ -110,9 +120,33 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
+  const { userEmail } = useSidebar();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    // Bind the event listener
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      // Unbind the event listener on clean up
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [dropdownRef]);
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
+    // Special case: highlight workspaces for both /workspaces and /workspace paths
+    if (path === '/workspaces') {
+      return (
+        router.pathname.startsWith('/workspaces') ||
+        router.pathname.startsWith('/workspace')
+      );
+    }
     return router.pathname.startsWith(path);
   };
 
@@ -139,9 +173,7 @@ export function TopBar() {
             className="flex items-center px-1 pt-1 h-full"
             prefetch={false}
           >
-            <div
-              className={`${isMobile ? 'h-16 w-16' : 'h-20 w-20'} flex items-center justify-center`}
-            >
+            <div className={`h-20 w-20 flex items-center justify-center`}>
               <Image
                 src={`${BASE_PATH}/skypilot.svg`}
                 alt="SkyPilot Logo"
@@ -156,7 +188,7 @@ export function TopBar() {
 
         {/* Navigation links - reduce spacing on mobile */}
         <div
-          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-6'} ${isMobile ? 'mr-2' : 'mr-6'}`}
+          className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2 md:space-x-4'} ${isMobile ? 'mr-2' : 'mr-6'}`}
         >
           <Link
             href="/clusters"
@@ -176,20 +208,6 @@ export function TopBar() {
             {!isMobile && <span>Jobs</span>}
           </Link>
 
-          <div
-            className={`inline-flex items-center ${isMobile ? 'px-2 py-1' : 'px-1 pt-1'} text-gray-400`}
-          >
-            <ServiceBellIcon className="w-4 h-4" />
-            {!isMobile && (
-              <>
-                <span className="ml-2">Services</span>
-                <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
-                  Soon
-                </span>
-              </>
-            )}
-          </div>
-
           <div className="border-l border-gray-200 h-6 mx-1"></div>
 
           <Link
@@ -199,6 +217,24 @@ export function TopBar() {
           >
             <ChipIcon className="w-4 h-4" />
             {!isMobile && <span>Infra</span>}
+          </Link>
+
+          {/* Workspaces Link */}
+          <Link
+            href="/workspaces"
+            className={getLinkClasses('/workspaces')}
+            prefetch={false}
+          >
+            <BookDocIcon className="w-4 h-4" />
+            {!isMobile && <span>Workspaces</span>}
+          </Link>
+          <Link
+            href="/users"
+            className={getLinkClasses('/users')}
+            prefetch={false}
+          >
+            <UsersIcon className="w-4 h-4" />
+            {!isMobile && <span>Users</span>}
           </Link>
         </div>
 
@@ -223,8 +259,6 @@ export function TopBar() {
               />
             </a>
           </CustomTooltip>
-
-          <div className="border-l border-gray-200 h-6 mx-1"></div>
 
           {/* Keep the rest of the external links as icons only */}
           <CustomTooltip
@@ -273,6 +307,76 @@ export function TopBar() {
               />
             </a>
           </CustomTooltip>
+
+          <div className="border-l border-gray-200 h-6"></div>
+
+          {/* Config Button */}
+          <CustomTooltip
+            content="Configuration"
+            className="text-sm text-muted-foreground"
+          >
+            <Link
+              href="/config"
+              className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
+                isActivePath('/config')
+                  ? 'text-blue-600 hover:bg-gray-100'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+              title="Configuration"
+              prefetch={false}
+            >
+              <Settings className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+            </Link>
+          </CustomTooltip>
+
+          {/* User Profile Icon and Dropdown */}
+          {userEmail && (
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                title="User Profile"
+              >
+                <UserCircleIcon
+                  className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`}
+                />
+              </button>
+
+              {isDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                  {(() => {
+                    let displayName = userEmail;
+                    let emailToDisplay = null;
+                    if (userEmail && userEmail.includes('@')) {
+                      displayName = userEmail.split('@')[0];
+                      emailToDisplay = userEmail;
+                    }
+                    return (
+                      <>
+                        <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
+                          {displayName}
+                        </div>
+                        {emailToDisplay && (
+                          <div className="px-4 pt-0 pb-2 text-xs text-gray-500">
+                            {emailToDisplay}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <div className="border-t border-gray-200 mx-1 my-1"></div>
+                  <Link
+                    href="/users"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                    onClick={() => setIsDropdownOpen(false)}
+                    prefetch={false}
+                  >
+                    See all users
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

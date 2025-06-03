@@ -17,6 +17,7 @@ from sky import global_user_state
 from sky import models
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
@@ -1009,9 +1010,29 @@ def storage_delete(name: str) -> None:
 # = Catalog Observe =
 # ===================
 @usage_lib.entrypoint
-def enabled_clouds() -> List[clouds.Cloud]:
-    return global_user_state.get_cached_enabled_clouds(
-        sky_cloud.CloudCapability.COMPUTE)
+def enabled_clouds(workspace: Optional[str] = None,
+                   expand: bool = False) -> List[str]:
+    if workspace is None:
+        workspace = skypilot_config.get_active_workspace()
+    cached_clouds = global_user_state.get_cached_enabled_clouds(
+        sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
+    with skypilot_config.local_active_workspace_ctx(workspace):
+        if not expand:
+            return [cloud.canonical_name() for cloud in cached_clouds]
+        enabled_ssh_infras = []
+        enabled_k8s_infras = []
+        enabled_cloud_infras = []
+        for cloud in cached_clouds:
+            cloud_infra = cloud.expand_infras()
+            if isinstance(cloud, clouds.SSH):
+                enabled_ssh_infras.extend(cloud_infra)
+            elif isinstance(cloud, clouds.Kubernetes):
+                enabled_k8s_infras.extend(cloud_infra)
+            else:
+                enabled_cloud_infras.extend(cloud_infra)
+        all_infras = sorted(enabled_ssh_infras) + sorted(
+            enabled_k8s_infras) + sorted(enabled_cloud_infras)
+        return all_infras
 
 
 @usage_lib.entrypoint

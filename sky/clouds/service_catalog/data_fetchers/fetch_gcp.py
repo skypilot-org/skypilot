@@ -179,7 +179,7 @@ TPU_V4_HOST_DF = pd.read_csv(
 # TODO(woosuk): Make this more robust.
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
 # Unsupported Series: 'f1', 'm2'
-SERIES_TO_DISCRIPTION = {
+SERIES_TO_DESCRIPTION = {
     'a2': 'A2 Instance',
     'a3': 'A3 Instance',
     # TODO(zhwu): GCP does not have A4 instance in SKUs API yet. We keep it here
@@ -338,7 +338,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
 
     # Drop the unsupported series.
     df = df[df['InstanceType'].str.startswith(
-        tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
+        tuple(f'{series}-' for series in SERIES_TO_DESCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.
@@ -356,7 +356,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
 
             # Check if the SKU is for the correct series.
             description = sku['description']
-            if SERIES_TO_DISCRIPTION[series].lower() not in description.lower():
+            if SERIES_TO_DESCRIPTION[series].lower() not in description.lower():
                 continue
             # Special check for M1 instances.
             if series == 'm1' and 'M3' in description:

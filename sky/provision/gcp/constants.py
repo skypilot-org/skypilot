@@ -84,6 +84,8 @@ GPU_DIRECT_TCPX_USER_DATA = textwrap.dedent("""
     echo "GPU Direct TCPX installed"
     """)
 
+# Some NCCL options are from the following link.
+# https://docs.nvidia.com/dgx-cloud/run-ai/latest/appendix-gcp.html
 GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--cap-add=IPC_LOCK',
     '--userns=host',
@@ -103,6 +105,14 @@ GPU_DIRECT_TCPX_SPECIFIC_OPTIONS = [
     '--device /dev/nvidia-uvm:/dev/nvidia-uvm',
     '--device /dev/nvidiactl:/dev/nvidiactl',
     '--env LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/tcpx/lib64',
+    '--env NCCL_GPUDIRECTTCPX_SOCKET_IFNAME=eth1,eth2,eth3,eth4',
+    '--env NCCL_GPUDIRECTTCPX_CTRL_DEV=eth0',
+    '--env NCCL_GPUDIRECTTCPX_TX_BINDINGS="eth1:8-21,112-125;eth2:8-21,112-125;eth3:60-73,164-177;eth4:60-73,164-177"',
+    '--env NCCL_GPUDIRECTTCPX_RX_BINDINGS="eth1:22-35,126-139;eth2:22-35,126-139;eth3:74-87,178-191;eth4:74-87,178-191"',
+    '--env NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS=50000',
+    '--env NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX="/run/tcpx"',
+    '--env NCCL_GPUDIRECTTCPX_FORCE_ACK=0',
+    '--env NCCL_SOCKET_IFNAME=eth0',
 ]
 
 PD_EXTREME_IOPS = 20000

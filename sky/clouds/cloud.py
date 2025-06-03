@@ -45,6 +45,7 @@ class CloudImplementationFeatures(enum.Enum):
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    CUSTOM_NETWORK_TIER = 'custom_network_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
@@ -139,6 +140,9 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTED_NETWORK_TIERS = {
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
+    }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
@@ -492,13 +496,13 @@ class Cloud:
             f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
 
     @classmethod
-    def get_infras(cls) -> List[str]:
+    def expand_infras(cls) -> List[str]:
         """Returns a list of enabled infrastructures for this cloud.
 
         For Kubernetes and SSH, return a list of resource pools.
         For all other clouds, return self.
         """
-        return [cls._REPR.lower()]
+        return [cls.canonical_name()]
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
@@ -714,6 +718,22 @@ class Cloud:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def check_network_tier_enabled(
+            cls, instance_type: Optional[str],
+            network_tier: resources_utils.NetworkTier) -> None:
+        """Errors out if the network tier is not supported by the
+        cloud provider.
+
+        Raises:
+            exceptions.NotSupportedError: If the network tier is not supported.
+        """
+        del instance_type  # unused
+        if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{network_tier} is not supported by {cls._REPR}.')
 
     @classmethod
     def _translate_disk_tier(

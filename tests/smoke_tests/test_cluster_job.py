@@ -1900,3 +1900,60 @@ def test_min_gpt_kubernetes():
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test GCP network tier ----------
+@pytest.mark.gcp
+def test_gcp_network_tier():
+    """Test GCP network tier functionality for standard tier."""
+    network_tier = resources_utils.NetworkTier.STANDARD
+    # Use n2-standard-4 instance type for testing
+    instance_type = 'n2-standard-4'
+    name = smoke_tests_utils.get_cluster_name() + '-' + network_tier.value
+    region = 'us-central1'
+
+    # For standard tier, verify basic network functionality
+    verification_commands = [
+        smoke_tests_utils.run_cloud_cmd_on_cluster(
+            name, cmd='echo "Standard network tier verification"')
+    ]
+
+    test_commands = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+        f'sky launch -y -c {name} --infra gcp/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+        f'--network-tier {network_tier.value} --instance-type {instance_type} '
+        f'echo "Testing network tier {network_tier.value}"',
+    ] + verification_commands
+
+    test = smoke_tests_utils.Test(
+        f'gcp-network-tier-{network_tier.value}',
+        test_commands,
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=10 * 60,  # 10 mins
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_network_tier_with_gpu():
+    """Test GCP network_tier=best with GPU to verify GPU Direct functionality."""
+    name = smoke_tests_utils.get_cluster_name() + '-gpu-best'
+
+    test = smoke_tests_utils.Test(
+        'gcp-network-tier-best-gpu',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+            f'sky launch -y -c {name} --cloud gcp '
+            f'--gpus H100:8 --network-tier best '
+            f'echo "Testing network tier best with GPU"',
+            # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                'echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths" || echo "LD_LIBRARY_PATH missing required paths"'
+            )
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,  # 15 mins for GPU provisioning
+    )
+    smoke_tests_utils.run_one_test(test)

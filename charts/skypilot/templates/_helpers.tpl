@@ -34,6 +34,18 @@
 {{- end -}} 
 
 {{/*
+Check for apiService.config during upgrade and display warning
+*/}}
+{{- define "skypilot.checkUpgradeConfig" -}}
+{{- if and .Release.IsUpgrade .Values.apiService.config -}}
+WARNING: apiService.config is set during an upgrade operation, which will be IGNORED.
+
+To update your SkyPilot config, follow the instructions in the upgrade guide:
+https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config
+{{- end -}}
+{{- end -}}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "skypilot.serviceAccountName" -}}

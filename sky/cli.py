@@ -353,12 +353,12 @@ _TASK_OPTIONS = [
         type=str,
         help='Infrastructure to use. '
         'Format: cloud, cloud/region, cloud/region/zone, '
-        'or kubernetes/context-name. '
+        'k8s/context-name, or ssh/node-pool-name. '
         'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
         # TODO(zhwu): we have to use `\*` to make sure the docs build
         # not complaining about the `*`, but this will cause `--help`
         # to show `\*` instead of `*`.
-        'aws/\\*/us-east-1a, kubernetes/my-cluster-context.'),
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'),
     click.option(
         '--cloud',
         required=False,
@@ -415,6 +415,13 @@ _TASK_OPTIONS = [
                                    case_sensitive=False),
                  required=False,
                  help=resources_utils.DiskTier.cli_help_message()),
+    click.option('--network-tier',
+                 default=None,
+                 type=click.Choice(
+                     resources_utils.NetworkTier.supported_tiers(),
+                     case_sensitive=False),
+                 required=False,
+                 help=resources_utils.NetworkTier.cli_help_message()),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,
@@ -696,6 +703,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
+        network_tier: Optional[str] = None,
         ports: Optional[Tuple[str, ...]] = None,
         config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
@@ -749,6 +757,11 @@ def _parse_override_params(
             override_params['disk_tier'] = None
         else:
             override_params['disk_tier'] = disk_tier
+    if network_tier is not None:
+        if network_tier.lower() == 'none':
+            override_params['network_tier'] = None
+        else:
+            override_params['network_tier'] = network_tier
     if ports:
         if any(p.lower() == 'none' for p in ports):
             if len(ports) > 1:
@@ -857,11 +870,13 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
+    network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    priority: Optional[int] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
@@ -896,6 +911,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
+                                             network_tier=network_tier,
                                              ports=ports,
                                              config_override=config_override)
     if field_to_ignore is not None:
@@ -939,6 +955,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+    # job launch specific.
+    if priority is not None:
+        task.set_job_priority(priority)
     return task
 
 
@@ -1231,6 +1250,7 @@ def launch(
         env: List[Tuple[str, str]],
         disk_size: Optional[int],
         disk_tier: Optional[str],
+        network_tier: Optional[str],
         ports: Tuple[str, ...],
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
@@ -1284,6 +1304,7 @@ def launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         config_override=config_override,
     )
@@ -1401,6 +1422,7 @@ def exec(cluster: Optional[str],
          memory: Optional[str],
          disk_size: Optional[int],
          disk_tier: Optional[str],
+         network_tier: Optional[str],
          async_call: bool,
          config_override: Optional[Dict[str, Any]] = None):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1496,6 +1518,7 @@ def exec(cluster: Optional[str],
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
         config_override=config_override,
@@ -1781,24 +1804,16 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
-def _show_enabled_infra():
+def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     """Show the enabled infrastructure."""
-    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra:'
+    workspace_str = ''
+    if show_workspace:
+        workspace_str = f' (workspace: {active_workspace!r})'
+    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
+             f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
-    enabled_clouds = sdk.get(sdk.enabled_clouds())
-    enabled_ssh_infras = []
-    enabled_k8s_infras = []
-    enabled_cloud_infras = []
-    for cloud in enabled_clouds:
-        cloud_infra = cloud.get_infras()
-        if isinstance(cloud, clouds.SSH):
-            enabled_ssh_infras.extend(cloud_infra)
-        elif isinstance(cloud, clouds.Kubernetes):
-            enabled_k8s_infras.extend(cloud_infra)
-        else:
-            enabled_cloud_infras.extend(cloud_infra)
-    all_infras = sorted(enabled_ssh_infras) + sorted(
-        enabled_k8s_infras) + sorted(enabled_cloud_infras)
+    all_infras = sdk.get(
+        sdk.enabled_clouds(workspace=active_workspace, expand=True))
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -1954,6 +1969,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         # status query.
         service_status_request_id = serve_lib.status(service_names=None)
 
+    workspace_request_id = None
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -1988,9 +2004,18 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
-        _show_enabled_infra()
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
+        try:
+            workspace_request_id = sdk.workspaces()
+        except RuntimeError:
+            # Backward compatibility for API server before #5660.
+            # TODO(zhwu): remove this after 0.10.0.
+            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
+                           'in an old version, and may miss feature: '
+                           'workspaces. Update with: sky api stop; '
+                           'sky api start'
+                           f'{colorama.Style.RESET_ALL}')
+            workspace_request_id = None
+
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
     if refresh:
@@ -2013,9 +2038,20 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         else:
             normal_clusters.append(cluster_record)
 
+    if workspace_request_id is not None:
+        all_workspaces = sdk.get(workspace_request_id)
+    else:
+        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
+    active_workspace = skypilot_config.get_active_workspace()
+    show_workspace = len(all_workspaces) > 1
+    _show_enabled_infra(active_workspace, show_workspace)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+               f'{colorama.Style.RESET_ALL}')
+
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users, query_clusters)
+        normal_clusters + controllers, verbose, all_users, query_clusters,
+        show_workspace)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
@@ -3345,9 +3381,16 @@ def _down_or_stop_clusters(
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
+@click.option(
+    '--workspace',
+    '-w',
+    type=str,
+    help='The workspace to check. If None, all workspaces will be checked.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
-def check(infra_list: Tuple[str], verbose: bool):
+def check(infra_list: Tuple[str],
+          verbose: bool,
+          workspace: Optional[str] = None):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3370,7 +3413,9 @@ def check(infra_list: Tuple[str], verbose: bool):
       sky check aws gcp
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
-    request_id = sdk.check(infra_list=infra_arg, verbose=verbose)
+    request_id = sdk.check(infra_list=infra_arg,
+                           verbose=verbose,
+                           workspace=workspace)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()
@@ -3490,13 +3535,8 @@ def show_gpus(
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = False
-    ssh_is_enabled = False
-    for cloud in enabled_clouds:
-        if isinstance(cloud, clouds.SSH):
-            ssh_is_enabled = True
-        elif isinstance(cloud, clouds.Kubernetes):
-            kubernetes_is_enabled = True
+    kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
+    ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
                               (cloud_name is None or cloud_is_kubernetes))
     query_ssh_realtime_gpu = (ssh_is_enabled and
@@ -4153,6 +4193,12 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
+@click.option('--priority',
+              type=click.IntRange(0, 1000),
+              default=None,
+              show_default=True,
+              help=('Job priority from 0 to 1000. A lower number is higher '
+                    'priority. Default is 500.'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4189,7 +4235,9 @@ def jobs_launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     ports: Tuple[str],
+    priority: Optional[int],
     detach_run: bool,
     yes: bool,
     async_call: bool,
@@ -4234,8 +4282,10 @@ def jobs_launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         job_recovery=job_recovery,
+        priority=priority,
         config_override=config_override,
     )
 
@@ -4317,8 +4367,6 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
     - ``PENDING``: Job is waiting for a free slot on the jobs controller to be
       accepted.
-
-    - ``SUBMITTED``: Job is submitted to and accepted by the jobs controller.
 
     - ``STARTING``: Job is starting (provisioning a cluster for the job).
 
@@ -4447,7 +4495,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
             f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
-        job_identity_str = (f'managed jobs with IDs {job_id_str}'
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else repr(name))
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
@@ -4535,7 +4584,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
-    managed_jobs.dashboard()
+    sdk.dashboard(starting_page='jobs')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4571,6 +4620,7 @@ def _generate_task_with_service(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     not_supported_cmd: str,
 ) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
@@ -4597,6 +4647,7 @@ def _generate_task_with_service(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
     )
     if isinstance(task, sky.Dag):
@@ -4710,6 +4761,7 @@ def serve_up(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     yes: bool,
     async_call: bool,
 ):
@@ -4764,6 +4816,7 @@ def serve_up(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve up',
     )
@@ -4808,16 +4861,16 @@ def serve_up(
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def serve_update(service_name: str, service_yaml: Tuple[str, ...],
-                 workdir: Optional[str], infra: Optional[str],
-                 cloud: Optional[str], region: Optional[str],
-                 zone: Optional[str], num_nodes: Optional[int],
-                 use_spot: Optional[bool], image_id: Optional[str],
-                 env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-                 gpus: Optional[str], instance_type: Optional[str],
-                 ports: Tuple[str], cpus: Optional[str], memory: Optional[str],
-                 disk_size: Optional[int], disk_tier: Optional[str], mode: str,
-                 yes: bool, async_call: bool):
+def serve_update(
+        service_name: str, service_yaml: Tuple[str, ...],
+        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
+        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
+        use_spot: Optional[bool], image_id: Optional[str],
+        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
+        cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
+        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
+        yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4867,6 +4920,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve update',
     )
@@ -5275,7 +5329,8 @@ def serve_logs(
 
 
 @ux_utils.print_exception_no_traceback()
-def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
+def _get_candidate_configs(
+        entrypoint_yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
     Benchmark candidates are configured in the YAML file as a list of
@@ -5289,17 +5344,18 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {instance_type: g4dn.2xlarge}
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
-    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
+    config = common_utils.read_yaml(os.path.expanduser(entrypoint_yaml_path))
     if not isinstance(config, dict):
-        raise ValueError(f'Invalid YAML file: {yaml_path}. '
+        raise ValueError(f'Invalid YAML file: {entrypoint_yaml_path}. '
                          'The YAML file should be parsed into a dictionary.')
     if config.get('resources') is None:
         return None
 
     resources = config['resources']
     if not isinstance(resources, dict):
-        raise ValueError(f'Invalid resources configuration in {yaml_path}. '
-                         'Resources must be a dictionary.')
+        raise ValueError(
+            f'Invalid resources configuration in {entrypoint_yaml_path}. '
+            'Resources must be a dictionary.')
     if resources.get('candidates') is None:
         return None
 
@@ -6169,10 +6225,14 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
+@click.option('--get-token',
+              is_flag=True,
+              default=False,
+              help='Force token-based login.')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str]):
+def api_login(endpoint: Optional[str], get_token: bool):
     """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint)
+    sdk.api_login(endpoint, get_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -6184,6 +6244,10 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    api_server_user = api_server_info.get('user')
+    if api_server_user is not None:
+        user_name = api_server_user['name']
+        user_hash = api_server_user['id']
     dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '

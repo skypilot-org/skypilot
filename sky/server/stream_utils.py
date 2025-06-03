@@ -19,6 +19,7 @@ logger = sky_logging.init_logger(__name__)
 _BUFFER_SIZE = 8 * 1024  # 8KB
 # The timeout for flushing the buffer.
 _BUFFER_TIMEOUT = 0.02  # 20ms
+_HEARTBEAT_INTERVAL = 30
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -107,6 +108,8 @@ async def log_streamer(request_id: Optional[str],
             for line_str in lines:
                 yield line_str
 
+        last_heartbeat_time = asyncio.get_event_loop().time()
+
         while True:
             # Sleep 0 to yield control to allow other coroutines to run,
             # while keeps the loop tight to make log stream responsive.
@@ -130,15 +133,32 @@ async def log_streamer(request_id: Optional[str],
                         break
                 if not follow:
                     break
+
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
+                    # Currently just used to keep the connection busy, refer to
+                    # https://github.com/skypilot-org/skypilot/issues/5750 for
+                    # more details.
+                    yield message_utils.encode_payload(
+                        rich_utils.Control.HEARTBEAT.encode(''))
+                    last_heartbeat_time = current_time
+
                 # Sleep shortly to avoid storming the DB and CPU, this has
                 # little impact on the responsivness here since we are waiting
                 # for a new line to come in.
                 await asyncio.sleep(0.1)
                 continue
+
+            # Refresh the heartbeat time, this is a trivial optimization for
+            # performance but it helps avoid unnecessary heartbeat strings
+            # being printed when the client runs in an old version.
+            last_heartbeat_time = asyncio.get_event_loop().time()
             line_str = line.decode('utf-8')
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
                     line_str, raise_for_mismatch=False)
+                # TODO(aylei): implement heartbeat mechanism for plain logs,
+                # sending invisible characters might be okay.
                 if is_payload:
                     continue
 

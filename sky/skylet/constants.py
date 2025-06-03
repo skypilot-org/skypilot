@@ -89,7 +89,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '12'
+SKYLET_VERSION = '13'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -378,7 +378,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 # we skip the following keys because they are meant to be client-side configs.
 SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
                                                        ('api_server',),
-                                                       ('allowed_clouds',)]
+                                                       ('allowed_clouds',),
+                                                       ('workspaces',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -405,3 +406,9 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
+
+SKYPILOT_DEFAULT_WORKSPACE = 'default'
+
+# Experimental - may be deprecated in the future without notice.
+SKYPILOT_API_SERVER_DB_URL_ENV_VAR: str = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_DB_URL')

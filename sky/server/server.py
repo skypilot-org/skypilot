@@ -6,6 +6,7 @@ import base64
 import contextlib
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import multiprocessing
@@ -31,6 +32,7 @@ from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.data import storage_utils
@@ -56,6 +58,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -108,6 +111,49 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         response.headers['X-Request-ID'] = request_id
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
+
+
+def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
+    if 'X-Auth-Request-Email' not in request.headers:
+        return None
+    user_name = request.headers['X-Auth-Request-Email']
+    user_hash = hashlib.md5(
+        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    return models.User(id=user_hash, name=user_name)
+
+
+class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle auth proxy."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        auth_user = _get_auth_user_header(request)
+
+        # Add user to database if auth_user is present
+        if auth_user is not None:
+            global_user_state.add_or_update_user(auth_user)
+
+        body = await request.body()
+        if auth_user and body:
+            try:
+                original_json = await request.json()
+            except json.JSONDecodeError as e:
+                logger.error(f'Error parsing request JSON: {e}')
+            else:
+                logger.debug(f'Overriding user for {request.state.request_id}: '
+                             f'{auth_user.name}, {auth_user.id}')
+                if 'env_vars' in original_json:
+                    if isinstance(original_json.get('env_vars'), dict):
+                        original_json['env_vars'][
+                            constants.USER_ID_ENV_VAR] = auth_user.id
+                        original_json['env_vars'][
+                            constants.USER_ENV_VAR] = auth_user.name
+                    else:
+                        logger.warning(
+                            f'"env_vars" in request body is not a dictionary '
+                            f'for request {request.state.request_id}. '
+                            'Skipping user info injection into body.')
+                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        return await call_next(request)
 
 
 # Default expiration time for upload ids before cleanup.
@@ -216,15 +262,28 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
 
 
 @app.get('/token')
-async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
+    user = _get_auth_user_header(request)
+
+    token_data = {
+        'v': 1,  # Token version number, bump for backwards incompatible.
+        'user': user.id if user is not None else None,
+        'cookies': request.cookies,
+    }
     # Use base64 encoding to avoid having to escape anything in the HTML.
-    json_bytes = json.dumps(request.cookies).encode('utf-8')
+    json_bytes = json.dumps(token_data).encode('utf-8')
     base64_str = base64.b64encode(json_bytes).decode('utf-8')
 
     html_dir = pathlib.Path(__file__).parent / 'html'
@@ -236,8 +295,10 @@ async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
 
+    user_info_string = f'Logged in as {user.name}' if user is not None else ''
     html_content = html_content.replace(
-        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER', base64_str)
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
+        base64_str).replace('USER_PLACEHOLDER', user_info_string)
 
     return fastapi.responses.HTMLResponse(
         content=html_content,
@@ -263,12 +324,15 @@ async def check(request: fastapi.Request,
 
 
 @app.get('/enabled_clouds')
-async def enabled_clouds(request: fastapi.Request) -> None:
+async def enabled_clouds(request: fastapi.Request,
+                         workspace: Optional[str] = None,
+                         expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -359,6 +423,10 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
+    ctx = context.get()
+    assert ctx is not None
+    # TODO(aylei): generalize this to all requests without a db record.
+    ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
@@ -1113,7 +1181,7 @@ async def api_status(
 
 
 @app.get('/api/health')
-async def health() -> Dict[str, str]:
+async def health(request: fastapi.Request) -> Dict[str, Any]:
     """Checks the health of the API server.
 
     Returns:
@@ -1125,23 +1193,22 @@ async def health() -> Dict[str, str]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
+    user = _get_auth_user_header(request)
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
+        'user': user.to_dict() if user is not None else None,
     }
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-    websocket: fastapi.WebSocket,
-    cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()
-) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
-    cluster_name = cluster_name_body.cluster_name
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     cluster_records = core.status(cluster_name, all_users=True)
