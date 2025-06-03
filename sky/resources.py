@@ -1164,11 +1164,37 @@ class Resources:
             ValueError: if the attribute is invalid.
         """
 
-        if self._image_id is None and isinstance(self._cloud, clouds.GCP):
-            if self._network_tier == resources_utils.NetworkTier.BEST:
+        if (self._network_tier == resources_utils.NetworkTier.BEST and
+                isinstance(self._cloud, clouds.GCP)):
+            # Handle GPU Direct TCPX requirement for docker images
+            if self._image_id is None:
+                # No custom image specified - use the default GPU Direct image
+                if not self._cloud.is_image_tag_valid(
+                        gcp_constants.GCP_GPU_DIRECT_IMAGE_ID, self._region):
+                    region_str = f' ({self._region})' if self._region else ''
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Image tag {gcp_constants.GCP_GPU_DIRECT_IMAGE_ID!r} is not valid for {self._cloud}{region_str}.'
+                        )
                 self._image_id = {
                     self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
                 }
+            else:
+                # Custom image specified - validate it's a docker image
+                # Check if any of the specified images are not docker images
+                non_docker_images = []
+                for region, image_id in self._image_id.items():
+                    if not image_id.startswith('docker:'):
+                        non_docker_images.append(f'{image_id} (region: {region})')
+                
+                if non_docker_images:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'When using network_tier=BEST on GCP, image_id must be a docker image. '
+                            f'Found non-docker images: {", ".join(non_docker_images)}. '
+                            f'Please either: (1) use a docker image (prefix with "docker:"), or '
+                            f'(2) leave image_id empty to use the default GPU Direct TCPX image.'
+                        )
 
         if self._image_id is None:
             return
