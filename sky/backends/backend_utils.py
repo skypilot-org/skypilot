@@ -813,9 +813,9 @@ def write_cluster_config(
 
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
+        cluster_config_overrides = to_provision.cluster_config_overrides
         kubernetes_utils.combine_pod_config_fields(
-            tmp_yaml_path,
-            cluster_config_overrides=to_provision.cluster_config_overrides)
+            tmp_yaml_path, cluster_config_overrides=cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][

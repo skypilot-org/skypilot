@@ -361,7 +361,7 @@ export function Workspaces() {
         await Promise.all([
           dashboardCache.get(getWorkspaces),
           dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs),
+          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
         ]);
 
       setRawWorkspacesData(fetchedWorkspacesConfig);
@@ -544,7 +544,7 @@ export function Workspaces() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs);
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
 
     fetchData(true); // Show loading on manual refresh
