@@ -1165,8 +1165,10 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-def _get_ha_kill_test(name: str, generic_cloud: str,
-                      status: sky.ManagedJobStatus) -> smoke_tests_utils.Test:
+def _get_ha_kill_test(name: str,
+                      generic_cloud: str,
+                      status: sky.ManagedJobStatus,
+                      second_timeout: int = 335) -> smoke_tests_utils.Test:
     return smoke_tests_utils.Test(
         f'test-managed-jobs-ha-kill-{status.value.lower()}',
         [
@@ -1180,7 +1182,7 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=335),
+                timeout=second_timeout),
             f's=$(sky jobs logs --controller -n {name} --no-follow); echo "$s"; echo "$s" | grep "Job succeeded."',
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
@@ -1204,5 +1206,8 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_starting(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    test = _get_ha_kill_test(name, generic_cloud, sky.ManagedJobStatus.STARTING)
+    test = _get_ha_kill_test(name,
+                             generic_cloud,
+                             sky.ManagedJobStatus.STARTING,
+                             second_timeout=600)
     smoke_tests_utils.run_one_test(test)
