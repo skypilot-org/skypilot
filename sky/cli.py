@@ -6068,9 +6068,8 @@ def api():
     '--port',
     type=int,
     required=False,
-    help=
-    'The port to deploy the SkyPilot API server. If not specified, port 46580 will be used.'
-)
+    help=('The port to deploy the SkyPilot API server. If not specified, '
+          'port 46580 will be used.'))
 @click.option('--host',
               default='127.0.0.1',
               type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
