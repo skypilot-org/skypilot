@@ -205,8 +205,7 @@ def _execute(
     if controller is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
-        if controller_utils.high_availability_specified(cluster_name,
-                                                        skip_warning=False):
+        if controller_utils.high_availability_specified(cluster_name):
             requested_features.add(clouds.CloudImplementationFeatures.
                                    HIGH_AVAILABILITY_CONTROLLERS)
             # If we provision a cluster that supports high availability

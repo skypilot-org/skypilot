@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -1525,7 +1526,7 @@ def is_kubeconfig_exec_auth(
         return False, None
 
     # Get active context and user from kubeconfig using k8s api
-    all_contexts, current_context = k8s.config.list_kube_config_contexts()
+    all_contexts, current_context = kubernetes.list_kube_config_contexts()
     context_obj = current_context
     if context is not None:
         for c in all_contexts:
@@ -1581,7 +1582,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     """
     k8s = kubernetes.kubernetes
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
+        _, current_context = kubernetes.list_kube_config_contexts()
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
         return None
@@ -1617,7 +1618,7 @@ def get_all_kube_context_names() -> List[str]:
     k8s = kubernetes.kubernetes
     context_names = []
     try:
-        all_contexts, _ = k8s.config.list_kube_config_contexts()
+        all_contexts, _ = kubernetes.list_kube_config_contexts()
         # all_contexts will always have at least one context. If kubeconfig
         # does not have any contexts defined, it will raise ConfigException.
         context_names = [context['name'] for context in all_contexts]
@@ -1660,7 +1661,7 @@ def get_kube_config_context_namespace(
                 return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
-        contexts, current_context = k8s.config.list_kube_config_contexts()
+        contexts, current_context = kubernetes.list_kube_config_contexts()
         if context_name is None:
             context = current_context
         else:
@@ -2810,7 +2811,7 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
     namespace = get_namespace_from_config(provider_config)
     context = get_context_from_config(provider_config)

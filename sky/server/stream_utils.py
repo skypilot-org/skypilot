@@ -3,7 +3,7 @@
 import asyncio
 import collections
 import pathlib
-from typing import AsyncGenerator, Deque, Optional
+from typing import AsyncGenerator, Deque, List, Optional
 
 import aiofiles
 import fastapi
@@ -14,6 +14,14 @@ from sky.utils import message_utils
 from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# When streaming log lines, buffer the lines in memory and flush them in chunks
+# to improve log tailing throughput. Buffer size is the max size bytes of each
+# chunk and the timeout threshold for flushing the buffer to ensure
+# responsiveness.
+_BUFFER_SIZE = 8 * 1024  # 8KB
+_BUFFER_TIMEOUT = 0.02  # 20ms
+_HEARTBEAT_INTERVAL = 30
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -35,6 +43,20 @@ async def log_streamer(request_id: Optional[str],
                        tail: Optional[int] = None,
                        follow: bool = True) -> AsyncGenerator[str, None]:
     """Streams the logs of a request."""
+
+    # Buffer the lines in memory and flush them in chunks to improve log tailing
+    # throughput.
+    buffer: List[str] = []
+    buffer_bytes = 0
+    last_flush_time = asyncio.get_event_loop().time()
+
+    async def flush_buffer() -> AsyncGenerator[str, None]:
+        nonlocal buffer, buffer_bytes, last_flush_time
+        if buffer:
+            yield ''.join(buffer)
+            buffer.clear()
+            buffer_bytes = 0
+            last_flush_time = asyncio.get_event_loop().time()
 
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
@@ -90,12 +112,21 @@ async def log_streamer(request_id: Optional[str],
             for line_str in lines:
                 yield line_str
 
+        last_heartbeat_time = asyncio.get_event_loop().time()
+
         while True:
             # Sleep 0 to yield control to allow other coroutines to run,
             # while keeps the loop tight to make log stream responsive.
             await asyncio.sleep(0)
             line: Optional[bytes] = await f.readline()
+
+            current_time = asyncio.get_event_loop().time()
             if not line:
+                if buffer and (current_time -
+                               last_flush_time) >= _BUFFER_TIMEOUT:
+                    async for chunk in flush_buffer():
+                        yield chunk
+
                 if request_id is not None:
                     request_task = requests_lib.get_request(request_id)
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
@@ -106,18 +137,44 @@ async def log_streamer(request_id: Optional[str],
                         break
                 if not follow:
                     break
+
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
+                    # Currently just used to keep the connection busy, refer to
+                    # https://github.com/skypilot-org/skypilot/issues/5750 for
+                    # more details.
+                    yield message_utils.encode_payload(
+                        rich_utils.Control.HEARTBEAT.encode(''))
+                    last_heartbeat_time = current_time
+
                 # Sleep shortly to avoid storming the DB and CPU, this has
                 # little impact on the responsivness here since we are waiting
                 # for a new line to come in.
                 await asyncio.sleep(0.1)
                 continue
+
+            # Refresh the heartbeat time, this is a trivial optimization for
+            # performance but it helps avoid unnecessary heartbeat strings
+            # being printed when the client runs in an old version.
+            last_heartbeat_time = asyncio.get_event_loop().time()
             line_str = line.decode('utf-8')
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
                     line_str, raise_for_mismatch=False)
+                # TODO(aylei): implement heartbeat mechanism for plain logs,
+                # sending invisible characters might be okay.
                 if is_payload:
                     continue
-            yield line_str
+
+            # Add to buffer
+            buffer.append(line_str)
+            buffer_bytes += len(line_str.encode('utf-8'))
+
+            # Check if we should flush the buffer
+            if (buffer_bytes >= _BUFFER_SIZE or
+                (current_time - last_flush_time) >= _BUFFER_TIMEOUT):
+                async for chunk in flush_buffer():
+                    yield chunk
 
 
 def stream_response(

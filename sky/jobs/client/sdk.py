@@ -46,6 +46,7 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
             managed job.
         name: Name of the managed job.
+        priority: Priority of the managed job.
         _need_confirmation: (Internal only) Whether to show a confirmation
             prompt before launching the job.
 
@@ -196,6 +197,7 @@ def tail_logs(name: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
+              tail: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails logs of managed jobs.
 
@@ -208,6 +210,7 @@ def tail_logs(name: Optional[str] = None,
         follow: Whether to follow the logs.
         controller: Whether to tail logs from the jobs controller.
         refresh: Whether to restart the jobs controller if it is stopped.
+        tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
 
@@ -226,6 +229,7 @@ def tail_logs(name: Optional[str] = None,
         follow=follow,
         controller=controller,
         refresh=refresh,
+        tail=tail,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/logs',

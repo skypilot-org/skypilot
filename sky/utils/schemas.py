@@ -223,6 +223,9 @@ def _get_single_resources_schema():
             'disk_tier': {
                 'type': 'string',
             },
+            'network_tier': {
+                'type': 'string',
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -645,6 +648,18 @@ def get_task_schema():
             # service config is validated separately using SERVICE_SCHEMA
             'service': {
                 'type': 'object',
+            },
+            'job': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'priority': {
+                        'type': 'integer',
+                        'minimum': 0,
+                        'maximum': 1000,
+                    },
+                },
             },
             'setup': {
                 'type': 'string',
@@ -1096,6 +1111,9 @@ def get_config_schema():
             'required': [],
             'properties': {
                 **_NETWORK_CONFIG_SCHEMA,
+                'tenant_id': {
+                    'type': 'string',
+                },
             },
             'additionalProperties': {
                 'type': 'object',
@@ -1200,7 +1218,7 @@ def get_config_schema():
     # all clouds except gcp, kubernetes, ssh
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1262,6 +1280,22 @@ def get_config_schema():
                             'items': {
                                 'type': 'string',
                             },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'nebius': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'credentials_file_path': {
+                            'type': 'string',
+                        },
+                        'tenant_id': {
+                            'type': 'string',
                         },
                         'disabled': {
                             'type': 'boolean'

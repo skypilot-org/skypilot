@@ -5,7 +5,13 @@
  */
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import {
@@ -43,6 +49,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -54,6 +64,27 @@ import {
 // };
 
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
+
+// Helper function to format autostop information, similar to _get_autostop in CLI utils
+const formatAutostop = (autostop, toDown) => {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    autostopStr = autostop + 'm';
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+};
 
 export function Clusters() {
   const router = useRouter();
@@ -79,12 +110,15 @@ export function Clusters() {
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
+        // Trigger cache preloading for clusters page and background preload other pages
+        await cachePreloader.preloadForPage('clusters');
+
         // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await getWorkspaces();
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all clusters to see if 'default' workspace is implicitly used
-        const allClusters = await getClusters();
+        const allClusters = await dashboardCache.get(getClusters);
         const uniqueClusterWorkspaces = [
           ...new Set(
             allClusters
@@ -117,6 +151,10 @@ export function Clusters() {
   }, []);
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getWorkspaces);
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -159,15 +197,14 @@ export function Clusters() {
               <span className="ml-2 text-gray-500">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
+          <button
             onClick={handleRefresh}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <ClusterTable
@@ -222,7 +259,7 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    const initialData = await getClusters();
+    const initialData = await dashboardCache.get(getClusters);
     setData(initialData);
     setLoading(false);
     setLocalLoading(false);
@@ -356,6 +393,12 @@ export function ClusterTable({
               >
                 Started{getSortDirection('time')}
               </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('autostop')}
+              >
+                Autostop{getSortDirection('autostop')}
+              </TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -364,7 +407,7 @@ export function ClusterTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -427,6 +470,9 @@ export function ClusterTable({
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
+                    <TableCell>
+                      {formatAutostop(item.autostop, item.to_down)}
+                    </TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
@@ -441,7 +487,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters

@@ -146,6 +146,12 @@ def pytest_addoption(parser):
         default=None,
         help='Controller cloud to use for tests',
     )
+    parser.addoption(
+        '--postgres',
+        action='store_true',
+        default=False,
+        help='Run tests for Postgres Backend',
+    )
 
 
 def pytest_configure(config):
@@ -456,3 +462,13 @@ def setup_controller_cloud_env(request):
     controller_cloud = request.config.getoption('--controller-cloud')
     os.environ['PYTEST_SKYPILOT_CONTROLLER_CLOUD'] = controller_cloud
     yield controller_cloud
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_postgres_backend_env(request):
+    """Setup Postgres Backend environment variable if --postgres is specified."""
+    if not request.config.getoption('--postgres'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield

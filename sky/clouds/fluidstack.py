@@ -53,6 +53,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
             'Host controllers'
             f' are not supported in {_REPR}.',
