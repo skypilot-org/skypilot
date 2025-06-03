@@ -222,12 +222,20 @@ class JobsController:
                                           callback_func=callback_func)
 
         while True:
+            # NOTE: if we are resuming from a controller failure, we only keep
+            # monitoring if the job is in RUNNING state. For all other cases,
+            # we will directly transit to recovering since we have no idea what
+            # the cluster status is.
+            transit_to_recovering = False
             if is_resume:
                 last_status = managed_job_state.get_job_status_with_task_id(
                     job_id=self._job_id, task_id=task_id)
                 if last_status is not None and last_status.is_terminal():
                     return (last_status ==
                             managed_job_state.ManagedJobStatus.SUCCEEDED)
+                if last_status != managed_job_state.ManagedJobStatus.RUNNING:
+                    transit_to_recovering = True
+
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
@@ -242,12 +250,17 @@ class JobsController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            try:
-                job_status = managed_job_utils.get_job_status(
-                    self._backend, cluster_name)
-            except exceptions.FetchClusterInfoError:
-                logger.info('Failed to fetch the job status. Start recovery...')
-                job_status = None
+            # NOTE: If fetching the job status fails or we force to transit to
+            # recovering, we will set the job status to None, which will force
+            # enter the recovering logic.
+            job_status = None
+            if not transit_to_recovering:
+                try:
+                    job_status = managed_job_utils.get_job_status(
+                        self._backend, cluster_name)
+                except exceptions.FetchClusterInfoError:
+                    logger.info(
+                        'Failed to fetch the job status. Start recovery...')
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 success_end_time = managed_job_utils.try_to_get_job_end_time(
