@@ -378,3 +378,29 @@ def test_cookies_set_with_file(monkeypatch):
     assert found_cookie_jar['test-cookie-2'] == expected_cookie.value
 
     temp_cookie_dir.cleanup()
+
+
+def test_api_server_port_file(monkeypatch, tmp_path):
+    """Test that the API server port file is created and used correctly."""
+    # Mock the port file path to use a temporary directory
+    port_file = tmp_path / 'port'
+    monkeypatch.setattr('sky.server.common.SERVER_PORT_FILE', str(port_file))
+
+    # Test starting server with custom port
+    port = 12345
+    common._start_api_server(port=port)
+    assert port_file.exists()
+    assert int(port_file.read_text().strip()) == port
+
+    # Test that get_server_url uses the port from file
+    assert common.get_server_url() == f'http://127.0.0.1:{port}'
+
+    # Test that default port is used when no port is specified
+    port_file.unlink()
+    common._start_api_server()
+    assert port_file.exists()
+    assert int(port_file.read_text().strip()) == 46580
+
+    # Test that get_server_url uses default port when file doesn't exist
+    port_file.unlink()
+    assert common.get_server_url() == 'http://127.0.0.1:46580'
