@@ -2583,6 +2583,12 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     return f'{cluster_name_on_cloud}-head'
 
 
+def get_custom_k8s_contexts_names() -> List[str]:
+    """Returns the list of context names from the config"""
+    contexts = skypilot_config.get_nested(('kubernetes', 'contexts'), {})
+    return [*contexts] or []
+
+
 def get_config_property_value(keys: Tuple[str, ...],
                               context: Optional[str] = None,
                               default_value: Optional[Any] = None) -> Any:
