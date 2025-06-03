@@ -239,8 +239,11 @@ def override_request_env_and_config(
         client_command=request_body.entrypoint_command,
         using_remote_api_server=request_body.using_remote_api_server)
     try:
+        logger.debug(
+            f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
-                request_body.override_skypilot_config):
+                request_body.override_skypilot_config,
+                request_body.override_skypilot_config_path):
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
