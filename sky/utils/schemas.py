@@ -1316,6 +1316,24 @@ def get_config_schema():
         }
     }
 
+    db_config_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'api_server': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'connection_string': {
+                        'type': 'string',
+                    },
+                },
+            },
+        },
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(
@@ -1343,6 +1361,7 @@ def get_config_schema():
             'api_server': api_server,
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
+            'db': db_config_schema,
             'provision': provision_configs,
             **cloud_configs,
         },

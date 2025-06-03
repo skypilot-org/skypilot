@@ -47,15 +47,6 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
-if os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR):
-    # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set, use it as the database URI.
-    logger.debug(
-        f'using db URI from {constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR}')
-    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-        os.environ.get(constants.SKYPILOT_API_SERVER_DB_URL_ENV_VAR))
-else:
-    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
-
 Base = declarative.declarative_base()
 
 config_table = sqlalchemy.Table(
@@ -309,6 +300,20 @@ def create_table():
         session.commit()
 
 
+conn_string = None
+if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER):
+    conn_string = skypilot_config.get_nested((
+        'db',
+        'api_server',
+        'connection_string',
+    ), None)
+if conn_string:
+    # If SKYPILOT_API_SERVER_DB_URL_ENV_VAR is set,
+    # use it as the database URI.
+    logger.debug(f'using db URI from {conn_string}')
+    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+else:
+    _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
 create_table()
 
 
