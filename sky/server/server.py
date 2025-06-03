@@ -426,13 +426,17 @@ async def validate(validate_body: payloads.ValidateBody) -> str:
     ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
-        # TODO: Admin policy may contain arbitrary code, which may be expensive
-        # to run and may block the server thread. However, moving it into the
-        # executor adds a ~150ms penalty on the local API server because of
-        # added RTTs. For now, we stick to doing the validation inline in the
-        # server thread.
-        dag, mutated_config = admin_policy_utils.apply(
-            dag, request_options=validate_body.request_options)
+        # Ensure the admin policy is applied on the overrided config, i.e.
+        # server config + client config.
+        with skypilot_config.override_skypilot_config(
+                validate_body.override_skypilot_config):
+            # TODO: Admin policy may contain arbitrary code, which may be
+            # expensive to run and may block the server thread. However, moving
+            # it into the executor adds a ~150ms penalty on the local API
+            # server because of added RTTs. For now, we stick to doing the
+            # validation inline in the server thread.
+            dag, mutated_config = admin_policy_utils.apply(
+                dag, request_options=validate_body.request_options)
         with skypilot_config.replace_skypilot_config(mutated_config):
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
