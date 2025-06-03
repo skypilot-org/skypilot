@@ -92,7 +92,8 @@ def launch(
 @server_common.check_server_healthy_or_start
 def queue(refresh: bool,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId:
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> server_common.RequestId:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -135,6 +136,7 @@ def queue(refresh: bool,
         refresh=refresh,
         skip_finished=skip_finished,
         all_users=all_users,
+        job_ids=job_ids,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/queue',
