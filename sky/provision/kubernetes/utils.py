@@ -2516,6 +2516,26 @@ def get_autoscaler_type(
     return autoscaler_type
 
 
+def get_config_property_value(keys: Tuple[str, ...],
+                              context: Optional[str] = None,
+                              default_value: Optional[Any] = None) -> Any:
+    """Returns the nested key value by reading from config
+    Order to get the property_name value:
+    1. if context is specified, will try to get the value from kubernetes/contexts/context/keys
+    2. if no context or no override, try to get it at the k8s level kubernetes/keys
+    3. if not found at k8s level, return either default_value if specified or None
+    """
+    property_value = None
+    if context is not None:
+        property_value = skypilot_config.get_nested(
+            ('kubernetes', 'contexts', context) + keys, None)
+    # if no override found for specified context
+    if property_value is None:
+        property_value = skypilot_config.get_nested(
+            ('kubernetes',) + keys, default_value if default_value else None)
+    return property_value
+
+
 # Mapping of known spot label keys and values for different cluster types
 # Add new cluster types here if they support spot instances along with the
 # corresponding spot label key and value.
