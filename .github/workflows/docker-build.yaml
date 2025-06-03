@@ -11,10 +11,6 @@ on:
           - 'skypilot-nightly'
           - 'skypilot'
         default: 'skypilot-nightly'
-      version:
-        description: 'SkyPilot version to build (optional, uses latest from PyPI if not specified)'
-        required: false
-        type: string
   workflow_call:
     inputs:
       package_name:
@@ -36,46 +32,80 @@ on:
         required: true
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.latest_version }}
     steps:
+      # For manual trigger: checkout the repository
       - name: Checkout repository
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
 
-      - name: Find the release version
+      # For workflow trigger: download all artifacts
+      - name: Download artifacts
+        if: github.event_name == 'workflow_call'
+        uses: actions/download-artifact@v4
+        with:
+          name: skypilot-artifacts
+          path: .
+
+      - name: Verify source code
+        run: |
+          if [ ! -f "setup.py" ]; then
+            echo "Error: Source code not properly prepared"
+            exit 1
+          fi
+
+      - name: Find and verify version
         id: version
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            # Use the provided version
-            echo "Using provided version: ${{ inputs.version }}"
-            echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" == "workflow_call" ]; then
+            if [ -n "${{ inputs.version }}" ]; then
+              # Use the provided version
+              echo "Using provided version: ${{ inputs.version }}"
+              echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            else
+              # Fetch package info from PyPI
+              echo "Fetching package info for ${{ inputs.package_name }}"
+              PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
+              # Parse JSON and get the latest version
+              LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+              echo "Latest version found: $LATEST_VERSION"
+              echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            fi
           else
-            # Fetch package info from PyPI
-            echo "Fetching package info for ${{ inputs.package_name }}"
-            PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
-            # Parse JSON and get the latest version
-            LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
-            echo "Latest version found: $LATEST_VERSION"
-            echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            # For workflow_dispatch, extract version from sky/__init__.py
+            VERSION=$(grep "__version__ = " sky/__init__.py | cut -d"'" -f2)
+            echo "Using version from source: $VERSION"
+            echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+
+          # Verify version does not contain 1.0.0
+          VERSION_TO_CHECK=$(cat $GITHUB_OUTPUT | grep "latest_version=" | cut -d"=" -f2)
+          if [[ "$VERSION_TO_CHECK" == *"1.0.0"* ]]; then
+            echo "Error: Version contains 1.0.0 which is not allowed"
+            exit 1
           fi
           cat $GITHUB_OUTPUT
 
-      - name: Update Dockerfile version
+      - name: Update version in source code
+        if: github.event_name == 'workflow_call'
         run: |
-          sed -i 's/skypilot-nightly\[all\]/${{ inputs.package_name }}[all]==${{ steps.version.outputs.latest_version }}/g' Dockerfile
+          sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${{ steps.version.outputs.latest_version }}'/g" sky/__init__.py
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:

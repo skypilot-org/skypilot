@@ -72,11 +72,18 @@ jobs:
           --wheel
           --outdir dist/
           .
-      - name: Upload distribution artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
+          name: skypilot-artifacts
+          path: |
+            .
+            !**/*.pyc
+            !**/__pycache__
+            !.git/
+            !.github/
+            !.pytest_cache/
+            !*.egg-info/
 
       # Trigger Buildkite smoke tests
       - name: Trigger Buildkite Smoke Tests

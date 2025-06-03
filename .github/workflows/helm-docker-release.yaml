@@ -43,6 +43,8 @@ jobs:
 
   docker-build:
     needs: set-package
+    permissions:
+      contents: read
     uses: ./.github/workflows/docker-build.yaml
     with:
       package_name: ${{ needs.set-package.outputs.package_name }}

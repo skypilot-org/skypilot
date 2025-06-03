@@ -73,11 +73,18 @@ jobs:
           --outdir dist/
           .
 
-      - name: Upload distribution artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
+          name: skypilot-artifacts
+          path: |
+            .
+            !**/*.pyc
+            !**/__pycache__
+            !.git/
+            !.github/
+            !.pytest_cache/
+            !*.egg-info/
 
   publish-and-validate-test-pypi:
     needs: [extract-version, build-package]
@@ -89,7 +96,7 @@ jobs:
     secrets: inherit
 
   publish-and-validate-pypi:
-    needs: [publish-and-validate-test-pypi]
+    needs: [extract-version, publish-and-validate-test-pypi]
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot
@@ -97,25 +104,15 @@ jobs:
       repository_type: 'pypi'
     secrets: inherit
 
-  trigger-docker-build:
-    needs: [extract-version, publish-and-validate-pypi]
-    uses: ./.github/workflows/docker-build.yaml
+  trigger-helm-release:
+    needs: [publish-and-validate-pypi]
+    uses: ./.github/workflows/helm-docker-release.yaml
     with:
-      package_name: 'skypilot'
-      version: ${{ needs.extract-version.outputs.version }}
-    secrets: inherit
-
-  publish-helm:
-    needs: [extract-version, publish-and-validate-pypi, trigger-docker-build]
-    uses: ./.github/workflows/publish-helm.yml
-    with:
-      version: ${{ needs.extract-version.outputs.version }}
-      commit_message: 'Update Helm charts for skypilot version ${{ needs.extract-version.outputs.version }}'
-      package_name: 'skypilot'
+      package_name: skypilot
     secrets: inherit
 
   create-release:
-    needs: [extract-version, publish-to-pypi]
+    needs: [extract-version, publish-and-validate-pypi]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -138,7 +135,6 @@ jobs:
           tag_name: "v${{ needs.extract-version.outputs.version }}"
           generate_release_notes: true
           draft: true
-
 
   cleanup-branches:
     needs: extract-version

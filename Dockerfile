@@ -26,8 +26,14 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash && \
     # Install uv and skypilot
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
-    ~/.local/bin/uv pip install skypilot-nightly[all] --system && \
+    ~/.local/bin/uv pip install --prerelease allow azure-cli --system
+
+# Add source code
+COPY . /skypilot-src
+
+# Install SkyPilot and clean up
+RUN cd /skypilot-src && \
+    ~/.local/bin/uv pip install -e ".[all]" --system && \
     # Cleanup all caches to reduce the image size
     conda clean -afy && \
     ~/.local/bin/uv cache clean && \
