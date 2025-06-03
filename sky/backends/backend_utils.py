@@ -535,7 +535,6 @@ def get_expirable_clouds(
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
 
-
         local_credential_expiring = cloud.can_credential_expire()
         if isinstance(remote_identities, str):
             if remote_identities == local_credentials_value and local_credential_expiring:
