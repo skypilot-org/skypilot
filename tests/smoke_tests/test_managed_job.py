@@ -1188,11 +1188,11 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'},
     )
 
 
 @pytest.mark.kubernetes
-@pytest.mark.gcp
 @pytest.mark.managed_jobs
 def test_managed_jobs_ha_kill_running(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
