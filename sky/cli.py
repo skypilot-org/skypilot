@@ -68,6 +68,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
+from sky.service_catalog import constants as service_catalog_constants
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -3835,7 +3836,7 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS
+                c for c in service_catalog_constants.ALL_CLOUDS
                 if c != 'kubernetes' and c != 'ssh'
             ]
 

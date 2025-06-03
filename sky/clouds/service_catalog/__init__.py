@@ -5,12 +5,7 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.config import fallback_to_default_catalog
-from sky.clouds.service_catalog.constants import ALL_CLOUDS
-from sky.clouds.service_catalog.constants import CATALOG_DIR
-from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
-from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
-from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL_S3_MIRROR)
+from sky.service_catalog import constants as service_catalog_constants
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
@@ -23,7 +18,7 @@ CloudFilter = Optional[Union[List[str], str]]
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
-        clouds = list(ALL_CLOUDS)
+        clouds = list(service_catalog_constants.ALL_CLOUDS)
 
         # TODO(hemil): Remove this once the common service catalog
         # functions are refactored from clouds/kubernetes.py to
@@ -382,10 +377,4 @@ __all__ = [
     'is_image_tag_valid',
     # Configuration
     'fallback_to_default_catalog',
-    # Constants
-    'ALL_CLOUDS',
-    'HOSTED_CATALOG_DIR_URL',
-    'HOSTED_CATALOG_DIR_URL_S3_MIRROR',
-    'CATALOG_SCHEMA_VERSION',
-    'CATALOG_DIR',
 ]
