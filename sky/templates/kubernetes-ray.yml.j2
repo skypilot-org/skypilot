@@ -529,6 +529,8 @@ available_node_types:
             - name: {{ key }}
               value: {{ value }}
             {% endfor %}
+            # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#environment-variables-nccl
+            # Page recommends setting NCCL values for GPUDirect TCPX for best performance.
             {% if k8s_enable_gpudirect_tcpx %}
             - name: LD_LIBRARY_PATH
               value: /usr/local/nvidia/lib64:/usr/local/tcpx/lib64
