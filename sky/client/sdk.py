@@ -1888,7 +1888,10 @@ def api_start(
                              'from the config file and/or unset the '
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
-    server_common.check_server_healthy_or_start_fn(deploy, host, foreground, port=port)
+    server_common.check_server_healthy_or_start_fn(deploy,
+                                                   host,
+                                                   foreground,
+                                                   port=port)
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')

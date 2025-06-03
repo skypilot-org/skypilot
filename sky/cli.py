@@ -6065,10 +6065,13 @@ def api():
                     'machine assuming the machine is dedicated to SkyPilot API '
                     'server; host will also be set to 0.0.0.0 to allow remote '
                     'access.'))
-@click.option('--port',
-              type=int,
-              required=False,
-              help='The port to deploy the SkyPilot API server. If not specified, port 46580 will be used.')
+@click.option(
+    '--port',
+    type=int,
+    required=False,
+    help=
+    'The port to deploy the SkyPilot API server. If not specified, port 46580 will be used.'
+)
 @click.option('--host',
               default='127.0.0.1',
               type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
@@ -6085,7 +6088,8 @@ def api():
               'This is useful when the API server is managed by systems '
               'like systemd and Kubernetes.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str], foreground: bool, port: Optional[int]):
+def api_start(deploy: bool, host: Optional[str], foreground: bool,
+              port: Optional[int]):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy, host=host, foreground=foreground, port=port)
 
