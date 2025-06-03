@@ -1164,11 +1164,34 @@ class Resources:
             ValueError: if the attribute is invalid.
         """
 
-        if self._image_id is None and isinstance(self._cloud, clouds.GCP):
-            if self._network_tier == resources_utils.NetworkTier.BEST:
+        if (self._network_tier == resources_utils.NetworkTier.BEST and
+                isinstance(self._cloud, clouds.GCP)):
+            # Handle GPU Direct TCPX requirement for docker images
+            if self._image_id is None:
+                # No custom image specified - use the default GPU Direct image
                 self._image_id = {
                     self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
                 }
+            else:
+                # Custom image specified - validate it's a docker image
+                # Check if any of the specified images are not docker images
+                non_docker_images = []
+                for region, image_id in self._image_id.items():
+                    if not image_id.startswith('docker:'):
+                        non_docker_images.append(
+                            f'{image_id} (region: {region})')
+
+                if non_docker_images:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'When using network_tier=BEST on GCP, image_id '
+                            f'must be a docker image. '
+                            f'Found non-docker images: '
+                            f'{", ".join(non_docker_images)}. '
+                            f'Please either: (1) use a docker image '
+                            f'(prefix with "docker:"), or '
+                            f'(2) leave image_id empty to use the default '
+                            f'GPU Direct TCPX image.')
 
         if self._image_id is None:
             return
