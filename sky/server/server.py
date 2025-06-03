@@ -110,16 +110,17 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if user_id is None:
             return await call_next(request)
 
-        user_roles = users_rest.permission_service.get_user_roles(user_id)
+        permission_service = users_rest.permission_service
+        user_roles = permission_service.get_user_roles(user_id)
         if len(user_roles) == 0:
             default_role = rbac.get_default_role()
             logger.info(f'User {user_id} has no roles, adding'
                         f' default role {default_role}')
-            users_rest.permission_service.add_role(user_id, default_role)
+            permission_service.add_role(user_id, default_role)
 
         # Check the role permission
-        if users_rest.permission_service.check_permission(
-                user_id, request.url.path, request.method):
+        if permission_service.check_permission(user_id, request.url.path,
+                                               request.method):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 

@@ -20,6 +20,16 @@ permission_service = permission.PermissionService()
 permission_service.init_policies()
 
 
+# Set callback function to reload policy when it's updated
+def on_policy_update():
+    """Callback function to reload policy when it's updated."""
+    logger.info('Policy update detected, reloading policy')
+    permission_service.load_policy()
+
+
+permission_service.watcher.set_update_callback(on_policy_update)
+
+
 @router.get('')
 async def users() -> List[Dict[str, Any]]:
     """Gets all users."""
@@ -62,11 +72,6 @@ async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
     if not user_info.name:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
-    user_roles = permission_service.get_user_roles(user_id)
-    if role in user_roles:
-        logger.info(f'User {user_id} already has role {role}')
-        return
+
     # Update user role in casbin policy
-    # TODO(hailong): how to handle multiple roles?
-    logger.info(f'Updating user {user_id} role from {user_roles[0]} to {role}')
-    permission_service.update_role(user_id, user_roles[0], role)
+    permission_service.update_role(user_id, role)
