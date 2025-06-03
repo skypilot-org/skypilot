@@ -2,7 +2,7 @@
 import typing
 from typing import Optional
 
-from sky.clouds import service_catalog
+from sky import service_catalog
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 

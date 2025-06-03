@@ -16,12 +16,12 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import optimizer
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils

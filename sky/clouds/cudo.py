@@ -4,7 +4,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
-from sky.clouds import service_catalog
+from sky import service_catalog
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils

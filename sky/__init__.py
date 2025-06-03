@@ -110,7 +110,6 @@ from sky.client.sdk import storage_delete
 from sky.client.sdk import storage_ls
 from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
-from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
@@ -118,6 +117,7 @@ from sky.data import StoreType
 from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.resources import Resources
+from sky.service_catalog import list_accelerators
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
 from sky.utils.common import OptimizeTarget

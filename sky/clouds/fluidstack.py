@@ -4,8 +4,8 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import service_catalog
 from sky.adaptors import common as adaptors_common
-from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
 from sky.utils import registry
 from sky.utils import resources_utils

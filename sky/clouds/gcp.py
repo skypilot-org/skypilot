@@ -12,10 +12,10 @@ import colorama
 
 from sky import clouds
 from sky import exceptions
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
-from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
@@ -1322,7 +1322,7 @@ class GCP(clouds.Cloud):
         region = resources.region
 
         # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import gcp_catalog
+        from sky.service_catalog import gcp_catalog
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 

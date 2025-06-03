@@ -17,8 +17,8 @@ from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
 from typing_extensions import assert_never
 
 from sky import exceptions
+from sky import service_catalog
 from sky import skypilot_config
-from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import timeline

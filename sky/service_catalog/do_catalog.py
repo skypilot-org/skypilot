@@ -7,7 +7,7 @@ query instance types and pricing information for digital ocean.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.clouds.service_catalog import common
+from sky.service_catalog import common
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

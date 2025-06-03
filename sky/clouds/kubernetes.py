@@ -8,10 +8,10 @@ import colorama
 
 from sky import clouds
 from sky import exceptions
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils

@@ -10,7 +10,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import GCP
-from sky.clouds.service_catalog import common
+from sky.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 

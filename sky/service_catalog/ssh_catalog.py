@@ -8,9 +8,9 @@ from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.clouds import ssh
-from sky.clouds.service_catalog import CloudFilter
-from sky.clouds.service_catalog import common
-from sky.clouds.service_catalog import kubernetes_catalog
+from sky.service_catalog import CloudFilter
+from sky.service_catalog import common
+from sky.service_catalog import kubernetes_catalog
 
 logger = sky_logging.init_logger(__name__)
 

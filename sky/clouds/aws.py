@@ -13,12 +13,12 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
-from sky.clouds import service_catalog
-from sky.clouds.service_catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
+from sky.service_catalog import common as catalog_common
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -671,7 +671,7 @@ class AWS(clouds.Cloud):
 
         # Fetch the AWS catalogs
         # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.service_catalog import aws_catalog
 
         # Trigger the fetch of the availability zones mapping.
         try:
@@ -980,7 +980,7 @@ class AWS(clouds.Cloud):
         use_spot = resources.use_spot
 
         # pylint: disable=import-outside-toplevel,unused-import
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.service_catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 

@@ -10,8 +10,8 @@ import pytest
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import service_catalog
 from sky import skypilot_config
-from sky.clouds import service_catalog
 
 ALL_INSTANCE_TYPE_INFOS = sum(
     sky.list_accelerators(gpus_only=True).values(), [])

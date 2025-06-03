@@ -1,23 +1,23 @@
-"""Nebius Catalog.
+"""SCP Cloud Catalog.
 
 This module loads the service catalog file and can be used to query
-instance types and pricing information for Nebius.
+instance types and pricing information for SCP.
 """
+
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.clouds.service_catalog import common
+from sky.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-# Keep it synced with the frequency in
-# skypilot-catalog/.github/workflows/update-Nebius-catalog.yml
-_PULL_FREQUENCY_HOURS = 7
-
-_df = common.read_catalog('nebius/vms.csv')
+_df = common.read_catalog('scp/vms.csv')
+_image_df = common.read_catalog('scp/images.csv')
+_DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 2
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -29,8 +29,8 @@ def validate_region_zone(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Nebius does not support zones.')
-    return common.validate_region_zone_impl('nebius', _df, region, zone)
+            raise ValueError('SCP Cloud does not support zones.')
+    return common.validate_region_zone_impl('scp', _df, region, zone)
 
 
 def get_hourly_cost(instance_type: str,
@@ -38,10 +38,10 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'Nebius does not support spot.'
+    assert not use_spot, 'SCP Cloud does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Nebius does not support zones.')
+            raise ValueError('SCP Cloud does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -56,7 +56,14 @@ def get_default_instance_type(
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
+    if cpus is None and memory is None:
+        cpus = str(_DEFAULT_NUM_VCPUS)
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
@@ -79,7 +86,7 @@ def get_instance_type_for_accelerator(
     """
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Nebius does not support zones.')
+            raise ValueError('SCP Cloud does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
@@ -90,14 +97,19 @@ def get_instance_type_for_accelerator(
                                                          zone=zone)
 
 
-def regions() -> List['cloud.Region']:
-    return common.get_region_zones(_df, use_spot=False)
-
-
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
-    return common.get_region_zones(df, use_spot)
+    region_list = common.get_region_zones(df, use_spot)
+    # Hack: Enforce default regions are always tried first
+    default_region_list = []
+    other_region_list = []
+    for region in region_list:
+        if 'SCP' in region.name:
+            default_region_list.append(region)
+        else:
+            other_region_list.append(region)
+    return default_region_list + other_region_list
 
 
 def list_accelerators(
@@ -108,9 +120,13 @@ def list_accelerators(
         case_sensitive: bool = True,
         all_regions: bool = False,
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in Nebius offering GPUs."""
-
+    """Returns all instance types in SCP offering GPUs."""
     del require_price  # Unused.
-    return common.list_accelerators_impl('nebius', _df, gpus_only, name_filter,
+    return common.list_accelerators_impl('scp', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
                                          case_sensitive, all_regions)
+
+
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    """Returns the image id from the tag."""
+    return common.get_image_id_from_tag_impl(_image_df, tag, region)

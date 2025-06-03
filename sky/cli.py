@@ -55,13 +55,13 @@ from sky import global_user_state
 from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.client import sdk
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -3959,7 +3959,7 @@ def show_gpus(
                                   all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common as catalog_common
+        from sky.service_catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud

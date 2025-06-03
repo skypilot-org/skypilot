@@ -18,7 +18,6 @@ import sky
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
-from sky.clouds.service_catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -27,6 +26,7 @@ from sky.server import common as server_common
 from sky.server.requests import executor
 from sky.server.requests import requests as api_requests
 from sky.server.server import app
+from sky.service_catalog import vsphere_catalog
 from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import message_utils
@@ -204,9 +204,8 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     monkeypatch.setattr('sky.check.get_cached_enabled_clouds_or_refresh',
                         get_clouds_factory)
     monkeypatch.setattr('sky.check.check_capability', dummy_function)
-    monkeypatch.setattr(
-        'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
-        get_az_mappings)
+    monkeypatch.setattr('sky.service_catalog.aws_catalog._get_az_mappings',
+                        get_az_mappings)
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
                         dummy_function)
     monkeypatch.setattr(

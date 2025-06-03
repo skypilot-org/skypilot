@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from sky import clouds as cloud_lib
 from sky import sky_logging
 from sky.clouds import Azure
-from sky.clouds.service_catalog import common
+from sky.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 

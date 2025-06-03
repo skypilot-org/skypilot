@@ -17,10 +17,10 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.service_catalog import common as service_catalog_common
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils

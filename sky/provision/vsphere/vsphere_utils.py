@@ -10,18 +10,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
-from sky.clouds.service_catalog import vsphere_catalog
-from sky.clouds.service_catalog.common import get_catalog_path
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_accelerators_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_hosts_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_images_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_instance_image_mapping_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_vms_csv)
 from sky.provision.vsphere.common import vim_utils
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
 from sky.provision.vsphere.common.cls_api_helper import ClsApiHelper
@@ -32,6 +20,16 @@ from sky.provision.vsphere.common.vim_utils import create_spec_with_script
 from sky.provision.vsphere.common.vim_utils import poweron_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
+from sky.service_catalog import vsphere_catalog
+from sky.service_catalog.common import get_catalog_path
+from sky.service_catalog.data_fetchers.fetch_vsphere import (
+    initialize_accelerators_csv)
+from sky.service_catalog.data_fetchers.fetch_vsphere import initialize_hosts_csv
+from sky.service_catalog.data_fetchers.fetch_vsphere import (
+    initialize_images_csv)
+from sky.service_catalog.data_fetchers.fetch_vsphere import (
+    initialize_instance_image_mapping_csv)
+from sky.service_catalog.data_fetchers.fetch_vsphere import initialize_vms_csv
 
 if typing.TYPE_CHECKING:
     import yaml

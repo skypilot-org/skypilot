@@ -11,10 +11,10 @@ from packaging import version as pversion
 
 from sky import clouds
 from sky import exceptions
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
-from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -338,7 +338,7 @@ class Azure(clouds.Cloud):
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
             # pylint: disable=import-outside-toplevel
-            from sky.clouds.service_catalog import azure_catalog
+            from sky.service_catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
                 resources.instance_type)
             image_id = self._get_default_image_tag(gen_version,

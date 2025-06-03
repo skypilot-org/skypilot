@@ -4,8 +4,8 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import service_catalog
 from sky.adaptors import common as adaptors_common
-from sky.clouds import service_catalog
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data

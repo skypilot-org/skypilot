@@ -33,13 +33,13 @@ from sky import jobs as managed_jobs
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
+from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib

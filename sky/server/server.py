@@ -33,8 +33,8 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import models
+from sky import service_catalog
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils

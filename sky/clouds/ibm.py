@@ -6,10 +6,10 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import colorama
 
 from sky import clouds
+from sky import service_catalog
 from sky import sky_logging
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
-from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib

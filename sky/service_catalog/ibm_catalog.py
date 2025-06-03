@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from sky import sky_logging
 from sky.adaptors import ibm
 from sky.clouds import cloud
-from sky.clouds.service_catalog import common
+from sky.service_catalog import common
 from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)

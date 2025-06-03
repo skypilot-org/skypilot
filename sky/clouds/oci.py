@@ -27,8 +27,8 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
+from sky import service_catalog
 from sky.adaptors import oci as oci_adaptor
-from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
@@ -319,7 +319,7 @@ class OCI(clouds.Cloud):
                 region=region.name)
 
             # pylint: disable=import-outside-toplevel
-            from sky.clouds.service_catalog import oci_catalog
+            from sky.service_catalog import oci_catalog
             os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
                                                         region=region.name)
         logger.debug(f'OS type for the image {image_id} is {os_type}')
