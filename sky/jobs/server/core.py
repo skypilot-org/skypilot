@@ -20,7 +20,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds.service_catalog import common as service_catalog_common
+from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils

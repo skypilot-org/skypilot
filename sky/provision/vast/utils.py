@@ -78,7 +78,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 		 amount of memory.
 
       *  Vast instance types are an invention for skypilot. Refer to
-         service_catalog/vast_catalog.py for the current construction
+         catalog/vast_catalog.py for the current construction
          of the type.
 
     """

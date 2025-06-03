@@ -17,8 +17,8 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import oci as oci_adaptor
+from sky.catalog import common
 from sky.clouds import OCI
-from sky.clouds.service_catalog import common
 from sky.clouds.utils import oci_utils
 from sky.utils import resources_utils
 

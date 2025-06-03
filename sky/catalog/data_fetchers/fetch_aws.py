@@ -546,7 +546,7 @@ if __name__ == '__main__':
     print('AWS Service Catalog saved to aws/vms.csv')
 
     # Disable refreshing images.csv as we are using skypilot custom AMIs
-    # See sky/clouds/service_catalog/images/README.md for more details.
+    # See sky/clouds/catalog/images/README.md for more details.
     # image_df = get_all_regions_images_df(user_regions)
     # _check_regions_integrity(image_df, 'images')
 

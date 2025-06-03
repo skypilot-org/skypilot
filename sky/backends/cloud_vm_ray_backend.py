@@ -24,6 +24,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
@@ -39,7 +40,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -803,7 +803,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('scp'):
+                for r in catalog.regions('scp'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -1088,7 +1088,7 @@ class FailoverCloudErrorHandlerV2:
         output = str(error)
         # Sometimes, lambda cloud error will list available regions.
         if output.find('Regions with capacity available:') != -1:
-            for r in service_catalog.regions('lambda'):
+            for r in catalog.regions('lambda'):
                 if output.find(r.name) == -1:
                     _add_to_blocked_resources(
                         blocked_resources,
@@ -2696,7 +2696,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     NAME = 'cloudvmray'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
+    ResourceHandle = CloudVmRayResourceHandle  # type: ignore
 
     def __init__(self):
         self.run_timestamp = sky_logging.get_run_timestamp()
