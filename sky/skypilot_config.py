@@ -711,6 +711,8 @@ def update_config_no_lock(config: config_utils.Config) -> None:
     Args:
         config: The config to save and sync.
     """
+    # import here to avoid circular import
+    from sky import global_user_state # pylint: disable=import-outside-toplevel
     global_config_path = os.path.expanduser(get_user_config_path())
 
     # Always save to the local file (PVC in Kubernetes, local file otherwise)
@@ -722,4 +724,7 @@ def update_config_no_lock(config: config_utils.Config) -> None:
         # access
         config_map_utils.patch_configmap_with_config(config, global_config_path)
 
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:   
+        logger.debug('saving api_server config to db') 
+        global_user_state.set_config_yaml('api_server', common_utils.dump_yaml_str(dict(config)))
     _reload_config()
