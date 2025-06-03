@@ -102,6 +102,7 @@ def queue(refresh: bool,
         refresh: Whether to restart the jobs controller if it is stopped.
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
+        job_ids: IDs of the managed jobs to show.
 
     Returns:
         The request ID of the queue request.
