@@ -141,6 +141,10 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   - Use `abc` module for abstract classes to ensure all abstract methods are implemented.
   - Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
 
+## Kubernetes development
+
+The following [guide](https://github.com/skypilot-org/skypilot/blob/master/tests/kubernetes/README.md) provides details on Kubernetes-specific development, including scripts and setup.
+
 ### Environment variables for developers
 
 - `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
