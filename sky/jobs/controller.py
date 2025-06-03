@@ -417,7 +417,17 @@ class JobsController:
             if handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
-                if resources.need_cleanup_after_preemption_or_failure():
+                # If we are forcing to transit to recovering, we need to clean
+                # up the cluster as it is possible that we already submitted the
+                # job to the worker cluster, but state is not updated yet. In
+                # this case, it is possible that we will double-submit the job
+                # to the worker cluster. So we always clean up the cluster here.
+                # TODO(tian,cooperc): We can check if there is a running job on
+                # the worker cluster, and if so, we can skip the cleanup.
+                # Challenge: race condition when the worker cluster thought it
+                # does not have a running job yet but later the job is launched.
+                if (resources.need_cleanup_after_preemption_or_failure() or
+                        force_transit_to_recovering):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
