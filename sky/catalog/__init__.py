@@ -4,14 +4,14 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.service_catalog import constants as service_catalog_constants
-from sky.service_catalog.config import fallback_to_default_catalog
+from sky.catalog import constants as service_catalog_constants
+from sky.catalog.config import fallback_to_default_catalog
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
+    from sky.catalog import common
     from sky.clouds import cloud
-    from sky.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
 
@@ -32,10 +32,10 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     def _execute_catalog_method(cloud: str):
         try:
             cloud_module = importlib.import_module(
-                f'sky.service_catalog.{cloud.lower()}_catalog')
+                f'sky.catalog.{cloud.lower()}_catalog')
         except ModuleNotFoundError:
             raise ValueError(
-                'Cannot find module "sky.service_catalog'
+                'Cannot find module "sky.catalog'
                 f'.{cloud}_catalog" for cloud "{cloud}".') from None
         try:
             method = getattr(cloud_module, method_name)

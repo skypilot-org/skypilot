@@ -8,8 +8,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky import clouds as cloud_lib
 from sky import sky_logging
+from sky.catalog import common
 from sky.clouds import Azure
-from sky.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -17,7 +17,7 @@ logger = sky_logging.init_logger(__name__)
 
 # This list should match the list of regions in
 # skypilot image generation Packer script's replication_regions
-# sky/clouds/service_catalog/images/skypilot-azure-cpu-ubuntu.pkr.hcl
+# sky/clouds/catalog/images/skypilot-azure-cpu-ubuntu.pkr.hcl
 COMMUNITY_IMAGE_AVAILABLE_REGIONS = {
     'centralus',
     'eastus',

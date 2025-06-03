@@ -8,9 +8,9 @@ import pandas as pd
 import pytest
 
 import sky
+from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import service_catalog
 from sky import skypilot_config
 
 ALL_INSTANCE_TYPE_INFOS = sum(
@@ -75,7 +75,7 @@ def generate_random_dag(
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate
                     (instance_list,
-                     _) = service_catalog.get_instance_type_for_accelerator(
+                     _) = catalog.get_instance_type_for_accelerator(
                          candidate.accelerator_name,
                          candidate.accelerator_count,
                          clouds='gcp')

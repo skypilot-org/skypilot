@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
+from sky.catalog.common import get_catalog_path
 from sky.provision import common
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.common import custom_script as custom_script_lib
@@ -14,7 +15,6 @@ from sky.provision.vsphere.common.vim_utils import poweroff_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
 from sky.provision.vsphere.vsphere_utils import VsphereClient
-from sky.service_catalog.common import get_catalog_path
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:

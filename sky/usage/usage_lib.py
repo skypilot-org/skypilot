@@ -205,8 +205,8 @@ class UsageMessageToReport(MessageToReport):
                     logger.debug('Multiple accelerators are not supported: '
                                  f'{resources.accelerators}.')
                 self.task_accelerators = list(resources.accelerators.keys())[0]
-                self.task_num_accelerators = resources.accelerators[
-                    self.task_accelerators]
+                self.task_num_accelerators = int(
+                    resources.accelerators[self.task_accelerators])
             else:
                 self.task_accelerators = None
                 self.task_num_accelerators = None
@@ -245,7 +245,8 @@ class UsageMessageToReport(MessageToReport):
                 logger.debug('Multiple accelerators are not supported: '
                              f'{resources.accelerators}.')
             self.accelerators = list(resources.accelerators.keys())[0]
-            self.num_accelerators = resources.accelerators[self.accelerators]
+            self.num_accelerators = int(
+                resources.accelerators[self.accelerators])
         else:
             self.accelerators = None
             self.num_accelerators = None

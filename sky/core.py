@@ -8,6 +8,7 @@ import colorama
 
 from sky import admin_policy
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
@@ -16,7 +17,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import optimizer
-from sky import service_catalog
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
@@ -1061,7 +1061,7 @@ def realtime_kubernetes_gpu_availability(
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None
     ) -> List[models.RealtimeGpuAvailability]:
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
+        counts, capacity, available = catalog.list_accelerator_realtime(
             gpus_only=True,
             clouds='ssh' if is_ssh else 'kubernetes',
             name_filter=name_filter,

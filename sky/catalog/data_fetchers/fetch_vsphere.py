@@ -6,8 +6,8 @@ import typing
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
+from sky.catalog.common import get_catalog_path
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
-from sky.service_catalog.common import get_catalog_path
 
 if typing.TYPE_CHECKING:
     import pandas as pd

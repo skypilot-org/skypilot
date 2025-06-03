@@ -7,7 +7,7 @@ query instance types and pricing information for RunPod.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.service_catalog import common
+from sky.catalog import common
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud

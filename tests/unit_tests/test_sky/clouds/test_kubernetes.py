@@ -298,7 +298,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
-    @patch('sky.service_catalog.get_image_id_from_tag')
+    @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_enabled_with_user_security_context(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
@@ -366,7 +366,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
-    @patch('sky.service_catalog.get_image_id_from_tag')
+    @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_disabled_when_no_high_perf_networking(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
@@ -433,7 +433,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
-    @patch('sky.service_catalog.get_image_id_from_tag')
+    @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_disabled_when_network_tier_not_best(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
@@ -501,7 +501,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
-    @patch('sky.service_catalog.get_image_id_from_tag')
+    @patch('sky.catalog.get_image_id_from_tag')
     def test_nebius_network_tier_with_gpu_environment_variables(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,

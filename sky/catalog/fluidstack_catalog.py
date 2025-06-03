@@ -1,27 +1,21 @@
-"""Lambda Cloud Catalog.
+"""Fluidstack Cloud Catalog.
 
 This module loads the service catalog file and can be used to query
-instance types and pricing information for Lambda.
+instance types and pricing information for FluidStack.
 """
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.service_catalog import common
-from sky.utils import resources_utils
+from sky.catalog import common
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-# Keep it synced with the frequency in
-# skypilot-catalog/.github/workflows/update-lambda-catalog.yml
-_PULL_FREQUENCY_HOURS = 7
-
-_df = common.read_catalog('lambda/vms.csv',
-                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_df = common.read_catalog('fluidstack/vms.csv')
 
 # Number of vCPUS for gpu_1x_a10
-_DEFAULT_NUM_VCPUS = 30
+_DEFAULT_NUM_VCPUS = 6
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
 
@@ -34,8 +28,8 @@ def validate_region_zone(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not support zones.')
-    return common.validate_region_zone_impl('lambda', _df, region, zone)
+            raise ValueError('FluidStack Cloud does not support zones.')
+    return common.validate_region_zone_impl('fluidstack', _df, region, zone)
 
 
 def get_hourly_cost(instance_type: str,
@@ -43,10 +37,10 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'Lambda Cloud does not support spot.'
+    assert not use_spot, 'FluidStack Cloud does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not support zones.')
+            raise ValueError('FluidStack Cloud does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -56,10 +50,9 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -84,14 +77,12 @@ def get_instance_type_for_accelerator(
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
-    """Filter the instance types based on resource requirements.
-
-    Returns a list of instance types satisfying the required count of
+    """Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not support zones.')
+            raise ValueError('FluidStack Cloud does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
@@ -122,15 +113,17 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str],
-        region_filter: Optional[str],
-        quantity_filter: Optional[int],
-        case_sensitive: bool = True,
-        all_regions: bool = False,
-        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in Lambda offering GPUs."""
-    del require_price  # Unused.
-    return common.list_accelerators_impl('Lambda', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True,
+) -> Dict[str, List[common.InstanceTypeInfo]]:
+    """Returns all instance types in Fluidstack offering GPUs."""
+    del require_price
+    return common.list_accelerators_impl('Fluidstack', _df, gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

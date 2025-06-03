@@ -6,7 +6,7 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
-from sky.service_catalog import constants as service_catalog_constants
+from sky.catalog import constants as service_catalog_constants
 from sky.skylet import constants
 
 

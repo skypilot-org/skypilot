@@ -12,10 +12,10 @@ from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
+from sky.catalog import CloudFilter
+from sky.catalog import common
 from sky.clouds import cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.service_catalog import CloudFilter
-from sky.service_catalog import common
 
 logger = sky_logging.init_logger(__name__)
 

@@ -129,11 +129,10 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
     _run_label_test(allowed_labels, invalid_labels, cloud=clouds.AWS())
 
 
-@mock.patch('sky.service_catalog.instance_type_exists', return_value=True)
-@mock.patch('sky.service_catalog.get_accelerators_from_instance_type',
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
-@mock.patch('sky.service_catalog.get_image_id_from_tag',
-            return_value='fake-image')
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ[

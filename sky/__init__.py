@@ -86,6 +86,7 @@ from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
+from sky.catalog import list_accelerators
 from sky.client.sdk import api_cancel
 from sky.client.sdk import api_info
 from sky.client.sdk import api_server_logs
@@ -117,7 +118,6 @@ from sky.data import StoreType
 from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.resources import Resources
-from sky.service_catalog import list_accelerators
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
 from sky.utils.common import OptimizeTarget
