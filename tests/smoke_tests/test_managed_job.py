@@ -1186,9 +1186,8 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-        timeout=20 * 60,
         env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'},
+        timeout=20 * 60,
     )
 
 
