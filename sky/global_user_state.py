@@ -306,6 +306,7 @@ def create_table():
             default_statement='DEFAULT NULL')
         session.commit()
 
+
 def get_config_yaml(key: str) -> Optional[str]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(config_yaml_table).filter_by(key=key).first()
@@ -332,6 +333,7 @@ def set_config_yaml(key: str, yaml_str: str):
         session.execute(do_update_stmt)
         session.commit()
 
+
 conn_string = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
     conn_string = skypilot_config.get_nested((
@@ -346,13 +348,15 @@ else:
     _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
 create_table()
 
-saved_db_config = None
+saved_db_config_str = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
     # if a saved config exists, merge config from db into skypilot_config
-    saved_db_config = get_config_yaml('api_server')
+    saved_db_config_str = get_config_yaml('api_server')
 
-if saved_db_config:
-    overlaid_config = skypilot_config.overlay_skypilot_config(skypilot_config.to_dict(), saved_db_config)
+if saved_db_config_str:
+    saved_db_config = yaml.safe_load(saved_db_config_str)
+    overlaid_config = skypilot_config.overlay_skypilot_config(
+        skypilot_config.to_dict(), saved_db_config)
     skypilot_config.update_config_no_lock(overlaid_config)
 
 
