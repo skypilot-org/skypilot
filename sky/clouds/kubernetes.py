@@ -264,22 +264,6 @@ class Kubernetes(clouds.Cloud):
         if instance_type is None:
             return regions
 
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if (autoscaler_type is not None and not kubernetes_utils.get_autoscaler(
-                autoscaler_type).can_query_backend):
-            # Unsupported autoscaler type. Rely on the autoscaler to
-            # provision the right instance type without running checks.
-            # Worst case, if autoscaling fails, the pod will be stuck in
-            # pending state until provision_timeout, after which failover
-            # will be triggered.
-            #
-            # Removing this if statement produces the same behavior,
-            # because can_create_new_instance_of_type() always returns True
-            # for unsupported autoscaler types.
-            # This check is here as a performance optimization to avoid
-            # further code executions that is known to return this result.
-            return regions
-
         regions_to_return = []
         for r in regions:
             context = r.name
@@ -296,6 +280,26 @@ class Kubernetes(clouds.Cloud):
                          'not fit in the existing Kubernetes cluster '
                          'with context: '
                          f'{context}. Reason: {reason}')
+
+            autoscaler_type = kubernetes_utils.get_config_property_value(
+                ('autoscaler',), context=context)
+            if (autoscaler_type is not None and
+                    not kubernetes_utils.get_autoscaler(
+                        autoscaler_type).can_query_backend):
+                # Unsupported autoscaler type. Rely on the autoscaler to
+                # provision the right instance type without running checks.
+                # Worst case, if autoscaling fails, the pod will be stuck in
+                # pending state until provision_timeout, after which failover
+                # will be triggered.
+                #
+                # Removing this if statement produces the same behavior,
+                # because can_create_new_instance_of_type() always returns True
+                # for unsupported autoscaler types.
+                # This check is here as a performance optimization to avoid
+                # further code executions that is known to return this result.
+                regions_to_return.append(r)
+                continue
+
             if autoscaler_type is None:
                 continue
             autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
