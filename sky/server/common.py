@@ -188,9 +188,6 @@ def get_server_url(host: Optional[str] = DEFAULT_SERVER_HOST) -> str:
         port = int(port_file.read_text(encoding='utf-8').strip())
     else:
         port = 46580
-        logger.warning(
-            f'SkyPilot API server port file does not exist at {port_file}. '
-            'Assuming default port 46580.')
     endpoint = f'http://{host}:{port}'
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
