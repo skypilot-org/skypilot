@@ -3,6 +3,39 @@
 import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import { ENDPOINT } from '@/data/connectors/constants';
+import dashboardCache from '@/lib/cache';
+
+/**
+ * Truncates a string in the middle, preserving parts from beginning and end.
+ * @param {string} str - The string to truncate
+ * @param {number} maxLength - Maximum length of the truncated string
+ * @return {string} - Truncated string
+ */
+function truncateMiddle(str, maxLength = 15) {
+  if (!str || str.length <= maxLength) return str;
+
+  // Reserve 3 characters for '...'
+  if (maxLength <= 3) return '...';
+
+  // Calculate how many characters to keep from beginning and end
+  const halfLength = Math.floor((maxLength - 3) / 2);
+  const remainder = (maxLength - 3) % 2;
+
+  // Keep one more character at the beginning if maxLength - 3 is odd
+  const startLength = halfLength + remainder;
+  const endLength = halfLength;
+
+  // When endLength is 0, just show the start part and '...'
+  if (endLength === 0) {
+    return str.substring(0, startLength) + '...';
+  }
+
+  return (
+    str.substring(0, startLength) +
+    '...' +
+    str.substring(str.length - endLength)
+  );
+}
 
 const clusterStatusMap = {
   UP: 'RUNNING',
@@ -31,19 +64,45 @@ export async function getClusters({ clusterNames = null } = {}) {
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
+      // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
+      let region_or_zone = '';
+      if (cluster.zone) {
+        region_or_zone = cluster.zone;
+      } else {
+        region_or_zone = cluster.region;
+      }
+      // Store the full value before truncation
+      const full_region_or_zone = region_or_zone;
+      // Truncate region_or_zone in the middle if it's too long
+      if (region_or_zone && region_or_zone.length > 25) {
+        region_or_zone = truncateMiddle(region_or_zone, 25);
+      }
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
-        infra: cluster.cloud,
+        user_hash: cluster.user_hash,
+        cloud: cluster.cloud,
         region: cluster.region,
+        infra: region_or_zone
+          ? cluster.cloud + ' (' + region_or_zone + ')'
+          : cluster.cloud,
+        full_infra: full_region_or_zone
+          ? `${cluster.cloud} (${full_region_or_zone})`
+          : cluster.cloud,
         cpus: cluster.cpus,
         mem: cluster.memory,
         gpus: cluster.accelerators,
         resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
         time: new Date(cluster.launched_at * 1000),
         num_nodes: cluster.nodes,
+        workspace: cluster.workspace,
+        autostop: cluster.autostop,
+        to_down: cluster.to_down,
         jobs: [],
+        command: cluster.last_creation_command || cluster.last_use,
+        task_yaml: cluster.last_creation_yaml || '{}',
         events: [
           {
             time: new Date(cluster.launched_at * 1000),
@@ -59,7 +118,12 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function streamClusterJobLogs({ clusterName, jobId, onNewLog }) {
+export async function streamClusterJobLogs({
+  clusterName,
+  jobId,
+  onNewLog,
+  workspace,
+}) {
   try {
     const response = await fetch(`${ENDPOINT}/logs`, {
       method: 'POST',
@@ -73,6 +137,9 @@ export async function streamClusterJobLogs({ clusterName, jobId, onNewLog }) {
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
+        override_skypilot_config: {
+          active_workspace: workspace || 'default',
+        },
       }),
     });
     // Stream the logs
@@ -89,7 +156,7 @@ export async function streamClusterJobLogs({ clusterName, jobId, onNewLog }) {
   }
 }
 
-export async function getClusterJobs({ clusterName }) {
+export async function getClusterJobs({ clusterName, workspace }) {
   try {
     const response = await fetch(`${ENDPOINT}/queue`, {
       method: 'POST',
@@ -99,6 +166,9 @@ export async function getClusterJobs({ clusterName }) {
       body: JSON.stringify({
         cluster_name: clusterName,
         all_users: true,
+        override_skypilot_config: {
+          active_workspace: workspace,
+        },
       }),
     });
     // TODO(syang): remove X-Request-ID when v0.10.0 is released.
@@ -134,6 +204,7 @@ export async function getClusterJobs({ clusterName }) {
         job_duration: job_duration,
         infra: '',
         logs: '',
+        workspace: workspace || 'default',
       };
     });
     return jobData;
@@ -149,44 +220,101 @@ export function useClusterDetails({ cluster, job = null }) {
   const [loadingClusterData, setLoadingClusterData] = useState(true);
   const [loadingClusterJobData, setLoadingClusterJobData] = useState(true);
 
-  const loading = loadingClusterData || loadingClusterJobData;
+  // Separate loading states - cluster details vs cluster jobs
+  const clusterDetailsLoading = loadingClusterData;
+  const clusterJobsLoading = loadingClusterJobData;
 
   const fetchClusterData = useCallback(async () => {
     if (cluster) {
       try {
         setLoadingClusterData(true);
-        const data = await getClusters({ clusterNames: [cluster] });
+        // Use dashboard cache for cluster data
+        const data = await dashboardCache.get(getClusters, [
+          { clusterNames: [cluster] },
+        ]);
         setClusterData(data[0]); // Assuming getClusters returns an array
+        return data[0]; // Return the data for use in fetchClusterJobData
       } catch (error) {
         console.error('Error fetching cluster data:', error);
+        return null;
       } finally {
         setLoadingClusterData(false);
       }
     }
+    return null;
   }, [cluster]);
 
-  const fetchClusterJobData = useCallback(async () => {
-    if (cluster) {
-      try {
-        setLoadingClusterJobData(true);
-        const data = await getClusterJobs({ clusterName: cluster, job: job });
-        setClusterJobData(data);
-      } catch (error) {
-        console.error('Error fetching cluster job data:', error);
-      } finally {
-        setLoadingClusterJobData(false);
+  const fetchClusterJobData = useCallback(
+    async (workspace) => {
+      if (cluster) {
+        try {
+          setLoadingClusterJobData(true);
+          // Use dashboard cache for cluster jobs
+          const data = await dashboardCache.get(getClusterJobs, [
+            {
+              clusterName: cluster,
+              workspace: workspace || 'default',
+            },
+          ]);
+          setClusterJobData(data);
+        } catch (error) {
+          console.error('Error fetching cluster job data:', error);
+        } finally {
+          setLoadingClusterJobData(false);
+        }
       }
-    }
-  }, [cluster, job]);
+    },
+    [cluster]
+  );
 
   const refreshData = useCallback(async () => {
-    await Promise.all([fetchClusterData(), fetchClusterJobData()]);
-  }, [fetchClusterData, fetchClusterJobData]);
+    // Invalidate cache for fresh data
+    dashboardCache.invalidate(getClusters, [{ clusterNames: [cluster] }]);
+
+    const clusterInfo = await fetchClusterData();
+    if (clusterInfo) {
+      // Invalidate cluster jobs cache for fresh data
+      dashboardCache.invalidate(getClusterJobs, [
+        {
+          clusterName: cluster,
+          workspace: clusterInfo.workspace || 'default',
+        },
+      ]);
+      await fetchClusterJobData(clusterInfo.workspace);
+    }
+  }, [fetchClusterData, fetchClusterJobData, cluster]);
+
+  const refreshClusterJobsOnly = useCallback(async () => {
+    if (clusterData) {
+      // Invalidate only cluster jobs cache for fresh data
+      dashboardCache.invalidate(getClusterJobs, [
+        {
+          clusterName: cluster,
+          workspace: clusterData.workspace || 'default',
+        },
+      ]);
+      await fetchClusterJobData(clusterData.workspace);
+    }
+  }, [fetchClusterJobData, clusterData, cluster]);
 
   useEffect(() => {
-    fetchClusterData();
-    fetchClusterJobData();
+    const initializeData = async () => {
+      const clusterInfo = await fetchClusterData();
+      if (clusterInfo) {
+        // Start loading cluster jobs independently
+        fetchClusterJobData(clusterInfo.workspace);
+      }
+    };
+    initializeData();
   }, [cluster, job, fetchClusterData, fetchClusterJobData]);
 
-  return { clusterData, clusterJobData, loading, refreshData };
+  return {
+    clusterData,
+    clusterJobData,
+    loading: clusterDetailsLoading, // Only cluster details loading for initial page render
+    clusterDetailsLoading,
+    clusterJobsLoading,
+    refreshData,
+    refreshClusterJobsOnly,
+  };
 }

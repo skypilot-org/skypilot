@@ -71,7 +71,7 @@ def test_file_mounts(generic_cloud: str):
         extra_flags = '--num-nodes 1'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {extra_flags} examples/using_file_mounts.yaml',
+        f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(
@@ -105,7 +105,7 @@ def test_oci_mounts():
     name = smoke_tests_utils.get_cluster_name()
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --cloud oci --num-nodes 2 examples/oci/oci-mounts.yaml',
+        f'sky launch -y -c {name} --infra oci --num-nodes 2 examples/oci/oci-mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(
@@ -124,12 +124,12 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        (f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} '
+        (f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
-        (f'sky launch -y -c {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} '
+        (f'sky launch -y -c {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name} '
          '--env MY_LOCAL_PATH=tmpfile'),
@@ -176,7 +176,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     test_commands = [
         smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {cluster_name} --cloud {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
         smoke_tests_utils.run_cloud_cmd_on_cluster(cluster_name,
                                                    cmd=ls_hello_command),
@@ -336,7 +336,7 @@ def test_kubernetes_context_switch():
 
     test_commands = [
         # Launch a cluster and run a simple task
-        f'sky launch -y -c {name} --cloud kubernetes "echo Hello from original context"',
+        f'sky launch -y -c {name} --infra kubernetes "echo Hello from original context"',
         f'sky logs {name} 1 --status',  # Ensure job succeeded
 
         # Get current context details and save to a file for later use in cleanup
@@ -420,7 +420,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # If azure is used, the azure blob storage checking assumes the bucket is
     # created in the centralus region when getting the storage account. We
     # should set the cluster to be launched in the same region.
-    region_str = '--region centralus' if generic_cloud == 'azure' else ''
+    region_str = f'/centralus' if generic_cloud == 'azure' else ''
     if azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
@@ -449,7 +449,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         file_path = f.name
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {region_str} --image-id {image_id} {file_path}',
+            f'sky launch -y -c {name} --infra {generic_cloud}{region_str} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
             f'sky exec {name} {quoted_check}',
@@ -479,7 +479,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         file_path = f.name
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
         ]
@@ -507,7 +507,7 @@ def test_nebius_storage_mounts(generic_cloud: str):
         file_path = f.name
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls s3://{storage_name}/hello.txt --profile={nebius.NEBIUS_PROFILE_NAME}'
         ]
@@ -537,7 +537,7 @@ def test_ibm_storage_mounts():
         file_path = f.name
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud ibm {file_path}',
+            f'sky launch -y -c {name} --infra ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt',
         ]
@@ -617,7 +617,7 @@ exclude.py
         # Run test commands
         test_commands = [
             # Test with sky launch
-            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --workdir {temp_dir} {yaml_path}',
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --workdir {temp_dir} {yaml_path}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded
 
             # Test with sky jobs launch
@@ -1128,9 +1128,10 @@ class TestStorageWithCredentials:
         # Stores for each object in the list must be added in the test.
         custom_source_names = ['"path With Spaces"', 'path With Spaces']
         storage_mult_obj = []
+        temp_dir = tempfile.TemporaryDirectory(suffix='skypilot-test')
         for name in custom_source_names:
-            src_path = os.path.expanduser(f'~/{name}')
-            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
+            src_path = pathlib.Path(temp_dir.name) / name
+            src_path.expanduser().mkdir(exist_ok=True)
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=src_path)
@@ -1144,6 +1145,7 @@ class TestStorageWithCredentials:
                     storage_obj.name)
                 if handle:
                     storage_obj.delete()
+            temp_dir.cleanup()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):

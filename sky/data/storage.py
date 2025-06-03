@@ -109,7 +109,7 @@ def _is_storage_cloud_enabled(cloud_name: str,
         sky_check.check_capability(
             sky_cloud.CloudCapability.STORAGE,
             quiet=True,
-        )
+            workspace=skypilot_config.get_active_workspace())
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
@@ -124,6 +124,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    VOLUME = 'VOLUME'
 
     @classmethod
     def from_cloud(cls, cloud: str) -> 'StoreType':

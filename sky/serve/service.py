@@ -186,7 +186,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
-    task_yaml = serve_utils.generate_task_yaml_file_name(service_name, version)
+    service_task_yaml = serve_utils.generate_task_yaml_file_name(
+        service_name, version)
 
     if not is_recovery:
         if (len(serve_state.get_services()) >=
@@ -218,7 +219,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # don't want the new file mounts to overwrite the old one, so we
         # sync to a tmp file first and then copy it to the final name
         # if there is no name conflict.
-        shutil.copy(tmp_task_yaml, task_yaml)
+        shutil.copy(tmp_task_yaml, service_task_yaml)
 
     controller_process = None
     load_balancer_process = None
@@ -249,8 +250,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             controller_host = _get_controller_host()
             controller_process = multiprocessing.Process(
                 target=controller.run_controller,
-                args=(service_name, service_spec, task_yaml, controller_host,
-                      controller_port))
+                args=(service_name, service_spec, service_task_yaml,
+                      controller_host, controller_port))
             controller_process.start()
 
             if not is_recovery:

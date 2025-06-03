@@ -14,6 +14,7 @@ from sky import backends
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -141,8 +142,7 @@ def up(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(
-        task, use_mutated_config_in_current_request=False)
+    dag, mutated_user_config = admin_policy_utils.apply(task)
     task = dag.tasks[0]
 
     with rich_utils.safe_status(
@@ -222,12 +222,14 @@ def up(
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         with common.with_server_user_hash():
-            controller_job_id, controller_handle = execution.launch(
-                task=controller_task,
-                cluster_name=controller_name,
-                retry_until_up=True,
-                _disable_controller_check=True,
-            )
+            with skypilot_config.local_active_workspace_ctx(
+                    constants.SKYPILOT_DEFAULT_WORKSPACE):
+                controller_job_id, controller_handle = execution.launch(
+                    task=controller_task,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    _disable_controller_check=True,
+                )
 
         style = colorama.Style
         fore = colorama.Fore
@@ -352,8 +354,7 @@ def update(
     # and get the mutated config.
     # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
     # will not apply the config.
-    dag, _ = admin_policy_utils.apply(
-        task, use_mutated_config_in_current_request=False)
+    dag, _ = admin_policy_utils.apply(task)
     task = dag.tasks[0]
 
     assert task.service is not None

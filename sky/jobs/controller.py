@@ -179,8 +179,8 @@ class JobsController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id)
-        managed_job_state.set_submitted(
+            cluster_name, self._backend, task, self._job_id, task_id)
+        managed_job_state.set_starting(
             self._job_id,
             task_id,
             self._backend.run_timestamp,
@@ -197,9 +197,7 @@ class JobsController:
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
         logger.info('Started monitoring.')
-        managed_job_state.set_starting(job_id=self._job_id,
-                                       task_id=task_id,
-                                       callback_func=callback_func)
+
         remote_job_submitted_at = self._strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 

@@ -30,6 +30,8 @@ class RunPod(clouds.Cloud):
              'are non-trivial on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on RunPod. To read data '
              'from object stores on RunPod, use `mode: COPY` to copy the data '
@@ -259,7 +261,8 @@ class RunPod(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         RunPod's compute service."""
         return cls._check_credentials()

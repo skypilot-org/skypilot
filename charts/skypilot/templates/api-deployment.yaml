@@ -38,6 +38,8 @@ spec:
         env:
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
+        - name: SKYPILOT_RELEASE_NAME
+          value: {{ .Release.Name | quote }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -61,11 +63,57 @@ spec:
           {{- if .Values.apiService.preDeployHook }}
           {{ .Values.apiService.preDeployHook | nindent 10 }}
           {{- end }}
-          {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
-          echo "Copying config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
-          # The configmap serves as the ground truth for the config.yaml file, read-only
-          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          # When the config.yaml is a symlink, it should be from the old API
+          # server code. We remove the symlink and copy the ConfigMap config to
+          # PVC location for backward compatibility.
+          # TODO(zhwu): remove this after 0.12.0.
+          if [ -L /root/.sky/config.yaml ]; then
+            echo "Config.yaml is a symlink to ConfigMap config, deleting symlink"
+            rm /root/.sky/config.yaml
+          fi
+          # Initialize the SkyPilot config.
+          if [ -s /root/.sky/config.yaml ]; then
+            # If the config.yaml is not empty, sync the PVC config to ConfigMap
+            python3 -c "from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup('~/.sky/config.yaml')"
+          else
+            # If the config.yaml is empty, we initialize the config on PVC with
+            # user specified config.
+            cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          fi
+          {{- if .Values.apiService.sshNodePools }}
+          mkdir -p /root/.sky
+          echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
+          # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
+          ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          {{- end }}
+          # Nebius credentials mounting
+          # Since the ~/.nebius directory is also used by the Nebius CLI, we mount the credentials to /root/.nebius_credentials
+          # and create a symlink to /root/.nebius. This cannot be done in the init container because the Nebius CLI needs read-write access to ~/.nebius.
+          {{- if .Values.nebiusCredentials.enabled }}
+          echo "Setting up Nebius credentials..."
+          mkdir -p /root/.nebius
+          # Link all files from .nebius_credentials to .nebius
+          # In workspace, it is possible to use multiple credentials files. We need to link all of them to .nebius
+          for file in /root/.nebius_credentials/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ln -sf "$file" "/root/.nebius/$filename"
+            fi
+          done
+          echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
+          # Create a Nebius profile for the nebius CLI to use as default
+          nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
+          {{- end }}
+          {{- if .Values.apiService.sshKeySecret }}
+          mkdir -p /root/.ssh
+          echo "Linking ssh keys to /root/.ssh"
+          for file in /var/skypilot/ssh_keys/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ln -sf "$file" "/root/.ssh/$filename"
+            fi
+          done
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
@@ -100,9 +148,15 @@ spec:
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
         {{- end }}
-        {{- if .Values.apiService.config }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
+        {{- if .Values.apiService.sshNodePools }}
+        - name: skypilot-ssh-node-pools
+          mountPath: /var/skypilot/ssh_node_pool
+        {{- end }}
+        {{- if .Values.apiService.sshKeySecret }}
+        - name: skypilot-ssh-identity
+          mountPath: /var/skypilot/ssh_keys
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-config
@@ -131,9 +185,8 @@ spec:
           readOnly: true
         {{- end }}
         {{- if .Values.nebiusCredentials.enabled }}
-        - name: nebius-config
-          mountPath: /root/.nebius
-          readOnly: true
+        - name: nebius-credentials
+          mountPath: /root/.nebius_credentials
         {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
@@ -252,27 +305,6 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
-      {{- if .Values.nebiusCredentials.enabled }}
-      - name: create-nebius-credentials
-        {{- with .Values.securityContext }}
-        securityContext:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        image: {{ .Values.apiService.image }}
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          echo "Setting up Nebius credentials..."
-          mkdir -p /root/.nebius
-          cp /root/.nebius_cloud/credentials.json /root/.nebius/credentials.json
-          echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
-        volumeMounts:
-        - name: nebius-config
-          mountPath: /root/.nebius
-        - name: nebius-credentials
-          mountPath: /root/.nebius_cloud/credentials.json
-          subPath: credentials.json
-      {{- end }}
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
@@ -302,8 +334,6 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- if .Values.nebiusCredentials.enabled }}
-      - name: nebius-config
-        emptyDir: {}
       - name: nebius-credentials
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
@@ -313,8 +343,17 @@ spec:
         secret:
           secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
       {{- end }}
-      {{- if .Values.apiService.config }}
       - name: skypilot-config
         configMap:
           name: {{ .Release.Name }}-config
+      {{- if .Values.apiService.sshNodePools }}
+      - name: skypilot-ssh-node-pools
+        secret:
+          secretName: {{ .Release.Name }}-ssh-node-pools
+      {{- end }}
+      {{- if .Values.apiService.sshKeySecret }}
+      - name: skypilot-ssh-identity
+        secret:
+          secretName: {{ .Values.apiService.sshKeySecret }}
+          defaultMode: 0600 
       {{- end }}

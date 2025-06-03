@@ -158,3 +158,51 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with invalid endpoint
     with pytest.raises(click.BadParameter):
         client_sdk.api_login("invalid_endpoint")
+
+    # Test with endpoint ending with a slash
+    test_endpoint_with_slash = "http://test3.skypilot.co/"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_endpoint_with_slash)
+        config = skypilot_config.get_user_config()
+        # Endpoint should be stored without the trailing slash
+        assert config["api_server"]["endpoint"] == "http://test3.skypilot.co"
+        mock_check.assert_called_once_with("http://test3.skypilot.co")
+
+    # Test with https endpoint
+    test_https_endpoint = "https://secure.skypilot.co"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_https_endpoint)
+        config = skypilot_config.get_user_config()
+        assert config["api_server"]["endpoint"] == test_https_endpoint
+        mock_check.assert_called_once_with(test_https_endpoint)
+
+    # Test with https endpoint ending with a slash
+    test_https_endpoint_with_slash = "https://secure.skypilot.co/"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_https_endpoint_with_slash)
+        config = skypilot_config.get_user_config()
+        # Endpoint should be stored without the trailing slash
+        assert config["api_server"]["endpoint"] == "https://secure.skypilot.co"
+        mock_check.assert_called_once_with("https://secure.skypilot.co")
+
+    # Test with endpoint containing port number
+    test_endpoint_with_port = "http://localhost:8080"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_endpoint_with_port)
+        config = skypilot_config.get_user_config()
+        assert config["api_server"]["endpoint"] == test_endpoint_with_port
+        mock_check.assert_called_once_with(test_endpoint_with_port)
+
+    # Test with endpoint containing port number and trailing slash
+    test_endpoint_with_port_slash = "http://localhost:8080/"
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = None
+        client_sdk.api_login(test_endpoint_with_port_slash)
+        config = skypilot_config.get_user_config()
+        # Endpoint should be stored without the trailing slash
+        assert config["api_server"]["endpoint"] == "http://localhost:8080"
+        mock_check.assert_called_once_with("http://localhost:8080")

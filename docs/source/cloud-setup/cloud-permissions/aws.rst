@@ -90,10 +90,10 @@ Example of mixing the default profile and another profile:
 .. code-block:: console
 
     $ # A cluster launched under the default AWS identity.
-    $ sky launch --cloud aws -c default
+    $ sky launch --infra aws -c default
 
     $ # A cluster launched under a different profile.
-    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
+    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --infra aws -c other-profile-cluster
 
 If you are using a :ref:`remote API server <sky-api-server>`, the AWS credentials are configured on the remote server. Overriding ``AWS_PROFILE`` on the client side won't work.
 

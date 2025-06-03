@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -1137,6 +1138,11 @@ def get_accelerator_label_key_values(
     #  support pollingthe clusters for autoscaling information, such as the
     #  node pools configured etc.
 
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
+    cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
+    context_display_name = context.lstrip('ssh-') if (
+        context and is_ssh_node_pool) else context
+
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
         # If autoscaler is set in config.yaml, override the label key and value
@@ -1176,13 +1182,17 @@ def get_accelerator_label_key_values(
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
-                raise exceptions.ResourcesUnavailableError(
-                    'Could not detect GPU labels in Kubernetes cluster. '
-                    'If this cluster has GPUs, please ensure GPU nodes have '
-                    'node labels of either of these formats: '
-                    f'{supported_formats}. Please refer to '
-                    'the documentation on how to set up node labels.'
-                    f'{suffix}')
+                msg = (f'Could not detect GPU labels in {cloud_name}.')
+                if not is_ssh_node_pool:
+                    msg += (' Run `sky check ssh` to debug.')
+                else:
+                    msg += (
+                        ' If this cluster has GPUs, please ensure GPU nodes have '
+                        'node labels of either of these formats: '
+                        f'{supported_formats}. Please refer to '
+                        'the documentation on how to set up node labels.')
+                msg += f'{suffix}'
+                raise exceptions.ResourcesUnavailableError(msg)
         else:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
@@ -1193,7 +1203,7 @@ def get_accelerator_label_key_values(
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
-                                f'Node {node_name!r} in Kubernetes cluster has '
+                                f'Node {node_name!r} in {cloud_name} has '
                                 f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
@@ -1257,10 +1267,10 @@ def get_accelerator_label_key_values(
                 # TODO(Doyoung): Update the error message raised with the
                 # multi-host TPU support.
                 raise exceptions.ResourcesUnavailableError(
-                    'Could not find any node in the Kubernetes cluster '
+                    f'Could not find any node in the {cloud_name} '
                     f'with {acc_type}. Please ensure at least one node in the '
                     f'cluster has {acc_type} and node labels are setup '
-                    'correctly. Please refer to the documentration for more. '
+                    'correctly. Please refer to the documentation for more. '
                     f'{suffix}. Note that multi-host TPU podslices are '
                     'currently not unsupported.')
     else:
@@ -1270,15 +1280,24 @@ def get_accelerator_label_key_values(
             if env_options.Options.SHOW_DEBUG_INFO.get():
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
-            raise exceptions.ResourcesUnavailableError(
-                f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
-                f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
-                ' contains GPUs, please ensure GPU drivers are installed on '
-                'the node. Check if the GPUs are setup correctly by running '
-                '`kubectl describe nodes` and looking for the '
-                f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
-                'Please refer to the documentation on how to set up GPUs.'
-                f'{suffix}')
+            if is_ssh_node_pool:
+                msg = (
+                    f'Could not detect GPUs in SSH Node Pool '
+                    f'\'{context_display_name}\'. If this cluster contains '
+                    'GPUs, please ensure GPU drivers are installed on the node '
+                    'and re-run '
+                    f'`sky ssh up --infra {context_display_name}`. {suffix}')
+            else:
+                msg = (
+                    f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
+                    f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
+                    ' contains GPUs, please ensure GPU drivers are installed on '
+                    'the node. Check if the GPUs are setup correctly by running '
+                    '`kubectl describe nodes` and looking for the '
+                    f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
+                    'Please refer to the documentation on how to set up GPUs.'
+                    f'{suffix}')
+            raise exceptions.ResourcesUnavailableError(msg)
     assert False, 'This should not be reached'
 
 
@@ -1507,7 +1526,7 @@ def is_kubeconfig_exec_auth(
         return False, None
 
     # Get active context and user from kubeconfig using k8s api
-    all_contexts, current_context = k8s.config.list_kube_config_contexts()
+    all_contexts, current_context = kubernetes.list_kube_config_contexts()
     context_obj = current_context
     if context is not None:
         for c in all_contexts:
@@ -1563,7 +1582,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     """
     k8s = kubernetes.kubernetes
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
+        _, current_context = kubernetes.list_kube_config_contexts()
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
         return None
@@ -1599,7 +1618,7 @@ def get_all_kube_context_names() -> List[str]:
     k8s = kubernetes.kubernetes
     context_names = []
     try:
-        all_contexts, _ = k8s.config.list_kube_config_contexts()
+        all_contexts, _ = kubernetes.list_kube_config_contexts()
         # all_contexts will always have at least one context. If kubeconfig
         # does not have any contexts defined, it will raise ConfigException.
         context_names = [context['name'] for context in all_contexts]
@@ -1642,7 +1661,7 @@ def get_kube_config_context_namespace(
                 return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
-        contexts, current_context = k8s.config.list_kube_config_contexts()
+        contexts, current_context = kubernetes.list_kube_config_contexts()
         if context_name is None:
             context = current_context
         else:
@@ -2792,7 +2811,7 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
     namespace = get_namespace_from_config(provider_config)
     context = get_context_from_config(provider_config)

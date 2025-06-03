@@ -59,6 +59,8 @@ class Cudo(clouds.Cloud):
             ('Spot is not supported, as Cudo API does not implement spot.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Custom disk tier is currently not supported on Cudo Compute'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported on Cudo Compute'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             ('Image ID is currently not supported on Cudo. '),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
@@ -270,7 +272,8 @@ class Cudo(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
         try:

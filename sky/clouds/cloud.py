@@ -45,6 +45,7 @@ class CloudImplementationFeatures(enum.Enum):
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    CUSTOM_NETWORK_TIER = 'custom_network_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
@@ -139,6 +140,9 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTED_NETWORK_TIERS = {
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
+    }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
@@ -457,12 +461,14 @@ class Cloud:
 
     @classmethod
     def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        cls, cloud_capability: CloudCapability
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud.
 
-        Returns a boolean of whether the user can access this cloud, and a
-        string describing the reason if the user cannot access.
+        Returns a boolean of whether the user can access this cloud, and:
+          - For SSH and Kubernetes, a dictionary that maps context names to
+            the status of the context.
+          - For others, a string describing the reason if cannot access.
 
         Raises NotSupportedError if the capability is
         not supported by this cloud.
@@ -474,18 +480,29 @@ class Cloud:
         assert_never(cloud_capability)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's compute service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's storage service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
+
+    @classmethod
+    def expand_infras(cls) -> List[str]:
+        """Returns a list of enabled infrastructures for this cloud.
+
+        For Kubernetes and SSH, return a list of resource pools.
+        For all other clouds, return self.
+        """
+        return [cls.canonical_name()]
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
@@ -703,6 +720,22 @@ class Cloud:
                     f'{disk_tier} is not supported by {cls._REPR}.')
 
     @classmethod
+    def check_network_tier_enabled(
+            cls, instance_type: Optional[str],
+            network_tier: resources_utils.NetworkTier) -> None:
+        """Errors out if the network tier is not supported by the
+        cloud provider.
+
+        Raises:
+            exceptions.NotSupportedError: If the network tier is not supported.
+        """
+        del instance_type  # unused
+        if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{network_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
     def _translate_disk_tier(
         cls, disk_tier: Optional[resources_utils.DiskTier]
     ) -> resources_utils.DiskTier:
@@ -878,6 +911,11 @@ class Cloud:
     def canonical_name(cls) -> str:
         return cls.__name__.lower()
 
+    @classmethod
+    def display_name(cls) -> str:
+        """Name of the cloud used in messages displayed to the user."""
+        return cls.canonical_name()
+
     def __repr__(self):
         return self._REPR
 
@@ -886,6 +924,12 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+class DummyCloud(Cloud):
+    """A dummy Cloud that has zero egress cost from/to for optimization
+    purpose."""
+    pass
 
 
 # === Helper functions ===

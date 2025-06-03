@@ -1,7 +1,7 @@
 name: nccl-test-efa
 
 resources:
-  cloud: kubernetes
+  infra: k8s
   accelerators: A100:8
   cpus: 90+
   image_id: docker:public.ecr.aws/hpc-cloud/nccl-tests:latest

@@ -14,6 +14,7 @@ from sky import clouds
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
@@ -21,6 +22,7 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -73,8 +75,8 @@ class Optimizer:
     def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
                      gigabytes: float) -> float:
         """Returns estimated egress cost."""
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, clouds.DummyCloud) or isinstance(
+                dst_cloud, clouds.DummyCloud):
             return 0.0
 
         if not src_cloud.is_same_cloud(dst_cloud):
@@ -88,8 +90,8 @@ class Optimizer:
                      gigabytes: float) -> float:
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, clouds.DummyCloud) or isinstance(
+                dst_cloud, clouds.DummyCloud):
             return 0.0
         if not src_cloud.is_same_cloud(dst_cloud):
             # 10Gbps is close to the average of observed b/w from S3
@@ -167,7 +169,7 @@ class Optimizer:
 
         def make_dummy(name):
             dummy = task_lib.Task(name)
-            dummy.set_resources({DummyResources(DummyCloud(), None)})
+            dummy.set_resources({DummyResources(cloud=clouds.DummyCloud())})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
 
@@ -197,7 +199,7 @@ class Optimizer:
         node: task_lib.Task,
         resources: resources_lib.Resources,
     ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
-        if isinstance(parent_resources.cloud, DummyCloud):
+        if isinstance(parent_resources.cloud, clouds.DummyCloud):
             # Special case.  The current 'node' is a real
             # source node, and its input may be on a different
             # cloud from 'resources'.
@@ -321,10 +323,10 @@ class Optimizer:
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
-                    #    Resources('V100')
+                    #    Resources(accelerators='V100')
                     # and treats their launchable versions
-                    #    Resources(AWS, 'p3.2xlarge'),
-                    #    Resources(GCP, '...', 'V100'),
+                    #    Resources(infra='aws', instance_type='p3.2xlarge'),
+                    #    Resources(infra='gcp', accelerators='V100'),
                     #    ...
                     # as having the same run time.
                     # FIXME(zongheng): take 'num_nodes' as an arg/into
@@ -376,6 +378,10 @@ class Optimizer:
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
+                    elif all(
+                            isinstance(orig_resources.cloud, clouds.SSH)
+                            for orig_resources in node.resources):
+                        source_hint = 'node pool'
                     elif all(
                             isinstance(orig_resources.cloud, clouds.Kubernetes)
                             for orig_resources in node.resources):
@@ -772,6 +778,15 @@ class Optimizer:
                     f'{colorama.Style.BRIGHT}Estimated total cost: '
                     f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
 
+        def _instance_type_str(resources: 'resources_lib.Resources') -> str:
+            instance_type = resources.instance_type
+            assert instance_type is not None, 'Instance type must be specified'
+            if isinstance(resources.cloud, clouds.Kubernetes):
+                instance_type = '-'
+                if resources.use_spot:
+                    instance_type = ''
+            return instance_type
+
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
             accelerators = resources.get_accelerators_str()
@@ -794,22 +809,20 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
-            if resources.zone is None:
-                region_or_zone = resources.region
-            else:
-                region_or_zone = resources.zone
+            # Format infra as CLOUD (REGION/ZONE)
+            infra = resources.infra.formatted_str()
+
             return [
-                str(cloud),
-                resources.instance_type + spot,
+                infra,
+                _instance_type_str(resources) + spot,
                 vcpus,
                 mem,
                 str(accelerators),
-                str(region_or_zone),
             ]
 
         Row = collections.namedtuple('Row', [
-            'cloud', 'instance', 'vcpus', 'mem', 'accelerators',
-            'region_or_zone', 'cost_str', 'chosen_str'
+            'infra', 'instance', 'vcpus', 'mem', 'accelerators', 'cost_str',
+            'chosen_str'
         ])
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
@@ -833,18 +846,15 @@ class Optimizer:
             vcpus = format_number(vcpus_)
             mem = format_number(mem_)
 
-            if resources.zone is None:
-                region_or_zone = resources.region
-            else:
-                region_or_zone = resources.zone
+            infra = resources.infra.formatted_str()
 
             chosen_str = ''
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(cloud, resources.instance_type + spot, vcpus, mem,
-                      str(accelerators), str(region_or_zone), cost_str,
-                      chosen_str)
+            row = Row(infra,
+                      _instance_type_str(resources) + spot, vcpus, mem,
+                      str(accelerators), cost_str, chosen_str)
 
             return row
 
@@ -854,18 +864,23 @@ class Optimizer:
                 'accelerators': f'{resources.accelerators}',
                 'use_spot': resources.use_spot
             }
+
+            # Handle special case for Kubernetes and SSH clouds
             if isinstance(resources.cloud, clouds.Kubernetes):
-                # Region for Kubernetes is the context name, i.e. different
-                # Kubernetes clusters. We add region to the key to show all the
-                # Kubernetes clusters in the optimizer table for better UX.
+                # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
+                # context name, i.e. different Kubernetes clusters. We add
+                # region to the key to show all the Kubernetes clusters in the
+                # optimizer table for better UX.
+
+                if resources.cloud.__class__.__name__ == 'SSH':
+                    resource_key_dict[
+                        'cloud'] = 'SSH'  # Force the cloud name to be SSH
                 resource_key_dict['region'] = resources.region
+
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
-            'REGION/ZONE'
-        ]
+        resource_fields = ['INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS']
         if len(ordered_best_plan) > 1:
             best_plan_rows = []
             for t, r in ordered_best_plan.items():
@@ -993,13 +1008,19 @@ class Optimizer:
                     if len(candidate_list) > 1:
                         is_multi_instances = True
                         instance_list = [
-                            res.instance_type for res in candidate_list
+                            res.instance_type
+                            for res in candidate_list
+                            if res.instance_type is not None
                         ]
+                        candidate_str = resources_utils.format_resource(
+                            candidate_list[0], simplify=True)
+
                         logger.info(
-                            f'Multiple {cloud} instances satisfy '
-                            f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]!r} is considered '
-                            f'among:\n{instance_list}.')
+                            f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
+                            f'satisfy {acc_name}:{int(acc_count)}. '
+                            f'The cheapest {candidate_str} is considered '
+                            f'among: {", ".join(instance_list)}.'
+                            f'{colorama.Style.RESET_ALL}')
             if is_multi_instances:
                 logger.info(
                     f'To list more details, run: sky show-gpus {acc_name}\n')
@@ -1151,11 +1172,6 @@ class DummyResources(resources_lib.Resources):
         return 0
 
 
-class DummyCloud(clouds.Cloud):
-    """A dummy Cloud that has zero egress cost from/to."""
-    pass
-
-
 def _filter_out_blocked_launchable_resources(
         launchable_resources: Iterable[resources_lib.Resources],
         blocked_resources: Iterable[resources_lib.Resources]):
@@ -1202,9 +1218,11 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         clouds_to_check_again = list(clouds_need_recheck -
                                      global_disabled_clouds)
         if len(clouds_to_check_again) > 0:
-            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                       quiet=True,
-                                       clouds=clouds_to_check_again)
+            sky_check.check_capability(
+                sky_cloud.CloudCapability.COMPUTE,
+                quiet=True,
+                clouds=clouds_to_check_again,
+                workspace=skypilot_config.get_active_workspace())
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
@@ -1214,7 +1232,13 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         if disabled_clouds:
             is_or_are = 'is' if len(disabled_clouds) == 1 else 'are'
             task_name = f' {task.name!r}' if task.name is not None else ''
-            msg = (f'Task{task_name} requires {", ".join(disabled_clouds)} '
+            disabled_display_names = []
+            for c in disabled_clouds:
+                cloud_obj_one = registry.CLOUD_REGISTRY.from_str(c)
+                if cloud_obj_one is not None:
+                    disabled_display_names.append(cloud_obj_one.display_name())
+            cloud_names = ', '.join(disabled_display_names)
+            msg = (f'Task{task_name} requires {cloud_names} '
                    f'which {is_or_are} not enabled. To enable access, change '
                    f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
                    f'sky check {" ".join(c.lower() for c in disabled_clouds)}'

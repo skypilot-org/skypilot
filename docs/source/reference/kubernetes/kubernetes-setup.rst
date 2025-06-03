@@ -217,7 +217,7 @@ You can also check the GPUs available on your nodes by running:
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud k8s
+    $ sky show-gpus --infra k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     L4    1, 2, 4                   12 of 12 free
@@ -397,6 +397,44 @@ Examples:
                      hostPath:
                        path: /path/on/host/nvme
                        type: Directory
+
+    .. tab-item:: Nebius shared filesystem
+      :name: kubernetes-volumes-nebius-shared-filesystem
+
+      When creating a node group on the Nebius console, attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
+
+      * Ensure ``Auto mount`` is enabled.
+      * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
+
+      .. image:: ../../images/screenshots/nebius/nebius-k8s-attach-fs.png
+        :width: 50%
+        :align: center
+
+      Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+
+           config:
+             kubernetes:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: nebius-sharedfs
+                   volumes:
+                     - name: nebius-sharedfs
+                       hostPath:
+                         path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                         type: Directory
+
 
 .. note::
 

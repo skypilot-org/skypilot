@@ -13,7 +13,7 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
@@ -23,6 +23,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
@@ -33,8 +34,10 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -461,7 +464,8 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
-                      all_users: bool = False) -> str:
+                      all_users: bool = False,
+                      current_workspace: Optional[str] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
@@ -472,9 +476,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
-    job_id_str = ', '.join(map(str, job_ids))
-    logger.info(f'Cancelling jobs {job_id_str}.')
+    if current_workspace is None:
+        current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+
     cancelled_job_ids: List[int] = []
+    wrong_workspace_job_ids: List[int] = []
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -489,6 +495,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
+        job_workspace = managed_job_state.get_workspace(job_id)
+        if current_workspace is not None and job_workspace != current_workspace:
+            wrong_workspace_job_ids.append(job_id)
+            continue
+
         # Send the signal to the jobs controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
@@ -499,17 +510,30 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 f.flush()
         cancelled_job_ids.append(job_id)
 
+    wrong_workspace_job_str = ''
+    if wrong_workspace_job_ids:
+        plural = 's' if len(wrong_workspace_job_ids) > 1 else ''
+        plural_verb = 'are' if len(wrong_workspace_job_ids) > 1 else 'is'
+        wrong_workspace_job_str = (
+            f' Job{plural} with ID{plural}'
+            f' {", ".join(map(str, wrong_workspace_job_ids))} '
+            f'{plural_verb} skipped as they are not in the active workspace '
+            f'{current_workspace!r}. Check the workspace of the job with: '
+            f'sky jobs queue')
+
     if not cancelled_job_ids:
-        return 'No job to cancel.'
+        return f'No job to cancel.{wrong_workspace_job_str}'
     identity_str = f'Job with ID {cancelled_job_ids[0]} is'
     if len(cancelled_job_ids) > 1:
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    return f'{identity_str} scheduled to be cancelled.'
+    msg = f'{identity_str} scheduled to be cancelled.{wrong_workspace_job_str}'
+    return msg
 
 
-def cancel_job_by_name(job_name: str) -> str:
+def cancel_job_by_name(job_name: str,
+                       current_workspace: Optional[str] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -518,11 +542,13 @@ def cancel_job_by_name(job_name: str) -> str:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    cancel_jobs_by_id(job_ids)
-    return f'Job {job_name!r} is scheduled to be cancelled.'
+    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    return f'{job_name!r} {msg}'
 
 
-def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
+def stream_logs_by_id(job_id: int,
+                      follow: bool = True,
+                      tail: Optional[int] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
     Returns:
@@ -559,7 +585,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
-                    for line in f:
+                    read_from: Union[TextIO, Deque[str]] = f
+                    if tail is not None:
+                        assert tail > 0
+                        # Read only the last 'tail' lines using deque
+                        read_from = collections.deque(f, maxlen=tail)
+                    for line in read_from:
                         if log_lib.LOG_FILE_START_STREAMING_AT in line:
                             start_streaming = True
                         if start_streaming:
@@ -620,10 +651,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
+            tail_param = tail if tail is not None else 0
             returncode = backend.tail_logs(handle,
                                            job_id=None,
                                            managed_job_id=job_id,
-                                           follow=follow)
+                                           follow=follow,
+                                           tail=tail_param)
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
@@ -760,7 +793,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
 def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
                 controller: bool = False,
-                follow: bool = True) -> Tuple[str, int]:
+                follow: bool = True,
+                tail: Optional[int] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
     Returns:
@@ -831,7 +865,12 @@ def stream_logs(job_id: Optional[int],
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
             # Note: we do not need to care about start_stream_at here, since
             # that should be in the job log printed above.
-            for line in f:
+            read_from: Union[TextIO, Deque[str]] = f
+            if tail is not None:
+                assert tail > 0
+                # Read only the last 'tail' lines efficiently using deque
+                read_from = collections.deque(f, maxlen=tail)
+            for line in read_from:
                 print(line, end='')
             # Flush.
             print(end='', flush=True)
@@ -883,11 +922,35 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow)
+    return stream_logs_by_id(job_id, follow, tail)
 
 
 def dump_managed_job_queue() -> str:
+    # Make sure to get all jobs - some logic below (e.g. high priority job
+    # detection) requires a full view of the jobs table.
     jobs = managed_job_state.get_managed_jobs()
+
+    # Figure out what the highest priority blocking job is. We need to know in
+    # order to determine if other jobs are blocked by a higher priority job, or
+    # just by the limited controller resources.
+    lowest_blocking_priority_value = 1000
+    for job in jobs:
+        if job['schedule_state'] not in (
+                # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with
+                # lower priority.
+                managed_job_state.ManagedJobScheduleState.LAUNCHING,
+                managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF,
+                # It's possible for a WAITING/ALIVE_WAITING job to be ready to
+                # launch, but the scheduler just hasn't run yet.
+                managed_job_state.ManagedJobScheduleState.WAITING,
+                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING,
+        ):
+            # This job will not block others.
+            continue
+
+        priority = job.get('priority')
+        if priority is not None and priority < lowest_blocking_priority_value:
+            lowest_blocking_priority_value = priority
 
     for job in jobs:
         end_at = job['end_at']
@@ -911,15 +974,45 @@ def dump_managed_job_queue() -> str:
         cluster_name = generate_managed_job_cluster_name(
             job['task_name'], job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        if handle is not None:
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            job['cluster_resources'] = (
-                f'{handle.launched_nodes}x {handle.launched_resources}')
+        if isinstance(handle, backends.CloudVmRayResourceHandle):
+            resources_str = resources_utils.get_readable_resources_repr(
+                handle, simplify=True)
+            resources_str_full = resources_utils.get_readable_resources_repr(
+                handle, simplify=False)
+            job['cluster_resources'] = resources_str
+            job['cluster_resources_full'] = resources_str_full
+            job['cloud'] = str(handle.launched_resources.cloud)
             job['region'] = handle.launched_resources.region
+            job['zone'] = handle.launched_resources.zone
         else:
             # FIXME(zongheng): display the last cached values for these.
             job['cluster_resources'] = '-'
+            job['cluster_resources_full'] = '-'
+            job['cloud'] = '-'
             job['region'] = '-'
+            job['zone'] = '-'
+
+        # Add details about schedule state / backoff.
+        state_details = None
+        if job['schedule_state'] == 'ALIVE_BACKOFF':
+            state_details = 'In backoff, waiting for resources'
+        elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
+            priority = job.get('priority')
+            if (priority is not None and
+                    priority > lowest_blocking_priority_value):
+                # Job is lower priority than some other blocking job.
+                state_details = 'Waiting for higher priority jobs to launch'
+            else:
+                state_details = 'Waiting for other jobs to launch'
+
+        if state_details and job['failure_reason']:
+            job['details'] = f'{state_details} - {job["failure_reason"]}'
+        elif state_details:
+            job['details'] = state_details
+        elif job['failure_reason']:
+            job['details'] = f'Failure: {job["failure_reason"]}'
+        else:
+            job['details'] = None
 
     return message_utils.encode_payload(jobs)
 
@@ -949,7 +1042,7 @@ def _get_job_status_from_tasks(
         # Use the first non-succeeded status.
         if managed_task_status != managed_job_state.ManagedJobStatus.SUCCEEDED:
             # TODO(zhwu): we should not blindly use the first non-
-            # succeeded as the status could be changed to SUBMITTED
+            # succeeded as the status could be changed to PENDING
             # when going from one task to the next one, which can be
             # confusing.
             break
@@ -1010,10 +1103,15 @@ def format_job_table(
         jobs[get_hash(task)].append(task)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
+    workspaces = set()
     for job_tasks in jobs.values():
         managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
+        workspaces.add(job_tasks[0].get('workspace',
+                                        constants.SKYPILOT_DEFAULT_WORKSPACE))
+
+    show_workspace = len(workspaces) > 1 or show_all
 
     user_cols: List[str] = []
     if show_user:
@@ -1024,9 +1122,11 @@ def format_job_table(
     columns = [
         'ID',
         'TASK',
+        *(['WORKSPACE'] if show_workspace else []),
         'NAME',
+        'PRIORITY',
         *user_cols,
-        'RESOURCES',
+        'REQUESTED',
         'SUBMITTED',
         'TOT. DURATION',
         'JOB DURATION',
@@ -1035,7 +1135,7 @@ def format_job_table(
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'SCHED. STATE', 'DETAILS']
+        columns += ['STARTED', 'INFRA', 'RESOURCES', 'SCHED. STATE', 'DETAILS']
     if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -1054,7 +1154,10 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    def generate_details(failure_reason: Optional[str]) -> str:
+    def generate_details(details: Optional[str],
+                         failure_reason: Optional[str]) -> str:
+        if details is not None:
+            return details
         if failure_reason is not None:
             return f'Failure: {failure_reason}'
         return '-'
@@ -1083,6 +1186,8 @@ def format_job_table(
     for job_hash, job_tasks in jobs.items():
         if show_all:
             schedule_state = job_tasks[0]['schedule_state']
+        workspace = job_tasks[0].get('workspace',
+                                     constants.SKYPILOT_DEFAULT_WORKSPACE)
 
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
@@ -1091,6 +1196,7 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
+            priority = job_tasks[0].get('priority', '-')
             managed_job_status, current_task_id = _get_job_status_from_tasks(
                 job_tasks)
             for task in job_tasks:
@@ -1124,7 +1230,9 @@ def format_job_table(
             job_values = [
                 job_id,
                 '',
+                *([''] if show_workspace else []),
                 job_name,
+                str(priority),
                 *user_values,
                 '-',
                 submitted,
@@ -1134,13 +1242,14 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
+                details = job_tasks[current_task_id].get('details')
                 failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
                     job_tasks[0]['schedule_state'],
-                    generate_details(failure_reason),
+                    generate_details(details, failure_reason),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1153,10 +1262,14 @@ def format_job_table(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
+            task_workspace = '-' if len(job_tasks) > 1 else workspace
+            priority = task.get('priority', '-')
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
+                *([task_workspace] if show_workspace else []),
                 task['task_name'],
+                str(priority),
                 *user_values,
                 task['resources'],
                 # SUBMITTED
@@ -1174,13 +1287,35 @@ def format_job_table(
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
                                   if len(job_tasks) == 1 else '-')
+                cloud = task.get('cloud')
+                if cloud is None:
+                    # Backward compatibility for old jobs controller without
+                    # cloud info returned, we parse it from the cluster
+                    # resources
+                    # TODO(zhwu): remove this after 0.12.0
+                    cloud = task['cluster_resources'].split('(')[0].split(
+                        'x')[-1]
+                    task['cluster_resources'] = task[
+                        'cluster_resources'].replace(f'{cloud}(',
+                                                     '(').replace('x ', 'x')
+                region = task['region']
+                zone = task.get('zone')
+                if cloud == '-':
+                    cloud = None
+                if region == '-':
+                    region = None
+                if zone == '-':
+                    zone = None
+
+                infra = infra_utils.InfraInfo(cloud, region, zone)
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
+                    infra.formatted_str(),
                     task['cluster_resources'],
-                    task['region'],
                     schedule_state,
-                    generate_details(task['failure_reason']),
+                    generate_details(task.get('details'),
+                                     task['failure_reason']),
                 ])
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
@@ -1232,22 +1367,36 @@ class ManagedJobCodeGen:
     def cancel_jobs_by_id(cls,
                           job_ids: Optional[List[int]],
                           all_users: bool = False) -> str:
+        active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
             # For backward compatibility, since all_users is not supported
-            # before #4787. Assume th
+            # before #4787.
             # TODO(cooperc): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids})
-        else:
+        elif managed_job_version < 4:
+            # For backward compatibility, since current_workspace is not
+            # supported before #5660. Don't check the workspace.
+            # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
+        else:
+            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
+                            current_workspace={active_workspace!r})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
 
     @classmethod
     def cancel_job_by_name(cls, job_name: str) -> str:
+        active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        msg = utils.cancel_job_by_name({job_name!r})
+        if managed_job_version < 4:
+            # For backward compatibility, since current_workspace is not
+            # supported before #5660. Don't check the workspace.
+            # TODO(zhwu): Remove compatibility before 0.12.0
+            msg = utils.cancel_job_by_name({job_name!r})
+        else:
+            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
@@ -1266,10 +1415,16 @@ class ManagedJobCodeGen:
                     job_name: Optional[str],
                     job_id: Optional[int],
                     follow: bool = True,
-                    controller: bool = False) -> str:
+                    controller: bool = False,
+                    tail: Optional[int] = None) -> str:
         code = textwrap.dedent(f"""\
-        result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
-                                follow={follow}, controller={controller})
+        if managed_job_version < 6:
+            # Versions before 5 did not support tail parameter
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.
@@ -1283,11 +1438,18 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
+    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
+                    workspace: str, entrypoint: str) -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_info({job_id}, {dag_name!r})
+            set_job_info_kwargs = {{'workspace': {workspace!r}}}
+            if managed_job_version < 4:
+                set_job_info_kwargs = {{}}
+            if managed_job_version >= 5:
+                set_job_info_kwargs['entrypoint'] = {entrypoint!r}
+            managed_job_state.set_job_info(
+                {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(

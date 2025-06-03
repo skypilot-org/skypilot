@@ -78,6 +78,7 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -211,6 +212,7 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
+        # TODO(zhwu): client side should not rely on global_user_state.
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if not glob_storage:
             click.echo(f'Storage {storage_object} not found.')
@@ -346,23 +348,38 @@ _TASK_OPTIONS = [
               'Overrides the "workdir" config in the YAML if both are supplied.'
              )),
     click.option(
+        '--infra',
+        required=False,
+        type=str,
+        help='Infrastructure to use. '
+        'Format: cloud, cloud/region, cloud/region/zone, '
+        'k8s/context-name, or ssh/node-pool-name. '
+        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
+        # TODO(zhwu): we have to use `\*` to make sure the docs build
+        # not complaining about the `*`, but this will cause `--help`
+        # to show `\*` instead of `*`.
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'),
+    click.option(
         '--cloud',
         required=False,
         type=str,
         help=('The cloud to use. If specified, overrides the "resources.cloud" '
-              'config. Passing "none" resets the config.')),
+              'config. Passing "none" resets the config.'),
+        hidden=True),
     click.option(
         '--region',
         required=False,
         type=str,
         help=('The region to use. If specified, overrides the '
-              '"resources.region" config. Passing "none" resets the config.')),
+              '"resources.region" config. Passing "none" resets the config.'),
+        hidden=True),
     click.option(
         '--zone',
         required=False,
         type=str,
         help=('The zone to use. If specified, overrides the '
-              '"resources.zone" config. Passing "none" resets the config.')),
+              '"resources.zone" config. Passing "none" resets the config.'),
+        hidden=True),
     click.option(
         '--num-nodes',
         required=False,
@@ -398,6 +415,13 @@ _TASK_OPTIONS = [
                                    case_sensitive=False),
                  required=False,
                  help=resources_utils.DiskTier.cli_help_message()),
+    click.option('--network-tier',
+                 default=None,
+                 type=click.Choice(
+                     resources_utils.NetworkTier.supported_tiers(),
+                     case_sensitive=False),
+                 required=False,
+                 help=resources_utils.NetworkTier.cli_help_message()),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,
@@ -679,6 +703,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
+        network_tier: Optional[str] = None,
         ports: Optional[Tuple[str, ...]] = None,
         config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
@@ -732,6 +757,11 @@ def _parse_override_params(
             override_params['disk_tier'] = None
         else:
             override_params['disk_tier'] = disk_tier
+    if network_tier is not None:
+        if network_tier.lower() == 'none':
+            override_params['network_tier'] = None
+        else:
+            override_params['network_tier'] = network_tier
     if ports:
         if any(p.lower() == 'none' for p in ports):
             if len(ports) > 1:
@@ -840,11 +870,13 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
+    network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    priority: Optional[int] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
@@ -879,6 +911,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
+                                             network_tier=network_tier,
                                              ports=ports,
                                              config_override=config_override)
     if field_to_ignore is not None:
@@ -922,6 +955,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+    # job launch specific.
+    if priority is not None:
+        task.set_job_priority(priority)
     return task
 
 
@@ -1063,6 +1099,33 @@ def cli():
     pass
 
 
+def _handle_infra_cloud_region_zone_options(infra: Optional[str],
+                                            cloud: Optional[str],
+                                            region: Optional[str],
+                                            zone: Optional[str]):
+    """Handle the backward compatibility for --infra and --cloud/region/zone.
+
+    Returns:
+        cloud, region, zone
+    """
+    if cloud is not None or region is not None or zone is not None:
+        click.secho(
+            'The --cloud, --region, and --zone options are deprecated. '
+            'Use --infra instead.',
+            fg='yellow')
+        if infra is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both --infra and '
+                                 '--cloud, --region, or --zone.')
+
+    if infra is not None:
+        infra_info = infra_utils.InfraInfo.from_str(infra)
+        cloud = infra_info.cloud
+        region = infra_info.region
+        zone = infra_info.zone
+    return cloud, region, zone
+
+
 @cli.command(cls=_DocumentedCodeCommand)
 @config_option(expose_value=True)
 @click.argument('entrypoint',
@@ -1172,6 +1235,7 @@ def launch(
         backend_name: Optional[str],
         name: Optional[str],
         workdir: Optional[str],
+        infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
         zone: Optional[str],
@@ -1186,6 +1250,7 @@ def launch(
         env: List[Tuple[str, str]],
         disk_size: Optional[int],
         disk_tier: Optional[str],
+        network_tier: Optional[str],
         ports: Tuple[str, ...],
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
@@ -1219,6 +1284,9 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
+
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
@@ -1236,6 +1304,7 @@ def launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         config_override=config_override,
     )
@@ -1336,6 +1405,7 @@ def exec(cluster: Optional[str],
          entrypoint: Tuple[str, ...],
          detach_run: bool,
          name: Optional[str],
+         infra: Optional[str],
          cloud: Optional[str],
          region: Optional[str],
          zone: Optional[str],
@@ -1352,6 +1422,7 @@ def exec(cluster: Optional[str],
          memory: Optional[str],
          disk_size: Optional[int],
          disk_tier: Optional[str],
+         network_tier: Optional[str],
          async_call: bool,
          config_override: Optional[Dict[str, Any]] = None):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1427,6 +1498,9 @@ def exec(cluster: Optional[str],
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
+
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
@@ -1444,6 +1518,7 @@ def exec(cluster: Optional[str],
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
         config_override=config_override,
@@ -1729,6 +1804,19 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     return
 
 
+def _show_enabled_infra(active_workspace: str, show_workspace: bool):
+    """Show the enabled infrastructure."""
+    workspace_str = ''
+    if show_workspace:
+        workspace_str = f' (workspace: {active_workspace!r})'
+    title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
+             f'{workspace_str}:'
+             f'{colorama.Style.RESET_ALL} ')
+    all_infras = sdk.get(
+        sdk.enabled_clouds(workspace=active_workspace, expand=True))
+    click.echo(f'{title}{", ".join(all_infras)}\n')
+
+
 @cli.command()
 @config_option(expose_value=False)
 @click.option('--verbose',
@@ -1881,6 +1969,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         # status query.
         service_status_request_id = serve_lib.status(service_names=None)
 
+    workspace_request_id = None
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -1915,8 +2004,18 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
     else:
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
+        try:
+            workspace_request_id = sdk.workspaces()
+        except RuntimeError:
+            # Backward compatibility for API server before #5660.
+            # TODO(zhwu): remove this after 0.10.0.
+            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
+                           'in an old version, and may miss feature: '
+                           'workspaces. Update with: sky api stop; '
+                           'sky api start'
+                           f'{colorama.Style.RESET_ALL}')
+            workspace_request_id = None
+
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
     if refresh:
@@ -1939,9 +2038,20 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         else:
             normal_clusters.append(cluster_record)
 
+    if workspace_request_id is not None:
+        all_workspaces = sdk.get(workspace_request_id)
+    else:
+        all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
+    active_workspace = skypilot_config.get_active_workspace()
+    show_workspace = len(all_workspaces) > 1
+    _show_enabled_infra(active_workspace, show_workspace)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+               f'{colorama.Style.RESET_ALL}')
+
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users, query_clusters)
+        normal_clusters + controllers, verbose, all_users, query_clusters,
+        show_workspace)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
@@ -3265,15 +3375,22 @@ def _down_or_stop_clusters(
 
 @cli.command(cls=_DocumentedCodeCommand)
 @config_option(expose_value=False)
-@click.argument('clouds', required=False, type=str, nargs=-1)
+@click.argument('infra_list', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
+@click.option(
+    '--workspace',
+    '-w',
+    type=str,
+    help='The workspace to check. If None, all workspaces will be checked.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
-def check(clouds: Tuple[str], verbose: bool):
+def check(infra_list: Tuple[str],
+          verbose: bool,
+          workspace: Optional[str] = None):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3295,8 +3412,10 @@ def check(clouds: Tuple[str], verbose: bool):
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
     """
-    clouds_arg = clouds if len(clouds) > 0 else None
-    request_id = sdk.check(clouds=clouds_arg, verbose=verbose)
+    infra_arg = infra_list if len(infra_list) > 0 else None
+    request_id = sdk.check(infra_list=infra_arg,
+                           verbose=verbose,
+                           workspace=workspace)
     sdk.stream_and_get(request_id)
     api_server_url = server_common.get_server_url()
     click.echo()
@@ -3312,10 +3431,15 @@ def check(clouds: Tuple[str], verbose: bool):
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
+@click.option('--infra',
+              default=None,
+              type=str,
+              help='Infrastructure to query. Examples: "aws", "aws/us-east-1"')
 @click.option('--cloud',
               default=None,
               type=str,
-              help='Cloud provider to query.')
+              help='Cloud provider to query.',
+              hidden=True)
 @click.option(
     '--region',
     required=False,
@@ -3323,6 +3447,7 @@ def check(clouds: Tuple[str], verbose: bool):
     help=
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
+    hidden=True,
 )
 @click.option(
     '--all-regions',
@@ -3335,6 +3460,7 @@ def check(clouds: Tuple[str], verbose: bool):
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
         all_regions: Optional[bool]):
@@ -3376,6 +3502,11 @@ def show_gpus(
     * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
       in the Kubernetes cluster.
     """
+    cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
+                                                               cloud,
+                                                               region,
+                                                               zone=None)
+
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3399,13 +3530,17 @@ def show_gpus(
 
     # Kubernetes specific bools
     enabled_clouds = sdk.get(sdk.enabled_clouds())
-    cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+    cloud_is_kubernetes = isinstance(
+        cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
+    cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = clouds.cloud_in_iterable(
-        clouds.Kubernetes(),
-        enabled_clouds,
-    )
+    kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
+    ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
+    query_k8s_realtime_gpu = (kubernetes_is_enabled and
+                              (cloud_name is None or cloud_is_kubernetes))
+    query_ssh_realtime_gpu = (ssh_is_enabled and
+                              (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3415,7 +3550,8 @@ def show_gpus(
     def _get_kubernetes_realtime_gpu_tables(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        is_ssh: bool = False,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable'], List[Tuple[
                    str, 'models.KubernetesNodesInfo']]]:
@@ -3428,19 +3564,26 @@ def show_gpus(
             sdk.realtime_kubernetes_gpu_availability(
                 context=context,
                 name_filter=name_filter,
-                quantity_filter=quantity_filter))
+                quantity_filter=quantity_filter,
+                is_ssh=is_ssh))
         if not realtime_gpu_availability_lists:
-            err_msg = 'No GPUs found in any allowed Kubernetes cluster. '
-            debug_msg = 'To further debug, run: sky check '
+            # Customize message based on context
+            identity = ('SSH Node Pool'
+                        if is_ssh else 'any allowed Kubernetes cluster')
+            cloud_name = 'ssh' if is_ssh else 'kubernetes'
+            err_msg = f'No GPUs found in {identity}. '
+            debug_msg = (f'To further debug, run: sky check {cloud_name}')
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
                     gpu_info_msg += (' with requested quantity'
                                      f' {quantity_filter}')
                 err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in any allowed Kubernetes cluster. ')
-                debug_msg = ('To show available accelerators on kubernetes,'
-                             ' run: sky show-gpus --cloud kubernetes ')
+                           f'in {identity}. ')
+                identity_short = 'SSH Node Pool' if is_ssh else 'Kubernetes'
+                debug_msg = (
+                    f'To show available accelerators in {identity_short}, '
+                    f'run: sky show-gpus --cloud {cloud_name}')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3449,6 +3592,14 @@ def show_gpus(
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
         all_nodes_info = []
+
+        # display an aggregated table for all contexts
+        # if there are more than one contexts with GPUs.
+        def _filter_ctx(ctx: str) -> bool:
+            ctx_is_ssh = ctx and ctx.startswith('ssh-')
+            return ctx_is_ssh is is_ssh
+
+        num_filtered_contexts = 0
 
         if realtime_gpu_availability_lists:
             if len(realtime_gpu_availability_lists[0]) != 2:
@@ -3459,6 +3610,13 @@ def show_gpus(
                     (context, realtime_gpu_availability_lists)
                 ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
+                if not _filter_ctx(ctx):
+                    continue
+                if is_ssh:
+                    display_ctx = ctx.lstrip('ssh-')
+                else:
+                    display_ctx = ctx
+                num_filtered_contexts += 1
                 realtime_gpu_table = log_utils.create_table(
                     ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
@@ -3479,15 +3637,12 @@ def show_gpus(
                     if capacity > 0:
                         total_gpu_info[gpu][0] += capacity
                         total_gpu_info[gpu][1] += available
-                realtime_gpu_infos.append((ctx, realtime_gpu_table))
+                realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
                 # Collect node info for this context
                 nodes_info = sdk.stream_and_get(
                     sdk.kubernetes_node_info(context=ctx))
-                all_nodes_info.append((ctx, nodes_info))
-
-        # display an aggregated table for all contexts
-        # if there are more than one contexts with GPUs
-        if len(realtime_gpu_infos) > 1:
+                all_nodes_info.append((display_ctx, nodes_info))
+        if num_filtered_contexts > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
@@ -3499,10 +3654,11 @@ def show_gpus(
         return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
     def _format_kubernetes_node_info_combined(
-            contexts_info: List[Tuple[str,
-                                      'models.KubernetesNodesInfo']]) -> str:
+            contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
+            cloud_str: str = 'Kubernetes',
+            context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table(
-            ['CONTEXT', 'NODE', 'GPU', 'UTILIZATION'])
+            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3525,7 +3681,7 @@ def show_gpus(
                     'free'
                 ])
 
-        k8s_per_node_acc_message = ('Kubernetes per-node GPU availability')
+        k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
             k8s_per_node_acc_message += ' (' + '; '.join(hints) + ')'
 
@@ -3535,26 +3691,30 @@ def show_gpus(
                 f'{node_table.get_string()}')
 
     def _format_kubernetes_realtime_gpu(
-            total_table: 'prettytable.PrettyTable',
+            total_table: Optional['prettytable.PrettyTable'],
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
             all_nodes_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
-            show_node_info: bool) -> Generator[str, None, None]:
+            show_node_info: bool, is_ssh: bool) -> Generator[str, None, None]:
+        identity = 'SSH Node Pool' if is_ssh else 'Kubernetes'
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
-               'Kubernetes GPUs'
+               f'{identity} GPUs'
                f'{colorama.Style.RESET_ALL}')
         # print total table
         if total_table is not None:
             yield '\n'
             yield from total_table.get_string()
 
+        ctx_name = 'SSH Node Pool' if is_ssh else 'Context'
+        ctx_column_title = 'NODE_POOL' if is_ssh else 'CONTEXT'
+
         # print individual infos.
         for (ctx, k8s_realtime_table) in k8s_realtime_infos:
             yield '\n'
             # Print context header separately
             if ctx:
-                context_str = f'Context: {ctx}'
+                context_str = f'{ctx_name}: {ctx}'
             else:
-                context_str = 'Default Context'
+                context_str = f'Default {ctx_name}'
             yield (
                 f'{colorama.Fore.CYAN}{context_str}{colorama.Style.RESET_ALL}\n'
             )
@@ -3562,7 +3722,102 @@ def show_gpus(
 
         if show_node_info:
             yield '\n'
-            yield _format_kubernetes_node_info_combined(all_nodes_info)
+            yield _format_kubernetes_node_info_combined(all_nodes_info,
+                                                        identity,
+                                                        ctx_column_title)
+
+    def _possibly_show_k8s_like_realtime(
+            is_ssh: bool = False
+    ) -> Generator[str, None, Tuple[bool, bool, str]]:
+        # If cloud is kubernetes, we want to show real-time capacity
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or query_k8s_realtime_gpu):
+            context = region
+
+            try:
+                # If --cloud kubernetes is not specified, we want to catch
+                # the case where no GPUs are available on the cluster and
+                # print the warning at the end.
+                k8s_realtime_infos, total_table, all_nodes_info = (
+                    _get_kubernetes_realtime_gpu_tables(context, is_ssh=is_ssh))
+            except ValueError as e:
+                if not (cloud_is_kubernetes or cloud_is_ssh):
+                    # Make it a note if cloud is not kubernetes
+                    k8s_messages += 'Note: '
+                k8s_messages += str(e)
+            else:
+                print_section_titles = True
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=True,
+                                                           is_ssh=is_ssh)
+
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                yield k8s_messages
+                return True, print_section_titles, ''
+        return False, print_section_titles, k8s_messages
+
+    def _possibly_show_k8s_like_realtime_for_acc(
+            name: Optional[str],
+            quantity: Optional[int],
+            is_ssh: bool = False) -> Generator[str, None, Tuple[bool, bool]]:
+        k8s_messages = ''
+        print_section_titles = False
+        if (is_ssh and query_ssh_realtime_gpu or
+                query_k8s_realtime_gpu) and not show_all:
+            print_section_titles = True
+            # TODO(romilb): Show filtered per node GPU availability here as well
+            try:
+                (k8s_realtime_infos, total_table,
+                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
+                     context=region,
+                     name_filter=name,
+                     quantity_filter=quantity,
+                     is_ssh=is_ssh)
+
+                yield from _format_kubernetes_realtime_gpu(total_table,
+                                                           k8s_realtime_infos,
+                                                           all_nodes_info,
+                                                           show_node_info=False,
+                                                           is_ssh=is_ssh)
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources H100 not found ...")
+                yield common_utils.format_exception(e, use_bracket=True)
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            yield k8s_messages
+        if is_ssh:
+            if cloud_is_ssh:
+                if not ssh_is_enabled:
+                    yield ('SSH Node Pools are not enabled. To fix, run: '
+                           'sky check ssh ')
+                return True, print_section_titles
+        else:
+            if cloud_is_kubernetes:
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                return True, print_section_titles
+        return False, print_section_titles
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -3580,46 +3835,28 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
+                c for c in service_catalog.ALL_CLOUDS
+                if c != 'kubernetes' and c != 'ssh'
             ]
 
         k8s_messages = ''
         if accelerator_str is None:
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
-            # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud_name is None or
-                                          cloud_is_kubernetes):
-                context = region
-
-                try:
-                    # If --cloud kubernetes is not specified, we want to catch
-                    # the case where no GPUs are available on the cluster and
-                    # print the warning at the end.
-                    k8s_realtime_infos, total_table, all_nodes_info = _get_kubernetes_realtime_gpu_tables(context)  # pylint: disable=line-too-long
-                except ValueError as e:
-                    if not cloud_is_kubernetes:
-                        # Make it a note if cloud is not kubernetes
-                        k8s_messages += 'Note: '
-                    k8s_messages += str(e)
-                else:
-                    print_section_titles = True
-
-                    yield from _format_kubernetes_realtime_gpu(
-                        total_table,
-                        k8s_realtime_infos,
-                        all_nodes_info,
-                        show_node_info=True)
-
-                if kubernetes_autoscaling:
-                    k8s_messages += (
-                        '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            if cloud_is_kubernetes:
-                # Do not show clouds if --cloud kubernetes is specified
-                if not kubernetes_is_enabled:
-                    yield ('Kubernetes is not enabled. To fix, run: '
-                           'sky check kubernetes ')
-                yield k8s_messages
+            stop_iter = False
+            k8s_messages = ''
+            prev_print_section_titles = False
+            for is_ssh in [False, True]:
+                if prev_print_section_titles:
+                    yield '\n\n'
+                stop_iter_one, print_section_titles_one, k8s_messages_one = (
+                    yield from _possibly_show_k8s_like_realtime(is_ssh))
+                stop_iter = stop_iter or stop_iter_one
+                print_section_titles = (print_section_titles or
+                                        print_section_titles_one)
+                k8s_messages += k8s_messages_one
+                prev_print_section_titles = print_section_titles_one
+            if stop_iter:
                 return
 
             # For show_all, show the k8s message at the start since output is
@@ -3694,34 +3931,19 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and
-            (cloud_name is None or cloud_is_kubernetes) and not show_all):
-            # Print section title if not showing all and instead a specific
-            # accelerator is requested
-            print_section_titles = True
-            # TODO(romilb): Show filtered per node GPU availability here as well
-            try:
-                (k8s_realtime_infos, total_table,
-                 all_nodes_info) = _get_kubernetes_realtime_gpu_tables(
-                     context=region, name_filter=name, quantity_filter=quantity)
-
-                yield from _format_kubernetes_realtime_gpu(total_table,
-                                                           k8s_realtime_infos,
-                                                           all_nodes_info,
-                                                           show_node_info=False)
-            except ValueError as e:
-                # In the case of a specific accelerator, show the error message
-                # immediately (e.g., "Resources H100 not found ...")
-                yield common_utils.format_exception(e, use_bracket=True)
-            if kubernetes_autoscaling:
-                k8s_messages += ('\n' +
-                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
-            yield k8s_messages
-        if cloud_is_kubernetes:
-            # Do not show clouds if --cloud kubernetes is specified
-            if not kubernetes_is_enabled:
-                yield ('Kubernetes is not enabled. To fix, run: '
-                       'sky check kubernetes ')
+        stop_iter = False
+        prev_print_section_titles = False
+        for is_ssh in [False, True]:
+            if prev_print_section_titles:
+                yield '\n\n'
+            stop_iter_one, print_section_titles_one = (
+                yield from _possibly_show_k8s_like_realtime_for_acc(
+                    name, quantity, is_ssh))
+            stop_iter = stop_iter or stop_iter_one
+            print_section_titles = (print_section_titles or
+                                    print_section_titles_one)
+            prev_print_section_titles = print_section_titles_one
+        if stop_iter:
             return
 
         # For clouds other than Kubernetes, get the accelerator details
@@ -3971,6 +4193,12 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
+@click.option('--priority',
+              type=click.IntRange(0, 1000),
+              default=None,
+              show_default=True,
+              help=('Job priority from 0 to 1000. A lower number is higher '
+                    'priority. Default is 500.'))
 @click.option(
     '--detach-run',
     '-d',
@@ -3991,6 +4219,7 @@ def jobs_launch(
     name: Optional[str],
     cluster: Optional[str],
     workdir: Optional[str],
+    infra: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
@@ -4006,7 +4235,9 @@ def jobs_launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     ports: Tuple[str],
+    priority: Optional[int],
     detach_run: bool,
     yes: bool,
     async_call: bool,
@@ -4032,6 +4263,8 @@ def jobs_launch(
                                    'Use one of the flags as they are alias.')
         name = cluster
     env = _merge_env_vars(env_file, env)
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -4049,8 +4282,10 @@ def jobs_launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         job_recovery=job_recovery,
+        priority=priority,
         config_override=config_override,
     )
 
@@ -4132,8 +4367,6 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
     - ``PENDING``: Job is waiting for a free slot on the jobs controller to be
       accepted.
-
-    - ``SUBMITTED``: Job is submitted to and accepted by the jobs controller.
 
     - ``STARTING``: Job is starting (provisioning a cluster for the job).
 
@@ -4262,7 +4495,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
             f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
-        job_identity_str = (f'managed jobs with IDs {job_id_str}'
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else repr(name))
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
@@ -4350,7 +4584,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
-    managed_jobs.dashboard()
+    sdk.dashboard(starting_page='jobs')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4386,6 +4620,7 @@ def _generate_task_with_service(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     not_supported_cmd: str,
 ) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
@@ -4412,6 +4647,7 @@ def _generate_task_with_service(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
     )
     if isinstance(task, sky.Dag):
@@ -4509,6 +4745,7 @@ def serve_up(
     service_yaml: Tuple[str, ...],
     service_name: Optional[str],
     workdir: Optional[str],
+    infra: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
@@ -4524,6 +4761,7 @@ def serve_up(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     yes: bool,
     async_call: bool,
 ):
@@ -4555,6 +4793,8 @@ def serve_up(
 
         sky serve up service.yaml
     """
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
@@ -4576,6 +4816,7 @@ def serve_up(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve up',
     )
@@ -4620,16 +4861,16 @@ def serve_up(
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def serve_update(service_name: str, service_yaml: Tuple[str, ...],
-                 workdir: Optional[str], cloud: Optional[str],
-                 region: Optional[str], zone: Optional[str],
-                 num_nodes: Optional[int], use_spot: Optional[bool],
-                 image_id: Optional[str], env_file: Optional[Dict[str, str]],
-                 env: List[Tuple[str, str]], gpus: Optional[str],
-                 instance_type: Optional[str], ports: Tuple[str],
-                 cpus: Optional[str], memory: Optional[str],
-                 disk_size: Optional[int], disk_tier: Optional[str], mode: str,
-                 yes: bool, async_call: bool):
+def serve_update(
+        service_name: str, service_yaml: Tuple[str, ...],
+        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
+        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
+        use_spot: Optional[bool], image_id: Optional[str],
+        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
+        cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
+        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
+        yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4659,6 +4900,8 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
         sky serve update --mode blue_green sky-service-16aa new_service.yaml
 
     """
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
     task = _generate_task_with_service(
         service_name=service_name,
         service_yaml_args=service_yaml,
@@ -4677,6 +4920,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve update',
     )
@@ -5085,7 +5329,8 @@ def serve_logs(
 
 
 @ux_utils.print_exception_no_traceback()
-def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
+def _get_candidate_configs(
+        entrypoint_yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
     Benchmark candidates are configured in the YAML file as a list of
@@ -5099,17 +5344,18 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {instance_type: g4dn.2xlarge}
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
-    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
+    config = common_utils.read_yaml(os.path.expanduser(entrypoint_yaml_path))
     if not isinstance(config, dict):
-        raise ValueError(f'Invalid YAML file: {yaml_path}. '
+        raise ValueError(f'Invalid YAML file: {entrypoint_yaml_path}. '
                          'The YAML file should be parsed into a dictionary.')
     if config.get('resources') is None:
         return None
 
     resources = config['resources']
     if not isinstance(resources, dict):
-        raise ValueError(f'Invalid resources configuration in {yaml_path}. '
-                         'Resources must be a dictionary.')
+        raise ValueError(
+            f'Invalid resources configuration in {entrypoint_yaml_path}. '
+            'Resources must be a dictionary.')
     if resources.get('candidates') is None:
         return None
 
@@ -5173,6 +5419,7 @@ def benchmark_launch(
     benchmark: str,
     name: Optional[str],
     workdir: Optional[str],
+    infra: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
@@ -5206,7 +5453,6 @@ def benchmark_launch(
         raise click.BadParameter(f'Benchmark {benchmark} already exists. '
                                  'To delete the previous benchmark result, '
                                  f'run `sky bench delete {benchmark}`.')
-
     entrypoint = ' '.join(entrypoint)
     if not entrypoint:
         raise click.BadParameter('Please specify a task yaml to benchmark.')
@@ -5217,6 +5463,8 @@ def benchmark_launch(
             'Sky Benchmark does not support command line tasks. '
             'Please provide a YAML file.')
     assert config is not None, (is_yaml, config)
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
 
     click.secho('Benchmarking a task from YAML: ', fg='cyan', nl=False)
     click.secho(entrypoint, bold=True)
@@ -5977,10 +6225,14 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
+@click.option('--get-token',
+              is_flag=True,
+              default=False,
+              help='Force token-based login.')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str]):
+def api_login(endpoint: Optional[str], get_token: bool):
     """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint)
+    sdk.api_login(endpoint, get_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -5992,6 +6244,10 @@ def api_info():
     api_server_info = sdk.api_info()
     user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     user_hash = common_utils.get_user_hash()
+    api_server_user = api_server_info.get('user')
+    if api_server_user is not None:
+        user_name = api_server_user['name']
+        user_hash = api_server_user['id']
     dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
@@ -5999,6 +6255,58 @@ def api_info():
                f'version: {api_server_info["version"]}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def ssh():
+    """Commands for managing SSH Node Pools."""
+    pass
+
+
+@ssh.command('up', cls=_DocumentedCodeCommand)
+@click.option(
+    '--infra',
+    help='Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. '
+    'If not specified, all clusters in the file will be set up.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+def ssh_up(infra: Optional[str], async_call: bool):
+    """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
+
+    This command sets up a Kubernetes cluster on the machines specified in
+    ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
+    """
+    request_id = sdk.ssh_up(infra=infra)
+    if async_call:
+        print(f'Request submitted with ID: {request_id}')
+    else:
+        sdk.stream_and_get(request_id)
+
+
+@ssh.command('down', cls=_DocumentedCodeCommand)
+@click.option(
+    '--infra',
+    help='Name of the cluster to clean up in ~/.sky/ssh_node_pools.yaml. '
+    'If not specified, all clusters in the file will be cleaned up.')
+@click.option('--async',
+              'async_call',
+              is_flag=True,
+              hidden=True,
+              help='Run the command asynchronously.')
+def ssh_down(infra, async_call):
+    """Clean up a cluster set up with 'sky ssh up'.
+
+    This command removes the Kubernetes installation from the machines specified
+    in ~/.sky/ssh_node_pools.yaml.
+    """
+    request_id = sdk.ssh_down(infra=infra)
+    if async_call:
+        print(f'Request submitted with ID: {request_id}')
+    else:
+        sdk.stream_and_get(request_id)
 
 
 def main():

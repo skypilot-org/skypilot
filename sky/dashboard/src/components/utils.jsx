@@ -8,6 +8,10 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { REFRESH_INTERVALS } from '@/lib/config';
+
+// Refresh interval in milliseconds
+export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 function capitalizeFirstWord(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -78,6 +82,24 @@ export const CustomTooltip = ({ children, ...props }) => {
       {...props}
       content={
         <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm capitalize rounded">
+          {content}
+        </span>
+      }
+    >
+      {children}
+    </Tooltip>
+  );
+};
+
+export const NonCapitalizedTooltip = ({ children, ...props }) => {
+  const content = props.content;
+  props.content = undefined;
+  return (
+    <Tooltip
+      {...DEFAULT_TOOLTIP_PROPS}
+      {...props}
+      content={
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded">
           {content}
         </span>
       }
@@ -314,7 +336,7 @@ export function LogFilter({ logs, controller = false }) {
       )}
       <div
         className="logs-container"
-        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
+        dangerouslySetInnerHTML={{ __html: filteredLogs }}
       />
     </div>
   );

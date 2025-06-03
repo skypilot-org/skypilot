@@ -9,7 +9,7 @@ ARG TARGETARCH
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl autossh jq -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
