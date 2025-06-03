@@ -81,10 +81,10 @@ jobs:
             echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
-          # Verify version does not contain 1.0.0
+          # Verify version is not exactly 1.0.0.dev
           VERSION_TO_CHECK=$(cat $GITHUB_OUTPUT | grep "latest_version=" | cut -d"=" -f2)
-          if [[ "$VERSION_TO_CHECK" == *"1.0.0"* ]]; then
-            echo "Error: Version contains 1.0.0 which is not allowed"
+          if [[ "$VERSION_TO_CHECK" == "1.0.0.dev" ]]; then
+            echo "Error: Version cannot be exactly 1.0.0.dev"
             exit 1
           fi
           cat $GITHUB_OUTPUT
