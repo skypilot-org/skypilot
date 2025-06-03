@@ -154,7 +154,7 @@ class JobsController:
 
         latest_task_id, status = managed_job_state.get_latest_task_id_status(
             self._job_id)
-        is_recovery = False
+        is_resume = False
         if (latest_task_id is not None and
                 status != managed_job_state.ManagedJobStatus.PENDING):
             assert latest_task_id >= task_id, (latest_task_id, task_id)
@@ -164,7 +164,7 @@ class JobsController:
                 return True
             if latest_task_id == task_id:
                 # Start recovery.
-                is_recovery = True
+                is_resume = True
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -190,7 +190,7 @@ class JobsController:
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id)
-        if not is_recovery:
+        if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
                 submitted_at = backend_utils.get_timestamp_from_run_timestamp(
@@ -222,11 +222,12 @@ class JobsController:
                                           callback_func=callback_func)
 
         while True:
-            if is_recovery:
+            if is_resume:
                 last_status = managed_job_state.get_job_status_with_task_id(
                     job_id=self._job_id, task_id=task_id)
                 if last_status is not None and last_status.is_terminal():
-                    return True
+                    return (last_status ==
+                            managed_job_state.ManagedJobStatus.SUCCEEDED)
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
@@ -244,7 +245,7 @@ class JobsController:
             try:
                 job_status = managed_job_utils.get_job_status(
                     self._backend, cluster_name)
-            except (exceptions.FetchClusterInfoError, exceptions.CommandError):
+            except exceptions.FetchClusterInfoError:
                 logger.info('Failed to fetch the job status. Start recovery...')
                 job_status = None
 

@@ -206,11 +206,11 @@ def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str,
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
-        is_recovery = state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                                  env_file_path,
-                                                  common_utils.get_user_hash(),
-                                                  priority)
-    if is_recovery:
+        is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                                env_file_path,
+                                                common_utils.get_user_hash(),
+                                                priority)
+    if is_resume:
         _start_controller(job_id, dag_yaml_path, env_file_path)
     else:
         maybe_schedule_next_jobs()
