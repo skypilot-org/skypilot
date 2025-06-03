@@ -66,6 +66,7 @@ Run :code:`sky check` to verify that SkyPilot can access your cluster.
     # Should show `Kubernetes: Enabled`
 
 If you see an error, ensure that your kubeconfig file at :code:`~/.kube/config` is correctly set up.
+Also, make sure that the cluster context name doesn't start with the prefix :code:`ssh-`. This prefix is reserved by SkyPilot internal use.
 
 
 Step A3 - Do your nodes have enough disk space?
