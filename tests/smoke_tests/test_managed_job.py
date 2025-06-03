@@ -1197,3 +1197,11 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(name, generic_cloud, sky.ManagedJobStatus.RUNNING)
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(name, generic_cloud, sky.ManagedJobStatus.STARTING)
+    smoke_tests_utils.run_one_test(test)
