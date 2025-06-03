@@ -170,8 +170,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       console.log('data', data);
       const currentUserRole = data.role;
 
-      if (currentUserRole === 'user') {
-        alert(`${data.name} is logged in as user, cannot edit user role.`);
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot edit user role.`);
         return;
       }
 

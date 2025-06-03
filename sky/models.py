@@ -10,13 +10,11 @@ class User:
     """Dataclass to store user information."""
     # User hash
     id: str
-    # Role of the user
-    role: str
     # Display name of the user
     name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': self.id, 'name': self.name, 'role': self.role}
+        return {'id': self.id, 'name': self.name}
 
 
 RealtimeGpuAvailability = collections.namedtuple(

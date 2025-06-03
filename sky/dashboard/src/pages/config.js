@@ -57,9 +57,9 @@ export default function ConfigPage() {
       const data = await response.json();
       const currentUserRole = data.role;
 
-      if (currentUserRole === 'user') {
+      if (currentUserRole != 'admin') {
         setError(
-          new Error(`${data.name} is logged in as user, cannot edit config`)
+          new Error(`${data.name} is logged in as no admin, cannot edit config`)
         );
         setSaving(false);
         return;

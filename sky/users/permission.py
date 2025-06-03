@@ -1,5 +1,6 @@
 """Permission service for SkyPilot API Server."""
 import os
+from typing import List
 
 import casbin
 import sqlalchemy_adapter
@@ -23,7 +24,9 @@ class PermissionService:
 
     def init_policies(self):
         """Initialize policies."""
-        self.enforcer.clear_policy()
+        # Only clear p policies (permission policies),
+        # keep g policies (role policies)
+        self.enforcer.remove_filtered_policy(0)
         for role, permissions in rbac.get_role_permissions().items():
             if permissions['permissions'] and 'blocklist' in permissions[
                     'permissions']:
@@ -34,7 +37,12 @@ class PermissionService:
                     self.enforcer.add_policy(role, path, method)
         all_users = global_user_state.get_all_users()
         for user in all_users:
-            self.enforcer.add_grouping_policy(user.id, user.role)
+            user_roles = self.get_user_roles(user.id)
+            if len(user_roles) == 0:
+                logger.info(f'User {user.id} has no roles, adding'
+                            f' default role {rbac.get_default_role()}')
+                self.enforcer.add_grouping_policy(user.id,
+                                                  rbac.get_default_role())
         self.enforcer.save_policy()
 
     def add_role(self, user: str, role: str):
@@ -52,6 +60,21 @@ class PermissionService:
         self.enforcer.remove_grouping_policy(user, old_role)
         self.enforcer.add_grouping_policy(user, new_role)
         self.enforcer.save_policy()
+
+    def get_user_roles(self, user: str) -> List[str]:
+        """Get all roles for a user.
+
+        This method returns all roles that the user has, including inherited
+        roles. For example, if a user has role 'admin' and 'admin' inherits
+        from 'user', this method will return ['admin', 'user'].
+
+        Args:
+            user: The user ID to get roles for.
+
+        Returns:
+            A list of role names that the user has.
+        """
+        return self.enforcer.get_roles_for_user(user)
 
     def check_permission(self, user: str, path: str, method: str) -> bool:
         """Check permission."""

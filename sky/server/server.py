@@ -110,6 +110,13 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if user_id is None:
             return await call_next(request)
 
+        user_roles = users_rest.permission_service.get_user_roles(user_id)
+        if len(user_roles) == 0:
+            default_role = rbac.get_default_role()
+            logger.info(f'User {user_id} has no roles, adding'
+                        f' default role {default_role}')
+            users_rest.permission_service.add_role(user_id, default_role)
+
         # Check the role permission
         if users_rest.permission_service.check_permission(
                 user_id, request.url.path, request.method):
@@ -157,9 +164,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     user_name = request.headers['X-Auth-Request-Email']
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    return models.User(id=user_hash,
-                       name=user_name,
-                       role=rbac.get_default_role())
+    return models.User(id=user_hash, name=user_name)
 
 
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -171,8 +176,6 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Add user to database if auth_user is present
         if auth_user is not None:
             global_user_state.add_or_update_user(auth_user)
-            user_info = global_user_state.get_user(auth_user.id)
-            users_rest.permission_service.add_role(user_info.id, user_info.role)
 
         body = await request.body()
         if auth_user and body:

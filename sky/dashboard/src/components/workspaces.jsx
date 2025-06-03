@@ -135,8 +135,8 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
       const data = await response.json();
       const currentUserRole = data.role;
 
-      if (currentUserRole === 'user') {
-        alert(`${data.name} is logged in as user, cannot edit workspace`);
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot edit workspace`);
         return;
       }
 
@@ -241,8 +241,8 @@ const CreateWorkspaceCard = ({ onClick }) => {
       const data = await response.json();
       const currentUserRole = data.role;
 
-      if (currentUserRole === 'user') {
-        alert(`${data.name} is logged in as user, cannot create workspace`);
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot create workspace`);
         return;
       }
 
@@ -500,8 +500,8 @@ export function Workspaces() {
       const data = await response.json();
       const currentUserRole = data.role;
 
-      if (currentUserRole === 'user') {
-        alert(`${data.name} is logged in as user, cannot delete workspace`);
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot delete workspace`);
         return;
       }
 
@@ -570,8 +570,8 @@ export function Workspaces() {
       const data = await response.json();
       const currentUserRole = data.role;
 
-      if (currentUserRole === 'user') {
-        alert(`${data.name} is logged in as user, cannot edit config`);
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot edit config`);
         return;
       }
 

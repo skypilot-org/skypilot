@@ -1239,7 +1239,7 @@ RBAC configuration (optional).
 ``rbac.default_role``
 ~~~~~~~~~~~~~~~~~~~~~
 
-Default role for users (optional).
+Default role for users (optional).  Either ``admin`` or ``user``.
 
 If not specified, the default role is ``admin``.
 

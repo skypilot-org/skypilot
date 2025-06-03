@@ -69,7 +69,6 @@ user_table = sqlalchemy.Table(
     Base.metadata,
     sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('name', sqlalchemy.Text),
-    sqlalchemy.Column('role', sqlalchemy.Text, server_default='admin'),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -306,26 +305,10 @@ def create_table():
             'last_creation_command',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
-        # add role column to user table
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'users',
-            'role',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'admin\'')
         session.commit()
 
 
 create_table()
-
-
-def update_user(user_id: str, role: str):
-    """Store the mapping from user hash to user name for display purposes."""
-    with orm.Session(SQLALCHEMY_ENGINE) as session:
-        update_stmnt = sqlalchemy.update(user_table).where(
-            user_table.c.id == user_id).values(role=role)
-        session.execute(update_stmnt)
-        session.commit()
 
 
 def add_or_update_user(user: models.User):
@@ -343,8 +326,7 @@ def add_or_update_user(user: models.User):
         else:
             raise ValueError('Unsupported database dialect')
         insert_stmnt = insert_func(user_table).values(id=user.id,
-                                                      name=user.name,
-                                                      role=user.role)
+                                                      name=user.name)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[user_table.c.id],
             set_={user_table.c.name: user.name})
@@ -356,16 +338,14 @@ def get_user(user_id: str) -> models.User:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
-        return models.User(id=user_id, role='')
-    return models.User(id=row.id, name=row.name, role=row.role)
+        return models.User(id=user_id)
+    return models.User(id=row.id, name=row.name)
 
 
 def get_all_users() -> List[models.User]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
-    return [
-        models.User(id=row.id, name=row.name, role=row.role) for row in rows
-    ]
+    return [models.User(id=row.id, name=row.name) for row in rows]
 
 
 def add_or_update_cluster(cluster_name: str,

@@ -1214,6 +1214,7 @@ def get_config_schema():
         'properties': {
             'default_role': {
                 'type': 'string',
+                'case_insensitive_enum': ['admin', 'user']
             },
         },
     }
