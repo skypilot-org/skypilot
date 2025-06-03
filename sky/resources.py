@@ -1178,16 +1178,20 @@ class Resources:
                 non_docker_images = []
                 for region, image_id in self._image_id.items():
                     if not image_id.startswith('docker:'):
-                        non_docker_images.append(f'{image_id} (region: {region})')
-                
+                        non_docker_images.append(
+                            f'{image_id} (region: {region})')
+
                 if non_docker_images:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'When using network_tier=BEST on GCP, image_id must be a docker image. '
-                            f'Found non-docker images: {", ".join(non_docker_images)}. '
-                            f'Please either: (1) use a docker image (prefix with "docker:"), or '
-                            f'(2) leave image_id empty to use the default GPU Direct TCPX image.'
-                        )
+                            f'When using network_tier=BEST on GCP, image_id '
+                            f'must be a docker image. '
+                            f'Found non-docker images: '
+                            f'{", ".join(non_docker_images)}. '
+                            f'Please either: (1) use a docker image '
+                            f'(prefix with "docker:"), or '
+                            f'(2) leave image_id empty to use the default '
+                            f'GPU Direct TCPX image.')
 
         if self._image_id is None:
             return
