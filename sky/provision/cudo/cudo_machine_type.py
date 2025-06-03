@@ -1,7 +1,7 @@
 """Cudo Compute VM spec helper for SkyPilot."""
 import csv
 
-from sky.clouds.service_catalog.common import get_catalog_path
+from sky.catalog.common import get_catalog_path
 
 VMS_CSV = 'cudo/vms.csv'
 

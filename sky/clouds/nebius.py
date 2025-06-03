@@ -4,11 +4,11 @@ import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
-from sky.clouds import service_catalog
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -92,7 +92,7 @@ class Nebius(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'nebius')
 
         if region is not None:
@@ -104,8 +104,8 @@ class Nebius(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='nebius')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='nebius')
 
     @classmethod
     def zones_provision_loop(
@@ -132,11 +132,11 @@ class Nebius(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='nebius')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='nebius')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -165,18 +165,18 @@ class Nebius(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
         """Returns the default instance type for Nebius."""
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='nebius')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='nebius')
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='nebius')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='nebius')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -277,15 +277,15 @@ class Nebius(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='nebius')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='nebius')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -368,12 +368,10 @@ class Nebius(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'nebius')
+        return catalog.instance_type_exists(instance_type, 'nebius')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='nebius')
+        return catalog.validate_region_zone(region, zone, clouds='nebius')
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:

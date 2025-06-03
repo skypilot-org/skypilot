@@ -6,12 +6,12 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -471,14 +471,14 @@ class Kubernetes(clouds.Cloud):
                 # Select image based on whether we are using GPUs or not.
                 image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
                 # Get the container image ID from the service catalog.
-                image_id = service_catalog.get_image_id_from_tag(
-                    image_id, clouds='kubernetes')
+                image_id = catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
             return image_id
 
         image_id = _get_image_id(resources)
         # TODO(romilb): Create a lightweight image for SSH jump host
-        ssh_jump_image = service_catalog.get_image_id_from_tag(
-            self.IMAGE_CPU, clouds='kubernetes')
+        ssh_jump_image = catalog.get_image_id_from_tag(self.IMAGE_CPU,
+                                                       clouds='kubernetes')
 
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are

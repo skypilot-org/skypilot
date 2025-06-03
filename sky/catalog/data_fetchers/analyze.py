@@ -3,7 +3,7 @@ import typing
 from typing import List
 
 from sky.adaptors import common as adaptors_common
-from sky.clouds.service_catalog import common
+from sky.catalog import common
 
 if typing.TYPE_CHECKING:
     import pandas as pd

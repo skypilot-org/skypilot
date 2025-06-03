@@ -49,6 +49,7 @@ import yaml
 
 import sky
 from sky import backends
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -60,8 +61,8 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
+from sky.catalog import constants as service_catalog_constants
 from sky.client import sdk
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -3455,7 +3456,7 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
-@service_catalog.fallback_to_default_catalog
+@catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
@@ -3835,7 +3836,7 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS
+                c for c in service_catalog_constants.ALL_CLOUDS
                 if c != 'kubernetes' and c != 'ssh'
             ]
 
@@ -3881,13 +3882,13 @@ def show_gpus(
                        f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
+            for gpu in catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
 
             # Google TPUs
-            for tpu in service_catalog.get_tpus():
+            for tpu in catalog.get_tpus():
                 if tpu in result:
                     tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
             if tpu_table.get_string():
@@ -3958,7 +3959,7 @@ def show_gpus(
                                   all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common as catalog_common
+        from sky.catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud

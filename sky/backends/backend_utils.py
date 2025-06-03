@@ -2836,6 +2836,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         if is_managed_job:
             if task.best_resources.use_spot:
                 spot_str = '[Spot]'
+            assert task.best_resources.cpus is not None
             task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
