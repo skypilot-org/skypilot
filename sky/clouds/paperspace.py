@@ -3,9 +3,9 @@
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky.adaptors import common as adaptors_common
-from sky.clouds import service_catalog
 from sky.provision.paperspace import utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -41,6 +41,9 @@ class Paperspace(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             (f'High availability controllers are not supported in {_REPR}.'),
     }
@@ -85,7 +88,7 @@ class Paperspace(clouds.Cloud):
         if use_spot:
             return []
         else:
-            regions = service_catalog.get_region_zones_for_instance_type(
+            regions = catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'paperspace')
 
         if region is not None:
@@ -97,8 +100,8 @@ class Paperspace(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds='paperspace')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='paperspace')
 
     @classmethod
     def zones_provision_loop(
@@ -127,7 +130,7 @@ class Paperspace(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> float:
-        return service_catalog.get_hourly_cost(
+        return catalog.get_hourly_cost(
             instance_type,
             use_spot=use_spot,
             region=region,
@@ -160,16 +163,16 @@ class Paperspace(clouds.Cloud):
         disk_tier: Optional[resources_utils.DiskTier] = None,
     ) -> Optional[str]:
         """Returns the default instance type for Paperspace."""
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='paperspace')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='paperspace')
 
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='paperspace')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='paperspace')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -237,17 +240,17 @@ class Paperspace(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list) = (
-            service_catalog.get_instance_type_for_accelerator(
-                acc,
-                acc_count,
-                use_spot=resources.use_spot,
-                cpus=resources.cpus,
-                memory=resources.memory,
-                region=resources.region,
-                zone=resources.zone,
-                clouds='paperspace',
-            ))
+        (instance_list,
+         fuzzy_candidate_list) = (catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='paperspace',
+         ))
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -293,9 +296,7 @@ class Paperspace(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'paperspace')
+        return catalog.instance_type_exists(instance_type, 'paperspace')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='paperspace')
+        return catalog.validate_region_zone(region, zone, clouds='paperspace')

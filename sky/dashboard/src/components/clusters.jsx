@@ -5,7 +5,13 @@
  */
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import {
@@ -45,6 +51,8 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -56,6 +64,27 @@ import cachePreloader from '@/lib/cache-preloader';
 // };
 
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
+
+// Helper function to format autostop information, similar to _get_autostop in CLI utils
+const formatAutostop = (autostop, toDown) => {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    autostopStr = autostop + 'm';
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+};
 
 export function Clusters() {
   const router = useRouter();
@@ -364,6 +393,12 @@ export function ClusterTable({
               >
                 Started{getSortDirection('time')}
               </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('autostop')}
+              >
+                Autostop{getSortDirection('autostop')}
+              </TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -372,7 +407,7 @@ export function ClusterTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -435,6 +470,9 @@ export function ClusterTable({
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
+                    <TableCell>
+                      {formatAutostop(item.autostop, item.to_down)}
+                    </TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
@@ -449,7 +487,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters

@@ -3,7 +3,7 @@
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.clouds.service_catalog import common
+from sky.catalog import common
 import sky.provision.cudo.cudo_machine_type as cudo_mt
 from sky.utils import ux_utils
 

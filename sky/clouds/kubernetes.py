@@ -6,12 +6,12 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -75,6 +75,9 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -127,6 +130,12 @@ class Kubernetes(clouds.Cloud):
             if spot_label_key is not None:
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+            # Allow custom network tier if supported by the cluster
+            # (e.g., Nebius clusters with high performance networking)
+            if cls._cluster_supports_high_performance_networking(context):
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                    None)
         except exceptions.KubeAPIUnreachableError as e:
             cls._log_unreachable_context(context, str(e))
         return unsupported_features
@@ -462,15 +471,21 @@ class Kubernetes(clouds.Cloud):
                 # Select image based on whether we are using GPUs or not.
                 image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
                 # Get the container image ID from the service catalog.
-                image_id = service_catalog.get_image_id_from_tag(
-                    image_id, clouds='kubernetes')
+                image_id = catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
             return image_id
 
         image_id = _get_image_id(resources)
         # TODO(romilb): Create a lightweight image for SSH jump host
-        ssh_jump_image = service_catalog.get_image_id_from_tag(
-            self.IMAGE_CPU, clouds='kubernetes')
+        ssh_jump_image = catalog.get_image_id_from_tag(self.IMAGE_CPU,
+                                                       clouds='kubernetes')
 
+        # Set environment variables for the pod. Note that SkyPilot env vars
+        # are set separately when the task is run. These env vars are
+        # independent of the SkyPilot task to be run.
+        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+
+        # Setup GPU/TPU labels and resource keys.
         k8s_acc_label_key = None
         k8s_acc_label_values = None
         k8s_topology_label_key = None
@@ -492,6 +507,17 @@ class Kubernetes(clouds.Cloud):
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
         else:
+            # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
+            # maintain GPU isolation. This is to override the default behavior
+            # of Nvidia device plugin which would expose all GPUs to the pod
+            # when no GPUs are requested.
+            # Note that NVIDIA_VISIBLE_DEVICES is different from
+            # CUDA_VISIBLE_DEVICES - the latter is used to control which GPUs
+            # are visible to the application and is set inside the pod, while
+            # the former is used to control which GPUs are visible to the pod
+            # through the nvidia runtime.
+            # See: https://github.com/NVIDIA/k8s-device-plugin/issues/61
+            k8s_env_vars['NVIDIA_VISIBLE_DEVICES'] = 'none'
             avoid_label_keys = kubernetes_utils.get_accelerator_label_keys(
                 context)
             if len(avoid_label_keys) == 0:
@@ -552,10 +578,22 @@ class Kubernetes(clouds.Cloud):
             timeout,
             override_configs=resources.cluster_config_overrides)
 
-        # Set environment variables for the pod. Note that SkyPilot env vars
-        # are set separately when the task is run. These env vars are
-        # independent of the SkyPilot task to be run.
-        k8s_env_vars = {kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        # Check if this cluster supports high performance networking and
+        # configure IPC_LOCK capability for clusters like Nebius that support it
+        k8s_ipc_lock_capability = False
+        if (resources.network_tier is not None and
+                resources.network_tier == resources_utils.NetworkTier.BEST):
+            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
+            unsupported_features = self._unsupported_features_for_resources(
+                resources)
+            if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
+                not in unsupported_features:
+                k8s_ipc_lock_capability = True
+
+        if k8s_ipc_lock_capability:
+            k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
+            k8s_env_vars['UCX_NET_DEVICES'] = \
+                'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -621,6 +659,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
+            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -904,3 +943,30 @@ class Kubernetes(clouds.Cloud):
             f'{cls.canonical_name()}/{c}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
+    def _cluster_supports_high_performance_networking(cls,
+                                                      context: str) -> bool:
+        """Check if the cluster supports high performance networking.
+
+        Currently detects Nebius clusters by checking for nebius.com/ labels
+        on cluster nodes.
+
+        Args:
+            context: The Kubernetes context to check.
+
+        Returns:
+            True if the cluster supports high performance networking.
+        """
+        try:
+            nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+            for node in nodes:
+                if node.metadata.labels:
+                    for label_key in node.metadata.labels.keys():
+                        if label_key.startswith('nebius.com/'):
+                            return True
+        except exceptions.KubeAPIUnreachableError:
+            # If we can't reach the cluster, assume no high perf networking
+            return False
+        return False

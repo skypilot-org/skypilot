@@ -16,9 +16,9 @@ from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
 
 from typing_extensions import assert_never
 
+from sky import catalog
 from sky import exceptions
 from sky import skypilot_config
-from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import timeline
@@ -45,6 +45,7 @@ class CloudImplementationFeatures(enum.Enum):
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    CUSTOM_NETWORK_TIER = 'custom_network_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
@@ -139,6 +140,9 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTED_NETWORK_TIERS = {
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
+    }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
@@ -184,7 +188,7 @@ class Cloud:
         """Returns the regions that offer the specified resources.
 
         The order of the regions follow the order of the regions returned by
-        service_catalog/common.py#get_region_zones().
+        sky/catalog/common.py#get_region_zones().
         When region or zone is not None, the returned value will be limited to
         the specified region/zone.
 
@@ -363,9 +367,9 @@ class Cloud:
     @classmethod
     def is_image_tag_valid(cls, image_tag: str, region: Optional[str]) -> bool:
         """Validates that the image tag is valid for this cloud."""
-        return service_catalog.is_image_tag_valid(image_tag,
-                                                  region,
-                                                  clouds=cls._REPR.lower())
+        return catalog.is_image_tag_valid(image_tag,
+                                          region,
+                                          clouds=cls._REPR.lower())
 
     @classmethod
     def is_label_valid(cls, label_key: str,
@@ -621,9 +625,9 @@ class Cloud:
         Raises:
             ValueError: If region or zone is invalid or not supported.
         """
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds=self._REPR.lower())
+        return catalog.validate_region_zone(region,
+                                            zone,
+                                            clouds=self._REPR.lower())
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
@@ -714,6 +718,22 @@ class Cloud:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def check_network_tier_enabled(
+            cls, instance_type: Optional[str],
+            network_tier: resources_utils.NetworkTier) -> None:
+        """Errors out if the network tier is not supported by the
+        cloud provider.
+
+        Raises:
+            exceptions.NotSupportedError: If the network tier is not supported.
+        """
+        del instance_type  # unused
+        if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{network_tier} is not supported by {cls._REPR}.')
 
     @classmethod
     def _translate_disk_tier(

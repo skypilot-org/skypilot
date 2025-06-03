@@ -336,7 +336,7 @@ export function LogFilter({ logs, controller = false }) {
       )}
       <div
         className="logs-container"
-        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
+        dangerouslySetInnerHTML={{ __html: filteredLogs }}
       />
     </div>
   );

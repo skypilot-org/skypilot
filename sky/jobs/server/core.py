@@ -20,7 +20,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds.service_catalog import common as service_catalog_common
+from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
@@ -521,8 +521,12 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool) -> int:
+def tail_logs(name: Optional[str],
+              job_id: Optional[int],
+              follow: bool,
+              controller: bool,
+              refresh: bool,
+              tail: Optional[int] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -565,7 +569,8 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                          job_id=job_id,
                                          job_name=name,
                                          follow=follow,
-                                         controller=controller)
+                                         controller=controller,
+                                         tail=tail)
 
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:

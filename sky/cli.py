@@ -49,6 +49,7 @@ import yaml
 
 import sky
 from sky import backends
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -60,8 +61,8 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
+from sky.catalog import constants as service_catalog_constants
 from sky.client import sdk
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -415,6 +416,13 @@ _TASK_OPTIONS = [
                                    case_sensitive=False),
                  required=False,
                  help=resources_utils.DiskTier.cli_help_message()),
+    click.option('--network-tier',
+                 default=None,
+                 type=click.Choice(
+                     resources_utils.NetworkTier.supported_tiers(),
+                     case_sensitive=False),
+                 required=False,
+                 help=resources_utils.NetworkTier.cli_help_message()),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,
@@ -696,6 +704,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
+        network_tier: Optional[str] = None,
         ports: Optional[Tuple[str, ...]] = None,
         config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
@@ -749,6 +758,11 @@ def _parse_override_params(
             override_params['disk_tier'] = None
         else:
             override_params['disk_tier'] = disk_tier
+    if network_tier is not None:
+        if network_tier.lower() == 'none':
+            override_params['network_tier'] = None
+        else:
+            override_params['network_tier'] = network_tier
     if ports:
         if any(p.lower() == 'none' for p in ports):
             if len(ports) > 1:
@@ -857,6 +871,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
+    network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
@@ -897,6 +912,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
+                                             network_tier=network_tier,
                                              ports=ports,
                                              config_override=config_override)
     if field_to_ignore is not None:
@@ -1235,6 +1251,7 @@ def launch(
         env: List[Tuple[str, str]],
         disk_size: Optional[int],
         disk_tier: Optional[str],
+        network_tier: Optional[str],
         ports: Tuple[str, ...],
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
@@ -1288,6 +1305,7 @@ def launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         config_override=config_override,
     )
@@ -1405,6 +1423,7 @@ def exec(cluster: Optional[str],
          memory: Optional[str],
          disk_size: Optional[int],
          disk_tier: Optional[str],
+         network_tier: Optional[str],
          async_call: bool,
          config_override: Optional[Dict[str, Any]] = None):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1500,6 +1519,7 @@ def exec(cluster: Optional[str],
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
         config_override=config_override,
@@ -3436,7 +3456,7 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
-@service_catalog.fallback_to_default_catalog
+@catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
@@ -3816,7 +3836,7 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS
+                c for c in service_catalog_constants.ALL_CLOUDS
                 if c != 'kubernetes' and c != 'ssh'
             ]
 
@@ -3862,13 +3882,13 @@ def show_gpus(
                        f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
+            for gpu in catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
 
             # Google TPUs
-            for tpu in service_catalog.get_tpus():
+            for tpu in catalog.get_tpus():
                 if tpu in result:
                     tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
             if tpu_table.get_string():
@@ -3939,7 +3959,7 @@ def show_gpus(
                                   all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common as catalog_common
+        from sky.catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud
@@ -4216,6 +4236,7 @@ def jobs_launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     ports: Tuple[str],
     priority: Optional[int],
     detach_run: bool,
@@ -4262,6 +4283,7 @@ def jobs_launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         job_recovery=job_recovery,
         priority=priority,
@@ -4563,7 +4585,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
-    managed_jobs.dashboard()
+    sdk.dashboard(starting_page='jobs')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4599,6 +4621,7 @@ def _generate_task_with_service(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     not_supported_cmd: str,
 ) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
@@ -4625,6 +4648,7 @@ def _generate_task_with_service(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
     )
     if isinstance(task, sky.Dag):
@@ -4738,6 +4762,7 @@ def serve_up(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    network_tier: Optional[str],
     yes: bool,
     async_call: bool,
 ):
@@ -4792,6 +4817,7 @@ def serve_up(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve up',
     )
@@ -4836,16 +4862,16 @@ def serve_up(
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def serve_update(service_name: str, service_yaml: Tuple[str, ...],
-                 workdir: Optional[str], infra: Optional[str],
-                 cloud: Optional[str], region: Optional[str],
-                 zone: Optional[str], num_nodes: Optional[int],
-                 use_spot: Optional[bool], image_id: Optional[str],
-                 env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-                 gpus: Optional[str], instance_type: Optional[str],
-                 ports: Tuple[str], cpus: Optional[str], memory: Optional[str],
-                 disk_size: Optional[int], disk_tier: Optional[str], mode: str,
-                 yes: bool, async_call: bool):
+def serve_update(
+        service_name: str, service_yaml: Tuple[str, ...],
+        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
+        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
+        use_spot: Optional[bool], image_id: Optional[str],
+        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
+        cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
+        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
+        yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4895,6 +4921,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve update',
     )
@@ -5303,7 +5330,8 @@ def serve_logs(
 
 
 @ux_utils.print_exception_no_traceback()
-def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
+def _get_candidate_configs(
+        entrypoint_yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
     Benchmark candidates are configured in the YAML file as a list of
@@ -5317,17 +5345,18 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {instance_type: g4dn.2xlarge}
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
-    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
+    config = common_utils.read_yaml(os.path.expanduser(entrypoint_yaml_path))
     if not isinstance(config, dict):
-        raise ValueError(f'Invalid YAML file: {yaml_path}. '
+        raise ValueError(f'Invalid YAML file: {entrypoint_yaml_path}. '
                          'The YAML file should be parsed into a dictionary.')
     if config.get('resources') is None:
         return None
 
     resources = config['resources']
     if not isinstance(resources, dict):
-        raise ValueError(f'Invalid resources configuration in {yaml_path}. '
-                         'Resources must be a dictionary.')
+        raise ValueError(
+            f'Invalid resources configuration in {entrypoint_yaml_path}. '
+            'Resources must be a dictionary.')
     if resources.get('candidates') is None:
         return None
 
