@@ -185,12 +185,6 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
-async def reschedule_retryable_requests():
-    """Reschedules retryable requests."""
-    while True:
-        await asyncio.sleep(1)
-
-
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""

@@ -69,6 +69,16 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
 
 # Define the worker function outside of the class to avoid pickling self
 def _disposable_worker(fn, initializer, initargs, result_queue, args, kwargs):
+    """The worker function that is used to run the task.
+
+    Args:
+        fn: The function to run.
+        initializer: The initializer function to run before running the task.
+        initargs: The arguments to pass to the initializer function.
+        result_queue: The queue to put the result and exception into.
+        args: The arguments to pass to the function.
+        kwargs: The keyword arguments to pass to the function.
+    """
     try:
         if initializer is not None:
             initializer(*initargs)
@@ -204,7 +214,8 @@ class BurstableExecutor:
 
         Prioritizes submitting to the guaranteed pool. If no idle workers
         are available in the guaranteed pool, it will submit to the burst
-        pool.
+        pool. If the busrt pool is full, it will retry the whole process until
+        the task is submitted successfully.
         TODO(aylei): this is coupled with executor.RequestWorker since we
         know the worker is dedicated to request scheduling and it either
         blocks on request polling or request submitting. So it is no harm
