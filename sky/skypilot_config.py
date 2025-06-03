@@ -558,7 +558,6 @@ def _reload_config_as_client() -> None:
 def loaded_config_path() -> Optional[str]:
     """Returns the path to the loaded config file, or '<overridden>' if the
     config is overridden."""
-    # here here here
     path = [p for p in set(_get_loaded_config_path()) if p is not None]
     if len(path) == 0:
         return '<overridden>' if _is_config_overridden() else None
