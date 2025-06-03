@@ -88,7 +88,8 @@ def test_use_spot_for_all_gpus_policy(add_example_policy_paths, task):
 
 def test_add_labels_policy(add_example_policy_paths, task):
     task = _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
-    with admin_policy_utils.apply_and_use_config_in_current_request(task):
+    _, config = admin_policy_utils.apply(task)
+    with skypilot_config.replace_skypilot_config(config):
         assert 'app' in skypilot_config.get_nested(
             ('kubernetes', 'custom_metadata', 'labels'),
             {}), ('label should be set')
@@ -195,7 +196,8 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
         None) == ['kind-skypilot', 'kind-skypilot2'
                  ], 'Kubernetes allowed contexts should be updated'
 
-    with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+    _, config = admin_policy_utils.apply(dag)
+    with skypilot_config.replace_skypilot_config(config):
         assert skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'),
             None) == ['kind-skypilot', 'kind-skypilot2'
