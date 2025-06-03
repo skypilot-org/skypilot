@@ -510,11 +510,31 @@ def get_expirable_clouds(
     expirable_clouds = []
     local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
     for cloud in enabled_clouds:
-        remote_identities = skypilot_config.get_nested(
-            (str(cloud).lower(), 'remote_identity'), None)
-        if remote_identities is None:
-            remote_identities = schemas.get_default_remote_identity(
-                str(cloud).lower())
+        # Kubernetes config might have context-specific properties
+        if isinstance(cloud, clouds.Kubernetes):
+            # get all custom contexts
+            contexts = kubernetes_utils.get_custom_k8s_contexts_names()
+            # add remote_identity of each context if it exists
+            remote_identities = []
+            for context in contexts:
+                context_remote_identity = kubernetes_utils.get_config_property_value(
+                    ('remote_identity',), context=context)
+                if context_remote_identity is not None:
+                    remote_identities.append(context_remote_identity)
+            # add global kubernetes remote identity if it exists, if not, add default
+            global_remote_identity = kubernetes_utils.get_config_property_value(
+                ('remote_identity',),
+                default_value=schemas.get_default_remote_identity(
+                    str(cloud).lower()))
+            if global_remote_identity is not None:
+                remote_identities.append(global_remote_identity)
+        else:
+            remote_identities = skypilot_config.get_nested(
+                (str(cloud).lower(), 'remote_identity'), None)
+            if remote_identities is None:
+                remote_identities = schemas.get_default_remote_identity(
+                    str(cloud).lower())
+
 
         local_credential_expiring = cloud.can_credential_expire()
         if isinstance(remote_identities, str):
@@ -607,8 +627,13 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), None)
+    # handle k8s cloud separately
+    if isinstance(cloud, clouds.Kubernetes):
+        remote_identity_config = kubernetes_utils.get_config_property_value(
+            ('remote_identity',), context=region.name)
+    else:
+        remote_identity_config = skypilot_config.get_nested(
+            (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
@@ -687,7 +712,11 @@ def write_cluster_config(
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
-    labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
+    if isinstance(cloud, clouds.Kubernetes):
+        labels = kubernetes_utils.get_config_property_value(('labels',),
+                                                            context=region.name)
+    else:
+        labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
