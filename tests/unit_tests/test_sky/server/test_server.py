@@ -11,8 +11,6 @@ import pytest
 import uvicorn
 
 from sky.server import server
-from sky.server.requests import payloads
-from sky.server.requests import requests as api_requests
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context

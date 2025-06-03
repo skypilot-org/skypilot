@@ -105,7 +105,7 @@ def encode_status_kubernetes(
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
-@register_encoder('jobs.queue', 'jobs.job_status')
+@register_encoder('jobs.queue')
 def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
