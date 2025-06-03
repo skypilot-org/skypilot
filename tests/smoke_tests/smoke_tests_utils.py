@@ -786,9 +786,10 @@ def get_response_from_request_id(request_id: str) -> Any:
 
 
 def _get_controller_pod_name(controller_name: str) -> str:
-    return ('kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
-            'APP:.metadata.labels.app --no-headers | '
-            f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
+    return (
+        'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
+        'APP:.metadata.labels.app --no-headers | '
+        f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
 
 
 def kill_and_wait_controller(controller_name: str) -> str:

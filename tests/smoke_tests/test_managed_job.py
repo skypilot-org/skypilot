@@ -1186,7 +1186,9 @@ def _get_ha_kill_test(name: str, generic_cloud: str,
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env={skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'},
+        env={
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
+        },
         timeout=20 * 60,
     )
 
