@@ -61,7 +61,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
-from sky.catalog import constants as service_catalog_constants
+from sky.catalog_constants import constants as service_catalog_constants
 from sky.client import sdk
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants

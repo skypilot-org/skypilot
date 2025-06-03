@@ -11,7 +11,7 @@ import filelock
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.catalog import constants as service_catalog_constants
+from sky.catalog_constants import constants as service_catalog_constants
 from sky.clouds import cloud as cloud_lib
 from sky.utils import common_utils
 from sky.utils import registry

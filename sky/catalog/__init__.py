@@ -4,8 +4,8 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.catalog import constants as service_catalog_constants
 from sky.catalog.config import fallback_to_default_catalog
+from sky.catalog_constants import constants as service_catalog_constants
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
