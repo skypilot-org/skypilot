@@ -28,6 +28,7 @@ import webbrowser
 import click
 import colorama
 import filelock
+import aiohttp
 
 from sky import admin_policy
 from sky import backends
@@ -2140,3 +2141,63 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
             f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
             f'{dashboard_msg}',
             fg='green')
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+async def get_async(request_id: str) -> Any:
+    """Async version of get() that waits for and gets the result of a request.
+
+    Args:
+        request_id: The request ID of the request to get.
+
+    Returns:
+        The ``Request Returns`` of the specified request. See the documentation
+        of the specific requests above for more details.
+
+    Raises:
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
+    """
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f'{server_common.get_server_url()}/api/get?request_id={request_id}',
+            timeout=aiohttp.ClientTimeout(
+                total=None,
+                connect=client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS
+            ),
+            cookies=server_common.get_api_cookie_jar()
+        ) as response:
+            request_task = None
+            if response.status == 200:
+                request_task = requests_lib.Request.decode(
+                    requests_lib.RequestPayload(**await response.json()))
+            elif response.status == 500:
+                try:
+                    request_task = requests_lib.Request.decode(
+                        requests_lib.RequestPayload(**await response.json()))
+                    logger.debug(f'Got request with error: {request_task.name}')
+                except Exception:  # pylint: disable=broad-except
+                    request_task = None
+            if request_task is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(f'Failed to get request {request_id}: '
+                                    f'{response.status} {await response.text()}')
+            error = request_task.get_error()
+            if error is not None:
+                error_obj = error['object']
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
+                    logger.error('=== Traceback on SkyPilot API Server ===\n'
+                                f'{stacktrace}')
+                with ux_utils.print_exception_no_traceback():
+                    raise error_obj
+            if request_task.status == requests_lib.RequestStatus.CANCELLED:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.RequestCancelled(
+                        f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                        f'({request_task.request_id}) is cancelled by another process.'
+                        f'{colorama.Style.RESET_ALL}')
+            return request_task.get_return_value()
