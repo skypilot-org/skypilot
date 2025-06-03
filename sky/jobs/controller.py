@@ -152,11 +152,11 @@ class JobsController:
         Other exceptions may be raised depending on the backend.
         """
 
-        latest_task_id, status = managed_job_state.get_latest_task_id_status(
-            self._job_id)
+        latest_task_id, prev_status = (
+            managed_job_state.get_latest_task_id_status(self._job_id))
         is_resume = False
         if (latest_task_id is not None and
-                status != managed_job_state.ManagedJobStatus.PENDING):
+                prev_status != managed_job_state.ManagedJobStatus.PENDING):
             assert latest_task_id >= task_id, (latest_task_id, task_id)
             if latest_task_id > task_id:
                 logger.info(f'Task {task_id} ({task.name}) has already '
@@ -225,7 +225,7 @@ class JobsController:
         # the initial value of `last_recovered_at`. Otherwise, the job duration
         # will be incorrect (55 years 5mo 2d 22h 33m 53s).
         if (not is_resume or
-                status == managed_job_state.ManagedJobStatus.STARTING):
+                prev_status == managed_job_state.ManagedJobStatus.STARTING):
             managed_job_state.set_started(job_id=self._job_id,
                                           task_id=task_id,
                                           start_time=remote_job_submitted_at,
