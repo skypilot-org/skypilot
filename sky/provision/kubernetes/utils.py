@@ -1143,7 +1143,8 @@ def get_accelerator_label_key_values(
     context_display_name = context.lstrip('ssh-') if (
         context and is_ssh_node_pool) else context
 
-    autoscaler_type = get_autoscaler_type()
+    autoscaler_type = get_config_property_value(('autoscaler',),
+                                                context=context)
     if autoscaler_type is not None:
         # If autoscaler is set in config.yaml, override the label key and value
         # to the autoscaler's format and bypass the GPU checks.
@@ -2505,17 +2506,6 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     return f'{cluster_name_on_cloud}-head'
 
 
-def get_autoscaler_type(
-) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
-    """Returns the autoscaler type by reading from config"""
-    autoscaler_type = skypilot_config.get_nested(('kubernetes', 'autoscaler'),
-                                                 None)
-    if autoscaler_type is not None:
-        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
-            autoscaler_type)
-    return autoscaler_type
-
-
 def get_config_property_value(keys: Tuple[str, ...],
                               context: Optional[str] = None,
                               default_value: Optional[Any] = None) -> Any:
@@ -2568,7 +2558,8 @@ def get_spot_label(
 
     # Check if autoscaler is configured. Allow spot instances if autoscaler type
     # is known to support spot instances.
-    autoscaler_type = get_autoscaler_type()
+    autoscaler_type = get_config_property_value(('autoscaler',),
+                                                context=context)
     if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
         return SPOT_LABEL_MAP[autoscaler_type.value]
 
