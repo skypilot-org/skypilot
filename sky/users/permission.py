@@ -47,19 +47,48 @@ class PermissionService:
         self._maybe_initialize_policies()
 
     def _maybe_initialize_policies(self):
-        """Initialize policies."""
+        """Initialize policies if they don't already exist."""
         logger.debug(f'Initializing policies in process: {os.getpid()}')
-        # Only clear p policies (permission policies),
-        # keep g policies (role policies)
-        self.enforcer.remove_filtered_policy(0)
-        for role, permissions in rbac.get_role_permissions().items():
+        
+        # Check if policies are already initialized by looking for existing 
+        # permission policies in the enforcer
+        existing_policies = self.enforcer.get_policy()
+        
+        # If we already have policies for the expected roles, skip initialization
+        role_permissions = rbac.get_role_permissions()
+        expected_policies = []
+        for role, permissions in role_permissions.items():
             if permissions['permissions'] and 'blocklist' in permissions[
                     'permissions']:
                 blocklist = permissions['permissions']['blocklist']
                 for item in blocklist:
-                    path = item['path']
-                    method = item['method']
-                    self.enforcer.add_policy(role, path, method)
+                    expected_policies.append([role, item['path'], item['method']])
+        
+        # Check if all expected policies already exist
+        policies_exist = all(
+            any(policy == expected for policy in existing_policies)
+            for expected in expected_policies
+        )
+        
+        if not policies_exist:
+            # Only clear and reinitialize if policies don't exist or are incomplete
+            logger.debug('Policies not found or incomplete, initializing...')
+            # Only clear p policies (permission policies),
+            # keep g policies (role policies)
+            self.enforcer.remove_filtered_policy(0)
+            for role, permissions in role_permissions.items():
+                if permissions['permissions'] and 'blocklist' in permissions[
+                        'permissions']:
+                    blocklist = permissions['permissions']['blocklist']
+                    for item in blocklist:
+                        path = item['path']
+                        method = item['method']
+                        self.enforcer.add_policy(role, path, method)
+            self.enforcer.save_policy()
+        else:
+            logger.debug('Policies already exist, skipping initialization')
+            
+        # Always ensure users have default roles (this is idempotent)
         all_users = global_user_state.get_all_users()
         for user in all_users:
             self.add_user_if_not_exists(user.id)
@@ -113,10 +142,12 @@ class PermissionService:
 
     def check_permission(self, user: str, path: str, method: str) -> bool:
         """Check permission."""
+        # We intentionally don't load the policy here, as it is a hot path, and
+        # we don't support updating the policy.
         # We don't hold the lock for checking permission, as it is read only and
         # it is a hot path in every request. It is ok to have a stale policy,
         # as long as it is eventually consistent.
-        self._load_policy_no_lock()
+        # self._load_policy_no_lock()
         return self.enforcer.enforce(user, path, method)
 
     def _load_policy_no_lock(self):
