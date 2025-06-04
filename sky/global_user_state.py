@@ -304,21 +304,8 @@ def create_table():
         session.commit()
 
 
-conn_string = None
-if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-    conn_string = skypilot_config.get_nested(('db',), None)
-if conn_string:
-    logger.debug(f'using db URI from {conn_string}')
-    SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
-else:
-    _DB_PATH = os.path.expanduser('~/.sky/state.db')
-    pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-    SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
-create_table()
-
-
 def get_config_yaml(key: str) -> Optional[str]:
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(config_yaml_table).filter_by(key=key).first()
     if row:
         return row.yaml
@@ -326,11 +313,11 @@ def get_config_yaml(key: str) -> Optional[str]:
 
 
 def set_config_yaml(key: str, yaml_str: str):
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
+    with orm.Session(SQLALCHEMY_ENGINE) as session:
+        if (SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+        elif (SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             insert_func = postgresql.insert
         else:
@@ -344,16 +331,38 @@ def set_config_yaml(key: str, yaml_str: str):
         session.commit()
 
 
+conn_string = None
+if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    conn_string = skypilot_config.get_nested(('db',), None)
+if conn_string:
+    logger.debug(f'using db URI from {conn_string}')
+    SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+else:
+    _DB_PATH = os.path.expanduser('~/.sky/state.db')
+    pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
+    SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
+create_table()
+
 saved_db_config_str = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-    # if a saved config exists, merge config from db into skypilot_config
     saved_db_config_str = get_config_yaml('api_server')
-
-if saved_db_config_str:
-    saved_db_config = yaml.safe_load(saved_db_config_str)
-    overlaid_config = skypilot_config.overlay_skypilot_config(
-        skypilot_config.get_server_config(), saved_db_config)
-    skypilot_config.update_config_no_lock(overlaid_config)
+    config = skypilot_config.get_server_config()
+    config.pop_nested(('db',), None)
+    if saved_db_config_str:
+        # if a saved config exists, merge config from db into skypilot_config
+        # and use the merged config to update the db.
+        saved_db_config = yaml.safe_load(saved_db_config_str)
+        overlaid_config = skypilot_config.overlay_skypilot_config(
+            config, saved_db_config)
+        if overlaid_config != config:
+            logger.info('updating config to db')
+            skypilot_config.update_config_no_lock(overlaid_config)
+        else:
+            logger.info('no config update needed')
+    else:
+        # if no saved config exists, stash the current config to db.
+        logger.info('stashing config to db')
+        skypilot_config.update_config_no_lock(config)
 
 
 def add_or_update_user(user: models.User):
