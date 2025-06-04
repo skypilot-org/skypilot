@@ -312,27 +312,64 @@ def create_table():
 create_table()
 
 
-def add_or_update_user(user: models.User):
-    """Store the mapping from user hash to user name for display purposes."""
+def add_or_update_user(user: models.User) -> bool:
+    """Store the mapping from user hash to user name for display purposes.
+
+    Returns:
+        Boolean: whether the user is newly added
+    """
     if user.name is None:
-        return
+        return False
 
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         if (SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
+            # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
+            # vs existing
             insert_func = sqlite.insert
+
+            # First try INSERT OR IGNORE - this won't fail if user exists
+            insert_stmnt = insert_func(user_table).prefix_with(
+                'OR IGNORE').values(id=user.id, name=user.name)
+            result = session.execute(insert_stmnt)
+
+            # Check if the INSERT actually inserted a row
+            was_inserted = result.rowcount > 0
+
+            if not was_inserted:
+                # User existed, so update it
+                session.query(user_table).filter_by(id=user.id).update(
+                    {user_table.c.name: user.name})
+
+            session.commit()
+            return was_inserted
+
         elif (SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            # For PostgreSQL, use INSERT ... ON CONFLICT with RETURNING to
+            # detect insert vs update
             insert_func = postgresql.insert
+            insert_stmnt = insert_func(user_table).values(id=user.id,
+                                                          name=user.name)
+
+            # Use a sentinel in the RETURNING clause to detect insert vs update
+            upsert_stmnt = insert_stmnt.on_conflict_do_update(
+                index_elements=[user_table.c.id],
+                set_={
+                    user_table.c.name: user.name
+                }).returning(
+                    user_table.c.id,
+                    # This will be True for INSERT, False for UPDATE
+                    sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
+                                                                 ))
+
+            result = session.execute(upsert_stmnt)
+            session.commit()
+
+            row = result.fetchone()
+            return bool(row.was_inserted) if row else False
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(user_table).values(id=user.id,
-                                                      name=user.name)
-        do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[user_table.c.id],
-            set_={user_table.c.name: user.name})
-        session.execute(do_update_stmt)
-        session.commit()
 
 
 def get_user(user_id: str) -> models.User:

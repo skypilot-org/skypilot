@@ -23,7 +23,6 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
-import filelock
 import starlette.middleware.base
 
 import sky
@@ -51,7 +50,6 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import permission
-from sky.users import rbac
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
@@ -155,7 +153,10 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         # Add user to database if auth_user is present
         if auth_user is not None:
-            global_user_state.add_or_update_user(auth_user)
+            newly_added = global_user_state.add_or_update_user(auth_user)
+            if newly_added:
+                users_rest.permission_service.add_user_if_not_exists(
+                    auth_user.id)
 
         body = await request.body()
         if auth_user and body:
@@ -322,10 +323,6 @@ async def token(request: fastapi.Request,
     except FileNotFoundError as e:
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
-
-    # Add user if not exists
-    if user is not None:
-        users_rest.permission_service.add_user_if_not_exists(user.id)
 
     user_info_string = f'Logged in as {user.name}' if user is not None else ''
     html_content = html_content.replace(

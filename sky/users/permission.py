@@ -124,6 +124,7 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
+
 @contextlib.contextmanager
 def _policy_lock():
     """Context manager for policy update lock."""
