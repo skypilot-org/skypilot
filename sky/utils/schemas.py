@@ -1320,11 +1320,18 @@ def get_config_schema():
         'properties': {
             'api_server': {
                 'type': 'object',
-                'required': [],
+                'required': ['state_db'],
                 'additionalProperties': False,
                 'properties': {
-                    'connection_string': {
-                        'type': 'string',
+                    'state_db': {
+                        'type': 'object',
+                        'required': ['connection_string'],
+                        'additionalProperties': False,
+                        'properties': {
+                            'connection_string': {
+                                'type': 'string',
+                            },
+                        },
                     },
                 },
             },
