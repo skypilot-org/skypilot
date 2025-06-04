@@ -167,7 +167,10 @@ def _get_loaded_config_path() -> List[Optional[str]]:
     serialized = _get_config_context().config_path
     if not serialized:
         return []
-    return json.loads(serialized)
+    config_paths = json.loads(serialized)
+    if config_paths is None:
+        return []
+    return config_paths
 
 
 def _set_loaded_config_path(
