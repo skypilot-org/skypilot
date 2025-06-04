@@ -375,6 +375,7 @@ class JobsQueueBody(RequestBody):
     refresh: bool = False
     skip_finished: bool = False
     all_users: bool = False
+    job_ids: Optional[List[int]] = None
 
 
 class JobsCancelBody(RequestBody):
