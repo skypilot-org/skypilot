@@ -11,7 +11,7 @@ import { useMobile } from '@/hooks/useMobile';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool, sshDownNodePool } from '@/data/connectors/ssh-node-pools';
+import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool, sshDownNodePool, getSSHNodePoolStatus } from '@/data/connectors/ssh-node-pools';
 import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
 import { Button } from '@/components/ui/button';
 import dashboardCache from '@/lib/cache';
@@ -20,6 +20,7 @@ import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
+import { Card } from '@/components/ui/card';
 
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -188,7 +189,7 @@ export function InfrastructureSection({
                               </span>
                             )}
                           </td>
-                          <td className="p-3">{(nodes || []).length}</td>
+                          <td className="p-3">{nodes.length}</td>
                           <td className="p-3">{gpuTypes || '-'}</td>
                           <td className="p-3">{totalGpus}</td>
                         </tr>
@@ -402,6 +403,110 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// SSH Node Pool Details component
+function SSHNodePoolDetails({ poolName, gpusInContext, nodesInContext }) {
+  const [statusData, setStatusData] = useState(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+
+  // Fetch status when component mounts
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        setStatusLoading(true);
+        const status = await getSSHNodePoolStatus(poolName);
+        setStatusData(status);
+      } catch (error) {
+        console.error('Failed to fetch SSH Node Pool status:', error);
+        setStatusData({
+          pool_name: poolName,
+          status: 'Error',
+          reason: 'Failed to fetch status'
+        });
+      } finally {
+        setStatusLoading(false);
+      }
+    };
+
+    fetchStatus();
+  }, [poolName]);
+
+  const StatusBadge = ({ status, reason }) => {
+    const isReady = status === 'Ready';
+    const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
+    const textColor = isReady ? 'text-green-800' : 'text-red-800';
+    
+    return (
+      <div className="flex items-center space-x-2">
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}`}>
+          {status}
+        </span>
+        {!isReady && reason && (
+          <span className="text-sm text-gray-600">({reason})</span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* SSH Node Pool Info Card */}
+      <div className="mb-6">
+        <Card>
+          <div className="flex items-center justify-between px-4 pt-4">
+            <h3 className="text-lg font-semibold">SSH Node Pool Details</h3>
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
+                <div className="text-base mt-1">
+                  {statusLoading ? (
+                    <div className="flex items-center">
+                      <CircularProgress size={16} className="mr-2" />
+                      <span className="text-gray-500">Loading...</span>
+                    </div>
+                  ) : statusData ? (
+                    <StatusBadge status={statusData.status} reason={statusData.reason} />
+                  ) : (
+                    <span className="text-gray-500">Unknown</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Pool Name
+                </div>
+                <div className="text-base mt-1">{poolName}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Context Name
+                </div>
+                <div className="text-base mt-1">{statusData?.context_name || `ssh-${poolName}`}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Nodes
+                </div>
+                <div className="text-base mt-1">{nodesInContext ? nodesInContext.length : 0}</div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* GPU and Node Details */}
+      <ContextDetails
+        contextName={`ssh-${poolName}`}
+        gpusInContext={gpusInContext}
+        nodesInContext={nodesInContext}
+      />
     </div>
   );
 }
@@ -776,6 +881,22 @@ export function GPUs() {
       );
     }
 
+    // Check if this is an SSH context
+    const isSSHContext = contextName.startsWith('ssh-');
+    
+    if (isSSHContext) {
+      // Extract pool name from context (remove 'ssh-' prefix)
+      const poolName = contextName.replace(/^ssh-/, '');
+      return (
+        <SSHNodePoolDetails
+          poolName={poolName}
+          gpusInContext={gpusInContext}
+          nodesInContext={nodesInContext}
+        />
+      );
+    }
+
+    // For Kubernetes contexts, show the regular context details
     return (
       <ContextDetails
         contextName={contextName}

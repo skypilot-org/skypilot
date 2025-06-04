@@ -145,4 +145,24 @@ export async function sshDownNodePool(poolName) {
     console.error('Error calling ssh_down for SSH Node Pool:', error);
     throw error;
   }
+}
+
+export async function getSSHNodePoolStatus(poolName) {
+  try {
+    const response = await fetch(`${ENDPOINT}/ssh_node_pools/${poolName}/status`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching SSH Node Pool status:', error);
+    throw error;
+  }
 } 

@@ -115,4 +115,27 @@ async def deploy_ssh_node_pool(request: fastapi.Request, pool_name: str) -> Dict
         raise fastapi.HTTPException(
             status_code=500,
             detail=f"Failed to deploy SSH Node Pool: {common_utils.format_exception(e)}"
+        )
+
+
+@router.get('/{pool_name}/status')
+async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
+    """Get the status of a specific SSH Node Pool."""
+    try:
+        from sky import core as sky_core
+        
+        # Call ssh_status to check the context
+        context_name = f"ssh-{pool_name}"
+        is_ready, reason = sky_core.ssh_status(context_name)
+        
+        return {
+            "pool_name": pool_name,
+            "context_name": context_name,
+            "status": "Ready" if is_ready else "Not Ready",
+            "reason": reason
+        }
+    except Exception as e:
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=f"Failed to get SSH Node Pool status: {common_utils.format_exception(e)}"
         ) 
