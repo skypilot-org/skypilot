@@ -53,7 +53,7 @@ from sky.server import common as server_common
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius'
+    'vast', 'nebius', 'ssh'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -78,7 +78,8 @@ cloud_to_pytest_keyword = {
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
-    'nebius': 'nebius'
+    'nebius': 'nebius',
+    'ssh': 'ssh'
 }
 
 
@@ -462,6 +463,18 @@ def setup_controller_cloud_env(request):
     controller_cloud = request.config.getoption('--controller-cloud')
     os.environ['PYTEST_SKYPILOT_CONTROLLER_CLOUD'] = controller_cloud
     yield controller_cloud
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_ssh_env(request):
+    """Setup SSH environment variable if --ssh is specified."""
+    if not request.config.getoption('--ssh'):
+        yield
+        return
+
+    # Set environment variable to indicate we're using remote server
+    os.environ['PYTEST_SKYPILOT_SSH'] = '1'
+    yield
 
 
 @pytest.fixture(scope='session', autouse=True)

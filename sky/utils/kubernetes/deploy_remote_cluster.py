@@ -23,7 +23,7 @@ YELLOW = '\033[1;33m'
 WARNING_YELLOW = '\x1b[33m'
 NC = '\033[0m'  # No color
 
-DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
+ENV_VAR_SSH_NODE_POOLS_CONFIG = 'SKYPILOT_SSH_NODE_POOLS_CONFIG'
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
@@ -32,18 +32,27 @@ NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def get_ssh_node_pools_path():
+    # We need to load this every time because the path
+    # can be overridden by the user.
+    return os.path.expanduser(
+        os.environ.get(ENV_VAR_SSH_NODE_POOLS_CONFIG) or
+        '~/.sky/ssh_node_pools.yaml')
+
+
 class UniqueKeySafeLoader(yaml.SafeLoader):
     """Custom YAML loader that raises an error if there are duplicate keys."""
 
     def construct_mapping(self, node, deep=False):
         mapping = {}
+        ssh_node_pools_path = get_ssh_node_pools_path()
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
                 raise yaml.constructor.ConstructorError(
                     note=(f'Duplicate cluster config for cluster {key!r}.\n'
                           'Please remove one of them from: '
-                          f'{DEFAULT_SSH_NODE_POOLS_PATH}'))
+                          f'{ssh_node_pools_path}'))
             value = self.construct_object(value_node, deep=deep)
             mapping[key] = value
         return mapping
@@ -63,9 +72,9 @@ def parse_args():
     parser.add_argument(
         '--ssh-node-pools-file',
         dest='ssh_node_pools_file',
-        default=DEFAULT_SSH_NODE_POOLS_PATH,
+        default=get_ssh_node_pools_path(),
         help=
-        f'Path to SSH node pools YAML file (default: {DEFAULT_SSH_NODE_POOLS_PATH})'
+        f'Path to SSH node pools YAML file (default: {get_ssh_node_pools_path()})'
     )
     parser.add_argument(
         '--kubeconfig-path',
@@ -1399,7 +1408,7 @@ def deploy_cluster(head_node,
             while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
                 echo 'Waiting for GPU operator...'
                 sleep 5
-            done 
+            done
             echo 'GPU operator installed successfully.'
         """
         result = run_remote(head_node,
