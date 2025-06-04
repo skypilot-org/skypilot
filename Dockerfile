@@ -31,10 +31,28 @@ RUN conda install -c conda-forge google-cloud-sdk && \
 # Add source code
 COPY . /skypilot-src
 
-# Install SkyPilot and clean up
+# Install SkyPilot
 RUN cd /skypilot-src && \
-    ~/.local/bin/uv pip install -e ".[all]" --system && \
-    # Cleanup all caches to reduce the image size
-    conda clean -afy && \
+    if ls dist/skypilot-*.whl 1> /dev/null 2>&1; then \
+        echo "Installing from wheel file" && \
+        WHEEL_FILE=$(ls dist/skypilot-*.whl) && \
+        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system; \
+    else \
+        echo "Installing in editable mode" && \
+        ~/.local/bin/uv pip install -e ".[all]" --system; \
+    fi
+
+# Set up Node.js and build dashboard
+RUN curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
+    apt-get update && \
+    apt-get install -y nodejs && \
+    cd /skypilot-src/sky/dashboard && \
+    npm ci && \
+    npm run build
+
+# Cleanup all caches to reduce the image size
+RUN conda clean -afy && \
     ~/.local/bin/uv cache clean && \
-    rm -rf ~/.cache/pip ~/.cache/uv
+    rm -rf ~/.cache/pip ~/.cache/uv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*

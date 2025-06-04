@@ -50,6 +50,18 @@ jobs:
           name: skypilot-artifacts
           path: .
 
+      - name: Extract source tarball
+        if: github.event_name == 'workflow_call'
+        run: |
+          # Find the tarball in dist directory
+          TARBALL=$(ls dist/skypilot-*.tar.gz)
+          if [ -z "$TARBALL" ]; then
+            echo "Error: No tarball found in dist directory"
+            exit 1
+          fi
+          # Extract to current directory
+          tar -xzf "$TARBALL" --strip-components=1
+
       - name: Verify source code
         run: |
           if [ ! -f "setup.py" ]; then
