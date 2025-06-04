@@ -113,9 +113,9 @@ class PermissionService:
 
     def check_permission(self, user: str, path: str, method: str) -> bool:
         """Check permission."""
-        # We don't hold the lock for checking permission, as it is a hot path,
-        # and it is ok to have a stale policy, as long as it is eventually
-        # consistent.
+        # We don't hold the lock for checking permission, as it is read only and
+        # it is a hot path in every request. It is ok to have a stale policy,
+        # as long as it is eventually consistent.
         self._load_policy_no_lock()
         return self.enforcer.enforce(user, path, method)
 
