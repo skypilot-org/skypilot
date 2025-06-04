@@ -7,6 +7,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1356,7 +1357,7 @@ def deploy_cluster(head_node,
                 merged_file.write(result)
 
         # Replace the kubeconfig with the merged config
-        os.replace(merged_config, kubeconfig_path)
+        shutil.move(merged_config, kubeconfig_path)
 
         # Set the new context as the current context
         run_command(['kubectl', 'config', 'use-context', context_name],

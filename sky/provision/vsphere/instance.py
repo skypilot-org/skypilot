@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
-from sky.clouds.service_catalog.common import get_catalog_path
+from sky.catalog.common import get_catalog_path
 from sky.provision import common
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.common import custom_script as custom_script_lib
