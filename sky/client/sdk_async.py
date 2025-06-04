@@ -497,9 +497,8 @@ async def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_status(
-        request_ids: Optional[List[str]] = None,
-        all_status: bool = False) -> List[requests_lib.RequestPayload]:
+def api_status(request_ids: Optional[List[str]] = None,
+               all_status: bool = False) -> List[requests_lib.RequestPayload]:
     """Async version of api_status() that lists all requests."""
     return sdk.api_status(request_ids, all_status)
 
@@ -530,15 +529,13 @@ def api_stop() -> None:
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_server_logs(follow: bool = True,
-                          tail: Optional[int] = None) -> None:
+def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
     """Async version of api_server_logs() that streams the API server logs."""
     return sdk.api_server_logs(follow, tail)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_login(endpoint: Optional[str] = None,
-                    get_token: bool = False) -> None:
+def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
     """Async version of api_login() that logs into a SkyPilot API server."""
     return sdk.api_login(endpoint, get_token)
