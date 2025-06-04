@@ -71,14 +71,6 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('name', sqlalchemy.Text),
 )
 
-policy_update_time = sqlalchemy.Table(
-    'policy_update_time', Base.metadata,
-    sqlalchemy.Column('id',
-                      sqlalchemy.Integer,
-                      primary_key=True,
-                      autoincrement=True),
-    sqlalchemy.Column('updated_at', sqlalchemy.Integer, nullable=False))
-
 cluster_table = sqlalchemy.Table(
     'clusters',
     Base.metadata,

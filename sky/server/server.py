@@ -23,6 +23,7 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
+import filelock
 import starlette.middleware.base
 
 import sky
@@ -49,6 +50,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import permission
 from sky.users import rbac
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
@@ -106,20 +108,17 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        user_id = await _get_user_id(request)
-        if user_id is None:
+        if request.url.path.startswith('/dashboard/'):
+            return await call_next(request)
+
+        auth_user = _get_auth_user_header(request)
+        if auth_user is None:
             return await call_next(request)
 
         permission_service = users_rest.permission_service
-        user_roles = permission_service.get_user_roles(user_id)
-        if len(user_roles) == 0:
-            default_role = rbac.get_default_role()
-            logger.info(f'User {user_id} has no roles, adding'
-                        f' default role {default_role}')
-            permission_service.add_role(user_id, default_role)
-
         # Check the role permission
-        if permission_service.check_permission(user_id, request.url.path,
+        permission_service.load_policy()
+        if permission_service.check_permission(auth_user.id, request.url.path,
                                                request.method):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
@@ -138,25 +137,6 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         response.headers['X-Request-ID'] = request_id
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
-
-
-async def _get_user_id(request: fastapi.Request) -> Optional[str]:
-    if 'X-Auth-Request-Email' in request.headers:
-        user_name = request.headers['X-Auth-Request-Email']
-        user_hash = hashlib.md5(
-            user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-        return user_hash
-    body = await request.body()
-    if body:
-        try:
-            original_json = json.loads(body)
-        except json.JSONDecodeError as e:
-            logger.error(f'Error parsing request JSON: {e}')
-        else:
-            if ('env_vars' in original_json and
-                    constants.USER_ID_ENV_VAR in original_json['env_vars']):
-                return original_json['env_vars'][constants.USER_ID_ENV_VAR]
-    return None
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
@@ -290,7 +270,8 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
             if not _is_relative_to(request_path, parent):
-                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+                return fastapi.responses.JSONResponse(
+                    status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
 
 
@@ -342,6 +323,28 @@ async def token(request: fastapi.Request,
     except FileNotFoundError as e:
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
+
+    # Add role for user
+    if user is not None:
+        permission_service = users_rest.permission_service
+        try:
+            with filelock.FileLock(
+                    permission.POLICY_UPDATE_LOCK_PATH,
+                    permission.POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
+                # Get current roles
+                permission_service.load_policy()
+                user_roles = permission_service.get_user_roles(user.id)
+                if len(user_roles) == 0:
+                    default_role = rbac.get_default_role()
+                    logger.info(f'User {user.id} has no roles, adding'
+                                f' default role {default_role}')
+                    permission_service.add_role(user.id, default_role)
+        except filelock.Timeout as e:
+            raise RuntimeError(f'Failed to add role due to a timeout '
+                               f'when trying to acquire the lock at '
+                               f'{permission.POLICY_UPDATE_LOCK_PATH}. '
+                               'Please try again or manually remove the lock '
+                               f'file if you believe it is stale.') from e
 
     user_info_string = f'Logged in as {user.name}' if user is not None else ''
     html_content = html_content.replace(

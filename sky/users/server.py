@@ -20,21 +20,12 @@ permission_service = permission.PermissionService()
 permission_service.init_policies()
 
 
-# Set callback function to reload policy when it's updated
-def on_policy_update():
-    """Callback function to reload policy when it's updated."""
-    logger.info('Policy update detected, reloading policy')
-    permission_service.load_policy()
-
-
-permission_service.watcher.set_update_callback(on_policy_update)
-
-
 @router.get('')
 async def users() -> List[Dict[str, Any]]:
     """Gets all users."""
     all_users = []
     user_list = global_user_state.get_all_users()
+    permission_service.load_policy()
     for user in user_list:
         user_roles = permission_service.get_user_roles(user.id)
         all_users.append({
@@ -55,6 +46,7 @@ async def get_current_user_role(request: fastapi.Request):
     user_name = request.headers['X-Auth-Request-Email']
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    permission_service.load_policy()
     user_roles = permission_service.get_user_roles(user_hash)
     return {'name': user_name, 'role': user_roles[0] if user_roles else ''}
 
