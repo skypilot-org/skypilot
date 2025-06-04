@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Tuple
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.catalog import common
 from sky.clouds import GCP
-from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -125,7 +125,7 @@ GCP_ACC_INSTANCE_TYPES = list(_INSTANCE_TYPE_TO_ACC.keys())
 
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
-# Refer to sky/clouds/service_catalog/gcp_catalog.py
+# Refer to sky/clouds/catalog/gcp_catalog.py
 _NUM_ACC_TO_NUM_CPU = {
     # Based on p2 on AWS.
     'K80': {

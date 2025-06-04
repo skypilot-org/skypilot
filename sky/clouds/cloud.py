@@ -16,9 +16,9 @@ from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
 
 from typing_extensions import assert_never
 
+from sky import catalog
 from sky import exceptions
 from sky import skypilot_config
-from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import timeline
@@ -188,7 +188,7 @@ class Cloud:
         """Returns the regions that offer the specified resources.
 
         The order of the regions follow the order of the regions returned by
-        service_catalog/common.py#get_region_zones().
+        sky/catalog/common.py#get_region_zones().
         When region or zone is not None, the returned value will be limited to
         the specified region/zone.
 
@@ -367,9 +367,9 @@ class Cloud:
     @classmethod
     def is_image_tag_valid(cls, image_tag: str, region: Optional[str]) -> bool:
         """Validates that the image tag is valid for this cloud."""
-        return service_catalog.is_image_tag_valid(image_tag,
-                                                  region,
-                                                  clouds=cls._REPR.lower())
+        return catalog.is_image_tag_valid(image_tag,
+                                          region,
+                                          clouds=cls._REPR.lower())
 
     @classmethod
     def is_label_valid(cls, label_key: str,
@@ -625,9 +625,9 @@ class Cloud:
         Raises:
             ValueError: If region or zone is invalid or not supported.
         """
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds=self._REPR.lower())
+        return catalog.validate_region_zone(region,
+                                            zone,
+                                            clouds=self._REPR.lower())
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:

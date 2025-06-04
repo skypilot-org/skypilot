@@ -26,6 +26,7 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import core
@@ -34,7 +35,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -389,7 +389,7 @@ async def list_accelerators(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerators,
+        func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -404,7 +404,7 @@ async def list_accelerator_counts(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerator_counts,
+        func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 

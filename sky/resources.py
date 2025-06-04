@@ -7,13 +7,13 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 import colorama
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -379,7 +379,7 @@ class Resources:
     # if it fails to fetch some account specific catalog information (e.g., AWS
     # zone mapping). It is fine to use the default catalog as this function is
     # only for display purposes.
-    @service_catalog.fallback_to_default_catalog
+    @catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 

@@ -1,17 +1,18 @@
 """Kubernetes."""
-import os
 import re
+import subprocess
+import tempfile
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -27,10 +28,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-
-# Check if KUBECONFIG is set, and use it if it is.
-DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
-CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
@@ -471,14 +468,14 @@ class Kubernetes(clouds.Cloud):
                 # Select image based on whether we are using GPUs or not.
                 image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
                 # Get the container image ID from the service catalog.
-                image_id = service_catalog.get_image_id_from_tag(
-                    image_id, clouds='kubernetes')
+                image_id = catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
             return image_id
 
         image_id = _get_image_id(resources)
         # TODO(romilb): Create a lightweight image for SSH jump host
-        ssh_jump_image = service_catalog.get_image_id_from_tag(
-            self.IMAGE_CPU, clouds='kubernetes')
+        ssh_jump_image = catalog.get_image_id_from_tag(self.IMAGE_CPU,
+                                                       clouds='kubernetes')
 
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
@@ -791,6 +788,7 @@ class Kubernetes(clouds.Cloud):
         """Checks if the user has access credentials to
         Kubernetes."""
         # Check for port forward dependencies
+        logger.info(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
         if reasons is not None:
             formatted = '\n'.join(
@@ -853,10 +851,24 @@ class Kubernetes(clouds.Cloud):
         return ''.join(message_parts)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+        credential_paths = kubernetes_utils.get_kubeconfig_paths()
+        if credential_paths:
+            # For single kubeconfig path, keep the original path.
+            kubeconfig_file = credential_paths[0]
+            if len(credential_paths) > 1:
+                # For multiple kubeconfig paths, merge them into a single file.
+                # TODO(aylei): GC merged kubeconfig files.
+                kubeconfig_file = tempfile.NamedTemporaryFile(
+                    prefix='merged-kubeconfig-', suffix='.yaml',
+                    delete=False).name
+                subprocess.run(
+                    'kubectl config view --flatten '
+                    f'> {kubeconfig_file}',
+                    shell=True,
+                    check=True)
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+            return {kubernetes.DEFAULT_KUBECONFIG_PATH: kubeconfig_file}
         else:
             return {}
 

@@ -12,7 +12,7 @@ import filelock
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
-from sky.clouds.service_catalog import constants
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -344,7 +344,7 @@ def get_hourly_cost_impl(
 ) -> float:
     """Returns the hourly price of a VM instance in the given region and zone.
 
-    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
+    Refer to get_hourly_cost in catalog/__init__.py for the docstring.
     """
     df = _get_instance_type(df, instance_type, region, zone)
     if df.empty:
