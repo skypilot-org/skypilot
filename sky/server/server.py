@@ -49,7 +49,6 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.users import permission
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
