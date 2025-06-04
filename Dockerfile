@@ -32,6 +32,8 @@ RUN conda install -c conda-forge google-cloud-sdk && \
 COPY . /skypilot-src
 
 # Install SkyPilot
+# If triggered from release/nightly build pipeline, install from wheel file
+# Otherwise install from source in editable mode
 RUN cd /skypilot-src && \
     if ls dist/skypilot-*.whl 1> /dev/null 2>&1; then \
         echo "Installing from wheel file" && \
