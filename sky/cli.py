@@ -61,7 +61,6 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
-from sky.catalog import constants as service_catalog_constants
 from sky.client import sdk
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -3836,7 +3835,7 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog_constants.ALL_CLOUDS
+                c for c in constants.ALL_CLOUDS
                 if c != 'kubernetes' and c != 'ssh'
             ]
 
