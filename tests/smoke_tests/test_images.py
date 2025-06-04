@@ -20,9 +20,12 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import os
+import pathlib
 import subprocess
+import tempfile
 import textwrap
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -559,3 +562,36 @@ def test_kubernetes_docker_image_and_ssh():
         # Clean up temporary files
         os.unlink(docker_yaml_path)
         os.unlink(unprefixed_yaml_path)
+
+
+@pytest.mark.aws
+@pytest.mark.parametrize(
+    'username,password,registry',
+    [
+        # This is a test account with only read access to the private registry,
+        # should be fine to include in public repo.
+        ('skypilottest', 'dckr_pat_fHDX_pX24yxwMQlUegA7R73M8KM', 'docker.io')
+    ])
+def test_private_docker_registry(generic_cloud: str, username: str,
+                                 password: str, registry: str):
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_private_docker_registry.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(username=username,
+                              password=password,
+                              registry=registry,
+                              image='skypilot-private-test',
+                              tag='latest')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
+            'private_docker_registry',
+            [
+                f'sky launch -c {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+            ],
+            f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)

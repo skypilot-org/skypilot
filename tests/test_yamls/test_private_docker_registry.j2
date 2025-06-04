@@ -1,0 +1,7 @@
+setup: |
+  # Authenticate with private registry
+  docker login -u {{username}} -p {{password}} {{registry}}
+
+run: |
+  set -e
+  docker run {{registry}}/{{username}}/{{image}}:{{tag}} bash -c "sky -v" | grep "1.0.0.dev"
