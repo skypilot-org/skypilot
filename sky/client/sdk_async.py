@@ -497,7 +497,7 @@ async def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-async def api_status(
+def api_status(
         request_ids: Optional[List[str]] = None,
         all_status: bool = False) -> List[requests_lib.RequestPayload]:
     """Async version of api_status() that lists all requests."""
@@ -507,7 +507,7 @@ async def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-async def dashboard(starting_page: Optional[str] = None) -> None:
+def dashboard(starting_page: Optional[str] = None) -> None:
     """Async version of dashboard() that starts the dashboard for SkyPilot."""
     return sdk.dashboard(starting_page)
 
@@ -515,7 +515,7 @@ async def dashboard(starting_page: Optional[str] = None) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-async def api_info() -> Dict[str, Any]:
+def api_info() -> Dict[str, Any]:
     """Async version of api_info() that gets the server's status, commit and
       version."""
     return sdk.api_info()
@@ -523,14 +523,14 @@ async def api_info() -> Dict[str, Any]:
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_stop() -> None:
+def api_stop() -> None:
     """Async version of api_stop() that stops the API server."""
     return sdk.api_stop()
 
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_server_logs(follow: bool = True,
+def api_server_logs(follow: bool = True,
                           tail: Optional[int] = None) -> None:
     """Async version of api_server_logs() that streams the API server logs."""
     return sdk.api_server_logs(follow, tail)
@@ -538,7 +538,7 @@ async def api_server_logs(follow: bool = True,
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_login(endpoint: Optional[str] = None,
+def api_login(endpoint: Optional[str] = None,
                     get_token: bool = False) -> None:
     """Async version of api_login() that logs into a SkyPilot API server."""
     return sdk.api_login(endpoint, get_token)
