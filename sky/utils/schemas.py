@@ -1331,6 +1331,9 @@ def get_config_schema():
             'workspace': {
                 'type': 'string',
             },
+            'db': {
+                'type': 'string',
+            },
             'jobs': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
