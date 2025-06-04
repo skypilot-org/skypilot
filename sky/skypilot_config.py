@@ -142,6 +142,7 @@ def _get_config_context() -> ConfigContext:
     If no context is available, the global config context is returned.
     """
     ctx = context.get()
+    logger.info(f'ctx: {ctx}')
     if not ctx:
         return _global_config_context
     if ctx.config_context is None:
@@ -725,7 +726,7 @@ def update_config_no_lock(config: config_utils.Config) -> None:
         config_map_utils.patch_configmap_with_config(config, global_config_path)
 
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        logger.debug('saving api_server config to db')
+        logger.info('saving api_server config to db')
         global_user_state.set_config_yaml(
             'api_server', common_utils.dump_yaml_str(dict(config)))
     _reload_config()

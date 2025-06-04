@@ -44,9 +44,6 @@ logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 
-_DB_PATH = os.path.expanduser('~/.sky/state.db')
-pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-
 Base = declarative.declarative_base()
 
 config_table = sqlalchemy.Table(
@@ -345,19 +342,31 @@ if conn_string:
     logger.debug(f'using db URI from {conn_string}')
     _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
 else:
+    _DB_PATH = os.path.expanduser('~/.sky/state.db')
+    pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
     _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
 create_table()
 
 saved_db_config_str = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-    # if a saved config exists, merge config from db into skypilot_config
     saved_db_config_str = get_config_yaml('api_server')
-
-if saved_db_config_str:
-    saved_db_config = yaml.safe_load(saved_db_config_str)
-    overlaid_config = skypilot_config.overlay_skypilot_config(
-        skypilot_config.to_dict(), saved_db_config)
-    skypilot_config.update_config_no_lock(overlaid_config)
+    config = skypilot_config.get_server_config()
+    config.pop_nested(('db',), None)
+    if saved_db_config_str:
+        # if a saved config exists, merge config from db into skypilot_config
+        # and use the merged config to update the db.
+        saved_db_config = yaml.safe_load(saved_db_config_str)
+        overlaid_config = skypilot_config.overlay_skypilot_config(
+            config, saved_db_config)
+        if overlaid_config != config:
+            logger.info('updating config to db')
+            skypilot_config.update_config_no_lock(overlaid_config)
+        else:
+            logger.info('no config update needed')
+    else:
+        # if no saved config exists, stash the current config to db.
+        logger.info('stashing config to db')
+        skypilot_config.update_config_no_lock(config)
 
 
 def add_or_update_user(user: models.User):
