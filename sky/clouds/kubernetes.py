@@ -650,11 +650,32 @@ class Kubernetes(clouds.Cloud):
             timeout,
             override_configs=resources.cluster_config_overrides)
 
-        # Check if this cluster supports high performance networking and
-        # configure appropriate settings for different cluster types
+        # Get the storage class name for high availability controller's PVC
+        k8s_ha_storage_class_name = skypilot_config.get_nested(
+            ('kubernetes', 'high_availability', 'storage_class_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+
+        # Configure TCPX resource allocation by extracting from k8s_resource_key
+        # This must happen before deploy_vars is created to ensure the modified
+        # k8s_resource_key is properly saved
         cluster_type = self._detect_cluster_type(
             region.name if region else 'default')
+        tcpx_enabled = (cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+        if (tcpx_enabled and k8s_resource_key is not None and 
+            k8s_resource_key == kubernetes_utils.get_gpu_resource_key()):
+            # Extract nvidia GPU resources from k8s_resource_key and move to TCPX daemon
+            k8s_tcpx_resource_key = k8s_resource_key
+            k8s_tcpx_accelerator_count = str(acc_count)
+            # Remove GPU resources from ray-node by setting k8s_resource_key to None
+            k8s_resource_key = None
+        else:
+            # Normal case: no TCPX GPU extraction needed
+            k8s_tcpx_resource_key = None
+            k8s_tcpx_accelerator_count = '0'
 
+        # Check if this cluster supports high performance networking and
+        # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
             # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
@@ -680,12 +701,6 @@ class Kubernetes(clouds.Cloud):
             # cpus is <1.
             'num-cpus': str(max(int(cpus), 1)),
         }
-
-        # Get the storage class name for high availability controller's PVC
-        k8s_ha_storage_class_name = skypilot_config.get_nested(
-            ('kubernetes', 'high_availability', 'storage_class_name'),
-            None,
-            override_configs=resources.cluster_config_overrides)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -756,132 +771,10 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_ipc_lock_capability'] = (
             cluster_type.requires_ipc_lock_capability())
 
-        # Automatically setup GPUDirect prerequisites if needed
-        if cluster_type.supports_gpu_direct():
-            try:
-                self._ensure_gpudirect_prerequisites(
-                    region.name if region else 'default', cluster_type)
-            except (kubernetes.api_exception(), requests.RequestException,
-                    yaml.YAMLError) as e:
-                logger.warning(f'Failed to setup GPUDirect prerequisites: {e}')
+        deploy_vars['k8s_tcpx_resource_key'] = k8s_tcpx_resource_key
+        deploy_vars['k8s_tcpx_accelerator_count'] = k8s_tcpx_accelerator_count
 
         return deploy_vars
-
-    @classmethod
-    def _ensure_gpudirect_prerequisites(
-            cls, context: str,
-            cluster_type: KubernetesHighPerformanceNetworkType) -> None:
-        """Ensure GPUDirect prerequisites are installed in the cluster.
-
-        This method automatically deploys the required DaemonSets for
-        GPUDirect-TCPX:
-        - nccl-tcpx-installer: Installs NCCL libraries and GPUDirect-TCPX
-          binaries
-        - device-injector: NRI device injector for proper GPU device mounting
-
-        Args:
-            context: Kubernetes context name
-            cluster_type: The detected cluster type
-        """
-        if not cluster_type.supports_gpu_direct():
-            return
-
-        logger.info(f'Setting up GPUDirect prerequisites for '
-                    f'{cluster_type.value} cluster...')
-
-        try:
-            # Check if prerequisites are already installed by listing DaemonSets
-            daemonsets = kubernetes.apps_api(
-                context).list_namespaced_daemon_set(
-                    'kube-system',
-                    _request_timeout=kubernetes.API_TIMEOUT).items
-
-            # Check which DaemonSets are missing
-            has_nccl_installer = any(
-                'nccl-tcpx-installer' in ds.metadata.name for ds in daemonsets)
-            has_device_injector = any(
-                'device-injector' in ds.metadata.name for ds in daemonsets)
-
-            if has_nccl_installer and has_device_injector:
-                logger.info('GPUDirect prerequisites already installed.')
-                return
-
-            # Install missing DaemonSets
-            if not has_nccl_installer:
-                cls._install_nccl_tcpx_installer(context)
-            if not has_device_injector:
-                cls._install_device_injector(context)
-
-            logger.info('GPUDirect prerequisites installation completed.')
-
-        except (kubernetes.api_exception(), requests.RequestException) as e:
-            logger.error(f'Failed to setup GPUDirect prerequisites: {e}')
-            # Don't raise the error - this is not critical for basic
-            # functionality
-            logger.warning(
-                'Continuing without GPUDirect prerequisites. '
-                'Performance may be degraded for multi-GPU workloads.')
-
-    @classmethod
-    def _install_nccl_tcpx_installer(cls, context: str) -> None:
-        """Install the NCCL-TCPX installer DaemonSet."""
-        logger.info('Installing nccl-tcpx-installer DaemonSet...')
-
-        # Fetch the official YAML from Google Cloud's repository
-        nccl_tcpx_url = ('https://raw.githubusercontent.com/'
-                         'GoogleCloudPlatform/container-engine-accelerators/'
-                         'master/gpudirect-tcpx/nccl-tcpx-installer.yaml')
-
-        try:
-            response = requests.get(nccl_tcpx_url, timeout=30)
-            response.raise_for_status()
-
-            # Parse the YAML content
-            nccl_tcpx_yaml = yaml.safe_load(response.text)
-
-            kubernetes.apps_api(context).create_namespaced_daemon_set(
-                'kube-system', nccl_tcpx_yaml)
-            logger.info('Successfully created nccl-tcpx-installer DaemonSet.')
-        except kubernetes.api_exception() as e:
-            if e.status == 409:
-                logger.info('nccl-tcpx-installer DaemonSet already exists.')
-            else:
-                raise
-        except (requests.RequestException, yaml.YAMLError) as e:
-            logger.error(
-                f'Failed to fetch or apply nccl-tcpx-installer YAML: {e}')
-            raise
-
-    @classmethod
-    def _install_device_injector(cls, context: str) -> None:
-        """Install the NRI device injector DaemonSet."""
-        logger.info('Installing device-injector DaemonSet...')
-
-        # Fetch the official YAML from Google Cloud's repository
-        device_injector_url = (
-            'https://raw.githubusercontent.com/'
-            'GoogleCloudPlatform/container-engine-accelerators/'
-            'master/nri_device_injector/'
-            'nri-device-injector.yaml')
-
-        try:
-            response = requests.get(device_injector_url, timeout=30)
-            response.raise_for_status()
-
-            # Parse the YAML content
-            device_injector_yaml = yaml.safe_load(response.text)
-
-            kubernetes.apps_api(context).create_namespaced_daemon_set(
-                'kube-system', device_injector_yaml)
-            logger.info('Successfully created device-injector DaemonSet.')
-        except kubernetes.api_exception() as e:
-            if e.status == 409:
-                logger.info('device-injector DaemonSet already exists.')
-            else:
-                raise
-        except (requests.RequestException, yaml.YAMLError) as e:
-            logger.error(f'Failed to fetch or apply device-injector YAML: {e}')
-            raise
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
