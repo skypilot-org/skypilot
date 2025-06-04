@@ -79,7 +79,8 @@ class PermissionService:
         with _policy_lock():
             # Get current roles
             self._load_policy_no_lock()
-            current_roles = self.get_user_roles(user)
+            # Avoid calling get_user_roles, as it will require the lock.
+            current_roles = self.enforcer.get_roles_for_user(user)
             if not current_roles:
                 logger.warning(f'User {user} has no roles')
             else:
