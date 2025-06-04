@@ -564,16 +564,18 @@ def test_kubernetes_docker_image_and_ssh():
         os.unlink(unprefixed_yaml_path)
 
 
-@pytest.mark.aws
-@pytest.mark.parametrize(
-    'username,password,registry',
-    [
-        # This is a test account with only read access to the private registry,
-        # should be fine to include in public repo.
-        ('skypilottest', 'dckr_pat_fHDX_pX24yxwMQlUegA7R73M8KM', 'docker.io')
-    ])
-def test_private_docker_registry(generic_cloud: str, username: str,
-                                 password: str, registry: str):
+@pytest.fixture
+def private_docker_registry_setup(request):
+    """Fixture to setup private docker registry test environment.
+
+    Args:
+        request: pytest request object containing the parameters
+    """
+    # Get parameters from the test function
+    username = request.param['username']
+    password = request.param['password']
+    registry = request.param['registry']
+
     template_str = pathlib.Path(
         'tests/test_yamls/test_private_docker_registry.j2').read_text()
     template = jinja2.Template(template_str)
@@ -582,16 +584,70 @@ def test_private_docker_registry(generic_cloud: str, username: str,
                               registry=registry,
                               image='skypilot-private-test',
                               tag='latest')
+
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
-        name = smoke_tests_utils.get_cluster_name()
-        test = smoke_tests_utils.Test(
-            'private_docker_registry',
-            [
-                f'sky launch -c {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
-            ],
-            f'sky down -y {name}',
-        )
-        smoke_tests_utils.run_one_test(test)
+        yield file_path
+
+
+@pytest.mark.aws
+@pytest.mark.parametrize(
+    'private_docker_registry_setup',
+    # This is a test account with only read access to the private registry,
+    # should be fine to include in public repo.
+    [{
+        'username': 'skypilottest',
+        'password': 'dckr_pat_fHDX_pX24yxwMQlUegA7R73M8KM',
+        'registry': 'docker.io'
+    }],
+    indirect=True)
+def test_private_docker_registry_docker_io(private_docker_registry_setup: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'private_docker_registry_docker_io',
+        [
+            f'sky launch -c {name} -y --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.parametrize('private_docker_registry_setup', [{
+    'username': 'sky-dev-465/sky-test-private-image',
+    'password': '',
+    'registry': 'us-docker.pkg.dev'
+}],
+                         indirect=True)
+def test_private_docker_registry_gcp(private_docker_registry_setup: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'private_docker_registry_gcp',
+        [
+            f'sky launch -c {name} -y --infra gcp {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+@pytest.mark.parametrize('private_docker_registry_setup', [{
+    'username': '',
+    'password': '',
+    'registry': '195275664570.dkr.ecr.us-east-1.amazonaws.com'
+}],
+                         indirect=True)
+def test_private_docker_registry_aws(private_docker_registry_setup: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'private_docker_registry_aws',
+        [
+            f'sky launch -c {name} -y --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
