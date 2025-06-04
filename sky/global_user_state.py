@@ -26,6 +26,7 @@ import yaml
 
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -368,9 +369,6 @@ def add_or_update_cluster(cluster_name: str,
         config_hash: Configuration hash for the cluster.
         task_config: The config of the task being launched.
     """
-    # TODO(zhwu): have to be imported here to avoid circular import.
-    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
-
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None

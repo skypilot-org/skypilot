@@ -7,10 +7,10 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.catalog import CloudFilter
+from sky.catalog import common
+from sky.catalog import kubernetes_catalog
 from sky.clouds import ssh
-from sky.clouds.service_catalog import CloudFilter
-from sky.clouds.service_catalog import common
-from sky.clouds.service_catalog import kubernetes_catalog
 
 logger = sky_logging.init_logger(__name__)
 

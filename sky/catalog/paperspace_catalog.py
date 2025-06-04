@@ -1,19 +1,19 @@
-"""Digital ocean service catalog.
+"""Paperspace service catalog.
 
 This module loads the service catalog file and can be used to
-query instance types and pricing information for digital ocean.
+query instance types and pricing information for Paperspace.
 """
 
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky.clouds.service_catalog import common
+from sky.catalog import common
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('do/vms.csv')
+_df = common.read_catalog('paperspace/vms.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -25,8 +25,8 @@ def validate_region_zone(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('DO does not support zones.')
-    return common.validate_region_zone_impl('DO', _df, region, zone)
+            raise ValueError('Paperspace does not support zones.')
+    return common.validate_region_zone_impl('Paperspace', _df, region, zone)
 
 
 def get_hourly_cost(
@@ -38,7 +38,7 @@ def get_hourly_cost(
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('DO does not support zones.')
+            raise ValueError('Paperspace does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -76,7 +76,7 @@ def get_instance_type_for_accelerator(
     """Returns a list of instance types that have the given accelerator."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('DO does not support zones.')
+            raise ValueError('Paperspace does not support zones.')
     return common.get_instance_type_for_accelerator_impl(
         df=_df,
         acc_name=acc_name,
@@ -104,8 +104,9 @@ def list_accelerators(
     all_regions: bool = False,
     require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in DO offering GPUs."""
+    """Returns all instance types in Paperspace offering GPUs."""
     del require_price  # unused
-    return common.list_accelerators_impl('DO', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+    return common.list_accelerators_impl('Paperspace', _df, gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

@@ -1134,7 +1134,7 @@ class TestStorageWithCredentials:
             src_path.expanduser().mkdir(exist_ok=True)
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=src_path)
+                                            source=str(src_path))
             store_obj.construct()
             storage_mult_obj.append(store_obj)
         try:

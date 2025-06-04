@@ -5,11 +5,11 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import catalog
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
-from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -71,7 +71,7 @@ class IBM(clouds.Cloud):
         del accelerators  # unused
         if use_spot:
             return []
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'ibm')
 
         if region is not None:
@@ -131,11 +131,11 @@ class IBM(clouds.Cloud):
                                      zone: Optional[str] = None) -> float:
         # Currently doesn't support spot instances, hence use_spot set to False.
         del use_spot
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=False,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='ibm')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=False,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='ibm')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -243,8 +243,8 @@ class IBM(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='ibm')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='ibm')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -252,8 +252,8 @@ class IBM(clouds.Cloud):
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='ibm')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='ibm')
 
     @classmethod
     def get_default_instance_type(
@@ -262,10 +262,10 @@ class IBM(clouds.Cloud):
         memory: Optional[str] = None,
         disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='ibm')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='ibm')
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
@@ -309,15 +309,15 @@ class IBM(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='ibm')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='ibm')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -462,11 +462,11 @@ class IBM(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
-        return service_catalog.instance_type_exists(instance_type, clouds='ibm')
+        return catalog.instance_type_exists(instance_type, clouds='ibm')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         """Validates the region and zone."""
-        return service_catalog.validate_region_zone(region, zone, clouds='ibm')
+        return catalog.validate_region_zone(region, zone, clouds='ibm')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
