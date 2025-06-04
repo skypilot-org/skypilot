@@ -1,4 +1,5 @@
 """Kubernetes."""
+import os
 import re
 import subprocess
 import tempfile
@@ -852,12 +853,13 @@ class Kubernetes(clouds.Cloud):
                     f'> {kubeconfig_file}',
                     shell=True,
                     check=True)
-            # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
-            converted = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(
-                kubeconfig_file)
+            if os.path.exists(kubeconfig_file):
+                # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
+                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file) # pylint: disable=line-too-long
+            
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: converted}
+            return {DEFAULT_KUBECONFIG_PATH: kubeconfig_file}
         else:
             return {}
 
