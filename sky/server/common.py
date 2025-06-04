@@ -220,10 +220,8 @@ def get_dashboard_url(server_url: str,
 @annotations.lru_cache(scope='global')
 def is_api_server_local(host: Optional[str] = DEFAULT_SERVER_HOST):
     server_url = get_server_url(host)
-    if '://' in server_url:
-        server_host = server_url.split('://')[1].split(':')[0]
-    else:
-        server_host = server_url.split(':')[0]
+    parsed = parse.urlparse(server_url)
+    server_host = parsed.hostname
     return server_host in AVAILBLE_LOCAL_API_SERVER_HOSTS
 
 
