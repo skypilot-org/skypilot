@@ -774,10 +774,11 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
 
+    # import here to avoid circular import
+    from sky import global_user_state  # pylint: disable=import-outside-toplevel
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
         global_config_path = get_user_config_path()
-
     # Always save to the local file (PVC in Kubernetes, local file otherwise)
     common_utils.dump_yaml(global_config_path, dict(config))
 
@@ -786,5 +787,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         # PVC file is the source of truth, ConfigMap is just a mirror for easy
         # access
         config_map_utils.patch_configmap_with_config(config, global_config_path)
-
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        logger.debug('saving api_server config to db')
+        global_user_state.set_config_yaml(
+            'api_server', common_utils.dump_yaml_str(dict(config)))
     _reload_config()

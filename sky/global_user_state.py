@@ -144,6 +144,13 @@ cluster_yaml_table = sqlalchemy.Table(
     sqlalchemy.Column('yaml', sqlalchemy.Text),
 )
 
+config_yaml_table = sqlalchemy.Table(
+    'config_yaml',
+    Base.metadata,
+    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('yaml', sqlalchemy.Text),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -311,7 +318,46 @@ else:
 create_table()
 
 
-def add_or_update_user(user: models.User) -> bool:
+def get_config_yaml(key: str) -> Optional[str]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_yaml_table).filter_by(key=key).first()
+    if row:
+        return row.yaml
+    return None
+
+
+def set_config_yaml(key: str, yaml_str: str):
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(config_yaml_table).values(key=key,
+                                                             yaml=yaml_str)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_yaml_table.c.key],
+            set_={config_yaml_table.c.yaml: yaml_str})
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+saved_db_config_str = None
+if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    # if a saved config exists, merge config from db into skypilot_config
+    saved_db_config_str = get_config_yaml('api_server')
+
+if saved_db_config_str:
+    saved_db_config = yaml.safe_load(saved_db_config_str)
+    overlaid_config = skypilot_config.overlay_skypilot_config(
+        skypilot_config.get_server_config(), saved_db_config)
+    skypilot_config.update_config_no_lock(overlaid_config)
+
+
+def add_or_update_user(user: models.User):
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
