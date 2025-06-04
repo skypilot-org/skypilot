@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
 import webbrowser
 
-import aiohttp
 import click
 import colorama
 import filelock
@@ -2141,4 +2140,3 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
             f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
             f'{dashboard_msg}',
             fg='green')
-
