@@ -181,10 +181,7 @@ def get_cookies_from_response(
     return cookies
 
 
-def get_server_url(host: Optional[str] = None) -> str:
-    if host is None:
-        host = DEFAULT_SERVER_HOST
-
+def get_server_url(host: Optional[str] = DEFAULT_SERVER_HOST) -> str:
     port_file = pathlib.Path(SERVER_PORT_FILE).expanduser()
     if port_file.exists():
         port = int(port_file.read_text(encoding='utf-8').strip())
