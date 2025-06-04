@@ -299,12 +299,7 @@ def create_table():
 
 conn_string = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-    conn_string = skypilot_config.get_nested((
-        'db',
-        'api_server',
-        'state_db',
-        'connection_string',
-    ), None)
+    conn_string = skypilot_config.get_nested(('db',), None)
 if conn_string:
     logger.debug(f'using db URI from {conn_string}')
     _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
