@@ -121,4 +121,28 @@ export async function deploySSHNodePool(poolName) {
     console.error('Error deploying SSH Node Pool:', error);
     throw error;
   }
+}
+
+export async function sshDownNodePool(poolName) {
+  try {
+    const response = await fetch(`${ENDPOINT}/ssh_down`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        infra: poolName,
+        cleanup: true,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error calling ssh_down for SSH Node Pool:', error);
+    throw error;
+  }
 } 

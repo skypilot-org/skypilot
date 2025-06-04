@@ -11,7 +11,7 @@ import { useMobile } from '@/hooks/useMobile';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool } from '@/data/connectors/ssh-node-pools';
+import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool, sshDownNodePool } from '@/data/connectors/ssh-node-pools';
 import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
 import { Button } from '@/components/ui/button';
 import dashboardCache from '@/lib/cache';
@@ -555,6 +555,7 @@ export function GPUs() {
     }
 
     try {
+      await sshDownNodePool(poolName);
       await deleteSSHNodePool(poolName);
       await fetchSSHNodePools(); // Refresh the list
     } catch (error) {
@@ -876,12 +877,75 @@ export function GPUs() {
       hostCount: config.hosts ? config.hosts.length : 0,
     }));
 
-    // Also show SSH contexts from GPU discovery (these are deployed pools)
-    const deployedSSHContexts = sshContexts.map(context => ({
-      name: context,
-      isDeployed: true,
-      displayName: context.replace(/^ssh-/, ''),
-    }));
+    // Create a unified list combining configured and deployed pools
+    const allSSHPools = new Map();
+    
+    // Add configured pools
+    sshPoolsArray.forEach(pool => {
+      allSSHPools.set(pool.name, {
+        name: pool.name,
+        displayName: pool.name,
+        isConfigured: true,
+        isDeployed: false,
+        config: pool.config,
+        hostCount: pool.hostCount,
+        clusters: 0,
+        jobs: 0,
+        nodes: 0,
+        gpuTypes: '-',
+        totalGPUs: 0,
+      });
+    });
+
+    // Add deployed pools and merge with configured ones
+    sshContexts.forEach(context => {
+      const poolName = context.replace(/^ssh-/, '');
+      const gpus = groupedPerContextGPUs[context] || [];
+      const nodes = groupedPerNodeGPUs[context] || [];
+      const totalGpus = gpus.reduce((sum, gpu) => sum + (gpu.gpu_total || 0), 0);
+      
+      const contextStatsKey = `ssh/${poolName}`;
+      const stats = contextStats[contextStatsKey] || { clusters: 0, jobs: 0 };
+      
+      const gpuTypes = (() => {
+        const typeCounts = gpus.reduce((acc, gpu) => {
+          acc[gpu.gpu_name] = (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
+          return acc;
+        }, {});
+        return Object.keys(typeCounts).join(', ') || '-';
+      })();
+
+      if (allSSHPools.has(poolName)) {
+        // Update existing configured pool with deployed info
+        const existingPool = allSSHPools.get(poolName);
+        allSSHPools.set(poolName, {
+          ...existingPool,
+          isDeployed: true,
+          clusters: stats.clusters,
+          jobs: stats.jobs,
+          nodes: nodes.length,
+          gpuTypes,
+          totalGPUs: totalGpus,
+        });
+      } else {
+        // Add deployed-only pool
+        allSSHPools.set(poolName, {
+          name: poolName,
+          displayName: poolName,
+          isConfigured: false,
+          isDeployed: true,
+          config: null,
+          hostCount: 0,
+          clusters: stats.clusters,
+          jobs: stats.jobs,
+          nodes: nodes.length,
+          gpuTypes,
+          totalGPUs: totalGpus,
+        });
+      }
+    });
+
+    const unifiedPools = Array.from(allSSHPools.values());
 
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
@@ -892,9 +956,9 @@ export function GPUs() {
               <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
                 {sshPoolsArray.length} {sshPoolsArray.length === 1 ? 'pool' : 'pools'} configured
               </span>
-              {deployedSSHContexts.length > 0 && (
+              {sshContexts.length > 0 && (
                 <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                  {deployedSSHContexts.length} {deployedSSHContexts.length === 1 ? 'pool' : 'pools'} deployed
+                  {sshContexts.length} {sshContexts.length === 1 ? 'pool' : 'pools'} deployed
                 </span>
               )}
             </div>
@@ -909,8 +973,7 @@ export function GPUs() {
             </Button>
           </div>
 
-          {/* Configuration Table */}
-          {sshPoolsArray.length === 0 ? (
+          {unifiedPools.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-sm text-gray-500 mb-4">
                 No SSH Node Pools configured. Click &quot;Add SSH Node Pool&quot; to get started.
@@ -920,89 +983,119 @@ export function GPUs() {
               </p>
             </div>
           ) : (
-            <div className="mb-6">
-              <h4 className="text-md font-medium mb-3">Configured Pools</h4>
-              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="p-3 text-left font-medium text-gray-600">Pool Name</th>
-                      <th className="p-3 text-left font-medium text-gray-600">Hosts</th>
-                      <th className="p-3 text-left font-medium text-gray-600">SSH User</th>
-                      <th className="p-3 text-left font-medium text-gray-600">Authentication</th>
-                      <th className="p-3 text-left font-medium text-gray-600">Actions</th>
+            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-3 text-left font-medium text-gray-600">Pool Name</th>
+                    <th className="p-3 text-left font-medium text-gray-600">Status</th>
+                    <th className="p-3 text-left font-medium text-gray-600">Clusters</th>
+                    <th className="p-3 text-left font-medium text-gray-600">Jobs</th>
+                    <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
+                    <th className="p-3 text-left font-medium text-gray-600">GPU Types</th>
+                    <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
+                    <th className="p-3 text-left font-medium text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {unifiedPools.map((pool) => (
+                    <tr key={pool.name} className="hover:bg-gray-50">
+                      <td className="p-3 font-medium text-gray-700">
+                        {pool.displayName}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center space-x-2">
+                          {pool.isConfigured && (
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                              Configured
+                            </span>
+                          )}
+                          {pool.isDeployed && (
+                            <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                              Deployed
+                            </span>
+                          )}
+                          {!pool.isConfigured && !pool.isDeployed && (
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              Unknown
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        {pool.clusters > 0 ? (
+                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                            {pool.clusters}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                            0
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        {pool.jobs > 0 ? (
+                          <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                            {pool.jobs}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                            0
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3">{pool.nodes}</td>
+                      <td className="p-3">{pool.gpuTypes}</td>
+                      <td className="p-3">{pool.totalGPUs}</td>
+                      <td className="p-3">
+                        <div className="flex items-center space-x-2">
+                          {pool.isConfigured && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeploySSHPool(pool.name)}
+                                className="flex items-center"
+                              >
+                                <PlayIcon className="w-3 h-3 mr-1" />
+                                Deploy
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleEditSSHPool(pool.name, pool.config)}
+                                className="flex items-center"
+                              >
+                                <EditIcon className="w-3 h-3 mr-1" />
+                                Edit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeleteSSHPool(pool.name)}
+                                className="flex items-center text-red-600 hover:text-red-700"
+                              >
+                                <TrashIcon className="w-3 h-3 mr-1" />
+                                Delete
+                              </Button>
+                            </>
+                          )}
+                          {pool.isDeployed && (
+                            <Button
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleContextClick(`ssh-${pool.name}`)}
+                              className="flex items-center"
+                            >
+                              View Details
+                            </Button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {sshPoolsArray.map((pool) => (
-                      <tr key={pool.name} className="hover:bg-gray-50">
-                        <td className="p-3 font-medium text-gray-700">
-                          {pool.name}
-                        </td>
-                        <td className="p-3 text-gray-600">
-                          {pool.hostCount} {pool.hostCount === 1 ? 'host' : 'hosts'}
-                        </td>
-                        <td className="p-3 text-gray-600">
-                          {pool.config.user || 'ubuntu'}
-                        </td>
-                        <td className="p-3 text-gray-600">
-                          {pool.config.identity_file ? 'SSH Key' : pool.config.password ? 'Password' : 'Not configured'}
-                        </td>
-                        <td className="p-3">
-                          <div className="flex items-center space-x-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeploySSHPool(pool.name)}
-                              className="flex items-center"
-                            >
-                              <PlayIcon className="w-3 h-3 mr-1" />
-                              Deploy
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleEditSSHPool(pool.name, pool.config)}
-                              className="flex items-center"
-                            >
-                              <EditIcon className="w-3 h-3 mr-1" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeleteSSHPool(pool.name)}
-                              className="flex items-center text-red-600 hover:text-red-700"
-                            >
-                              <TrashIcon className="w-3 h-3 mr-1" />
-                              Delete
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Deployed Pools (if any) */}
-          {deployedSSHContexts.length > 0 && (
-            <div>
-              <h4 className="text-md font-medium mb-3">Deployed Pools (with GPU info)</h4>
-              <InfrastructureSection
-                title=""
-                isLoading={kubeLoading}
-                isDataLoaded={kubeDataLoaded}
-                contexts={sshContexts}
-                gpus={sshGPUs}
-                groupedPerContextGPUs={groupedPerContextGPUs}
-                groupedPerNodeGPUs={groupedPerNodeGPUs}
-                handleContextClick={handleContextClick}
-                contextStats={contextStats}
-                isSSH={true}
-              />
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
