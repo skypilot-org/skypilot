@@ -1,8 +1,32 @@
 # Using InfiniBand in Nebius with SkyPilot
 
+## Simplified InfiniBand Setup with `network_tier: best`
+
+SkyPilot provides the `network_tier: best` configuration option that automatically enables InfiniBand support on Nebius Kubernetes clusters. This eliminates the need for manual configuration of security contexts and environment variables.
+
+### Usage
+
+Simply add `network_tier: best` to your resources specification:
+
+```yaml
+resources:
+  infra: k8s
+  accelerators: H100:8
+  network_tier: best
+  image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
+```
+
+### Example with network_tier: best
+
+Check the [`nccl_network_tier.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl_network_tier.yaml) for a complete example using the simplified configuration:
+
+```bash
+sky launch -c nccl_network_tier nccl_network_tier.yaml
+```
+
 To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand, a high-throughput, low-latency networking standard.
 
-## InfiniBand on Managed Nebius Kubernetes clusters with SkyPilot
+## Enable InfiniBand manually on Managed Nebius Kubernetes clusters with SkyPilot
 
 With Nebius Kubernetes cluster, you can use SkyPilot to run your jobs with InfiniBand enabled:
 
