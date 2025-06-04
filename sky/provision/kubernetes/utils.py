@@ -1559,7 +1559,6 @@ def is_kubeconfig_exec_auth(
                     f'Kubernetes context {ctx_name!r}. '
                     'Make sure that the corresponding cloud provider is '
                     'also enabled through `sky check` (e.g.: GCP for GKE). '
-                    'Managed Jobs or SkyServe controller on Kubernetes. '
                     'Alternatively, configure SkyPilot to create a service '
                     'account for running pods by setting the following in '
                     '~/.sky/config.yaml:\n'
