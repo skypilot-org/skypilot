@@ -1384,7 +1384,7 @@ def check_credentials(context: Optional[str],
     # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
     # optional checks.
     try:
-        _ = _get_kubeconfig_path()
+        _ = get_kubeconfig_paths()
     except ValueError as e:
         return False, f'{common_utils.format_exception(e, use_bracket=True)}'
 
@@ -1537,15 +1537,11 @@ def is_kubeconfig_exec_auth(
             raise ValueError(f'Kubernetes context {context!r} not found.')
     target_username = context_obj['context']['user']
 
-    # K8s api does not provide a mechanism to get the user details from the
-    # context. We need to load the kubeconfig file and parse it to get the
-    # user details.
-    kubeconfig_path = _get_kubeconfig_path()
+    # Load the kubeconfig for the context
+    kubeconfig_text = _get_kubeconfig_text_for_context(context)
+    kubeconfig = yaml.safe_load(kubeconfig_text)
 
-    # Load the kubeconfig file as a dictionary
-    with open(kubeconfig_path, 'r', encoding='utf-8') as f:
-        kubeconfig = yaml.safe_load(f)
-
+    # Get the user details
     user_details = kubeconfig['users']
 
     # Find user matching the target username
@@ -1571,6 +1567,27 @@ def is_kubeconfig_exec_auth(
                     'reference/config.html')
         return True, exec_msg
     return False, None
+
+
+def _get_kubeconfig_text_for_context(context: Optional[str] = None) -> str:
+    """Get the kubeconfig text for the given context.
+
+    The kubeconfig might be multiple files, this function use kubectl to
+    handle merging automatically.
+    """
+    command = 'kubectl config view --minify'
+    if context is not None:
+        command += f' --context={context}'
+    proc = subprocess.run(command,
+                          shell=True,
+                          check=False,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f'Failed to get kubeconfig text for context {context}: {proc.stderr.decode("utf-8")}'
+        )
+    return proc.stdout.decode('utf-8')
 
 
 @annotations.lru_cache(scope='request')
@@ -3100,18 +3117,17 @@ def get_gpu_resource_key():
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
 
 
-def _get_kubeconfig_path() -> str:
-    """Get the path to the kubeconfig file.
+def get_kubeconfig_paths() -> List[str]:
+    """Get the path to the kubeconfig files.
     Parses `KUBECONFIG` env var if present, else uses the default path.
-    Currently, specifying multiple KUBECONFIG paths in the envvar is not
-    allowed, hence will raise a ValueError.
     """
-    kubeconfig_path = os.path.expanduser(
-        os.getenv(
-            'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
-            KUBE_CONFIG_DEFAULT_LOCATION))
-    if len(kubeconfig_path.split(os.pathsep)) > 1:
-        raise ValueError('SkyPilot currently only supports one '
-                         'config file path with $KUBECONFIG. Current '
-                         f'path(s) are {kubeconfig_path}.')
-    return kubeconfig_path
+    # We should always use the latest KUBECONFIG environment variable to
+    # make sure env var overrides get respected.
+    paths = os.getenv(
+        'KUBECONFIG',
+        kubernetes.kubernetes.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION)
+    expanded = []
+    for path in paths.split(kubernetes.kubernetes.config.kube_config.
+                            ENV_KUBECONFIG_PATH_SEPARATOR):
+        expanded.append(os.path.expanduser(path))
+    return expanded
