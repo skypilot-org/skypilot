@@ -302,8 +302,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                         onChange={(e) => setCurrentEditingRole(e.target.value)}
                         className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
                       >
-                        <option value="admin">admin</option>
-                        <option value="user">user</option>
+                        <option value="admin">Admin</option>
+                        <option value="user">User</option>
                       </select>
                       <button
                         onClick={() => handleSaveEdit(user.userId)}
@@ -322,7 +322,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                     </>
                   ) : (
                     <>
-                      <span>{user.role}</span>
+                      <span className="capitalize">{user.role}</span>
                       <button
                         onClick={() => handleEditClick(user.userId, user.role)}
                         className="text-gray-400 hover:text-sky-blue p-1"
