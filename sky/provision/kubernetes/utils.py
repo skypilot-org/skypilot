@@ -3123,11 +3123,8 @@ def get_kubeconfig_paths() -> List[str]:
     """
     # We should always use the latest KUBECONFIG environment variable to
     # make sure env var overrides get respected.
-    paths = os.getenv(
-        'KUBECONFIG',
-        kubernetes.kubernetes.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION)
+    paths = os.getenv('KUBECONFIG', kubernetes.DEFAULT_KUBECONFIG_PATH)
     expanded = []
-    for path in paths.split(kubernetes.kubernetes.config.kube_config.
-                            ENV_KUBECONFIG_PATH_SEPARATOR):
+    for path in paths.split(kubernetes.ENV_KUBECONFIG_PATH_SEPARATOR):
         expanded.append(os.path.expanduser(path))
     return expanded
