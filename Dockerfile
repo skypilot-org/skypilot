@@ -48,13 +48,18 @@ RUN cd /skypilot-src && \
 RUN sky -v && \
     sky api info
 
-# Set up Node.js and build dashboard
-RUN curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
-    apt-get update && \
-    apt-get install -y nodejs && \
-    cd /skypilot-src/sky/dashboard && \
-    npm ci && \
-    npm run build
+# Set up Node.js and build dashboard (only when installing from source)
+RUN if [ ! -f /skypilot-src/dist/skypilot-*.whl ]; then \
+        echo "Setting up Node.js and building dashboard" && \
+        curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
+        apt-get update && \
+        apt-get install -y nodejs && \
+        cd /skypilot-src/sky/dashboard && \
+        npm ci && \
+        npm run build; \
+    else \
+        echo "Skipping dashboard build as wheel file exists"; \
+    fi
 
 # Cleanup all caches to reduce the image size
 RUN conda clean -afy && \
