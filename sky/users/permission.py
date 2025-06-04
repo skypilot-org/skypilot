@@ -1,4 +1,5 @@
 """Permission service for SkyPilot API Server."""
+import contextlib
 import logging
 import os
 import threading
@@ -18,7 +19,7 @@ logger = sky_logging.init_logger(__name__)
 POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 
-_instance = None
+_enforcer_instance = None
 _lock = threading.Lock()
 
 
@@ -26,11 +27,12 @@ class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        global _instance
-        if _instance is None:
+        global _enforcer_instance
+        if _enforcer_instance is None:
+            # For different threads, we share the same enforcer instance.
             with _lock:
-                if _instance is None:
-                    _instance = self
+                if _enforcer_instance is None:
+                    _enforcer_instance = self
                     engine = global_user_state.SQLALCHEMY_ENGINE
                     adapter = sqlalchemy_adapter.Adapter(engine)
                     model_path = os.path.join(os.path.dirname(__file__),
@@ -41,9 +43,10 @@ class PermissionService:
                     logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
                     self.enforcer = enforcer
         else:
-            self.enforcer = _instance.enforcer
+            self.enforcer = _enforcer_instance.enforcer
+        self._maybe_initialize_policies()
 
-    def init_policies(self):
+    def _maybe_initialize_policies(self):
         """Initialize policies."""
         logger.debug(f'Initializing policies in process: {os.getpid()}')
         # Only clear p policies (permission policies),
@@ -59,51 +62,37 @@ class PermissionService:
                     self.enforcer.add_policy(role, path, method)
         all_users = global_user_state.get_all_users()
         for user in all_users:
-            user_roles = self.get_user_roles(user.id)
-            if len(user_roles) == 0:
-                logger.info(f'User {user.id} has no roles, adding'
-                            f' default role {rbac.get_default_role()}')
-                self.enforcer.add_grouping_policy(user.id,
-                                                  rbac.get_default_role())
-        self.enforcer.save_policy()
+            self.add_user_if_not_exists(user.id)
 
-    def add_role(self, user: str, role: str):
+    def add_user_if_not_exists(self, user: str) -> None:
         """Add user role relationship."""
-        self.enforcer.add_grouping_policy(user, role)
-        self.enforcer.save_policy()
-
-    def remove_role(self, user: str, role: str):
-        """Remove user role relationship."""
-        self.enforcer.remove_grouping_policy(user, role)
-        self.enforcer.save_policy()
+        with _policy_lock():
+            user_roles = self.enforcer.get_roles_for_user(user)
+            if not user_roles:
+                logger.info(f'User {user} has no roles, adding'
+                            f' default role {rbac.get_default_role()}')
+                self.enforcer.add_grouping_policy(user, rbac.get_default_role())
+                self.enforcer.save_policy()
 
     def update_role(self, user: str, new_role: str):
         """Update user role relationship."""
-        try:
-            with filelock.FileLock(POLICY_UPDATE_LOCK_PATH,
-                                   POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
-                # Get current roles
-                self.load_policy()
-                current_roles = self.get_user_roles(user)
-                if not current_roles:
-                    logger.warning(f'User {user} has no roles')
-                else:
-                    # TODO(hailong): how to handle multiple roles?
-                    current_role = current_roles[0]
-                    if current_role == new_role:
-                        logger.info(f'User {user} already has role {new_role}')
-                        return
-                    self.enforcer.remove_grouping_policy(user, current_role)
+        with _policy_lock():
+            # Get current roles
+            self._load_policy_no_lock()
+            current_roles = self.get_user_roles(user)
+            if not current_roles:
+                logger.warning(f'User {user} has no roles')
+            else:
+                # TODO(hailong): how to handle multiple roles?
+                current_role = current_roles[0]
+                if current_role == new_role:
+                    logger.info(f'User {user} already has role {new_role}')
+                    return
+                self.enforcer.remove_grouping_policy(user, current_role)
 
-                # Update user role
-                self.enforcer.add_grouping_policy(user, new_role)
-                self.enforcer.save_policy()
-        except filelock.Timeout as e:
-            raise RuntimeError(f'Failed to update role due to a timeout '
-                               f'when trying to acquire the lock at '
-                               f'{POLICY_UPDATE_LOCK_PATH}. '
-                               'Please try again or manually remove the lock '
-                               f'file if you believe it is stale.') from e
+            # Update user role
+            self.enforcer.add_grouping_policy(user, new_role)
+            self.enforcer.save_policy()
 
     def get_user_roles(self, user: str) -> List[str]:
         """Get all roles for a user.
@@ -118,12 +107,33 @@ class PermissionService:
         Returns:
             A list of role names that the user has.
         """
+        self._load_policy()
         return self.enforcer.get_roles_for_user(user)
 
     def check_permission(self, user: str, path: str, method: str) -> bool:
         """Check permission."""
+        self._load_policy()
         return self.enforcer.enforce(user, path, method)
 
-    def load_policy(self):
+    def _load_policy_no_lock(self):
         """Load policy from storage."""
         self.enforcer.load_policy()
+
+    def _load_policy(self):
+        """Load policy from storage with lock."""
+        with _policy_lock():
+            self._load_policy_no_lock()
+
+@contextlib.contextmanager
+def _policy_lock():
+    """Context manager for policy update lock."""
+    try:
+        with filelock.FileLock(POLICY_UPDATE_LOCK_PATH,
+                               POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
+            yield
+    except filelock.Timeout as e:
+        raise RuntimeError(f'Failed to load policy due to a timeout '
+                           f'when trying to acquire the lock at '
+                           f'{POLICY_UPDATE_LOCK_PATH}. '
+                           'Please try again or manually remove the lock '
+                           f'file if you believe it is stale.') from e

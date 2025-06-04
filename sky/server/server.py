@@ -117,7 +117,6 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         permission_service = users_rest.permission_service
         # Check the role permission
-        permission_service.load_policy()
         if permission_service.check_permission(auth_user.id, request.url.path,
                                                request.method):
             return fastapi.responses.JSONResponse(
@@ -324,27 +323,9 @@ async def token(request: fastapi.Request,
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
 
-    # Add role for user
+    # Add user if not exists
     if user is not None:
-        permission_service = users_rest.permission_service
-        try:
-            with filelock.FileLock(
-                    permission.POLICY_UPDATE_LOCK_PATH,
-                    permission.POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
-                # Get current roles
-                permission_service.load_policy()
-                user_roles = permission_service.get_user_roles(user.id)
-                if len(user_roles) == 0:
-                    default_role = rbac.get_default_role()
-                    logger.info(f'User {user.id} has no roles, adding'
-                                f' default role {default_role}')
-                    permission_service.add_role(user.id, default_role)
-        except filelock.Timeout as e:
-            raise RuntimeError(f'Failed to add role due to a timeout '
-                               f'when trying to acquire the lock at '
-                               f'{permission.POLICY_UPDATE_LOCK_PATH}. '
-                               'Please try again or manually remove the lock '
-                               f'file if you believe it is stale.') from e
+        users_rest.permission_service.add_user_if_not_exists(user.id)
 
     user_info_string = f'Logged in as {user.name}' if user is not None else ''
     html_content = html_content.replace(
