@@ -42,6 +42,10 @@ RUN cd /skypilot-src && \
         ~/.local/bin/uv pip install -e ".[all]" --system; \
     fi
 
+
+RUN sky -v && \
+    sky api info
+
 # Set up Node.js and build dashboard
 RUN curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
     apt-get update && \
