@@ -2495,6 +2495,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andyl): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner. Now this
+        # is required for rsync as using deployment in rsync seems to cause
+        # some unknown issues.
+        # TODO(andyl): Should check through the real cluster info. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                controller_utils.high_availability_specified(
+                    self.cluster_name)):
+            self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
