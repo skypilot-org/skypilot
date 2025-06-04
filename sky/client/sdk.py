@@ -71,6 +71,7 @@ else:
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
+
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None) -> Any:
@@ -2162,12 +2163,13 @@ async def get_async(request_id: str) -> Any:
     """
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f'{server_common.get_server_url()}/api/get?request_id={request_id}',
-            timeout=aiohttp.ClientTimeout(
-                total=None,
-                connect=client_common.
-                API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS),
-            cookies=server_common.get_api_cookie_jar()) as response:
+                f'{server_common.get_server_url()}'
+                f'/api/get?request_id={request_id}',
+                timeout=aiohttp.ClientTimeout(
+                    total=None,
+                    connect=client_common.
+                    API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS),
+                cookies=server_common.get_api_cookie_jar()) as response:
             request_task = None
             if response.status == 200:
                 request_task = requests_lib.Request.decode(
@@ -2189,15 +2191,15 @@ async def get_async(request_id: str) -> Any:
                 error_obj = error['object']
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     stacktrace = getattr(error_obj, 'stacktrace',
-                                            str(error_obj))
+                                         str(error_obj))
                     logger.error('=== Traceback on SkyPilot API Server ===\n'
-                                    f'{stacktrace}')
+                                 f'{stacktrace}')
                 with ux_utils.print_exception_no_traceback():
                     raise error_obj
             if request_task.status == requests_lib.RequestStatus.CANCELLED:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.RequestCancelled(
-                        f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
-                        f'({request_task.request_id}) is cancelled by another process.'
-                        f'{colorama.Style.RESET_ALL}')
+                        f'{colorama.Fore.YELLOW}Current {request_task.name!r} '
+                        f'request ({request_task.request_id}) is cancelled by '
+                        f'another process. {colorama.Style.RESET_ALL}')
             return request_task.get_return_value()
