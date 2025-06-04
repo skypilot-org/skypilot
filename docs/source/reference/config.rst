@@ -146,6 +146,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
 
+  :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
+
+
 Fields
 ----------
 
@@ -1222,6 +1225,22 @@ Example:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
 
+.. _config-yaml-db:
+
+``db``
+~~~~~~
+
+Database configuration (optional).
+
+Specify the database connection string to use for SkyPilot. If not specified, SkyPilot will use a SQLite database initialized in ~/.sky directory.
+If a postgres database URL is specified, SkyPilot will use the database to persist API server state.
+Currently, managed job controller state is not persisted in remote database even if `db` is specified.
+
+Example:
+
+.. code-block:: yaml
+
+  db: postgresql://postgres@localhost/skypilot
 
 .. toctree::
    :hidden:
