@@ -4,8 +4,8 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.catalog import constants as service_catalog_constants
 from sky.catalog.config import fallback_to_default_catalog
+from sky.skylet import constants
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
@@ -18,7 +18,7 @@ CloudFilter = Optional[Union[List[str], str]]
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
-        clouds = list(service_catalog_constants.ALL_CLOUDS)
+        clouds = list(constants.ALL_CLOUDS)
 
         # TODO(hemil): Remove this once the common service catalog
         # functions are refactored from clouds/kubernetes.py to
