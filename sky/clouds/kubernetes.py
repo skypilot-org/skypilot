@@ -536,11 +536,11 @@ class Kubernetes(clouds.Cloud):
         if k8s_service_account_name == lc or k8s_service_account_name == sa:
             # Use the default service account if remote identity is not set.
             # For LOCAL_CREDENTIALS, this is for in-cluster authentication
-            # which needs a serviceaccount (specifically for SSH node pools)
+            # which needs a serviceaccount (specifically for SSH node pools
+            # which uses in-cluster authentication internally, and we would
+            # like to support exec-auth when the user is also using SSH infra)
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
-
-        k8s_automount_sa_token = 'true'
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -614,7 +614,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
-            'k8s_automount_sa_token': k8s_automount_sa_token,
+            'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
