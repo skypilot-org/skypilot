@@ -6,11 +6,14 @@
 import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
-import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
+import { RotateCwIcon, SearchIcon, XIcon, PlusIcon, EditIcon, TrashIcon, PlayIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool } from '@/data/connectors/ssh-node-pools';
+import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
+import { Button } from '@/components/ui/button';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
@@ -423,6 +426,12 @@ export function GPUs() {
   const [enabledClouds, setEnabledClouds] = useState(0);
   const [contextStats, setContextStats] = useState({});
 
+  // SSH Node Pool state
+  const [sshNodePools, setSshNodePools] = useState({});
+  const [sshModalOpen, setSshModalOpen] = useState(false);
+  const [editingPool, setEditingPool] = useState(null);
+  const [sshLoading, setSshLoading] = useState(false);
+
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
@@ -484,6 +493,10 @@ export function GPUs() {
           // If no data at all, still need to clear loading eventually
           console.log('No cloud data received from cache');
         }
+
+        // Add SSH Node Pool fetching
+        await fetchSSHNodePools();
+
       } catch (error) {
         console.error('Error in fetchData:', error);
         // On error, we should still mark data as loaded but with empty values
@@ -513,6 +526,69 @@ export function GPUs() {
     },
     [isInitialLoad]
   );
+
+  // SSH Node Pool data fetching
+  const fetchSSHNodePools = async () => {
+    try {
+      const pools = await getSSHNodePools();
+      setSshNodePools(pools);
+    } catch (error) {
+      console.error('Failed to fetch SSH Node Pools:', error);
+      setSshNodePools({});
+    }
+  };
+
+  // SSH Node Pool handlers
+  const handleAddSSHPool = () => {
+    setEditingPool(null);
+    setSshModalOpen(true);
+  };
+
+  const handleEditSSHPool = (poolName, poolConfig) => {
+    setEditingPool({ name: poolName, config: poolConfig });
+    setSshModalOpen(true);
+  };
+
+  const handleDeleteSSHPool = async (poolName) => {
+    if (!confirm(`Are you sure you want to delete SSH Node Pool "${poolName}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteSSHNodePool(poolName);
+      await fetchSSHNodePools(); // Refresh the list
+    } catch (error) {
+      console.error('Failed to delete SSH Node Pool:', error);
+      alert('Failed to delete SSH Node Pool. Please try again.');
+    }
+  };
+
+  const handleDeploySSHPool = async (poolName) => {
+    try {
+      await deploySSHNodePool(poolName);
+      alert(`SSH Node Pool "${poolName}" deployment started. Check the logs for progress.`);
+    } catch (error) {
+      console.error('Failed to deploy SSH Node Pool:', error);
+      alert('Failed to deploy SSH Node Pool. Please try again.');
+    }
+  };
+
+  const handleSaveSSHPool = async (poolName, poolConfig) => {
+    setSshLoading(true);
+    try {
+      const updatedPools = { ...sshNodePools };
+      updatedPools[poolName] = poolConfig;
+      
+      await updateSSHNodePools(updatedPools);
+      await fetchSSHNodePools(); // Refresh the list
+      setSshModalOpen(false);
+    } catch (error) {
+      console.error('Failed to save SSH Node Pool:', error);
+      alert('Failed to save SSH Node Pool. Please try again.');
+    } finally {
+      setSshLoading(false);
+    }
+  };
 
   // Effect for assigning fetchData to refreshDataRef, stable after isInitialLoad becomes false.
   useEffect(() => {
@@ -791,6 +867,158 @@ export function GPUs() {
     );
   };
 
+  const renderSSHNodePoolInfrastructure = () => {
+    // Convert SSH Node Pool configurations to display format
+    const sshPoolsArray = Object.entries(sshNodePools).map(([name, config]) => ({
+      name,
+      config,
+      displayName: name,
+      hostCount: config.hosts ? config.hosts.length : 0,
+    }));
+
+    // Also show SSH contexts from GPU discovery (these are deployed pools)
+    const deployedSSHContexts = sshContexts.map(context => ({
+      name: context,
+      isDeployed: true,
+      displayName: context.replace(/^ssh-/, ''),
+    }));
+
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <h3 className="text-lg font-semibold">SSH Node Pool</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {sshPoolsArray.length} {sshPoolsArray.length === 1 ? 'pool' : 'pools'} configured
+              </span>
+              {deployedSSHContexts.length > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                  {deployedSSHContexts.length} {deployedSSHContexts.length === 1 ? 'pool' : 'pools'} deployed
+                </span>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddSSHPool}
+              className="flex items-center"
+            >
+              <PlusIcon className="w-4 h-4 mr-2" />
+              Add SSH Node Pool
+            </Button>
+          </div>
+
+          {/* Configuration Table */}
+          {sshPoolsArray.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-sm text-gray-500 mb-4">
+                No SSH Node Pools configured. Click &quot;Add SSH Node Pool&quot; to get started.
+              </p>
+              <p className="text-xs text-gray-400">
+                SSH Node Pools allow you to deploy Kubernetes on your own machines via SSH.
+              </p>
+            </div>
+          ) : (
+            <div className="mb-6">
+              <h4 className="text-md font-medium mb-3">Configured Pools</h4>
+              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="p-3 text-left font-medium text-gray-600">Pool Name</th>
+                      <th className="p-3 text-left font-medium text-gray-600">Hosts</th>
+                      <th className="p-3 text-left font-medium text-gray-600">SSH User</th>
+                      <th className="p-3 text-left font-medium text-gray-600">Authentication</th>
+                      <th className="p-3 text-left font-medium text-gray-600">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {sshPoolsArray.map((pool) => (
+                      <tr key={pool.name} className="hover:bg-gray-50">
+                        <td className="p-3 font-medium text-gray-700">
+                          {pool.name}
+                        </td>
+                        <td className="p-3 text-gray-600">
+                          {pool.hostCount} {pool.hostCount === 1 ? 'host' : 'hosts'}
+                        </td>
+                        <td className="p-3 text-gray-600">
+                          {pool.config.user || 'ubuntu'}
+                        </td>
+                        <td className="p-3 text-gray-600">
+                          {pool.config.identity_file ? 'SSH Key' : pool.config.password ? 'Password' : 'Not configured'}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeploySSHPool(pool.name)}
+                              className="flex items-center"
+                            >
+                              <PlayIcon className="w-3 h-3 mr-1" />
+                              Deploy
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditSSHPool(pool.name, pool.config)}
+                              className="flex items-center"
+                            >
+                              <EditIcon className="w-3 h-3 mr-1" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteSSHPool(pool.name)}
+                              className="flex items-center text-red-600 hover:text-red-700"
+                            >
+                              <TrashIcon className="w-3 h-3 mr-1" />
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Deployed Pools (if any) */}
+          {deployedSSHContexts.length > 0 && (
+            <div>
+              <h4 className="text-md font-medium mb-3">Deployed Pools (with GPU info)</h4>
+              <InfrastructureSection
+                title=""
+                isLoading={kubeLoading}
+                isDataLoaded={kubeDataLoaded}
+                contexts={sshContexts}
+                gpus={sshGPUs}
+                groupedPerContextGPUs={groupedPerContextGPUs}
+                groupedPerNodeGPUs={groupedPerNodeGPUs}
+                handleContextClick={handleContextClick}
+                contextStats={contextStats}
+                isSSH={true}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* SSH Node Pool Modal */}
+        <SSHNodePoolModal
+          isOpen={sshModalOpen}
+          onClose={() => setSshModalOpen(false)}
+          onSave={handleSaveSSHPool}
+          poolData={editingPool}
+          isLoading={sshLoading}
+        />
+      </div>
+    );
+  };
+
   const renderKubernetesInfrastructure = () => {
     return (
       <InfrastructureSection
@@ -804,23 +1032,6 @@ export function GPUs() {
         handleContextClick={handleContextClick}
         contextStats={contextStats}
         isSSH={false}
-      />
-    );
-  };
-
-  const renderSSHNodePoolInfrastructure = () => {
-    return (
-      <InfrastructureSection
-        title="SSH Node Pool"
-        isLoading={kubeLoading}
-        isDataLoaded={kubeDataLoaded}
-        contexts={sshContexts}
-        gpus={sshGPUs}
-        groupedPerContextGPUs={groupedPerContextGPUs}
-        groupedPerNodeGPUs={groupedPerNodeGPUs}
-        handleContextClick={handleContextClick}
-        contextStats={contextStats}
-        isSSH={true}
       />
     );
   };
