@@ -3,9 +3,9 @@ import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky.adaptors import common as adaptors_common
-from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -53,6 +53,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
             'Host controllers'
             f' are not supported in {_REPR}.',
@@ -93,7 +96,7 @@ class Fluidstack(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'fluidstack')
 
         if region is not None:
@@ -125,11 +128,11 @@ class Fluidstack(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='fluidstack')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='fluidstack')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -152,26 +155,26 @@ class Fluidstack(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional[DiskTier] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='fluidstack')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='fluidstack')
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='fluidstack')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='fluidstack')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds='fluidstack')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='fluidstack')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -188,9 +191,9 @@ class Fluidstack(clouds.Cloud):
     ) -> Dict[str, Optional[str]]:
 
         assert zones is None, 'FluidStack does not support zones.'
-
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        resources = resources.assert_launchable()
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
@@ -244,16 +247,16 @@ class Fluidstack(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='fluidstack')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='fluidstack')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -261,7 +264,8 @@ class Fluidstack(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         FluidStack's compute service."""
         try:
@@ -302,12 +306,10 @@ class Fluidstack(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'fluidstack')
+        return catalog.instance_type_exists(instance_type, 'fluidstack')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='fluidstack')
+        return catalog.validate_region_zone(region, zone, clouds='fluidstack')
 
     @classmethod
     def query_status(

@@ -1,24 +1,28 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import textwrap
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import typing
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
+import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.provision import docker_utils
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -32,6 +36,50 @@ _DEFAULT_DISK_SIZE_GB = 256
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
+
+
+@dataclasses.dataclass
+class AutostopConfig:
+    """Configuration for autostop."""
+    # enabled isn't present in the yaml config, but it's needed for this class
+    # to be complete.
+    enabled: bool
+    # If enabled is False, these values are ignored.
+    idle_minutes: int = 5
+    down: bool = False
+
+    def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
+        if not self.enabled:
+            return False
+        return {
+            'idle_minutes': self.idle_minutes,
+            'down': self.down,
+        }
+
+    @classmethod
+    def from_yaml_config(
+        cls, config: Union[bool, int, Dict[str, Any], None]
+    ) -> Optional['AutostopConfig']:
+        if isinstance(config, bool):
+            if config:
+                return cls(enabled=True)
+            else:
+                return cls(enabled=False)
+
+        if isinstance(config, int):
+            return cls(idle_minutes=config, down=False, enabled=True)
+
+        if isinstance(config, dict):
+            # If we have a dict, autostop is enabled. (Only way to disable is
+            # with `false`, a bool.)
+            autostop_config = cls(enabled=True)
+            if 'idle_minutes' in config:
+                autostop_config.idle_minutes = config['idle_minutes']
+            if 'down' in config:
+                autostop_config.down = config['down']
+            return autostop_config
+
+        return None
 
 
 class Resources:
@@ -51,7 +99,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 22
+    _VERSION = 26
 
     def __init__(
         self,
@@ -59,17 +107,22 @@ class Resources:
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
+        infra: Optional[str] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
+        job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
+                                     str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Union[Dict[str, str], str, None] = None,
+        image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
+        network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
+        autostop: Union[bool, int, Dict[str, Any], None] = None,
+        volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -87,9 +140,9 @@ class Resources:
           .. code-block:: python
 
             # Fully specified cloud and instance type (is_launchable() is True).
-            sky.Resources(clouds.AWS(), 'p3.2xlarge')
-            sky.Resources(clouds.GCP(), 'n1-standard-16')
-            sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+            sky.Resources(infra='aws', instance_type='p3.2xlarge')
+            sky.Resources(infra='k8s/my-cluster-ctx', accelerators='V100')
+            sky.Resources(infra='gcp/us-central1', accelerators='V100')
 
             # Specifying required resources; the system decides the
             # cloud/instance type. The below are equivalent:
@@ -98,8 +151,9 @@ class Resources:
             sky.Resources(accelerators={'V100': 1})
             sky.Resources(cpus='2+', memory='16+', accelerators='V100')
 
+
         Args:
-          cloud: the cloud to use.
+          cloud: the cloud to use. Deprecated. Use `infra` instead.
           instance_type: the instance type to use.
           cpus: the number of CPUs required for the task.
             If a str, must be a string of the form ``'2'`` or ``'2+'``, where
@@ -113,6 +167,11 @@ class Resources:
             dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
           accelerator_args: accelerator-specific arguments. For example,
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+          infra: a string specifying the infrastructure to use, in the format
+            of "cloud/region" or "cloud/region/zone". For example,
+            `aws/us-east-1` or `k8s/my-cluster-ctx`. This is an alternative to
+            specifying cloud, region, and zone separately. If provided, it
+            takes precedence over cloud, region, and zone parameters.
           use_spot: whether to use spot instances. If None, defaults to
             False.
           job_recovery: the job recovery strategy to use for the managed
@@ -125,8 +184,8 @@ class Resources:
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
 
-          region: the region to use.
-          zone: the zone to use.
+          region: the region to use. Deprecated. Use `infra` instead.
+          zone: the zone to use. Deprecated. Use `infra` instead.
           image_id: the image ID to use. If a str, must be a string
             of the image id from the cloud, such as AWS:
             ``'ami-1234567890abcdef0'``, GCP:
@@ -145,6 +204,8 @@ class Resources:
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
+          network_tier: the network performance tier to use. If None, defaults to
+            ``'standard'``.
           ports: the ports to open on the instance.
           labels: the labels to apply to the instance. These are useful for
             assigning metadata that may be used by external tools.
@@ -152,6 +213,9 @@ class Resources:
             instance tags. On GCP, labels map to instance labels. On
             Kubernetes, labels map to pod labels. On other clouds, labels are
             not supported and will be ignored.
+          autostop: the autostop configuration to use. For launched resources,
+            may or may not correspond to the actual current autostop config.
+          volumes: the volumes to mount on the instance.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
@@ -169,6 +233,25 @@ class Resources:
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
         self._version = self._VERSION
+
+        if infra is not None and (cloud is not None or region is not None or
+                                  zone is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both `infra` and `cloud`, '
+                                 '`region`, or `zone` parameters. '
+                                 f'Got: infra={infra}, cloud={cloud}, '
+                                 f'region={region}, zone={zone}')
+
+        # Infra is user facing, and cloud, region, zone in parameters are for
+        # backward compatibility. Internally, we keep using cloud, region, zone
+        # for simplicity.
+        if infra is not None:
+            infra_info = infra_utils.InfraInfo.from_str(infra)
+            # Infra takes precedence over individually specified parameters
+            cloud = sky.CLOUD_REGISTRY.from_str(infra_info.cloud)
+            region = infra_info.region
+            zone = infra_info.zone
+
         self._cloud = cloud
         self._region: Optional[str] = region
         self._zone: Optional[str] = zone
@@ -177,7 +260,8 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
+        self._job_recovery: Optional[Dict[str, Optional[Union[str,
+                                                              int]]]] = None
         if job_recovery is not None:
             if isinstance(job_recovery, str):
                 job_recovery = {'strategy': job_recovery}
@@ -188,7 +272,7 @@ class Resources:
             if strategy_name == 'none':
                 self._job_recovery = None
             else:
-                if strategy_name is not None:
+                if isinstance(strategy_name, str):
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
@@ -201,7 +285,7 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._image_id = image_id
+        self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
@@ -209,8 +293,13 @@ class Resources:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
-                    k.strip(): v.strip() for k, v in image_id.items()
+                    typing.cast(str, k).strip(): v.strip()
+                    for k, v in image_id.items()
                 }
+        else:
+            self._image_id = image_id
+        if isinstance(self._cloud, clouds.Kubernetes):
+            _maybe_add_docker_prefix_to_image_id(self._image_id)
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
@@ -224,11 +313,25 @@ class Resources:
             disk_tier = resources_utils.DiskTier(disk_tier_str)
         self._disk_tier = disk_tier
 
+        if isinstance(network_tier, str):
+            network_tier_str = str(network_tier).lower()
+            supported_tiers = [
+                tier.value for tier in resources_utils.NetworkTier
+            ]
+            if network_tier_str not in supported_tiers:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid network_tier {network_tier_str!r}. '
+                        f'Network tier must be one of '
+                        f'{", ".join(supported_tiers)}.')
+            network_tier = resources_utils.NetworkTier(network_tier_str)
+        self._network_tier = network_tier
+
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
             if not isinstance(ports, list):
-                ports = [ports]
+                ports = [str(ports)]
             ports = resources_utils.simplify_ports(
                 [str(port) for port in ports])
             if not ports:
@@ -250,11 +353,13 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
-        self._cached_repr = None
+        self._cached_repr: Optional[str] = None
 
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
+        self._set_autostop_config(autostop)
+        self._set_volumes(volumes)
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -265,6 +370,7 @@ class Resources:
         self._try_validate_managed_job_attributes()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
+        self._try_validate_volumes()
         self._try_validate_ports()
         self._try_validate_labels()
 
@@ -273,7 +379,7 @@ class Resources:
     # if it fails to fetch some account specific catalog information (e.g., AWS
     # zone mapping). It is fine to use the default catalog as this function is
     # only for display purposes.
-    @service_catalog.fallback_to_default_catalog
+    @catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 
@@ -330,6 +436,10 @@ class Resources:
         if self.disk_tier is not None:
             disk_tier = f', disk_tier={self.disk_tier.value}'
 
+        network_tier = ''
+        if self.network_tier is not None:
+            network_tier = f', network_tier={self.network_tier.value}'
+
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -349,7 +459,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}{ports}')
+            f'{disk_tier}{network_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -366,7 +476,10 @@ class Resources:
     def repr_with_region_zone(self) -> str:
         region_str = ''
         if self.region is not None:
-            region_str = f', region={self.region}'
+            region_name = self.region
+            if self.region.startswith('ssh-'):
+                region_name = self.region.lstrip('ssh-')
+            region_str = f', region={region_name}'
         zone_str = ''
         if self.zone is not None:
             zone_str = f', zone={self.zone}'
@@ -378,19 +491,24 @@ class Resources:
         return repr_str
 
     @property
-    def cloud(self):
+    def infra(self) -> infra_utils.InfraInfo:
+        cloud = str(self.cloud) if self.cloud is not None else None
+        return infra_utils.InfraInfo(cloud, self.region, self.zone)
+
+    @property
+    def cloud(self) -> Optional[clouds.Cloud]:
         return self._cloud
 
     @property
-    def region(self):
+    def region(self) -> Optional[str]:
         return self._region
 
     @property
-    def zone(self):
+    def zone(self) -> Optional[str]:
         return self._zone
 
     @property
-    def instance_type(self):
+    def instance_type(self) -> Optional[str]:
         return self._instance_type
 
     @property
@@ -432,9 +550,9 @@ class Resources:
     def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
-        For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
-        set to None, but this function will infer {'V100': 1} from the instance
-        type.
+        For example, Resources(infra='aws', instance_type='p3.2xlarge') has its
+        accelerators field set to None, but this function will infer {'V100': 1}
+        from the instance type.
         """
         if self._accelerators is not None:
             return self._accelerators
@@ -444,7 +562,7 @@ class Resources:
         return None
 
     @property
-    def accelerator_args(self) -> Optional[Dict[str, str]]:
+    def accelerator_args(self) -> Optional[Dict[str, Any]]:
         return self._accelerator_args
 
     @property
@@ -456,7 +574,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
+    def job_recovery(self) -> Optional[Dict[str, Optional[Union[str, int]]]]:
         return self._job_recovery
 
     @property
@@ -464,12 +582,16 @@ class Resources:
         return self._disk_size
 
     @property
-    def image_id(self) -> Optional[Dict[str, str]]:
+    def image_id(self) -> Optional[Dict[Optional[str], str]]:
         return self._image_id
 
     @property
-    def disk_tier(self) -> resources_utils.DiskTier:
+    def disk_tier(self) -> Optional[resources_utils.DiskTier]:
         return self._disk_tier
+
+    @property
+    def network_tier(self) -> Optional[resources_utils.NetworkTier]:
+        return self._network_tier
 
     @property
     def ports(self) -> Optional[List[str]]:
@@ -478,6 +600,20 @@ class Resources:
     @property
     def labels(self) -> Optional[Dict[str, str]]:
         return self._labels
+
+    @property
+    def volumes(self) -> Optional[List[Dict[str, Any]]]:
+        return self._volumes
+
+    @property
+    def autostop_config(self) -> Optional[AutostopConfig]:
+        """The requested autostop config.
+
+        Warning: This is the autostop config that was originally used to
+        launch the resources. It may not correspond to the actual current
+        autostop config.
+        """
+        return self._autostop_config
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -489,15 +625,25 @@ class Resources:
             return False
         return self._requires_fuse
 
+    def set_requires_fuse(self, value: bool) -> None:
+        """Sets whether this resource requires FUSE mounting support.
+
+        Args:
+            value: Whether the resource requires FUSE mounting support.
+        """
+        # TODO(zeping): This violates the immutability of Resources.
+        #  Refactor to use Resources.copy instead.
+        self._requires_fuse = value
+
     @property
     def cluster_config_overrides(self) -> Dict[str, Any]:
         if self._cluster_config_overrides is None:
             return {}
         return self._cluster_config_overrides
 
-    @requires_fuse.setter
-    def requires_fuse(self, value: Optional[bool]) -> None:
-        self._requires_fuse = value
+    @property
+    def docker_login_config(self) -> Optional[docker_utils.DockerLoginConfig]:
+        return self._docker_login_config
 
     @property
     def docker_username_for_runpod(self) -> Optional[str]:
@@ -568,8 +714,8 @@ class Resources:
 
     def _set_accelerators(
         self,
-        accelerators: Union[None, str, Dict[str, int]],
-        accelerator_args: Optional[Dict[str, str]],
+        accelerators: Union[None, str, Dict[str, Union[int, float]]],
+        accelerator_args: Optional[Dict[str, Any]],
     ) -> None:
         """Sets accelerators.
 
@@ -604,10 +750,11 @@ class Resources:
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
-                assert (self.cloud.is_same_cloud(clouds.GCP()) or
-                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
-                            'Cloud must be GCP or Kubernetes for TPU '
-                            'accelerators.')
+                assert self.cloud is not None and (
+                    self.cloud.is_same_cloud(clouds.GCP()) or
+                    self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                        'Cloud must be GCP or Kubernetes for TPU '
+                        'accelerators.')
 
                 if accelerator_args is None:
                     accelerator_args = {}
@@ -641,15 +788,119 @@ class Resources:
                                     'Cannot specify instance type (got '
                                     f'{self.instance_type!r}) for TPU VM.')
 
-        self._accelerators = accelerators
-        self._accelerator_args = accelerator_args
+        self._accelerators: Optional[Dict[str, Union[int,
+                                                     float]]] = accelerators
+        self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
+
+    def _set_autostop_config(
+        self,
+        autostop: Union[bool, int, Dict[str, Any], None],
+    ) -> None:
+        self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+    def _set_volumes(
+        self,
+        volumes: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        if not volumes:
+            self._volumes = None
+            return
+        valid_volumes = []
+        supported_tiers = [tier.value for tier in resources_utils.DiskTier]
+        supported_storage_types = [
+            storage_type.value for storage_type in resources_utils.StorageType
+        ]
+        supported_attach_modes = [
+            attach_mode.value for attach_mode in resources_utils.DiskAttachMode
+        ]
+        network_type = resources_utils.StorageType.NETWORK
+        read_write_mode = resources_utils.DiskAttachMode.READ_WRITE
+        for volume in volumes:
+            if 'path' not in volume:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid volume {volume!r}. '
+                                     f'Volume must have a "path" field.')
+            if 'storage_type' not in volume:
+                volume['storage_type'] = network_type
+            else:
+                if isinstance(volume['storage_type'], str):
+                    storage_type_str = str(volume['storage_type']).lower()
+                    if storage_type_str not in supported_storage_types:
+                        logger.warning(
+                            f'Invalid storage_type {storage_type_str!r}. '
+                            f'Set it to '
+                            f'{network_type.value}.')
+                        volume['storage_type'] = network_type
+                    else:
+                        volume['storage_type'] = resources_utils.StorageType(
+                            storage_type_str)
+            if 'auto_delete' not in volume:
+                volume['auto_delete'] = False
+            if 'attach_mode' in volume:
+                if isinstance(volume['attach_mode'], str):
+                    attach_mode_str = str(volume['attach_mode']).lower()
+                    if attach_mode_str not in supported_attach_modes:
+                        logger.warning(
+                            f'Invalid attach_mode {attach_mode_str!r}. '
+                            f'Set it to {read_write_mode.value}.')
+                        volume['attach_mode'] = read_write_mode
+                    else:
+                        volume['attach_mode'] = resources_utils.DiskAttachMode(
+                            attach_mode_str)
+            else:
+                volume['attach_mode'] = read_write_mode
+            if volume['storage_type'] == network_type:
+                if ('disk_size' in volume and
+                        round(volume['disk_size']) != volume['disk_size']):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Volume size must be an integer. '
+                                         f'Got: {volume["size"]}.')
+                if 'name' not in volume:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Network volume {volume["path"]} '
+                                         f'must have "name" field.')
+            elif 'name' in volume:
+                logger.info(f'Volume {volume["path"]} is a local disk. '
+                            f'The "name" field will be ignored.')
+                del volume['name']
+            if 'disk_tier' in volume:
+                if isinstance(volume['disk_tier'], str):
+                    disk_tier_str = str(volume['disk_tier']).lower()
+                    if disk_tier_str not in supported_tiers:
+                        logger.warning(
+                            f'Invalid disk_tier {disk_tier_str!r}. '
+                            f'Set it to {resources_utils.DiskTier.BEST.value}.')
+                        volume['disk_tier'] = resources_utils.DiskTier.BEST
+                    else:
+                        volume['disk_tier'] = resources_utils.DiskTier(
+                            disk_tier_str)
+            elif volume['storage_type'] == network_type:
+                logger.debug(
+                    f'No disk_tier specified for volume {volume["path"]}. '
+                    f'Set it to {resources_utils.DiskTier.BEST.value}.')
+                volume['disk_tier'] = resources_utils.DiskTier.BEST
+
+            valid_volumes.append(volume)
+        self._volumes = valid_volumes
 
     def is_launchable(self) -> bool:
+        """Returns whether the resource is launchable."""
         return self.cloud is not None and self._instance_type is not None
+
+    def assert_launchable(self) -> 'LaunchableResources':
+        """A workaround to make mypy understand that is_launchable() is true.
+
+        Note: The `cast` to `LaunchableResources` is only for static type
+        checking with MyPy. At runtime, the Python interpreter does not enforce
+        types, and the returned object will still be an instance of `Resources`.
+        """
+        assert self.is_launchable(), self
+        return typing.cast(LaunchableResources, self)
 
     def need_cleanup_after_preemption_or_failure(self) -> bool:
         """Whether a resource needs cleanup after preemption or failure."""
         assert self.is_launchable(), self
+        assert self.cloud is not None, 'Cloud must be specified'
         return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
     def _try_canonicalize_accelerators(self) -> None:
@@ -706,10 +957,10 @@ class Resources:
                     else:
                         table = log_utils.create_table(['Cloud', 'Hint'])
                         table.add_row(['-----', '----'])
-                        for cloud, error in cloud_to_errors.items():
+                        for cloud_msg, error in cloud_to_errors.items():
                             reason_str = '\n'.join(textwrap.wrap(
                                 str(error), 80))
-                            table.add_row([str(cloud), reason_str])
+                            table.add_row([cloud_msg, reason_str])
                         hint = table.get_string()
                     raise ValueError(
                         f'Invalid (region {self._region!r}, zone '
@@ -741,11 +992,13 @@ class Resources:
         ssh_proxy_command dict with region names as keys).
         """
         assert self.is_launchable(), self
-
-        regions = self._cloud.regions_with_offering(self._instance_type,
-                                                    self.accelerators,
-                                                    self._use_spot,
-                                                    self._region, self._zone)
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        regions = self.cloud.regions_with_offering(self._instance_type,
+                                                   self.accelerators,
+                                                   self._use_spot, self._region,
+                                                   self._zone)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 
@@ -845,6 +1098,10 @@ class Resources:
             cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
             if self._cpus is not None:
+                assert cpus is not None, (
+                    f'Can\'t get vCPUs from instance type: '
+                    f'{self._instance_type}, check catalog or '
+                    f'specify cpus directly.')
                 if self._cpus.endswith('+'):
                     if cpus < float(self._cpus[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -859,6 +1116,10 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
+                assert mem is not None, (
+                    f'Can\'t get memory from instance type: '
+                    f'{self._instance_type}, check catalog or '
+                    f'specify memory directly.')
                 if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
@@ -882,6 +1143,8 @@ class Resources:
         if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
         # Validate the job recovery strategy
+        assert isinstance(self._job_recovery['strategy'],
+                          str), 'Job recovery strategy must be a string'
         registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
             self._job_recovery['strategy'])
 
@@ -900,6 +1163,36 @@ class Resources:
         Raises:
             ValueError: if the attribute is invalid.
         """
+
+        if (self._network_tier == resources_utils.NetworkTier.BEST and
+                isinstance(self._cloud, clouds.GCP)):
+            # Handle GPU Direct TCPX requirement for docker images
+            if self._image_id is None:
+                # No custom image specified - use the default GPU Direct image
+                self._image_id = {
+                    self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
+                }
+            else:
+                # Custom image specified - validate it's a docker image
+                # Check if any of the specified images are not docker images
+                non_docker_images = []
+                for region, image_id in self._image_id.items():
+                    if not image_id.startswith('docker:'):
+                        non_docker_images.append(
+                            f'{image_id} (region: {region})')
+
+                if non_docker_images:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'When using network_tier=BEST on GCP, image_id '
+                            f'must be a docker image. '
+                            f'Found non-docker images: '
+                            f'{", ".join(non_docker_images)}. '
+                            f'Please either: (1) use a docker image '
+                            f'(prefix with "docker:"), or '
+                            f'(2) leave image_id empty to use the default '
+                            f'GPU Direct TCPX image.')
+
         if self._image_id is None:
             return
 
@@ -916,7 +1209,7 @@ class Resources:
                     'Cloud must be specified when image_id is provided.')
 
         try:
-            self._cloud.check_features_are_supported(
+            self.cloud.check_features_are_supported(
                 self,
                 requested_features={
                     clouds.CloudImplementationFeatures.IMAGE_ID
@@ -939,14 +1232,14 @@ class Resources:
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
             if (image_id.startswith('skypilot:') and
-                    not self._cloud.is_image_tag_valid(image_id, region)):
+                    not self.cloud.is_image_tag_valid(image_id, region)):
                 region_str = f' ({region})' if region else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Image tag {image_id!r} is not valid, please make sure'
                         f' the tag exists in {self._cloud}{region_str}.')
 
-            if (self._cloud.is_same_cloud(clouds.AWS()) and
+            if (self.cloud.is_same_cloud(clouds.AWS()) and
                     not image_id.startswith('skypilot:') and region is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -983,6 +1276,47 @@ class Resources:
                     raise ValueError(
                         f'Disk tier {self.disk_tier.value} is not supported '
                         f'for instance type {self.instance_type}.') from None
+
+    def _try_validate_volumes(self) -> None:
+        """Try to validate the volumes attribute.
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if self.volumes is None:
+            return
+        if self.cloud is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cloud must be specified when '
+                                 'volumes are provided.')
+        if not self.cloud.is_same_cloud(clouds.GCP()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Volumes are only supported for GCP'
+                                 f' not for {self.cloud}.')
+
+        need_region_or_zone = False
+        try:
+            for volume in self.volumes:
+                if ('name' in volume and volume['storage_type']
+                        == resources_utils.StorageType.NETWORK):
+                    need_region_or_zone = True
+                if 'disk_tier' not in volume:
+                    continue
+                # TODO(hailong): check instance local SSD
+                # support for instance_type.
+                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
+                self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                   volume['disk_tier'])
+            if (need_region_or_zone and self._region is None and
+                    self._zone is None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('When specifying the volume name, please'
+                                     ' also specify the region or zone.')
+        except exceptions.NotSupportedError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Disk tier {volume["disk_tier"].value} is not '
+                    f'supported for instance type {self.instance_type}.'
+                ) from None
 
     def _try_validate_ports(self) -> None:
         """Try to validate the ports attribute.
@@ -1051,6 +1385,9 @@ class Resources:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
@@ -1095,6 +1432,7 @@ class Resources:
         docker_image = self.extract_docker_image()
 
         # Cloud specific variables
+        assert self.cloud is not None, 'Cloud must be specified'
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun)
 
@@ -1149,9 +1487,21 @@ class Resources:
         specific_reservations = set(
             skypilot_config.get_nested(
                 (str(self.cloud).lower(), 'specific_reservations'), set()))
+
+        if isinstance(self.cloud, clouds.DummyCloud):
+            return self.cloud.get_reservations_available_resources(
+                instance_type='',
+                region='',
+                zone=None,
+                specific_reservations=specific_reservations)
+
+        assert (self.cloud is not None and self.instance_type is not None and
+                self.region is not None), (
+                    f'Cloud, instance type, region must be specified. '
+                    f'Resources={self}, cloud={self.cloud}, '
+                    f'instance_type={self.instance_type}, region={self.region}')
         return self.cloud.get_reservations_available_resources(
-            self._instance_type, self._region, self._zone,
-            specific_reservations)
+            self.instance_type, self.region, self.zone, specific_reservations)
 
     def less_demanding_than(
         self,
@@ -1171,6 +1521,9 @@ class Resources:
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
+
+        assert other.cloud is not None, 'Other cloud must be specified'
+
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
@@ -1234,6 +1587,12 @@ class Resources:
                 if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
                     return False
 
+        if self.network_tier is not None:
+            if other.network_tier is None:
+                return False
+            if not self.network_tier <= other.network_tier:
+                return False
+
         if check_ports:
             if self.ports is not None:
                 if other.ports is None:
@@ -1259,6 +1618,7 @@ class Resources:
         If a field in `blocked` is None, it should be considered as a wildcard
         for that field.
         """
+        assert self.cloud is not None, 'Cloud must be specified'
         is_matched = True
         if (blocked.cloud is not None and
                 not self.cloud.is_same_cloud(blocked.cloud)):
@@ -1287,6 +1647,7 @@ class Resources:
             not self._use_spot_specified,
             self._disk_size == _DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
+            self._network_tier is None,
             self._image_id is None,
             self._ports is None,
             self._docker_login_config is None,
@@ -1297,7 +1658,7 @@ class Resources:
         use_spot = self.use_spot if self._use_spot_specified else None
 
         current_override_configs = self._cluster_config_overrides
-        if self._cluster_config_overrides is None:
+        if current_override_configs is None:
             current_override_configs = {}
         new_override_configs = override.pop('_cluster_config_overrides', {})
         overlaid_configs = skypilot_config.overlay_skypilot_config(
@@ -1309,6 +1670,10 @@ class Resources:
             elem = overlaid_configs.get_nested(key, None)
             if elem is not None:
                 override_configs.set_nested(key, elem)
+
+        current_autostop_config = None
+        if self.autostop_config is not None:
+            current_autostop_config = self.autostop_config.to_yaml_config()
 
         override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
@@ -1326,8 +1691,12 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            network_tier=override.pop('network_tier', self.network_tier),
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
+            autostop=override.pop('autostop', current_autostop_config),
+            volumes=override.pop('volumes', self.volumes),
+            infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _docker_username_for_runpod=override.pop(
@@ -1361,12 +1730,21 @@ class Resources:
         if (self.disk_tier is not None and
                 self.disk_tier != resources_utils.DiskTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        if (self.network_tier is not None and
+                self.network_tier == resources_utils.NetworkTier.BEST):
+            features.add(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
         elif self.image_id is not None:
             features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
+        if self.volumes is not None:
+            for volume in self.volumes:
+                if 'disk_tier' in volume and volume[
+                        'disk_tier'] != resources_utils.DiskTier.BEST:
+                    features.add(
+                        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         return features
 
     @staticmethod
@@ -1499,9 +1877,21 @@ class Resources:
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
-        resources_fields = {}
+        resources_fields: Dict[str, Any] = {}
+
+        # Extract infra field if present
+        infra = config.pop('infra', None)
+        resources_fields['infra'] = infra
+
+        # Keep backward compatibility with cloud, region, zone
+        # Note: if both `infra` and any of `cloud`, `region`, `zone` are
+        # specified, it will raise an error during the Resources.__init__
+        # validation.
         resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
+        resources_fields['region'] = config.pop('region', None)
+        resources_fields['zone'] = config.pop('zone', None)
+
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)
         resources_fields['memory'] = config.pop('memory', None)
@@ -1519,12 +1909,13 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
-        resources_fields['region'] = config.pop('region', None)
-        resources_fields['zone'] = config.pop('zone', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
+        resources_fields['network_tier'] = config.pop('network_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
+        resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_docker_username_for_runpod'] = config.pop(
@@ -1556,7 +1947,10 @@ class Resources:
             if value is not None and value != 'None':
                 config[key] = value
 
-        add_if_not_none('cloud', str(self.cloud))
+        # Construct infra field if cloud is set
+        infra = self.infra.to_str()
+        add_if_not_none('infra', infra)
+
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
@@ -1567,13 +1961,30 @@ class Resources:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
-        add_if_not_none('region', self.region)
-        add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
+        if self.network_tier is not None:
+            config['network_tier'] = self.network_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
+        if self.volumes is not None:
+            # Convert DiskTier/StorageType enum to string value for each volume
+            volumes = []
+            for volume in self.volumes:
+                volume_copy = volume.copy()
+                if 'disk_tier' in volume_copy:
+                    volume_copy['disk_tier'] = volume_copy['disk_tier'].value
+                if 'storage_type' in volume_copy:
+                    volume_copy['storage_type'] = volume_copy[
+                        'storage_type'].value
+                if 'attach_mode' in volume_copy:
+                    volume_copy['attach_mode'] = volume_copy[
+                        'attach_mode'].value
+                volumes.append(volume_copy)
+            config['volumes'] = volumes
+        if self._autostop_config is not None:
+            config['autostop'] = self._autostop_config.to_yaml_config()
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -1729,4 +2140,61 @@ class Resources:
             self._docker_username_for_runpod = state.pop(
                 '_docker_username_for_runpod', None)
 
+        if version < 23:
+            self._autostop_config = None
+
+        if version < 24:
+            self._volumes = None
+
+        if version < 25:
+            if isinstance(state.get('_cloud', None), clouds.Kubernetes):
+                _maybe_add_docker_prefix_to_image_id(state['_image_id'])
+
+        if version < 26:
+            self._network_tier = state.get('_network_tier', None)
+
         self.__dict__.update(state)
+
+
+class LaunchableResources(Resources):
+    """A class representing resources that can be launched on a cloud provider.
+
+    This class is primarily a type hint for MyPy to indicate that an instance
+    of `Resources` is launchable (i.e., `cloud` and `instance_type` are not
+    None). It should not be instantiated directly.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called,unused-argument
+        assert False, (
+            'LaunchableResources should not be instantiated directly. '
+            'It is only used for type checking by MyPy.')
+
+    @property
+    def cloud(self) -> clouds.Cloud:
+        assert self._cloud is not None, 'Cloud must be specified'
+        return self._cloud
+
+    @property
+    def instance_type(self) -> str:
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        return self._instance_type
+
+    def copy(self, **override) -> 'LaunchableResources':
+        """Ensure MyPy understands the return type is LaunchableResources.
+
+        This method is not expected to be called at runtime, as
+        LaunchableResources should not be directly instantiated. It primarily
+        serves as a type hint for static analysis.
+        """
+        self.assert_launchable()
+        return typing.cast(LaunchableResources, super().copy(**override))
+
+
+def _maybe_add_docker_prefix_to_image_id(
+        image_id_dict: Optional[Dict[Optional[str], str]]) -> None:
+    if image_id_dict is None:
+        return
+    for k, v in image_id_dict.items():
+        if not v.startswith('docker:'):
+            image_id_dict[k] = f'docker:{v}'

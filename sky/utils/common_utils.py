@@ -66,7 +66,7 @@ def get_usage_run_id() -> str:
     return str(uuid.uuid4())
 
 
-def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
     try:
@@ -80,7 +80,7 @@ def generate_user_hash() -> str:
     """Generates a unique user-machine specific hash."""
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    if not _is_valid_user_hash(user_hash):
+    if not is_valid_user_hash(user_hash):
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
@@ -93,7 +93,7 @@ def get_user_hash() -> str:
     hostname changes causing a new user hash to be generated.
     """
     user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-    if _is_valid_user_hash(user_hash):
+    if is_valid_user_hash(user_hash):
         assert user_hash is not None
         return user_hash
 
@@ -102,7 +102,7 @@ def get_user_hash() -> str:
         with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
-        if _is_valid_user_hash(user_hash):
+        if is_valid_user_hash(user_hash):
             return user_hash
 
     user_hash = generate_user_hash()
@@ -324,7 +324,73 @@ def get_pretty_entrypoint_cmd() -> str:
         # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
         # things like 'examples/app.py'.
         argv[0] = basename
+
+    # Redact sensitive environment variable values
+    argv = _redact_env_values(argv)
+
     return ' '.join(argv)
+
+
+def _redact_env_values(argv: List[str]) -> List[str]:
+    """Redact sensitive values from --env arguments.
+
+    Args:
+        argv: Command line arguments
+
+    Returns:
+        Modified argv with redacted --env values, or original argv if any error
+
+    Examples:
+        ['sky', 'launch', '--env', 'HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--env', 'HF_TOKEN=<redacted>']
+
+        ['sky', 'launch', '--env=HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--env=HF_TOKEN=<redacted>']
+
+        ['sky', 'launch', '--env', 'HF_TOKEN'] ->
+        ['sky', 'launch', '--env', 'HF_TOKEN'] (no change)
+    """
+    try:
+        if not argv:
+            return argv or []
+
+        result = []
+        i = 0
+
+        while i < len(argv):
+            arg = argv[i]
+
+            # Ensure arg is a string
+            if not isinstance(arg, str):
+                result.append(arg)
+                i += 1
+                continue
+
+            if arg == '--env' and i + 1 < len(argv):
+                result.append(arg)
+                next_arg = argv[i + 1]
+                # Ensure next_arg is a string and handle redaction safely
+                if isinstance(next_arg, str):
+                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
+                                      next_arg)
+                    result.append(redacted)
+                else:
+                    result.append(next_arg)
+                i += 2
+            elif arg.startswith('--env='):
+                # Redact only if there's a value after the key
+                redacted = re.sub(r'^(--env=[^=]+)=.*', r'\1=<redacted>', arg)
+                result.append(redacted)
+                i += 1
+            else:
+                result.append(arg)
+                i += 1
+
+        return result
+    except Exception:  # pylint: disable=broad-except
+        # If anything goes wrong with redaction, return original argv
+        # This ensures the command can still execute
+        return argv or []
 
 
 def user_and_hostname_hash() -> str:
@@ -723,10 +789,43 @@ def deprecated_function(
     return new_func
 
 
-def truncate_long_string(s: str, max_length: int = 35) -> str:
-    """Truncate a string to a maximum length, preserving whole words."""
+def truncate_long_string(s: str,
+                         max_length: int = 35,
+                         truncate_middle: bool = False) -> str:
+    """Truncate a string to a maximum length.
+
+    Args:
+        s: String to truncate.
+        max_length: Maximum length of the truncated string.
+        truncate_middle: Whether to truncate in the middle of the string.
+            If True, the middle part of the string is replaced with '...'.
+            If False, truncation happens at the end preserving whole words.
+
+    Returns:
+        Truncated string.
+    """
     if len(s) <= max_length:
         return s
+
+    if truncate_middle:
+        # Reserve 3 characters for '...'
+        if max_length <= 3:
+            return '...'
+
+        # Calculate how many characters to keep from beginning and end
+        half_length = (max_length - 3) // 2
+        remainder = (max_length - 3) % 2
+
+        # Keep one more character at the beginning if max_length - 3 is odd
+        start_length = half_length + remainder
+        end_length = half_length
+
+        # When end_length is 0, just show the start part and '...'
+        if end_length == 0:
+            return s[:start_length] + '...'
+        return s[:start_length] + '...' + s[-end_length:]
+
+    # Original end-truncation logic
     splits = s.split(' ')
     if len(splits[0]) > max_length:
         return splits[0][:max_length] + '...'  # Use '…'?

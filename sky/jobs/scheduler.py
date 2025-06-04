@@ -45,6 +45,7 @@ import typing
 
 import filelock
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
@@ -190,7 +191,8 @@ def maybe_schedule_next_jobs() -> None:
         pass
 
 
-def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
+def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str,
+               priority: int) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -202,7 +204,7 @@ def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
     """
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path,
-                                    common_utils.get_user_hash())
+                                    common_utils.get_user_hash(), priority)
     maybe_schedule_next_jobs()
 
 
@@ -240,11 +242,19 @@ def scheduled_launch(job_id: int):
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
 
-    yield
-
-    with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_alive(job_id)
-    maybe_schedule_next_jobs()
+    try:
+        yield
+    except exceptions.NoClusterLaunchedError:
+        # NoClusterLaunchedError is indicates that the job is in retry backoff.
+        # We should transition to ALIVE_BACKOFF instead of ALIVE.
+        with filelock.FileLock(_get_lock_path()):
+            state.scheduler_set_alive_backoff(job_id)
+        raise
+    else:
+        with filelock.FileLock(_get_lock_path()):
+            state.scheduler_set_alive(job_id)
+    finally:
+        maybe_schedule_next_jobs()
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -309,5 +319,10 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
+    parser.add_argument(
+        '--priority',
+        type=int,
+        default=500,
+        help='Job priority (0-1000, lower is higher). Default: 500.')
     args = parser.parse_args()
-    submit_job(args.job_id, args.dag_yaml, args.env_file)
+    submit_job(args.job_id, args.dag_yaml, args.env_file, args.priority)

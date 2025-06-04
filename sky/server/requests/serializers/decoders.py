@@ -6,13 +6,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import jobs as managed_jobs
 from sky import models
-from sky.clouds.service_catalog import common
+from sky.catalog import common
 from sky.data import storage
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.server import constants as server_constants
 from sky.skylet import job_lib
-from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
@@ -133,16 +132,6 @@ def decode_cost_report(
         cluster_report['resources'] = decode_and_unpickle(
             cluster_report['resources'])
     return return_value
-
-
-@register_decoders('enabled_clouds')
-def decode_enabled_clouds(return_value: List[str]) -> List['clouds.Cloud']:
-    clouds = []
-    for cloud_name in return_value:
-        cloud = registry.CLOUD_REGISTRY.from_str(cloud_name)
-        assert cloud is not None, return_value
-        clouds.append(cloud)
-    return clouds
 
 
 @register_decoders('list_accelerators')

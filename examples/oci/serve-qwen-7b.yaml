@@ -5,8 +5,7 @@ service:
 
 # Fields below describe each replica.
 resources:
-  cloud: oci
-  region: us-sanjose-1
+  infra: oci/us-sanjose-1
   ports: 8080
   accelerators: {A10:1}
 

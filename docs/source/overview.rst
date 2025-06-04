@@ -227,6 +227,54 @@ SkyPilot supports most major cloud providers. See :ref:`cloud-account-setup` for
 
 By default, SkyPilot reuses your existing cloud authentication methods.  Optionally, you can also :ref:`set up <cloud-permissions>` specific roles, permissions, or service accounts for SkyPilot to use.
 
+Example usage:
+
+.. tab-set::
+
+    .. tab-item:: CLI
+        :sync: cli
+
+        .. code-block:: console
+
+            $ sky launch --infra aws  # Use any available region/zone within this cloud.
+            $ sky launch --infra gcp
+            $ sky launch --infra azure
+            $ sky launch --infra nebius
+            $ sky launch --infra runpod
+            $ sky launch --infra lambda
+            # ... Or any other supported cloud.
+
+            # Use a particular region.
+            $ sky launch --infra aws/us-east-1
+            $ sky launch --infra gcp/us-central1
+
+            # Use a particular zone.
+            $ sky launch --infra aws/us-east-1/us-east-1a
+
+    .. tab-item:: Python
+        :sync: python
+
+        .. code-block:: python
+
+            import sky
+            task = sky.Task().set_resources(sky.Resources(
+                infra='aws',  # Use any available region/zone within this cloud.
+                # infra='gcp',
+                # infra='azure',
+                # infra='nebius',
+                # infra='runpod',
+                # infra='lambda',
+                # ... Or any other supported cloud.
+
+                # Use a particular region:
+                # infra='aws/us-east-1',
+                # infra='gcp/us-central1',
+
+                # Use a particular zone:
+                # infra='aws/us-east-1/us-east-1a',
+            ))
+            sky.launch(task)
+
 .. _concept-kubernetes-clusters:
 
 Kubernetes clusters
@@ -245,6 +293,31 @@ between multiple clusters is also supported.
     :width: 45%
     :align: center
     :class: no-scaled-link, only-dark
+
+Example usage:
+
+.. tab-set::
+
+    .. tab-item:: CLI
+        :sync: cli
+
+        .. code-block:: console
+
+            $ sky launch --infra k8s  # Use any available Kubernetes context.
+            $ sky launch --infra k8s/my-cluster-context  # Use a particular context.
+
+    .. tab-item:: Python
+        :sync: python
+
+        .. code-block:: python
+
+            import sky
+            task = sky.Task().set_resources(sky.Resources(
+                infra='k8s',  # Use any available Kubernetes context.
+                # infra='k8s/my-cluster-context',  # Use a particular context.
+            ))
+            sky.launch(task)
+
 
 See :ref:`kubernetes-overview`.
 
@@ -266,6 +339,32 @@ If you have existing machines, i.e., a list of IP addresses you can SSH into, yo
    :align: center
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-dark
+
+
+Example usage:
+
+.. tab-set::
+
+    .. tab-item:: CLI
+        :sync: cli
+
+        .. code-block:: console
+
+            $ sky launch --infra ssh  # Use any available SSH node pool.
+            $ sky launch --infra ssh/my-node-pool  # Use a particular SSH node pool.
+
+    .. tab-item:: Python
+        :sync: python
+
+        .. code-block:: python
+
+            import sky
+            task = sky.Task().set_resources(sky.Resources(
+                infra='ssh',  # Use any available SSH node pool.
+                # infra='ssh/my-node-pool',  # Use a particular SSH node pool.
+            ))
+            sky.launch(task)
+
 
 See :ref:`Using Existing Machines <existing-machines>`.
 

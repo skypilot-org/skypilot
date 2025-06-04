@@ -28,10 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const newItems = [
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'Asynchronous Execution' },
-        { selector: '.toctree-l1 > a', text: 'Team Deployment' },
         { selector: '.toctree-l1 > a', text: 'Examples' },
-        { selector: '.toctree-l3 > a', text: 'DeepSeek-R1 for RAG' },
+        { selector: '.toctree-l1 > a', text: 'Workspaces: Isolating Teams' },
         { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
     ];
     newItems.forEach(({ selector, text }) => {

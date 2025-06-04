@@ -2,10 +2,14 @@ import { useState, useEffect } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   ENDPOINT,
-  NotSupportedError,
-  ClusterDoesNotExist,
-  ClusterNotUpError,
+  CLUSTER_NOT_UP_ERROR,
+  CLUSTER_DOES_NOT_EXIST,
+  NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
+import dashboardCache from '@/lib/cache';
+
+// Configuration
+const DEFAULT_TAIL_LINES = 1000;
 
 export async function getManagedJobs({ allUsers = true } = {}) {
   try {
@@ -18,7 +22,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         all_users: allUsers,
       }),
     });
-    const id = response.headers.get('x-request-id');
+    const id = response.headers.get('X-Skypilot-Request-ID');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
@@ -27,7 +31,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           try {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
-            if (error.type && error.type === ClusterNotUpError) {
+            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], controllerStopped: true };
             }
           } catch (jsonError) {
@@ -82,25 +86,78 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
       const total_duration = endTime - job.submitted_at;
 
+      // Extract cloud name if not available (backward compatibility)
+      // TODO(zhwu): remove this after 0.12.0
+      let cloud = job.cloud;
+      let cluster_resources = job.cluster_resources;
+      if (!cloud) {
+        // Backward compatibility for old jobs controller without cloud info
+        // Similar to the logic in sky/jobs/utils.py
+        if (job.cluster_resources && job.cluster_resources !== '-') {
+          try {
+            cloud = job.cluster_resources.split('(')[0].split('x').pop().trim();
+            cluster_resources = job.cluster_resources
+              .replace(`${cloud}(`, '(')
+              .replace('x ', 'x');
+          } catch (error) {
+            // If parsing fails, set a default value
+            cloud = 'Unknown';
+          }
+        } else {
+          cloud = 'Unknown';
+        }
+      }
+
+      let region_or_zone = '';
+      if (job.zone) {
+        region_or_zone = job.zone;
+      } else {
+        region_or_zone = job.region;
+      }
+
+      const full_region_or_zone = region_or_zone;
+      if (region_or_zone && region_or_zone.length > 15) {
+        region_or_zone = region_or_zone.substring(0, 15) + '...';
+      }
+
+      let infra = cloud + ' (' + region_or_zone + ')';
+      if (region_or_zone === '-') {
+        infra = cloud;
+      }
+      let full_infra = cloud + ' (' + full_region_or_zone + ')';
+      if (full_region_or_zone === '-') {
+        full_infra = cloud;
+      }
+
       return {
         id: job.job_id,
         task: job.task_name,
         name: job.job_name,
         job_duration: job.job_duration,
         total_duration: total_duration,
+        workspace: job.workspace,
         status: job.status,
-        resources: job.resources,
-        cluster: job.cluster_resources,
+        priority: job.priority,
+        requested_resources: job.resources,
+        resources_str: cluster_resources,
+        resources_str_full: job.cluster_resources_full || cluster_resources,
+        cloud: cloud,
         region: job.region,
+        infra: infra,
+        full_infra: full_infra,
         recoveries: job.recovery_count,
-        details: job.failure_reason,
+        details: job.details || job.failure_reason,
         user: job.user_name,
+        user_hash: job.user_hash,
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,
         events: events,
+        dag_yaml: job.dag_yaml,
+        entrypoint: job.entrypoint,
       };
     });
+
     return { jobs: jobData, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
@@ -118,7 +175,9 @@ export function useManagedJobDetails(refreshTrigger = 0) {
     async function fetchJobData() {
       try {
         setLoadingJobData(true);
-        const data = await getManagedJobs({ allUsers: true });
+        const data = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
         setJobData(data);
       } catch (error) {
         console.error('Error fetching managed job data:', error);
@@ -133,34 +192,106 @@ export function useManagedJobDetails(refreshTrigger = 0) {
   return { jobData, loading };
 }
 
+// Hook for individual job details that reuses the main jobs cache
+export function useSingleManagedJob(jobId, refreshTrigger = 0) {
+  const [jobData, setJobData] = useState(null);
+  const [loadingJobData, setLoadingJobData] = useState(true);
+
+  const loading = loadingJobData;
+
+  useEffect(() => {
+    async function fetchJobData() {
+      if (!jobId) return;
+
+      try {
+        setLoadingJobData(true);
+
+        // Always get all jobs data (cache handles freshness automatically)
+        const allJobsData = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
+
+        // Filter for the specific job client-side
+        const job = allJobsData?.jobs?.find(
+          (j) => String(j.id) === String(jobId)
+        );
+
+        if (job) {
+          setJobData({
+            jobs: [job],
+            controllerStopped: allJobsData.controllerStopped || false,
+          });
+        } else {
+          // Job not found in the results
+          setJobData({
+            jobs: [],
+            controllerStopped: allJobsData.controllerStopped || false,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching single managed job data:', error);
+        setJobData({ jobs: [], controllerStopped: false });
+      } finally {
+        setLoadingJobData(false);
+      }
+    }
+
+    fetchJobData();
+  }, [jobId, refreshTrigger]);
+
+  return { jobData, loading };
+}
+
 export async function streamManagedJobLogs({
   jobId,
   controller = false,
   signal,
   onNewLog,
 }) {
-  const timeout = 10000; // Default timeout of 10 seconds
+  // Measure timeout from last received data, not from start of request.
+  const inactivityTimeout = 30000; // 30 seconds of no data activity
+  let lastActivity = Date.now();
+  let timeoutId;
 
-  // Create a timeout promise that resolves after the specified time
-  const timeoutPromise = new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ timeout: true });
-    }, timeout);
-  });
+  // Create an activity-based timeout promise
+  const createTimeoutPromise = () => {
+    return new Promise((resolve) => {
+      const checkActivity = () => {
+        const timeSinceLastActivity = Date.now() - lastActivity;
+
+        if (timeSinceLastActivity >= inactivityTimeout) {
+          resolve({ timeout: true });
+        } else {
+          // Check again after remaining time
+          timeoutId = setTimeout(
+            checkActivity,
+            inactivityTimeout - timeSinceLastActivity
+          );
+        }
+      };
+
+      timeoutId = setTimeout(checkActivity, inactivityTimeout);
+    });
+  };
+
+  const timeoutPromise = createTimeoutPromise();
 
   // Create the fetch promise
   const fetchPromise = (async () => {
     try {
+      const requestBody = {
+        controller: controller,
+        follow: false,
+        job_id: jobId,
+        tail: DEFAULT_TAIL_LINES,
+      };
+
       const response = await fetch(`${ENDPOINT}/jobs/logs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          controller: controller,
-          follow: false,
-          job_id: jobId,
-        }),
+        body: JSON.stringify(requestBody),
         // Only use the signal if it's provided
         ...(signal ? { signal } : {}),
       });
@@ -172,14 +303,27 @@ export async function streamManagedJobLogs({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+
+          // Update activity timestamp when we receive data
+          lastActivity = Date.now();
+
           const chunk = new TextDecoder().decode(value);
           onNewLog(chunk);
         }
       } finally {
         reader.cancel();
+        // Clear the timeout when streaming completes successfully
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
       }
       return { timeout: false };
     } catch (error) {
+      // Clear timeout on any error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
       // If this was an abort, just return silently
       if (error.name === 'AbortError') {
         return { timeout: false };
@@ -188,13 +332,19 @@ export async function streamManagedJobLogs({
     }
   })();
 
-  // Race the fetch against the timeout
+  // Race the fetch against the activity-based timeout
   const result = await Promise.race([fetchPromise, timeoutPromise]);
-  // If we timed out, just return silently without throwing an error
+
+  // Clear any remaining timeout
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  // If we timed out due to inactivity, show a more informative message
   if (result.timeout) {
     showToast(
-      `Log request for job ${jobId} timed out after ${timeout}ms`,
-      'error'
+      `Log request for job ${jobId} timed out after ${inactivityTimeout / 1000}s of inactivity`,
+      'warning'
     );
     return;
   }
@@ -230,7 +380,7 @@ export async function handleJobAction(action, jobId, cluster) {
         body: JSON.stringify(requestBody),
       });
 
-      const id = response.headers.get('x-request-id');
+      const id = response.headers.get('X-Skypilot-Request-ID');
       const finalResponse = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
 
       // Check the status code of the final response
@@ -246,15 +396,18 @@ export async function handleJobAction(action, jobId, cluster) {
                 const error = JSON.parse(data.detail.error);
 
                 // Handle specific error types
-                if (error.type && error.type === NotSupportedError) {
+                if (error.type && error.type === NOT_SUPPORTED_ERROR) {
                   showToast(
                     `${logStarter} job ${jobId} is not supported!`,
                     'error',
                     10000
                   );
-                } else if (error.type && error.type === ClusterDoesNotExist) {
+                } else if (
+                  error.type &&
+                  error.type === CLUSTER_DOES_NOT_EXIST
+                ) {
                   showToast(`Cluster ${cluster} does not exist.`, 'error');
-                } else if (error.type && error.type === ClusterNotUpError) {
+                } else if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
                   showToast(`Cluster ${cluster} is not up.`, 'error');
                 } else {
                   showToast(

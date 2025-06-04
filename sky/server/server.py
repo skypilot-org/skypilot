@@ -2,13 +2,17 @@
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import dataclasses
 import datetime
+import hashlib
+import json
 import logging
 import multiprocessing
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import sys
@@ -22,14 +26,15 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -47,10 +52,13 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -99,8 +107,53 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         response = await call_next(request)
+        # TODO(syang): remove X-Request-ID when v0.10.0 is released.
         response.headers['X-Request-ID'] = request_id
+        response.headers['X-Skypilot-Request-ID'] = request_id
         return response
+
+
+def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
+    if 'X-Auth-Request-Email' not in request.headers:
+        return None
+    user_name = request.headers['X-Auth-Request-Email']
+    user_hash = hashlib.md5(
+        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    return models.User(id=user_hash, name=user_name)
+
+
+class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle auth proxy."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        auth_user = _get_auth_user_header(request)
+
+        # Add user to database if auth_user is present
+        if auth_user is not None:
+            global_user_state.add_or_update_user(auth_user)
+
+        body = await request.body()
+        if auth_user and body:
+            try:
+                original_json = await request.json()
+            except json.JSONDecodeError as e:
+                logger.error(f'Error parsing request JSON: {e}')
+            else:
+                logger.debug(f'Overriding user for {request.state.request_id}: '
+                             f'{auth_user.name}, {auth_user.id}')
+                if 'env_vars' in original_json:
+                    if isinstance(original_json.get('env_vars'), dict):
+                        original_json['env_vars'][
+                            constants.USER_ID_ENV_VAR] = auth_user.id
+                        original_json['env_vars'][
+                            constants.USER_ENV_VAR] = auth_user.name
+                    else:
+                        logger.warning(
+                            f'"env_vars" in request body is not a dictionary '
+                            f'for request {request.state.request_id}. '
+                            'Skipping user info injection into body.')
+                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        return await call_next(request)
 
 
 # Default expiration time for upload ids before cleanup.
@@ -138,14 +191,19 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     del app  # unused
     # Startup: Run background tasks
     for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
-        executor.schedule_request(
-            request_id=event.id,
-            request_name=event.name,
-            request_body=payloads.RequestBody(),
-            func=event.event_fn,
-            schedule_type=requests_lib.ScheduleType.SHORT,
-            is_skypilot_system=True,
-        )
+        try:
+            executor.schedule_request(
+                request_id=event.id,
+                request_name=event.name,
+                request_body=payloads.RequestBody(),
+                func=event.event_fn,
+                schedule_type=requests_lib.ScheduleType.SHORT,
+                is_skypilot_system=True,
+            )
+        except exceptions.RequestAlreadyExistsError:
+            # Lifespan will be executed in each uvicorn worker process, we
+            # can safely ignore the error if the task is already scheduled.
+            logger.debug(f'Request {event.id} already exists.')
     asyncio.create_task(cleanup_upload_ids())
     yield
     # Shutdown: Add any cleanup code here if needed
@@ -164,8 +222,36 @@ class InternalDashboardPrefixMiddleware(
         return await call_next(request)
 
 
+class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
+                                  ):
+    """Middleware to add cache control headers to static files."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/_next'):
+            response = await call_next(request)
+            response.headers['Cache-Control'] = 'max-age=3600'
+            return response
+        return await call_next(request)
+
+
+class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to check the path of requests."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/dashboard/'):
+            # If the requested path is not relative to the expected directory,
+            # then the user is attempting path traversal, so deny the request.
+            parent = pathlib.Path('/dashboard')
+            request_path = pathlib.Path(posixpath.normpath(request.url.path))
+            if not _is_relative_to(request_path, parent):
+                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(PathCleanMiddleware)
+app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
     cors.CORSMiddleware,
     # TODO(zhwu): in production deployment, we should restrict the allowed
@@ -174,10 +260,54 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    expose_headers=['X-Request-ID'])
+    # TODO(syang): remove X-Request-ID when v0.10.0 is released.
+    expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
+
+
+@app.get('/token')
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
+    user = _get_auth_user_header(request)
+
+    token_data = {
+        'v': 1,  # Token version number, bump for backwards incompatible.
+        'user': user.id if user is not None else None,
+        'cookies': request.cookies,
+    }
+    # Use base64 encoding to avoid having to escape anything in the HTML.
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    token_page_path = html_dir / 'token_page.html'
+    try:
+        with open(token_page_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+    except FileNotFoundError as e:
+        raise fastapi.HTTPException(
+            status_code=500, detail='Token page template not found.') from e
+
+    user_info_string = f'Logged in as {user.name}' if user is not None else ''
+    html_content = html_content.replace(
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
+        base64_str).replace('USER_PLACEHOLDER', user_info_string)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            # X-Accel-Buffering: no is useful for preventing buffering issues
+            # with some reverse proxies.
+            'X-Accel-Buffering': 'no'
+        })
 
 
 @app.post('/check')
@@ -194,12 +324,15 @@ async def check(request: fastapi.Request,
 
 
 @app.get('/enabled_clouds')
-async def enabled_clouds(request: fastapi.Request) -> None:
+async def enabled_clouds(request: fastapi.Request,
+                         workspace: Optional[str] = None,
+                         expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -256,7 +389,7 @@ async def list_accelerators(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerators,
+        func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -271,7 +404,7 @@ async def list_accelerator_counts(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerator_counts,
+        func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -289,25 +422,30 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
+    context.initialize()
+    ctx = context.get()
+    assert ctx is not None
+    # TODO(aylei): generalize this to all requests without a db record.
+    ctx.override_envs(validate_body.env_vars)
+
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        dag, _ = admin_policy_utils.apply(
-            dag, request_options=validate_body.request_options)
-        # Skip validating workdir and file_mounts, as those need to be
-        # validated after the files are uploaded to the SkyPilot API server
-        # with `upload_mounts_to_api_server`.
-        dag.validate(skip_file_mounts=True, skip_workdir=True)
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag, request_options=validate_body.request_options) as dag:
+            # Skip validating workdir and file_mounts, as those need to be
+            # validated after the files are uploaded to the SkyPilot API server
+            # with `upload_mounts_to_api_server`.
+            dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        loop = asyncio.get_running_loop()
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await loop.run_in_executor(None, validate_dag, dag)
+        await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
@@ -670,24 +808,28 @@ async def logs(
     # TODO(zhwu): This should wait for the request on the cluster, e.g., async
     # launch, to finish, so that a user does not need to manually pull the
     # request status.
-    executor.schedule_request(
+    # Only initialize the context in logs handler to limit the scope of this
+    # experimental change.
+    # TODO(aylei): init in lifespan() to enable SkyPilot context in all APIs.
+    context.initialize()
+    request_task = executor.prepare_request(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
-        # should be responsive. However, it can be long running if the user's
-        # job keeps running, and we should avoid it taking the SHORT worker.
         schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=cluster_job_body.cluster_name,
     )
+    task = asyncio.create_task(executor.execute_request_coroutine(request_task))
 
-    request_task = requests_lib.get_request(request.state.request_id)
+    def cancel_task():
+        task.cancel()
 
+    # Cancel the task after the request is done or client disconnects
+    background_tasks.add_task(cancel_task)
     # TODO(zhwu): This makes viewing logs in browser impossible. We should adopt
     # the same approach as /stream.
     return stream_utils.stream_response(
-        request_id=request_task.request_id,
+        request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
@@ -831,6 +973,33 @@ async def local_down(request: fastapi.Request) -> None:
         request_name='local_down',
         request_body=payloads.RequestBody(),
         func=core.local_down,
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
+@app.post('/ssh_up')
+async def ssh_up(request: fastapi.Request,
+                 ssh_up_body: payloads.SSHUpBody) -> None:
+    """Deploys a Kubernetes cluster on SSH targets."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_up',
+        request_body=ssh_up_body,
+        func=core.ssh_up,
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
+@app.post('/ssh_down')
+async def ssh_down(request: fastapi.Request,
+                   ssh_up_body: payloads.SSHUpBody) -> None:
+    """Tears down a Kubernetes cluster on SSH targets."""
+    # We still call ssh_up but with cleanup=True
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_down',
+        request_body=ssh_up_body,
+        func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
         schedule_type=requests_lib.ScheduleType.LONG,
     )
 
@@ -1012,7 +1181,7 @@ async def api_status(
 
 
 @app.get('/api/health')
-async def health() -> Dict[str, str]:
+async def health(request: fastapi.Request) -> Dict[str, Any]:
     """Checks the health of the API server.
 
     Returns:
@@ -1024,23 +1193,22 @@ async def health() -> Dict[str, str]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
+    user = _get_auth_user_header(request)
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
+        'user': user.to_dict() if user is not None else None,
     }
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-    websocket: fastapi.WebSocket,
-    cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()
-) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
-    cluster_name = cluster_name_body.cluster_name
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     cluster_records = core.status(cluster_name, all_users=True)
@@ -1111,6 +1279,19 @@ async def kubernetes_pod_ssh_proxy(
         proc.terminate()
 
 
+@app.get('/all_contexts')
+async def all_contexts(request: fastapi.Request) -> None:
+    """Gets all Kubernetes and SSH node pool contexts."""
+
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='all_contexts',
+        request_body=payloads.RequestBody(),
+        func=core.get_all_contexts,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
@@ -1122,25 +1303,28 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
-# Add a route to serve static files
-@app.get('/{full_path:path}')
-async def serve_static_or_dashboard(full_path: str):
-    """Serves static files for any unmatched routes.
+@app.get('/dashboard/{full_path:path}')
+async def serve_dashboard(full_path: str):
+    """Serves the Next.js dashboard application.
 
-    Handles the /dashboard prefix from Next.js configuration.
+    Args:
+        full_path: The path requested by the client.
+        e.g. /clusters, /jobs
+
+    Returns:
+        FileResponse for static files or index.html for client-side routing.
+
+    Raises:
+        HTTPException: If the path is invalid or file not found.
     """
-    # Check if the path starts with 'dashboard/' and remove it if it does
-    if full_path.startswith('dashboard/'):
-        full_path = full_path[len('dashboard/'):]
-
-    # Try to serve the file directly from the out directory first
+    # Try to serve the staticfile directly e.g. /skypilot.svg,
+    # /favicon.ico, and /_next/, etc.
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
-    # If file not found, serve the index.html for client-side routing.
-    # For example, the non-matched arbitrary route (/ or /test) from
-    # client will be redirected to the index.html.
+    # Serve index.html for client-side routing
+    # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
@@ -1149,6 +1333,12 @@ async def serve_static_or_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+# Redirect the root path to dashboard
+@app.get('/')
+async def root():
+    return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
 if __name__ == '__main__':

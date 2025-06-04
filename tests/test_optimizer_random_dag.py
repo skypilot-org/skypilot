@@ -5,12 +5,13 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import sky
+from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky.clouds import service_catalog
-from sky.utils import registry
+from sky import skypilot_config
 
 ALL_INSTANCE_TYPE_INFOS = sum(
     sky.list_accelerators(gpus_only=True).values(), [])
@@ -74,7 +75,7 @@ def generate_random_dag(
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate
                     (instance_list,
-                     _) = service_catalog.get_instance_type_for_accelerator(
+                     _) = catalog.get_instance_type_for_accelerator(
                          candidate.accelerator_name,
                          candidate.accelerator_count,
                          clouds='gcp')
@@ -83,7 +84,7 @@ def generate_random_dag(
                     if 'tpu' in candidate.accelerator_name:
                         instance_type = 'TPU-VM'
                 resources = sky.Resources(
-                    cloud=registry.CLOUD_REGISTRY.from_str(candidate.cloud),
+                    infra=candidate.cloud,
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count

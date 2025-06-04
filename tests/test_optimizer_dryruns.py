@@ -13,6 +13,7 @@ from sky import cli
 from sky import clouds
 from sky import exceptions
 from sky import optimizer
+from sky import skypilot_config
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -86,16 +87,16 @@ def _test_resources_launch(*resources_args,
 
 
 def test_resources_aws(enable_all_clouds):
-    _test_resources_launch(sky.AWS(), 'p3.2xlarge')
+    _test_resources_launch(infra='aws', instance_type='p3.2xlarge')
 
 
 def test_resources_azure(enable_all_clouds):
-    _test_resources_launch(sky.Azure(), 'Standard_NC24s_v3')
+    _test_resources_launch(infra='azure', instance_type='Standard_NC24s_v3')
 
 
 def test_resources_gcp(enable_all_clouds):
-    _test_resources_launch(sky.GCP(), 'n1-standard-16')
-    _test_resources_launch(sky.GCP(), 'a3-highgpu-8g')
+    _test_resources_launch(infra='gcp', instance_type='n1-standard-16')
+    _test_resources_launch(infra='gcp', instance_type='a3-highgpu-8g')
 
 
 def test_partial_cpus(enable_all_clouds):
@@ -419,20 +420,15 @@ def test_invalid_image(enable_all_clouds):
 
 
 def test_valid_image(enable_all_clouds):
-    _test_resources(cloud=sky.AWS(),
-                    region='us-east-1',
-                    image_id='ami-0868a20f5a3bf9702')
+    _test_resources(infra='aws/us-east-1', image_id='ami-0868a20f5a3bf9702')
     _test_resources(
-        cloud=sky.GCP(),
-        region='us-central1',
+        infra='gcp/us-central1',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
     _test_resources(
-        cloud=sky.GCP(),
+        infra='gcp',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
-    )
+        'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927')
 
 
 def test_parse_cpus_from_yaml():
@@ -566,9 +562,8 @@ def test_invalid_accelerators_regions(enable_all_clouds):
     task = sky.Task(run='echo hi')
     task.set_resources(
         sky.Resources(
-            sky.AWS(),
+            infra='aws/us-west-1',
             accelerators='A100:8',
-            region='us-west-1',
         ))
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
         sky.stream_and_get(
@@ -591,7 +586,7 @@ def _test_optimize_speed(resources: sky.Resources):
 def test_optimize_speed(enable_all_clouds):
     _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in registry.CLOUD_REGISTRY.values():
-        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
+        _test_optimize_speed(sky.Resources(infra=str(cloud), cpus='4+'))
     _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
         sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
@@ -732,6 +727,33 @@ def test_optimize_disk_tier(enable_all_clouds):
     ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
     assert ultra_tier_candidates == set(
         map(registry.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates
+
+
+def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
+    """
+    Tests that 'sky launch --dryrun' with reservations configured
+    does not raise an AssertionError when Optimizer processes DummySink.
+    Simulates 'sky launch --gpus A100:8 --cloud aws --dryrun'
+    """
+    override_config_dict = {
+        'aws': {
+            'specific_reservations': ['cr-xxx', 'cr-yyy']
+        }
+    }
+    runner = cli_testing.CliRunner()
+    with skypilot_config.override_skypilot_config(override_config_dict):
+        # Ensure AWS is treated as an enabled cloud. The enable_all_clouds
+        # fixture should typically handle this.
+        result = runner.invoke(
+            cli.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
+
+        # Check for a successful dryrun invocation
+        if result.exit_code != 0:
+            pytest.fail(f"'sky launch --dryrun' failed with exit code "
+                        f"{result.exit_code}.\nOutput:\n{result.output}\n"
+                        f"Exception Info: {result.exc_info}")
+
+    # If no exception is raised and exit code is 0, the test passes.
 
 
 def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):

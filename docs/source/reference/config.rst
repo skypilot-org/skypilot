@@ -37,8 +37,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
@@ -54,6 +53,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`: false
 
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
+
+  :ref:`provision <config-yaml-provision>`:
+    :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -74,6 +76,11 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+  
+  :ref: `ssh <config-yaml-ssh>`:
+    :ref: `allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+      - node-pool-1
+      - node-pool-2
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -105,6 +112,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       provision_timeout: 900
     :ref:`remote_identity <config-yaml-gcp-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
+    :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
+    :ref:`placement_policy <config-yaml-gcp-placement-policy>`: compact
 
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
@@ -122,6 +131,23 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`us-ashburn-1 <config-yaml-oci>`:
       vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
+  :ref:`nebius <config-yaml-nebius>`:
+    :ref:`eu-north1 <config-yaml-nebius>`:
+      project_id: project-e00xxxxxxxxxxx
+      fabric: fabric-3
+      filesystems:
+      - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
+        mount_path: /mnt/fsnew
+        attach_mode: READ_WRITE
+    :ref:`eu-west1 <config-yaml-nebius>`:
+      project_id: project-e01xxxxxxxxxxx
+      fabric: fabric-5
+    :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+
+  :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
+
 
 Fields
 ----------
@@ -203,8 +229,7 @@ Example:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         # optionally set specific cloud/region
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # default resources:
         cpus: 4+
         memory: 8x
@@ -345,6 +370,23 @@ Example:
 .. code-block:: yaml
 
   admin_policy: my_package.SkyPilotPolicyV1
+
+.. _config-yaml-provision:
+
+``provision``
+~~~~~~~~~~~~~
+
+.. _config-yaml-provision-ssh-timeout:
+
+``provision.ssh_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for SSH connection probing during provisioning (optional).
+
+Cluster SSH connection is probed during provisioning to check if a cluster is up. This timeout
+determines how long to wait for the connection to be established.
+
+Default: ``10``.
 
 .. _config-yaml-aws:
 
@@ -846,6 +888,26 @@ launched by SkyPilot. This is useful for improving network performance.
 
 Default: ``false``.
 
+.. _config-yaml-gcp-enable-gpu-direct:
+
+``gcp.enable_gpu_direct``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable GPUDirect-TCPX, a high-performance networking technology that establishes direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` instances launched by SkyPilot. When enabled, this configuration automatically activates the gVNIC network interface for optimal performance.
+
+Default: ``false``.
+
+.. _config-yaml-gcp-placement-policy:
+
+``gcp.placement_policy``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Placement policy for GCP instances. This setting controls how instances are physically placed within a data center to optimize performance and resource utilization.
+
+When `gcp.enable_gpu_direct` is enabled, the placement policy is automatically set to `compact` to ensure optimal communication performance. If `gcp.enable_gpu_direct` is disabled, no default placement policy is applied.
+
+Refer to the `GCP documentation <https://cloud.google.com/compute/docs/instances/placement-policies-overview>`_ for more information on placement policies.
+
 .. _config-yaml-azure:
 
 ``azure``
@@ -1008,6 +1070,20 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+``ssh``
+~~~~~~~~~~~~~~~
+
+Advanced SSH node pool configuration (optional).
+
+.. _config-yaml-ssh-allowed-node-pools:
+
+``ssh.allowed_node_pools``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed SSH node pools (optional).
+
+List of names that SkyPilot is allowed to use.
+
 .. _config-yaml-oci:
 
 ``oci``
@@ -1048,6 +1124,123 @@ Example:
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
           vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
+.. _config-yaml-nebius:
+
+``nebius``
+~~~~~~~~~~
+
+Advanced Nebius configuration (optional).
+
+``project_id``
+    Identifier for the Nebius project (optional)
+    Default: Uses first available project if not specified
+
+``fabric``
+    GPU cluster configuration identifier (optional)
+    Optional: GPU cluster disabled if not specified
+
+``filesystems``
+    List of filesystems to mount on the nodes (optional).
+    Each filesystem is a dict with the following keys:
+
+    - ``filesystem_id``: ID of the filesystem to mount. Required for each filesystem.
+    - ``filesystem_attach_mode``: Attach mode for the filesystem.
+
+      Allowed values: ``READ_WRITE``, ``READ_ONLY``. Defaults to ``READ_WRITE``.
+    - ``filesystem_mount_path``: Path to mount the filesystem on the nodes.
+
+      Defaults to ``/mnt/filesystem-skypilot-<index>``.
+
+The configuration must be specified in region-specific sections.
+
+Example:
+
+.. code-block:: yaml
+
+    nebius:
+        :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+        :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+          eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+          eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+        # Region-specific configuration
+        eu-north1:
+            # Project identifier for this region
+            # Optional: Uses first available project if not specified
+            project_id: project-e00......
+            # GPU cluster fabric identifier
+            # Optional: GPU cluster disabled if not specified
+            fabric: fabric-3
+        eu-west1:
+            project_id: project-e01...
+            fabric: fabric-5
+            filesystems:
+              - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                mount_path: /mnt/fsnew
+                attach_mode: READ_WRITE
+              - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                mount_path: /mnt/fsnew2
+                attach_mode: READ_ONLY
+
+
+.. _config-yaml-nebius-use-internal-ips:
+
+``nebius.use_internal_ips``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Should instances be assigned private IPs only? (optional).
+
+Set to ``true`` to use private IPs to communicate between the local client and
+any SkyPilot nodes. This requires the networking stack be properly set up.
+
+This flag is typically set together with ``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. _config-yaml-nebius-ssh-proxy-command:
+
+``nebius.ssh_proxy_command``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSH proxy command (optional).
+
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+Format 1:
+  A string; the same proxy command is used for all regions.
+Format 2:
+  A dict mapping region names to region-specific proxy commands.
+  NOTE: This restricts SkyPilot's search space for this cloud to only use
+  the specified regions and not any other regions in this cloud.
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    # Format 1
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
+    # Format 2
+    ssh_proxy_command:
+      eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+      eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
+.. _config-yaml-db:
+
+``db``
+~~~~~~
+
+Database configuration (optional).
+
+Specify the database connection string to use for SkyPilot. If not specified, SkyPilot will use a SQLite database initialized in ~/.sky directory.
+If a postgres database URL is specified, SkyPilot will use the database to persist API server state.
+Currently, managed job controller state is not persisted in remote database even if `db` is specified.
+
+Example:
+
+.. code-block:: yaml
+
+  db: postgresql://postgres@localhost/skypilot
 
 .. toctree::
    :hidden:

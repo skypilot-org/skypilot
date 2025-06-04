@@ -23,12 +23,12 @@ History:
 import logging
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky.adaptors import oci as oci_adaptor
-from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
@@ -97,7 +97,7 @@ class OCI(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
 
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'oci')
 
         if region is not None:
@@ -114,8 +114,8 @@ class OCI(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='oci')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='oci')
 
     @classmethod
     def zones_provision_loop(
@@ -143,11 +143,11 @@ class OCI(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='oci')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='oci')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -189,18 +189,18 @@ class OCI(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='oci')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='oci')
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='oci')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='oci')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -213,10 +213,11 @@ class OCI(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Any]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
 
+        resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
@@ -245,7 +246,8 @@ class OCI(clouds.Cloud):
             image_id, os_type = image_id.replace(' ', '').split(':')
 
         cpus = resources.cpus
-        instance_type_arr = resources.instance_type.split(
+        original_instance_type = resources.instance_type
+        instance_type_arr = original_instance_type.split(
             oci_utils.oci_config.INSTANCE_TYPE_RES_SPERATOR)
         instance_type = instance_type_arr[0]
 
@@ -259,12 +261,12 @@ class OCI(clouds.Cloud):
         else:
             if cpus is None:
                 cpus, mems = OCI.get_vcpus_mem_from_instance_type(
-                    resources.instance_type)
+                    original_instance_type)
                 resources = resources.copy(
                     cpus=cpus,
                     memory=mems,
                 )
-            if cpus is None and resources.instance_type.startswith(
+            if cpus is None and original_instance_type.startswith(
                     oci_utils.oci_config.VM_PREFIX):
                 cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}'
 
@@ -272,8 +274,8 @@ class OCI(clouds.Cloud):
         if zone is None:
             # If zone is not specified, try to get the first zone.
             if zones is None:
-                regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type=resources.instance_type,
+                regions = catalog.get_region_zones_for_instance_type(
+                    instance_type=original_instance_type,
                     use_spot=resources.use_spot,
                     clouds='oci')
                 zones = [r for r in iter(regions) if r.name == region.name
@@ -313,11 +315,11 @@ class OCI(clouds.Cloud):
             # OS type is not determined yet. So try to get it from vms.csv
             image_str = self._get_image_str(
                 image_id=resources.image_id,
-                instance_type=resources.instance_type,
+                instance_type=original_instance_type,
                 region=region.name)
 
             # pylint: disable=import-outside-toplevel
-            from sky.clouds.service_catalog import oci_catalog
+            from sky.catalog import oci_catalog
             os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
                                                         region=region.name)
         logger.debug(f'OS type for the image {image_id} is {os_type}')
@@ -381,16 +383,16 @@ class OCI(clouds.Cloud):
         assert len(accelerators) == 1, resources
 
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='oci')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='oci')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -399,13 +401,15 @@ class OCI(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         OCI's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         OCI's storage service."""
         # TODO(seungjin): Implement separate check for
@@ -528,10 +532,10 @@ class OCI(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'oci')
+        return catalog.instance_type_exists(instance_type, 'oci')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='oci')
+        return catalog.validate_region_zone(region, zone, clouds='oci')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
@@ -552,9 +556,9 @@ class OCI(clouds.Cloud):
                                            region=region_name)
 
         if image_id_str.startswith('skypilot:'):
-            image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
-                                                                 region_name,
-                                                                 clouds='oci')
+            image_id_str = catalog.get_image_id_from_tag(image_id_str,
+                                                         region_name,
+                                                         clouds='oci')
 
         # Image_id should be impossible be None, except for the case when
         # user specify an image tag which does not exist in the image.csv

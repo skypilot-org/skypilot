@@ -224,12 +224,26 @@ class DockerInitializer:
             # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
-            self._run(
-                f'{self.docker_cmd} login --username '
-                f'{docker_login_config.username} '
-                f'--password {docker_login_config.password} '
-                f'{docker_login_config.server}',
-                wait_for_docker_daemon=True)
+            if docker_login_config.password:
+                # Password is allowed to be empty, in that case, we will not run
+                # the login command, and assume that the image pulling is
+                # authenticated by the IAM permission on the VM.
+                self._run(
+                    f'{self.docker_cmd} login --username '
+                    f'{shlex.quote(docker_login_config.username)} '
+                    f'--password {shlex.quote(docker_login_config.password)} '
+                    f'{shlex.quote(docker_login_config.server)}',
+                    wait_for_docker_daemon=True)
+            elif docker_login_config.server.endswith('-docker.pkg.dev'):
+                # Docker image server is on GCR, we need to do additional setup
+                # to pull the image.
+                # When no username or password is provided, we assume that
+                # we are on GCP VM (i.e. gcloud auth configure-docker is
+                # enough), or the image server is public.
+                # For the former case, gcloud should be available, and latter
+                # should be fine to fail the following command.
+                self._run('gcloud auth configure-docker '
+                          f'{docker_login_config.server} --quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
@@ -329,9 +343,12 @@ class DockerInitializer:
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         port = constants.DEFAULT_DOCKER_PORT
+        # In case the port is already configured in the sshd_config file
+        # in some images, we delete it first and then append the new one.
         # pylint: disable=anomalous-backslash-in-string
         self._run(
-            f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
+            'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
+            f'sudo echo "Port {port}" >> /etc/ssh/sshd_config;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'

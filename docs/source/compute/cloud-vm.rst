@@ -3,23 +3,29 @@
 Using Cloud VMs
 =====================
 
-SkyPilot supports launching cloud instances (virtual machines, or VMs) on all major cloud providers.
-You can get started with :ref:`quickstart`.
+SkyPilot supports both elastic (on-demand, spot) and reserved cloud instances (virtual machines, or VMs).
 
-See :ref:`concept-cloud-vms` for an overview.
+Elastic VMs
+-----------
+
+SkyPilot supports launching elastic cloud instances on all major cloud providers.
+Both on-demand and spot instances are supported.
+
+Get started with :ref:`quickstart`.  See :ref:`concept-cloud-vms` for an overview.
+
+Reserved VMs
+------------
+
+For reserved instances that are a set of long-running, SSH-accessible nodes, see
+:ref:`existing-machines` to bring them into SkyPilot as an infra choice.
+
+For reserved instances that require cloud-specific settings to use (e.g., AWS
+Capacity Reservations and Capacity Blocks; GCP reservations; GCP DWS), see
+:ref:`reservation`.
 
 
-.. Administrator Guides
-.. ~~~~~~~~~~~~~~~~~~~~~
+.. toctree::
+   :hidden:
+   :maxdepth: 1
 
-.. For administrators, the following optional guides may be helpful:
-
-.. The following guides are optional and may be helpful for administrators:
-
-.. - :ref:`cloud-permissions`
-.. - :ref:`cloud-auth`
-.. - :ref:`quota`
-
-.. - :ref:`cloud-permissions`: Set up specific IAM roles, permissions, or service accounts for SkyPilot to use.
-.. - :ref:`cloud-auth`: Guides for different authentication methods for the clouds.
-.. - :ref:`quota`: Guides for requesting quota increases.
+   ../cloud-setup/quota

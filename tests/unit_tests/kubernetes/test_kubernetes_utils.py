@@ -2,6 +2,8 @@
 
 """
 
+import os
+import tempfile
 from unittest import mock
 from unittest.mock import patch
 
@@ -131,3 +133,147 @@ def test_get_kubernetes_node_info():
         assert isinstance(node_info, models.KubernetesNodesInfo)
         assert len(node_info.node_info_dict) == 0
         assert node_info.hint == ''
+
+
+def test_get_all_kube_context_names():
+    """Tests get_all_kube_context_names function with KUBECONFIG env var."""
+    mock_contexts = [{
+        'name': 'context1'
+    }, {
+        'name': 'context2'
+    }, {
+        'name': 'context3'
+    }]
+    mock_current_context = {'name': 'context1'}
+
+    with patch('sky.provision.kubernetes.utils.kubernetes.'
+               'list_kube_config_contexts',
+               return_value=(mock_contexts, mock_current_context)), \
+         patch('sky.provision.kubernetes.utils.is_incluster_config_available',
+               return_value=False):
+        context_names = utils.get_all_kube_context_names()
+        assert context_names == ['context1', 'context2', 'context3']
+
+    with patch('sky.provision.kubernetes.utils.kubernetes.'
+               'list_kube_config_contexts',
+               return_value=(mock_contexts, mock_current_context)), \
+         patch('sky.provision.kubernetes.utils.is_incluster_config_available',
+               return_value=True), \
+         patch('sky.provision.kubernetes.utils.kubernetes.'
+               'in_cluster_context_name',
+               return_value='in-cluster'):
+        context_names = utils.get_all_kube_context_names()
+        assert context_names == [
+            'context1', 'context2', 'context3', 'in-cluster'
+        ]
+
+    with patch('sky.provision.kubernetes.utils.kubernetes.'
+               'list_kube_config_contexts',
+               side_effect=utils.kubernetes.kubernetes.config.
+               config_exception.ConfigException()), \
+         patch('sky.provision.kubernetes.utils.is_incluster_config_available',
+               return_value=True), \
+         patch('sky.provision.kubernetes.utils.kubernetes.'
+               'in_cluster_context_name',
+               return_value='in-cluster'):
+        context_names = utils.get_all_kube_context_names()
+        assert context_names == ['in-cluster']
+
+    with patch('sky.provision.kubernetes.utils.kubernetes.'
+               'list_kube_config_contexts',
+               side_effect=utils.kubernetes.kubernetes.config.
+               config_exception.ConfigException()), \
+         patch('sky.provision.kubernetes.utils.is_incluster_config_available',
+               return_value=False):
+        context_names = utils.get_all_kube_context_names()
+        assert context_names == []
+
+    # Verify latest KUBECONFIG env var is used
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f1, \
+         tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f2:
+
+        # Write different kubeconfig content to each file
+        kubeconfig1_content = """
+apiVersion: v1
+kind: Config
+contexts:
+- name: old-context
+  context:
+    cluster: old-cluster
+    user: old-user
+current-context: old-context
+clusters:
+- name: old-cluster
+  cluster:
+    server: https://old-server
+users:
+- name: old-user
+  user: {}
+"""
+        kubeconfig2_content = """
+apiVersion: v1
+kind: Config
+contexts:
+- name: new-context
+  context:
+    cluster: new-cluster
+    user: new-user
+current-context: new-context
+clusters:
+- name: new-cluster
+  cluster:
+    server: https://new-server
+users:
+- name: new-user
+  user: {}
+"""
+        f1.write(kubeconfig1_content)
+        f1.flush()
+        f2.write(kubeconfig2_content)
+        f2.flush()
+
+        try:
+            # Mock the kubernetes module to use actual file loading
+            with patch(
+                    'sky.provision.kubernetes.utils.'
+                    'is_incluster_config_available',
+                    return_value=False):
+
+                # Set KUBECONFIG to first file
+                with patch.dict(os.environ, {'KUBECONFIG': f1.name}):
+                    # Mock the kubernetes.list_kube_config_contexts to read
+                    # from the actual file
+                    with patch('sky.provision.kubernetes.utils.kubernetes.'
+                               'list_kube_config_contexts') as mock_list:
+                        # Simulate reading from first kubeconfig
+                        mock_list.return_value = ([{
+                            'name': 'old-context'
+                        }], {
+                            'name': 'old-context'
+                        })
+                        context_names = utils.get_all_kube_context_names()
+                        assert context_names == ['old-context']
+                        # Verify the function was called (indicating it tried
+                        # to read config)
+                        mock_list.assert_called_once()
+
+                # Change KUBECONFIG to second file
+                with patch.dict(os.environ, {'KUBECONFIG': f2.name}):
+                    with patch('sky.provision.kubernetes.utils.kubernetes.'
+                               'list_kube_config_contexts') as mock_list:
+                        # Simulate reading from second kubeconfig
+                        mock_list.return_value = ([{
+                            'name': 'new-context'
+                        }], {
+                            'name': 'new-context'
+                        })
+                        context_names = utils.get_all_kube_context_names()
+                        assert context_names == ['new-context']
+                        mock_list.assert_called_once()
+
+        finally:
+            # Clean up temporary files
+            os.unlink(f1.name)
+            os.unlink(f2.name)

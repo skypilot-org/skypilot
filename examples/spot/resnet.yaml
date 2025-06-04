@@ -10,7 +10,7 @@ name: resnet
 
 resources:
     accelerators: V100
-    cloud: aws
+    infra: aws
     use_spot: true
     spot_recovery: FAILOVER
 

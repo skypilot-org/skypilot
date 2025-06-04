@@ -31,7 +31,7 @@ file_mounts:
     # store: r2
 
 setup: |
-  pip install torch torchvision
+  pip install torch==2.4.0 torchvision
 
   # Install torch tune from source for the latest Llama-3.1 model
   pip install git+https://github.com/pytorch/torchtune.git@58255001bd0b1e3a81a6302201024e472af05379
