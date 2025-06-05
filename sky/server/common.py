@@ -43,7 +43,8 @@ else:
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
-DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
+DEFAULT_SERVER_HOST = '127.0.0.1'
+SERVER_PORT_FILE = '~/.sky/api_server/port'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
 AVAILABLE_LOCAL_API_SERVER_URLS = [
     f'http://{host}:46580' for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
@@ -131,10 +132,11 @@ class ApiServerInfo:
 
 def get_api_cookie_jar_path() -> pathlib.Path:
     """Returns the Path to the API cookie jar file."""
-    return pathlib.Path(
-        os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR,
-                       server_constants.API_COOKIE_FILE_DEFAULT_LOCATION)
-    ).expanduser().resolve()
+    return (pathlib.Path(
+        os.environ.get(
+            server_constants.API_COOKIE_FILE_ENV_VAR,
+            server_constants.API_COOKIE_FILE_DEFAULT_LOCATION,
+        )).expanduser().resolve())
 
 
 def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
@@ -168,7 +170,7 @@ def set_api_cookie_jar(cookie_jar: CookieJar,
 
 
 def get_cookies_from_response(
-        response: 'requests.Response') -> requests.cookies.RequestsCookieJar:
+    response: 'requests.Response',) -> requests.cookies.RequestsCookieJar:
     """Returns the cookies from the API server response."""
     server_url = get_server_url()
     cookies = response.cookies
@@ -179,15 +181,17 @@ def get_cookies_from_response(
     return cookies
 
 
-@annotations.lru_cache(scope='global')
-def get_server_url(host: Optional[str] = None) -> str:
-    endpoint = DEFAULT_SERVER_URL
-    if host is not None:
-        endpoint = f'http://{host}:46580'
-
+def get_server_url(host: Optional[str] = DEFAULT_SERVER_HOST) -> str:
+    port_file = pathlib.Path(SERVER_PORT_FILE).expanduser()
+    if port_file.exists():
+        port = int(port_file.read_text(encoding='utf-8').strip())
+    else:
+        port = 46580
+    endpoint = f'http://{host}:{port}'
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
-        skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
+        skypilot_config.get_nested(('api_server', 'endpoint'), endpoint),
+    )
     return url.rstrip('/')
 
 
@@ -213,8 +217,11 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(host: Optional[str] = DEFAULT_SERVER_HOST):
+    server_url = get_server_url(host)
+    parsed = parse.urlparse(server_url)
+    server_host = parsed.hostname
+    return server_host in AVAILBLE_LOCAL_API_SERVER_HOSTS
 
 
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
@@ -260,11 +267,13 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             version = result.get('version')
             version_on_disk = result.get('version_on_disk')
             commit = result.get('commit')
-            server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
-                                        api_version=api_version,
-                                        version=version,
-                                        version_on_disk=version_on_disk,
-                                        commit=commit)
+            server_info = ApiServerInfo(
+                status=ApiServerStatus.HEALTHY,
+                api_version=api_version,
+                version=version,
+                version_on_disk=version_on_disk,
+                commit=commit,
+            )
             if api_version is None or version is None or commit is None:
                 logger.warning(f'API server response missing '
                                f'version info. {server_url} may '
@@ -317,13 +326,16 @@ def get_request_id(response: 'requests.Response') -> RequestId:
     return request_id
 
 
-def _start_api_server(deploy: bool = False,
-                      host: str = '127.0.0.1',
-                      foreground: bool = False):
+def _start_api_server(
+    deploy: bool = False,
+    host: str = '127.0.0.1',
+    foreground: bool = False,
+    port: Optional[int] = None,
+):
     """Starts a SkyPilot API server locally."""
     server_url = get_server_url(host)
-    assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
-        f'server url {server_url} is not a local url')
+    assert is_api_server_local(
+        host), f'server url {server_url} is not a local url'
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
@@ -345,10 +357,18 @@ def _start_api_server(deploy: bool = False,
                 f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
+        if port:
+            args += [f'--port={port}']
         if deploy:
             args += ['--deploy']
         if host is not None:
             args += [f'--host={host}']
+
+        # Write port to port file before exec-ing
+        port_file = pathlib.Path(SERVER_PORT_FILE).expanduser()
+        port_file.parent.mkdir(parents=True, exist_ok=True)
+        port_file.write_text(str(port if port is not None else 46580),
+                             encoding='utf-8')
 
         if foreground:
             # Replaces the current process with the API server
@@ -372,12 +392,14 @@ def _start_api_server(deploy: bool = False,
             # the child process will inherit its own copy of the fd,
             # independent of the parent's fd table which enables to child
             # process to continue writing to the log file.
-            proc = subprocess.Popen(args,
-                                    stdout=log_file,
-                                    stderr=subprocess.STDOUT,
-                                    stdin=subprocess.DEVNULL,
-                                    start_new_session=True,
-                                    env=server_env)
+            proc = subprocess.Popen(
+                args,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                env=server_env,
+            )
 
         start_time = time.time()
         while True:
@@ -430,11 +452,11 @@ def _start_api_server(deploy: bool = False,
 
 
 def check_server_healthy(
-    endpoint: Optional[str] = None
+    endpoint: Optional[str] = None,
 ) -> Literal[
         # Use an incomplete list of Literals here to enforce raising for other
         # enum values.
-        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH]:
+        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH,]:
     """Check if the API server is healthy.
 
     Args:
@@ -476,11 +498,13 @@ def check_server_healthy(
             if server_is_older:
                 msg = _REMOTE_SERVER_TOO_OLD_WARNING.format(
                     version_info=version_info,
-                    command=_install_server_version_command(api_server_info))
+                    command=_install_server_version_command(api_server_info),
+                )
             else:
                 msg = _CLIENT_TOO_OLD_WARNING.format(
                     version_info=version_info,
-                    command=_install_server_version_command(api_server_info))
+                    command=_install_server_version_command(api_server_info),
+                )
         with ux_utils.print_exception_no_traceback():
             raise exceptions.APIVersionMismatchError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
@@ -505,7 +529,8 @@ def check_server_healthy(
         logger.warning(
             _SERVER_INSTALL_VERSION_MISMATCH_WARNING.format(
                 server_version=api_server_info.version,
-                version_on_disk=api_server_info.version_on_disk))
+                version_on_disk=api_server_info.version_on_disk,
+            ))
         if is_api_server_local():
             logger.warning(_LOCAL_API_SERVER_RESTART_HINT)
 
@@ -524,10 +549,12 @@ def _get_version_info_hint(server_info: ApiServerInfo) -> str:
         sv = f'{sv} with commit {server_info.commit}'
     if cv == _DEV_VERSION:
         cv = f'{cv} with commit {sky.__commit__}'
-    return _VERSION_INFO.format(client_version=cv,
-                                server_version=sv,
-                                client_api_version=server_constants.API_VERSION,
-                                server_api_version=server_info.api_version)
+    return _VERSION_INFO.format(
+        client_version=cv,
+        server_version=sv,
+        client_api_version=server_constants.API_VERSION,
+        server_api_version=server_info.api_version,
+    )
 
 
 def _install_server_version_command(server_info: ApiServerInfo) -> str:
@@ -560,9 +587,12 @@ def get_skypilot_version_on_disk() -> str:
         raise RuntimeError('Unable to find version string.')
 
 
-def check_server_healthy_or_start_fn(deploy: bool = False,
-                                     host: str = '127.0.0.1',
-                                     foreground: bool = False):
+def check_server_healthy_or_start_fn(
+    deploy: bool = False,
+    host: str = '127.0.0.1',
+    foreground: bool = False,
+    port: Optional[int] = None,
+):
     api_server_status = None
     try:
         api_server_status = check_server_healthy()
@@ -583,7 +613,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             # have started the server while we were waiting for the lock.
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host, foreground)
+                _start_api_server(deploy, host, foreground, port=port)
 
 
 def check_server_healthy_or_start(func):
@@ -622,7 +652,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     # We should not use int(time.time()) as there can be multiple requests at
     # the same second.
     task_id = str(uuid.uuid4().hex)
-    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
+    client_dir = API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash
     client_task_dir = client_dir / 'tasks'
     client_task_dir.mkdir(parents=True, exist_ok=True)
 
@@ -708,9 +738,11 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
     }
 
 
-def reload_for_new_request(client_entrypoint: Optional[str],
-                           client_command: Optional[str],
-                           using_remote_api_server: bool):
+def reload_for_new_request(
+    client_entrypoint: Optional[str],
+    client_command: Optional[str],
+    using_remote_api_server: bool,
+):
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
