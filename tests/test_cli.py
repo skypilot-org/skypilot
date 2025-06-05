@@ -1,5 +1,7 @@
+import sys
 import tempfile
 import textwrap
+import traceback
 from unittest import mock
 
 from click import testing as cli_testing
@@ -349,4 +351,10 @@ class TestNoK8sInstalled:
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(cli.show_gpus, ['--infra', 'k8s'])
+        if result.exception:
+            print('\nTraceback:', file=sys.stderr, flush=True)
+            traceback.print_exception(type(result.exception),
+                                      result.exception,
+                                      result.exception.__traceback__,
+                                      file=sys.stderr)
         assert isinstance(result.exception, exceptions.KubeAPIUnreachableError)
