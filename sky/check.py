@@ -70,14 +70,18 @@ def check_capabilities(
 
         def check_one_cloud_one_capability(
             payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
-                           sky_cloud.CloudCapability]
+                           sky_cloud.CloudCapability, bool]
         ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
                 str, Dict[str, str]]]]]:
+            cloud_tuple, capability, allowed = payload
+            if not allowed:
+                return (False, 
+                        'cloud is not included in '
+                        'allowed_clouds in ~/.sky/config.yaml')
             with skypilot_config.local_active_workspace_ctx(
                     current_workspace_name):
                 # Have to override again for specific thread, as the
                 # local_active_workspace_ctx is thread-local.
-                cloud_tuple, capability = payload
                 _, cloud = cloud_tuple
                 try:
                     ok, reason = cloud.check_credentials(capability)
@@ -103,10 +107,8 @@ def check_capabilities(
 
         if clouds is not None:
             cloud_list = clouds
-            check_explicit = True
         else:
             cloud_list = get_all_clouds()
-            check_explicit = False
 
         clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
 
@@ -137,32 +139,29 @@ def check_capabilities(
         disallowed_cloud_names = [
             c for c in get_all_clouds() if c not in config_allowed_cloud_names
         ]
-        # Throw errors for clouds explicitly checked that are not allowed.
-        disallowed_explicit_check_message = '\n'.join([
-            f'Error: {cloud} is not included in allowed_clouds in `~/.sky/config.yaml`'  # pylint: disable=line-too-long
-            for cloud, _ in clouds_to_check
-            if check_explicit and cloud not in config_allowed_cloud_names
-        ])
         # Check only the clouds which are allowed in the config.
-        clouds_to_check = [
-            c for c in clouds_to_check if c[0] in config_allowed_cloud_names
-        ]
+        # clouds_to_check = [
+        #     c for c in clouds_to_check if c[0] in config_allowed_cloud_names
+        # ]
 
-        combinations = list(itertools.product(clouds_to_check, capabilities))
+        # combinations = list(itertools.product(clouds_to_check, capabilities))
+        combinations = []
+        for c in clouds_to_check:
+            allowed = c[0] in config_allowed_cloud_names
+            for capability in capabilities:
+                combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
-        if not config_allowed_cloud_names:
-            for capability in capabilities:
-                global_user_state.set_enabled_clouds([], capability,
-                                                     current_workspace_name)
-        if not combinations:
-            if disallowed_explicit_check_message:
-                echo(f'\n{disallowed_explicit_check_message}')
-            echo(
-                _summary_message(enabled_clouds, cloud2ctx2text,
-                                 current_workspace_name, hide_workspace_str,
-                                 disallowed_cloud_names))
-            return {}
+        # if not config_allowed_cloud_names:
+        #     for capability in capabilities:
+        #         global_user_state.set_enabled_clouds([], capability,
+        #                                              current_workspace_name)
+        # if not combinations:
+        #     echo(
+        #         _summary_message(enabled_clouds, cloud2ctx2text,
+        #                          current_workspace_name, hide_workspace_str,
+        #                          disallowed_cloud_names))
+        #     return {}
 
         workspace_str = f' for workspace: {current_workspace_name!r}'
         if hide_workspace_str:
@@ -182,7 +181,7 @@ def check_capabilities(
             if check_result is None:
                 continue
             capability, ok, ctx2text = check_result
-            cloud_tuple, _ = combination
+            cloud_tuple, _, _ = combination
             cloud_repr = cloud_tuple[0]
             if isinstance(ctx2text, dict):
                 cloud2ctx2text[cloud_repr] = ctx2text
@@ -239,8 +238,6 @@ def check_capabilities(
             all_enabled_clouds = all_enabled_clouds.union(
                 enabled_clouds_for_capability)
 
-        if disallowed_explicit_check_message:
-            echo(f'\n{disallowed_explicit_check_message}')
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,
                              current_workspace_name, hide_workspace_str,
