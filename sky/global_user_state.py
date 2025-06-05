@@ -362,7 +362,7 @@ if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             skypilot_config.update_config_no_lock(overlaid_config)
     else:
         # if no saved config exists, stash the current config to db.
-        skypilot_config.update_config_no_lock(config)
+        set_config_yaml('api_server', common_utils.dump_yaml_str(dict(config)))
 
 
 def add_or_update_user(user: models.User):
