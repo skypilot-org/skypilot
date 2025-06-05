@@ -1063,17 +1063,18 @@ export function GPUs() {
       router.push('/infra');
     } catch (error) {
       console.error('Failed to delete SSH Node Pool:', error);
-      alert('Failed to delete SSH Node Pool. Please try again.');
+      // Let the error bubble up to be handled by the dialog
+      throw error;
     }
   };
 
   const handleDeploySSHPool = async (poolName) => {
     try {
       await deploySSHNodePool(poolName);
-      alert(`SSH Node Pool "${poolName}" deployment started. Check the logs for progress.`);
     } catch (error) {
       console.error('Failed to deploy SSH Node Pool:', error);
-      alert('Failed to deploy SSH Node Pool. Please try again.');
+      // Let the error bubble up to be handled by the dialog
+      throw error;
     }
   };
 
