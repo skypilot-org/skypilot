@@ -877,8 +877,6 @@ def get_cluster_from_name(
 
 
 def get_clusters() -> List[Dict[str, Any]]:
-    current_user = common_utils.get_current_user()
-
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).order_by(
             sqlalchemy.desc(cluster_table.c.launched_at)).all()
