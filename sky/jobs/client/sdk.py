@@ -92,7 +92,8 @@ def launch(
 @server_common.check_server_healthy_or_start
 def queue(refresh: bool,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId:
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> server_common.RequestId:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -101,6 +102,7 @@ def queue(refresh: bool,
         refresh: Whether to restart the jobs controller if it is stopped.
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
+        job_ids: IDs of the managed jobs to show.
 
     Returns:
         The request ID of the queue request.
@@ -135,6 +137,7 @@ def queue(refresh: bool,
         refresh=refresh,
         skip_finished=skip_finished,
         all_users=all_users,
+        job_ids=job_ids,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/queue',
@@ -192,6 +195,7 @@ def tail_logs(name: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
+              tail: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails logs of managed jobs.
 
@@ -204,6 +208,7 @@ def tail_logs(name: Optional[str] = None,
         follow: Whether to follow the logs.
         controller: Whether to tail logs from the jobs controller.
         refresh: Whether to restart the jobs controller if it is stopped.
+        tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
 
@@ -222,6 +227,7 @@ def tail_logs(name: Optional[str] = None,
         follow=follow,
         controller=controller,
         refresh=refresh,
+        tail=tail,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/logs',

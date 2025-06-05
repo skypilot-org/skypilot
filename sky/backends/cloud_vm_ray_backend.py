@@ -24,6 +24,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
@@ -39,7 +40,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -699,6 +699,10 @@ class RayCodeGen:
                 # 139 is the return code of SIGSEGV, i.e. Segmentation Fault.
                 if any(r == 139 for r in returncodes):
                     reason = '(likely due to Segmentation Fault)'
+                if any(r == 137 for r in returncodes):
+                    # Find the first non-137 return code
+                    non_137 = next(r for r in returncodes if r != 137)
+                    reason = f'(A Worker failed with return code {{non_137}}, SkyPilot cleaned up the processes on other nodes with return code 137)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
@@ -803,7 +807,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('scp'):
+                for r in catalog.regions('scp'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -1088,7 +1092,7 @@ class FailoverCloudErrorHandlerV2:
         output = str(error)
         # Sometimes, lambda cloud error will list available regions.
         if output.find('Regions with capacity available:') != -1:
-            for r in service_catalog.regions('lambda'):
+            for r in catalog.regions('lambda'):
                 if output.find(r.name) == -1:
                     _add_to_blocked_resources(
                         blocked_resources,
@@ -1235,7 +1239,8 @@ class RetryingVmProvisioner(object):
                 assert isinstance(handle, CloudVmRayResourceHandle), (
                     'handle should be CloudVmRayResourceHandle (found: '
                     f'{type(handle)}) {cluster_name!r}')
-                config = common_utils.read_yaml(handle.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
                 # launch and multi-node cluster before PR #1700).
@@ -1935,7 +1940,8 @@ class RetryingVmProvisioner(object):
             # ready to ensure cluster will not scale up after preemption (spot).
             # Skip for non-spot as this takes extra time to provision (~1min).
             if use_spot:
-                ray_config = common_utils.read_yaml(cluster_config_file)
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    cluster_config_file)
                 ray_config['upscaling_speed'] = 0
                 common_utils.dump_yaml(cluster_config_file, ray_config)
                 start = time.time()
@@ -2270,7 +2276,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # Directly load the `use_internal_ips` flag from the cluster yaml
         # instead of `skypilot_config` as the latter can be changed after the
         # cluster is UP.
-        return common_utils.read_yaml(self.cluster_yaml).get(
+        return global_user_state.get_cluster_yaml_dict(self.cluster_yaml).get(
             'provider', {}).get('use_internal_ips', False)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
@@ -2299,7 +2305,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # It is possible that the cluster yaml is not available when
                 # the handle is unpickled for service replicas from the
                 # controller with older version.
-                config = common_utils.read_yaml(self.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    self.cluster_yaml)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2634,7 +2641,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # pylint: disable=import-outside-toplevel
             launched_resources = state['launched_resources']
             if isinstance(launched_resources.cloud, clouds.Kubernetes):
-                yaml_config = common_utils.read_yaml(
+                yaml_config = global_user_state.get_cluster_yaml_dict(
                     os.path.expanduser(state['_cluster_yaml']))
                 context = kubernetes_utils.get_context_from_config(
                     yaml_config['provider'])
@@ -2693,7 +2700,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     NAME = 'cloudvmray'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
+    ResourceHandle = CloudVmRayResourceHandle  # type: ignore
 
     def __init__(self):
         self.run_timestamp = sky_logging.get_run_timestamp()
@@ -3044,8 +3051,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ssh_port_list = handle.external_ssh_ports()
             assert ip_list is not None, handle
             assert ssh_port_list is not None, handle
-
-            config = common_utils.read_yaml(cluster_config_file)
+            config = global_user_state.get_cluster_yaml_dict(
+                cluster_config_file)
             if 'docker' in config:
                 handle.setup_docker_user(cluster_config_file)
 
@@ -3113,7 +3120,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cloud = handle.launched_resources.cloud
         logger.debug(
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
-        config = common_utils.read_yaml(handle.cluster_yaml)
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         provider_config = config['provider']
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
                                  handle.launched_resources.ports,
@@ -3178,6 +3185,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'Launching - Opening new ports')):
                     self._open_ports(handle)
 
+        # Capture task YAML and command
+        task_config = None
+        if task is not None:
+            task_config = task.to_yaml_config()
+
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
                 handle.cluster_name,
@@ -3185,6 +3197,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
+                task_config=task_config,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
@@ -3507,9 +3520,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Add the managed job to job queue database.
                 managed_job_codegen = managed_jobs.ManagedJobCodeGen()
                 managed_job_code = managed_job_codegen.set_pending(
-                    job_id, managed_job_dag,
+                    job_id,
+                    managed_job_dag,
                     skypilot_config.get_active_workspace(
-                        force_user_workspace=True))
+                        force_user_workspace=True),
+                    entrypoint=common_utils.get_current_command())
                 # Set the managed job to PENDING state to make sure that this
                 # managed job appears in the `sky jobs queue`, even if it needs
                 # to wait to be submitted.
@@ -3939,11 +3954,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
                               controller: bool = False,
-                              follow: bool = True) -> int:
+                              follow: bool = True,
+                              tail: Optional[int] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller)
+            job_name, job_id, follow, controller, tail)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4195,7 +4211,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_abs_path = os.path.abspath(log_path)
         launched_resources = handle.launched_resources.assert_launchable()
         cloud = launched_resources.cloud
-        config = common_utils.read_yaml(handle.cluster_yaml)
+        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
 
@@ -4255,7 +4271,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             from sky.adaptors import ibm
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
 
-            config_provider = common_utils.read_yaml(
+            config_provider = global_user_state.get_cluster_yaml_dict(
                 handle.cluster_yaml)['provider']
             region = config_provider['region']
             search_client = ibm.search_client()
@@ -4409,7 +4425,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     launched_resources = (
                         handle.launched_resources.assert_launchable())
                     cloud = launched_resources.cloud
-                    config = common_utils.read_yaml(handle.cluster_yaml)
+                    config = global_user_state.get_cluster_yaml_dict(
+                        handle.cluster_yaml)
                     cloud.check_features_are_supported(
                         launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -4448,7 +4465,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # https://github.com/skypilot-org/skypilot/pull/4443#discussion_r1872798032
             attempts = 0
             while True:
-                config = common_utils.read_yaml(handle.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
 
                 logger.debug(f'instance statuses attempt {attempts + 1}')
                 node_status_dict = provision_lib.query_instances(
@@ -4504,9 +4522,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def remove_cluster_config(self, handle: CloudVmRayResourceHandle) -> None:
         """Remove the YAML config of a cluster."""
+        cluster_yaml_path = handle.cluster_yaml
         handle.cluster_yaml = None
         global_user_state.update_cluster_handle(handle.cluster_name, handle)
-        common_utils.remove_file_if_exists(handle.cluster_yaml)
+        global_user_state.remove_cluster_yaml(handle.cluster_name)
+        common_utils.remove_file_if_exists(cluster_yaml_path)
 
     def set_autostop(self,
                      handle: CloudVmRayResourceHandle,

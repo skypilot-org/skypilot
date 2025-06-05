@@ -4,26 +4,21 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.clouds.service_catalog.config import fallback_to_default_catalog
-from sky.clouds.service_catalog.constants import ALL_CLOUDS
-from sky.clouds.service_catalog.constants import CATALOG_DIR
-from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
-from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
-from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL_S3_MIRROR)
+from sky.catalog.config import fallback_to_default_catalog
+from sky.skylet import constants
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
+    from sky.catalog import common
     from sky.clouds import cloud
-    from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
-        clouds = list(ALL_CLOUDS)
+        clouds = list(constants.ALL_CLOUDS)
 
         # TODO(hemil): Remove this once the common service catalog
         # functions are refactored from clouds/kubernetes.py to
@@ -37,10 +32,10 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     def _execute_catalog_method(cloud: str):
         try:
             cloud_module = importlib.import_module(
-                f'sky.clouds.service_catalog.{cloud.lower()}_catalog')
+                f'sky.catalog.{cloud.lower()}_catalog')
         except ModuleNotFoundError:
             raise ValueError(
-                'Cannot find module "sky.clouds.service_catalog'
+                'Cannot find module "sky.catalog'
                 f'.{cloud}_catalog" for cloud "{cloud}".') from None
         try:
             method = getattr(cloud_module, method_name)
@@ -382,10 +377,4 @@ __all__ = [
     'is_image_tag_valid',
     # Configuration
     'fallback_to_default_catalog',
-    # Constants
-    'ALL_CLOUDS',
-    'HOSTED_CATALOG_DIR_URL',
-    'HOSTED_CATALOG_DIR_URL_S3_MIRROR',
-    'CATALOG_SCHEMA_VERSION',
-    'CATALOG_DIR',
 ]

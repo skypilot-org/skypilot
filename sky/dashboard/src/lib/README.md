@@ -213,7 +213,7 @@ For refresh buttons that should pull completely fresh data:
 const handleRefresh = () => {
   // Functions without arguments - use invalidate()
   dashboardCache.invalidate(getClusters);
-  dashboardCache.invalidate(getManagedJobs);
+  dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
   dashboardCache.invalidate(getWorkspaces);
 
   // Functions with arguments - use invalidateFunction()

@@ -196,6 +196,13 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "configmaps" ]
       verbs: [ "get", "patch" ]
+    # Required for high-availability controller
+    - apiGroups: ["apps"]
+      resources: ["deployments", "deployments/status"]
+      verbs: ["*"]
+    - apiGroups: [""]
+      resources: ["persistentvolumeclaims"]
+      verbs: ["*"]
   # Cluster-scoped rules for API server.
   clusterRules:
     # Required for getting node resources.

@@ -389,6 +389,33 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --from-file=credentials.json=$HOME/.nebius/credentials.json
 
+        Optionally, if you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files, following the pattern ``--from-file=<filename>=$HOME/.nebius/<filename>``. Files in this secret will be linked to `~/.nebius/` in the container.
+
+        .. code-block:: bash
+
+            kubectl create secret generic nebius-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials.json=$HOME/.nebius/credentials.json \
+              --from-file=serviceaccount-1-credentials.json=$HOME/.nebius/serviceaccount-1-credentials.json \
+              --from-file=serviceaccount-2-credentials.json=$HOME/.nebius/serviceaccount-2-credentials.json
+
+
+        .. code-block:: yaml
+
+            # SkyPilot config
+
+            workspaces:
+
+              team-a:
+                nebius:
+                  credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
+                  tenant_id: tenant-rrww0kh3nnfo7v0dgw
+
+              team-b:
+                nebius:
+                  credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
+                  tenant_id: tenant-52czfp5clbtq0er1ol
+
         When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
 
         .. code-block:: bash
