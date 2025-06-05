@@ -217,12 +217,15 @@ def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
     # Test with resources having different autostop configurations
     task.set_resources([
         # Resource with autostop over limit (should be capped at 10 minutes)
-        sky.Resources(cpus='16+', autostop={'idle_minutes': 20, 'down': True}),
+        sky.Resources(cpus='16+', autostop={
+            'idle_minutes': 20,
+            'down': True
+        }),
     ])
-    
+
     dag, _ = _load_task_and_apply_policy(
         task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
-    
+
     resources = dag.tasks[0].resources
 
     assert resources[0].autostop_config is not None

@@ -301,6 +301,8 @@ def _execute_dag(
                     'All resources must have the same autostop config.')
         resource_autostop_config = resources[0].autostop_config
 
+        idle_minutes_to_autostop: Optional[int] = None
+        down = False
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (

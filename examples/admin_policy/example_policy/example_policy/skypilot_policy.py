@@ -157,6 +157,7 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
 
+
 def update_current_kubernetes_clusters_from_registry():
     """Mock implementation of updating kubernetes clusters from registry."""
     # All cluster names can be fetched from an organization's internal API.

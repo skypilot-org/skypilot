@@ -665,6 +665,7 @@ def test_network_tier_repr():
     repr_str = str(r)
     assert 'network_tier=standard' in repr_str
 
+
 def test_autostop_config():
     """Test autostop config override functionality."""
     # Override with down=True when no existing autostop config
@@ -762,4 +763,3 @@ def test_autostop_config():
     assert r.autostop_config.enabled is False  # should remain disabled
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 55
-
