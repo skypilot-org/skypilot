@@ -300,6 +300,19 @@ def create_table():
         session.commit()
 
 
+conn_string = None
+if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    conn_string = skypilot_config.get_nested(('db',), None)
+if conn_string:
+    logger.debug(f'using db URI from {conn_string}')
+    SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+else:
+    _DB_PATH = os.path.expanduser('~/.sky/state.db')
+    pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
+    SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
+create_table()
+
+
 def get_config_yaml(key: str) -> Optional[config_utils.Config]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(config_table).filter_by(key=key).first()
@@ -331,18 +344,6 @@ def set_config_yaml(key: str, config: config_utils.Config):
         session.commit()
 
 
-conn_string = None
-if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-    conn_string = skypilot_config.get_nested(('db',), None)
-if conn_string:
-    logger.debug(f'using db URI from {conn_string}')
-    SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
-else:
-    _DB_PATH = os.path.expanduser('~/.sky/state.db')
-    pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-    SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
-create_table()
-
 saved_db_config = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
     saved_db_config = get_config_yaml(API_SERVER_CONFIG_KEY)
@@ -366,7 +367,7 @@ if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             set_config_yaml(API_SERVER_CONFIG_KEY, file_config)
 
 
-def add_or_update_user(user: models.User):
+def add_or_update_user(user: models.User) -> bool:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
