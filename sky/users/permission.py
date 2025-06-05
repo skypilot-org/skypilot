@@ -49,12 +49,13 @@ class PermissionService:
     def _maybe_initialize_policies(self):
         """Initialize policies if they don't already exist."""
         logger.debug(f'Initializing policies in process: {os.getpid()}')
-        
-        # Check if policies are already initialized by looking for existing 
+
+        # Check if policies are already initialized by looking for existing
         # permission policies in the enforcer
         existing_policies = self.enforcer.get_policy()
-        
-        # If we already have policies for the expected roles, skip initialization
+
+        # If we already have policies for the expected roles, skip
+        # initialization
         role_permissions = rbac.get_role_permissions()
         expected_policies = []
         for role, permissions in role_permissions.items():
@@ -62,16 +63,18 @@ class PermissionService:
                     'permissions']:
                 blocklist = permissions['permissions']['blocklist']
                 for item in blocklist:
-                    expected_policies.append([role, item['path'], item['method']])
-        
+                    expected_policies.append(
+                        [role, item['path'], item['method']])
+
         # Check if all expected policies already exist
         policies_exist = all(
-            any(policy == expected for policy in existing_policies)
-            for expected in expected_policies
-        )
-        
+            any(policy == expected
+                for policy in existing_policies)
+            for expected in expected_policies)
+
         if not policies_exist:
-            # Only clear and reinitialize if policies don't exist or are incomplete
+            # Only clear and reinitialize if policies don't exist or are
+            # incomplete
             logger.debug('Policies not found or incomplete, initializing...')
             # Only clear p policies (permission policies),
             # keep g policies (role policies)
@@ -87,7 +90,7 @@ class PermissionService:
             self.enforcer.save_policy()
         else:
             logger.debug('Policies already exist, skipping initialization')
-            
+
         # Always ensure users have default roles (this is idempotent)
         all_users = global_user_state.get_all_users()
         for user in all_users:

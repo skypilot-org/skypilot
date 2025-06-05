@@ -119,7 +119,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       if (showLoading) setIsLoading(true);
       try {
         // Fetch data using cache like workspaces.jsx
-        const [usersData, clustersData, managedJobsResponse] = 
+        const [usersData, clustersData, managedJobsResponse] =
           await Promise.all([
             dashboardCache.get(getUsers),
             dashboardCache.get(getClusters),
