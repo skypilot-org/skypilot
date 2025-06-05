@@ -120,19 +120,19 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       try {
         // Step 1: Load users first and show them immediately
         const usersData = await dashboardCache.get(getUsers);
-        
+
         // Show users immediately with placeholder counts
         const initialProcessedUsers = (usersData || []).map((user) => ({
           ...user,
           usernameDisplay: parseUsername(user.username),
           fullEmail: getFullEmail(user.username),
           clusterCount: -1, // Use -1 as loading indicator
-          jobCount: -1,     // Use -1 as loading indicator
+          jobCount: -1, // Use -1 as loading indicator
         }));
 
         setUsersWithCounts(initialProcessedUsers);
         setHasInitiallyLoaded(true);
-        
+
         // Clear loading indicators now that we have users
         if (setLoading && showLoading) setLoading(false);
         if (showLoading) setIsLoading(false);
@@ -163,7 +163,6 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
         });
 
         setUsersWithCounts(finalProcessedUsers);
-        
       } catch (error) {
         console.error('Failed to fetch or process user data:', error);
         setUsersWithCounts([]);
