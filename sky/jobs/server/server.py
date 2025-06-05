@@ -61,6 +61,19 @@ async def cancel(request: fastapi.Request,
     )
 
 
+@router.post('/preempt')
+async def preempt(request: fastapi.Request,
+                  jobs_preempt_body: payloads.JobsPreemptBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.preempt',
+        request_body=jobs_preempt_body,
+        func=core.preempt,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+    )
+
+
 @router.post('/logs')
 async def logs(
     request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody,
