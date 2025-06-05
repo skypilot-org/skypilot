@@ -19,6 +19,7 @@ import logging
 import os
 import pathlib
 import subprocess
+import tempfile
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -47,6 +48,7 @@ from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import dag_utils
+from sky.utils.kubernetes import ssh_utils
 from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -1422,7 +1424,7 @@ def local_down() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_up(infra: Optional[str] = None, file: Optional[str] = None) -> server_common.RequestId:
     """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
 
     Args:
@@ -1432,6 +1434,10 @@ def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
+    if file is not None:
+        upd_id = update_ssh_node_pools(file, infra)
+        # Wait until the update is done.
+        stream_and_get(upd_id)
     body = payloads.SSHUpBody(
         infra=infra,
         cleanup=False,
@@ -1464,6 +1470,96 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
                              cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
+
+def _validate_and_upload_identity_file(
+    file: str, infra: Optional[str]
+) -> Dict[str, Any]:
+    """Validate the pool config and upload the SSH key to the API server.
+
+    Also replace the file path with the uploaded key path.
+    """
+    file = os.path.expanduser(file)
+    if not os.path.exists(file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH Node Pool config file {file} does not exist. '
+                             'Please check if the file exists and the path is correct.')
+    config = ssh_utils.load_ssh_targets(file)
+    config = ssh_utils.get_cluster_config(config, infra)
+    new_config = {}
+    for name, pool_config in config.items():
+        hosts_info = ssh_utils.prepare_hosts_info(
+            name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
+        new_config[name] = {'hosts': hosts_info}
+    return new_config
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def update_ssh_node_pools(file: str, infra: Optional[str] = None
+                          ) -> server_common.RequestId:
+    """Updates the SSH Node Pools configurations.
+
+    Args:
+        pools_config: The new SSH Node Pools configurations.
+    """
+    body = payloads.UpdateSSHNodePoolsBody(
+        pools_config=_validate_and_upload_identity_file(file, infra))
+    response = requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def upload_ssh_key(key_name: str, key_file_path: str) -> server_common.RequestId:
+    """Uploads an SSH private key to the API server.
+
+    Args:
+        key_name: The name to give the SSH key.
+        key_file_path: Path to the SSH private key file to upload.
+
+    Returns:
+        The request ID of the upload SSH key request.
+
+    Request Returns:
+        A dictionary containing the upload status and key path:
+
+        .. code-block:: python
+
+            {
+                'status': 'success',
+                'key_path': '/remote/path/to/uploaded/key'
+            }
+    """
+    if not os.path.exists(os.path.expanduser(key_file_path)):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH key file not found: {key_file_path}')
+    
+    with open(os.path.expanduser(key_file_path), 'rb') as key_file:
+        files = {
+            'key_file': (key_name, key_file, 'application/octet-stream')
+        }
+        data = {
+            'key_name': key_name
+        }
+        
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/keys',
+            files=files,
+            data=data,
+            cookies=server_common.get_api_cookie_jar()
+        )
+    
+    return server_common.get_request_id(response)
+
+
+def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
+    """Uploads an SSH private key to the API server and waits for it to be ready."""
+    upload_id = upload_ssh_key(key_name, key_file_path)
+    return stream_and_get(upload_id)
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
