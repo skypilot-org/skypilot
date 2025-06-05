@@ -470,6 +470,74 @@ function SSHNodePoolDetails({
     }
   };
 
+  // Determine button states based on status
+  const getButtonStates = () => {
+    if (!statusData) {
+      return {
+        deployDisabled: true,
+        repairDisabled: true
+      };
+    }
+
+    const status = statusData.status;
+    
+    if (status === 'Ready') {
+      return {
+        deployDisabled: true,
+        repairDisabled: true
+      };
+    } else if (status === 'Error') {
+      return {
+        deployDisabled: true,
+        repairDisabled: false
+      };
+    } else {
+      // Not Ready or other status
+      return {
+        deployDisabled: false,
+        repairDisabled: true
+      };
+    }
+  };
+
+  const { deployDisabled, repairDisabled } = getButtonStates();
+
+  const handleDeployClick = () => {
+    const confirmed = confirm(
+      `Are you sure you want to deploy SSH Node Pool "${poolName}"?\n\n` +
+      `This will:\n` +
+      `• Set up SkyPilot runtime on the configured SSH hosts\n` +
+      `• Install required components and dependencies\n` +
+      `• Make the node pool available for workloads\n\n` +
+      `This process may a few minutes to complete.`
+    );
+    
+    if (confirmed) {
+      console.log('Deploy button clicked for pool:', poolName);
+      if (handleDeploySSHPool) {
+        handleDeploySSHPool(poolName);
+      }
+    }
+  };
+
+  const handleRepairClick = () => {
+    const confirmed = confirm(
+      `Are you sure you want to repair SSH Node Pool "${poolName}"?\n\n` +
+      `This will:\n` +
+      `• Attempt to fix any configuration issues\n` +
+      `• Reinstall or update components if needed\n` +
+      `• May temporarily disrupt existing workloads\n\n` +
+      `This process may take a few minutes to complete.`
+    );
+    
+    if (confirmed) {
+      console.log('Repair button clicked for pool:', poolName);
+      if (handleDeploySSHPool) {
+        handleDeploySSHPool(poolName);
+      }
+    }
+  };
+
   return (
     <div>
       {/* SSH Node Pool Info Card */}
@@ -479,24 +547,39 @@ function SSHNodePoolDetails({
             <h3 className="text-lg font-semibold">SSH Node Pool Details</h3>
             <div className="flex items-center space-x-2">
               <button
-                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
-                onClick={() => {
-                  console.log('Deploy button clicked for pool:', poolName);
-                  if (handleDeploySSHPool) {
-                    handleDeploySSHPool(poolName);
-                  }
-                }}
+                className={`px-3 py-1 text-sm border rounded flex items-center ${
+                  deployDisabled
+                    ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                }`}
+                onClick={deployDisabled ? undefined : handleDeployClick}
+                disabled={deployDisabled}
               >
                 <PlayIcon className="w-4 h-4 mr-2" />
                 Deploy
               </button>
               <button
+                className={`px-3 py-1 text-sm border rounded flex items-center ${
+                  repairDisabled
+                    ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100'
+                }`}
+                onClick={repairDisabled ? undefined : handleRepairClick}
+                disabled={repairDisabled}
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Repair
+              </button>
+              {/* <button
                 className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
                 onClick={handleEditClick}
               >
                 <EditIcon className="w-4 h-4 mr-2" />
                 Edit
-              </button>
+              </button> */}
               <button
                 className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
                 onClick={() => {
