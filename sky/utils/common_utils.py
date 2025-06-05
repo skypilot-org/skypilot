@@ -257,11 +257,13 @@ class Backoff:
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
+_current_user: Optional['models.User'] = None
 
 
-def set_client_status(client_entrypoint: Optional[str],
+def set_request_context(client_entrypoint: Optional[str],
                       client_command: Optional[str],
-                      using_remote_api_server: bool):
+                      using_remote_api_server: bool,
+                      user: Optional['models.User']):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -270,10 +272,11 @@ def set_client_status(client_entrypoint: Optional[str],
     global _current_command
     global _current_client_entrypoint
     global _using_remote_api_server
+    global _current_user
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
-
+    _current_user = user
 
 def get_current_command() -> str:
     """Returns the command related to this operation.
@@ -285,6 +288,12 @@ def get_current_command() -> str:
         return _current_command
 
     return get_pretty_entrypoint_cmd()
+
+def get_current_user() -> 'models.User':
+    """Returns the current user."""
+    if _current_user is not None:
+        return _current_user
+    return models.User.get_current_user()
 
 
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
@@ -1003,17 +1012,30 @@ def _is_cgroup_v2() -> bool:
 
 
 def get_workspace_users(workspace_config: Dict[str, Any],
-                        all_users: List[models.User]) -> List[str]:
-    """Get the private users for a workspace."""
+                        all_users: List['models.User']) -> List[str]:
+    """Get the users that should have access to a workspace.
+    
+    Args:
+        workspace_config: The configuration of the workspace.
+        all_users: List of all users in the system.
+        
+    Returns:
+        List of user IDs that should have access to the workspace.
+        For private workspaces, returns specific user IDs.
+        For public workspaces, returns ['*'] to indicate all users.
+    """
     if 'private' in workspace_config and workspace_config['private']:
         user_ids = []
-        user_names = workspace_config['allowed_users']
+        user_names = workspace_config.get('allowed_users', [])
         all_users_map = {user.name: user.id for user in all_users}
         for user_name in user_names:
             if user_name not in all_users_map:
+                logger = sky_logging.init_logger(__name__)
                 logger.warning(f'User {user_name} not found in all users')
                 continue
             user_ids.append(all_users_map[user_name])
         return user_ids
     else:
+        # Public workspace - return '*' to indicate all users should have access
         return ['*']
+

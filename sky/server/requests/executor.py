@@ -37,6 +37,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.workspaces import core as workspaces_core
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -229,6 +230,9 @@ def override_request_env_and_config(
     original_env = os.environ.copy()
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
+    # TODO(zhwu): we need to make the entire request a context available to the
+    # entire request execution, so that we can access info like user through
+    # the execution.
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                        name=request_body.env_vars[constants.USER_ENV_VAR])
     global_user_state.add_or_update_user(user)
@@ -244,6 +248,9 @@ def override_request_env_and_config(
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
+            # Rejecting requests to workspaces that the user does not have
+            # permission to access.
+            workspaces_core.reject_request_for_unauthorized_workspace(user)
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be

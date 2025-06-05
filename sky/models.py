@@ -1,8 +1,13 @@
 """Data Models for SkyPilot."""
 
+import getpass
+import os
 import collections
 import dataclasses
 from typing import Any, Dict, Optional
+
+from sky.skylet import constants
+from sky.utils import common_utils
 
 
 @dataclasses.dataclass
@@ -15,6 +20,13 @@ class User:
 
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
+
+    @classmethod
+    def get_current_user(cls) -> 'User':
+        """Returns the current user."""
+        user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
+        user_hash = common_utils.get_user_hash()
+        return User(id=user_hash, name=user_name)
 
 
 RealtimeGpuAvailability = collections.namedtuple(

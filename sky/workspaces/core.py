@@ -12,7 +12,9 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.users import server as users_rest
+from sky import models
+from sky.utils import annotations
+from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import schemas
@@ -239,7 +241,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
         workspaces[workspace_name] = config
         all_users = global_user_state.get_all_users()
         users = common_utils.get_workspace_users(config, all_users)
-        permission_service = users_rest.permission_service
+        permission_service = permission.permission_service
         permission_service.update_workspace_policy(workspace_name, users)
 
     # Use the internal helper function to save
@@ -288,7 +290,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
         # Add policy for the workspace and allowed users
         all_users = global_user_state.get_all_users()
         users = common_utils.get_workspace_users(config, all_users)
-        permission_service = users_rest.permission_service
+        permission_service = permission.permission_service
         permission_service.add_workspace_policy(workspace_name, users)
 
     # Use the internal helper function to save
@@ -339,7 +341,7 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
         if workspace_name not in workspaces:
             raise ValueError(f'Workspace {workspace_name!r} does not exist.')
         del workspaces[workspace_name]
-        permission_service = users_rest.permission_service
+        permission_service = permission.permission_service
         permission_service.remove_workspace_policy(workspace_name)
 
     # Use the internal helper function to save
@@ -445,7 +447,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
-            permission_service = users_rest.permission_service
+            permission_service = permission.permission_service
             for operation, workspaces in workspaces_to_check_policy.items():
                 for workspace_name, users in workspaces.items():
                     if operation == 'add':
@@ -474,3 +476,65 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         # Don't fail the update if the check fails, just warn
 
     return config
+
+def reject_request_for_unauthorized_workspace(user: models.User) -> None:
+    """Rejects a request that has no permission to access active workspace.
+
+    Args:
+        user: The user making the request.
+
+    Raises:
+        PermissionDeniedError: If the user does not have permission to access
+            the active workspace.
+    """
+    active_workspace = skypilot_config.get_active_workspace()
+    if not permission.permission_service.check_workspace_permission(
+            user.id, skypilot_config.get_active_workspace()):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have '
+            f'permission to access workspace {active_workspace}')
+
+def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
+    """Check if a workspace is private.
+    
+    Args:
+        workspace_config: The workspace configuration dictionary.
+        
+    Returns:
+        True if the workspace is private, False if it's public.
+    """
+    return workspace_config.get('private', False)
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def workspaces_for_user(user: models.User) -> List[str]:
+    """Returns the workspaces that the user has access to.
+
+    Args:
+        user: The user to check.
+
+    Returns:
+        A list of workspace names that the user has access to.
+    """
+    workspaces = get_workspaces()
+    user_workspaces = []
+    
+    for workspace_name, workspace_config in workspaces.items():
+        if is_workspace_private(workspace_config):
+            # For private workspaces, check explicit permission
+            if permission.permission_service.check_workspace_permission(
+                    user.id, workspace_name):
+                user_workspaces.append(workspace_name)
+        else:
+            # For public workspaces, all users have access
+            # But we still check permissions to be consistent with the policy system
+            if permission.permission_service.check_workspace_permission(
+                    user.id, workspace_name):
+                user_workspaces.append(workspace_name)
+            else:
+                # If the permission check fails for a public workspace,
+                # it means the policy might not be set up correctly
+                logger.warning(f'Public workspace {workspace_name} permission '
+                             f'check failed for user {user.id}. This might '
+                             f'indicate a policy setup issue.')
+    
+    return user_workspaces

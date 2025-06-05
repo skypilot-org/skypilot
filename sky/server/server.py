@@ -35,7 +35,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -51,6 +50,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import server as users_rest
+from sky.users import permission
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -116,7 +116,7 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is None:
             return await call_next(request)
 
-        permission_service = users_rest.permission_service
+        permission_service = permission.permission_service
         roles = permission_service.get_user_roles_no_load_policy(auth_user.id)
         if 'admin' in roles:
             return await call_next(request)
@@ -124,11 +124,6 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Check the role permission
         if permission_service.check_permission(auth_user.id, request.url.path,
                                                request.method):
-            return fastapi.responses.JSONResponse(
-                status_code=403, content={'detail': 'Forbidden'})
-
-        if not permission_service.check_workspace_permission(
-                auth_user.id, skypilot_config.get_active_workspace()):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -167,7 +162,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
-                users_rest.permission_service.add_user_if_not_exists(
+                permission.permission_service.add_user_if_not_exists(
                     auth_user.id)
 
         body = await request.body()
