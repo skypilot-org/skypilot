@@ -118,18 +118,35 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       if (setLoading && showLoading) setLoading(true);
       if (showLoading) setIsLoading(true);
       try {
-        // Fetch data using cache like workspaces.jsx
-        const [usersData, clustersData, managedJobsResponse] =
-          await Promise.all([
-            dashboardCache.get(getUsers),
-            dashboardCache.get(getClusters),
-            dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-          ]);
+        // Step 1: Load users first and show them immediately
+        const usersData = await dashboardCache.get(getUsers);
+        
+        // Show users immediately with placeholder counts
+        const initialProcessedUsers = (usersData || []).map((user) => ({
+          ...user,
+          usernameDisplay: parseUsername(user.username),
+          fullEmail: getFullEmail(user.username),
+          clusterCount: -1, // Use -1 as loading indicator
+          jobCount: -1,     // Use -1 as loading indicator
+        }));
+
+        setUsersWithCounts(initialProcessedUsers);
+        setHasInitiallyLoaded(true);
+        
+        // Clear loading indicators now that we have users
+        if (setLoading && showLoading) setLoading(false);
+        if (showLoading) setIsLoading(false);
+
+        // Step 2: Load clusters and jobs in background and update counts
+        const [clustersData, managedJobsResponse] = await Promise.all([
+          dashboardCache.get(getClusters),
+          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        ]);
 
         const jobsData = managedJobsResponse.jobs || [];
 
-        // Process users data like getUsersWithCounts function
-        const processedUsers = (usersData || []).map((user) => {
+        // Update users with actual counts
+        const finalProcessedUsers = (usersData || []).map((user) => {
           const userClusters = (clustersData || []).filter(
             (c) => c.user_hash === user.userId
           );
@@ -145,15 +162,15 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
           };
         });
 
-        setUsersWithCounts(processedUsers);
-        setHasInitiallyLoaded(true);
+        setUsersWithCounts(finalProcessedUsers);
+        
       } catch (error) {
         console.error('Failed to fetch or process user data:', error);
         setUsersWithCounts([]);
         setHasInitiallyLoaded(true);
+        if (setLoading && showLoading) setLoading(false);
+        if (showLoading) setIsLoading(false);
       }
-      if (setLoading && showLoading) setLoading(false);
-      if (showLoading) setIsLoading(false);
     },
     [setLoading]
   );
@@ -380,7 +397,12 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                 </div>
               </TableCell>
               <TableCell>
-                {user.clusterCount > 0 ? (
+                {user.clusterCount === -1 ? (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                    <CircularProgress size={10} className="mr-1" />
+                    Loading...
+                  </span>
+                ) : user.clusterCount > 0 ? (
                   <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
                     {user.clusterCount}
                   </span>
@@ -391,7 +413,12 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                 )}
               </TableCell>
               <TableCell>
-                {user.jobCount > 0 ? (
+                {user.jobCount === -1 ? (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                    <CircularProgress size={10} className="mr-1" />
+                    Loading...
+                  </span>
+                ) : user.jobCount > 0 ? (
                   <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
                     {user.jobCount}
                   </span>
