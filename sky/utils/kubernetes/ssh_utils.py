@@ -140,7 +140,6 @@ def prepare_hosts_info(cluster_name: str,
                 raise ValueError(f'Identity file {identity_file} does not exist.')
         key_name = f'{cluster_name}-{i}-{str(uuid.uuid4())[:4]}'
         key_file_on_api_server = upload_ssh_key_func(key_name, identity_file)
-        print(f'Uploaded SSH key {key_name} -> {key_file_on_api_server}')
         return key_file_on_api_server
 
     hosts_info = []

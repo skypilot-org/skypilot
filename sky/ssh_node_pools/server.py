@@ -5,9 +5,6 @@ import fastapi
 
 from sky.ssh_node_pools import core
 from sky.utils import common_utils
-from sky.server.requests import payloads
-from sky.server.requests import executor
-from sky.server.requests import requests as requests_lib
 
 router = fastapi.APIRouter()
 
@@ -25,17 +22,11 @@ async def get_ssh_node_pools() -> Dict[str, Any]:
 
 
 @router.post('')
-async def update_ssh_node_pools(request: fastapi.Request,
-                                update_ssh_node_pools_body: payloads.UpdateSSHNodePoolsBody) -> None:
+async def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
     """Update SSH Node Pool configurations."""
     try:
-        executor.schedule_request(
-            request_id=request.state.request_id,
-            request_name='update_ssh_node_pools',
-            request_body=update_ssh_node_pools_body,
-            func=core.update_pools,
-            schedule_type=requests_lib.ScheduleType.LONG,
-        )
+        core.update_pools(pools_config)
+        return {"status": "success"}
     except Exception as e:
         raise fastapi.HTTPException(
             status_code=400,
@@ -64,7 +55,7 @@ async def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
 
 
 @router.post('/keys')
-async def upload_ssh_key(request: fastapi.Request) -> None:
+async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
     """Upload SSH private key."""
     try:
         form = await request.form()
@@ -78,16 +69,9 @@ async def upload_ssh_key(request: fastapi.Request) -> None:
             )
         
         key_content = await key_file.read()
-        body = payloads.UploadSSHKeyBody(key_name=key_name, key_content=key_content.decode())
-        executor.schedule_request(
-            request_id=request.state.request_id,
-            request_name='upload_ssh_key',
-            request_body=body,
-            func=core.upload_ssh_key,
-            schedule_type=requests_lib.ScheduleType.LONG,
-        )
+        key_path = core.upload_ssh_key(key_name, key_content.decode())
         
-        # return {"status": "success", "key_path": key_path}
+        return {"status": "success", "key_path": key_path}
     except fastapi.HTTPException:
         raise
     except Exception as e:

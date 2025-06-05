@@ -1435,9 +1435,7 @@ def ssh_up(infra: Optional[str] = None, file: Optional[str] = None) -> server_co
         request_id: The request ID of the SSH cluster deployment request.
     """
     if file is not None:
-        upd_id = update_ssh_node_pools(file, infra)
-        # Wait until the update is done.
-        stream_and_get(upd_id)
+        _update_ssh_node_pools(file, infra)
     body = payloads.SSHUpBody(
         infra=infra,
         cleanup=False,
@@ -1493,47 +1491,15 @@ def _validate_and_upload_identity_file(
     return new_config
 
 
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@annotations.client_api
-def update_ssh_node_pools(file: str, infra: Optional[str] = None
-                          ) -> server_common.RequestId:
-    """Updates the SSH Node Pools configurations.
-
-    Args:
-        pools_config: The new SSH Node Pools configurations.
-    """
-    body = payloads.UpdateSSHNodePoolsBody(
-        pools_config=_validate_and_upload_identity_file(file, infra))
-    response = requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
-    return server_common.get_request_id(response)
+def _update_ssh_node_pools(file: str, infra: Optional[str] = None
+                          ) -> None:
+    pools_config = _validate_and_upload_identity_file(file, infra)
+    requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
+                    json={'pools_config': pools_config},
+                    cookies=server_common.get_api_cookie_jar())
 
 
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@annotations.client_api
-def upload_ssh_key(key_name: str, key_file_path: str) -> server_common.RequestId:
-    """Uploads an SSH private key to the API server.
-
-    Args:
-        key_name: The name to give the SSH key.
-        key_file_path: Path to the SSH private key file to upload.
-
-    Returns:
-        The request ID of the upload SSH key request.
-
-    Request Returns:
-        A dictionary containing the upload status and key path:
-
-        .. code-block:: python
-
-            {
-                'status': 'success',
-                'key_path': '/remote/path/to/uploaded/key'
-            }
-    """
+def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
     if not os.path.exists(os.path.expanduser(key_file_path)):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'SSH key file not found: {key_file_path}')
@@ -1553,13 +1519,7 @@ def upload_ssh_key(key_name: str, key_file_path: str) -> server_common.RequestId
             cookies=server_common.get_api_cookie_jar()
         )
     
-    return server_common.get_request_id(response)
-
-
-def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
-    """Uploads an SSH private key to the API server and waits for it to be ready."""
-    upload_id = upload_ssh_key(key_name, key_file_path)
-    return stream_and_get(upload_id)
+    return response.json()['key_path']
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
