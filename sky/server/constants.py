@@ -25,8 +25,10 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
 # Environment variable for a file path to the API cookie file.
+# Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'
 # Default file if unset.
+# Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 
 # The path to the dashboard build output
