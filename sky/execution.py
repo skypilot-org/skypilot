@@ -118,6 +118,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _managed_job_id: Optional[int] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -204,7 +205,8 @@ def _execute(
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
-            _is_launched_by_sky_serve_controller)
+            _is_launched_by_sky_serve_controller,
+            _managed_job_id=_managed_job_id)
 
 
 def _execute_dag(
@@ -228,6 +230,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    _managed_job_id: Optional[int],
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
 
@@ -459,7 +462,8 @@ def _execute_dag(
                 job_id = backend.execute(handle,
                                          task,
                                          detach_run,
-                                         dryrun=dryrun)
+                                         dryrun=dryrun,
+                                         managed_job_id=_managed_job_id)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -492,6 +496,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
+    _managed_job_id: Optional[int] = None,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
@@ -659,6 +664,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _managed_job_id=_managed_job_id,
     )
 
 

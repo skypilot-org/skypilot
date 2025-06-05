@@ -4,6 +4,7 @@ import os
 import fastapi
 import httpx
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.jobs.server import core
 from sky.jobs.server import dashboard_utils
@@ -24,14 +25,15 @@ router = fastapi.APIRouter()
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='jobs.launch',
-        request_body=jobs_launch_body,
-        func=core.launch,
-        schedule_type=api_requests.ScheduleType.LONG,
-        request_cluster_name=common.JOB_CONTROLLER_NAME,
-    )
+    managed_job_id = global_user_state.atomic_increment_managed_job_id()
+    jobs_launch_body.managed_job_id = managed_job_id
+    executor.schedule_request(request_id=request.state.request_id,
+                              request_name='jobs.launch',
+                              request_body=jobs_launch_body,
+                              func=core.launch,
+                              schedule_type=api_requests.ScheduleType.LONG,
+                              request_cluster_name=common.JOB_CONTROLLER_NAME,
+                              request_managed_job_id=managed_job_id)
 
 
 @router.post('/queue')
