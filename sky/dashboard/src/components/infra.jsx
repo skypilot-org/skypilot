@@ -939,6 +939,10 @@ export function GPUs() {
       await sshDownNodePool(poolName);
       await deleteSSHNodePool(poolName);
       await fetchSSHNodePools(); // Refresh the list
+      
+      // Clear selected context and navigate back to infra home page after successful deletion
+      setSelectedContext(null);
+      router.push('/infra');
     } catch (error) {
       console.error('Failed to delete SSH Node Pool:', error);
       alert('Failed to delete SSH Node Pool. Please try again.');
