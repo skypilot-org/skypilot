@@ -16,6 +16,7 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
+import sky
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -923,11 +924,14 @@ def get_job_ids() -> List[int]:
     from sky.backends import backend_utils
     from sky.jobs.server.core import _maybe_restart_controller
     from sky.jobs import utils as managed_job_utils
-    
-    handle = _maybe_restart_controller(True,
-                                       stopped_message='',
-                                       spinner_message='Finding '
-                                       'largest managed job id')
+
+    try:
+        handle = _maybe_restart_controller(True,
+                                        stopped_message='',
+                                        spinner_message='Finding '
+                                        'largest managed job id')
+    except sky.exceptions.ClusterDoesNotExist:
+        return []
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -947,6 +951,7 @@ def get_job_ids() -> List[int]:
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
     return [job['job_id'] for job in jobs]
 
+
 def initialize_managed_job_id() -> int:
     """Initialize the managed job ID.
 
@@ -955,7 +960,7 @@ def initialize_managed_job_id() -> int:
     Returns:
         The initialized managed job ID as an integer.
     """
-    jobs = get_job_ids(refresh=True, skip_finished=False, all_users=True)
+    jobs = get_job_ids()
     if jobs:
         highest_job_id = max([job['job_id'] for job in jobs])
     else:
