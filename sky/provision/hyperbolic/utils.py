@@ -116,21 +116,36 @@ class HyperbolicClient:
             # Debug logging for response
             logger.debug(f'Response status code: {response.status_code}')
             logger.debug(f'Response headers: {dict(response.headers)}')
+
+            # Try to parse response as JSON
             try:
                 response_data = response.json()
                 logger.debug(
                     f'Response body: {json.dumps(response_data, indent=2)}')
-            except json.JSONDecodeError:
-                logger.debug(f'Response body (raw): {response.text}')
+            except json.JSONDecodeError as exc:
+                # If response is not JSON, use the raw text
+                response_text = response.text
+                logger.debug(f'Response body (raw): {response_text}')
+                if not response.ok:
+                    raise HyperbolicError(f'API request failed with status '
+                                          f'{response.status_code}: '
+                                          f'{response_text}') from exc
+                # If response is OK but not JSON, return empty dict
+                return {}
 
             if not response.ok:
                 error_msg = response_data.get(
                     'error', response_data.get('message', response.text))
-                raise HyperbolicError(f'API request failed: {error_msg}')
+                raise HyperbolicError(
+                    f'API request failed with status {response.status_code}: '
+                    f'{error_msg}')
 
             return response_data
         except requests.exceptions.RequestException as e:
             raise HyperbolicError(f'Request failed: {str(e)}') from e
+        except Exception as e:
+            raise HyperbolicError(
+                f'Unexpected error during API request: {str(e)}') from e
 
     def launch_instance(self, gpu_model: str, gpu_count: int,
                         name: str) -> Tuple[str, str]:
