@@ -766,6 +766,7 @@ def update_api_server_config_no_lock(config: config_utils.Config,
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
         global_config_path = get_user_config_path()
+
     # Always save to the local file (PVC in Kubernetes, local file otherwise)
     common_utils.dump_yaml(global_config_path, dict(config))
 
@@ -775,11 +776,11 @@ def update_api_server_config_no_lock(config: config_utils.Config,
         # access
         config_map_utils.patch_configmap_with_config(config, global_config_path)
     if update_db:
-        # import here to avoid circular import
-        # pylint: disable=import-outside-toplevel
-        from sky import global_user_state
         if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             logger.debug('saving api_server config to db')
+            # import here to avoid circular import
+            # pylint: disable=import-outside-toplevel
+            from sky import global_user_state
             global_user_state.set_config_yaml(
                 global_user_state.API_SERVER_CONFIG_KEY, config)
     _reload_config()
