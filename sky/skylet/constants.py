@@ -421,3 +421,112 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'do', 'nebius', 'ssh')
 # END constants used for service catalog.
+# Experimental - may be deprecated in the future without notice.
+SKYPILOT_API_SERVER_DB_URL_ENV_VAR: str = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_DB_URL')
+
+# Node Exporter Installation (v1.9.1)
+NODE_EXPORTER_INSTALLATION_COMMANDS = (
+    'echo "Installing Node Exporter" && '
+    'NODEEXPORTER_VERSION="1.9.1" && '
+    'ARCH=$(uname -m) && '
+    'if [ "$ARCH" = "x86_64" ]; then NODEEXPORTER_ARCH="linux-amd64"; '
+    'elif [ "$ARCH" = "aarch64" ]; then NODEEXPORTER_ARCH="linux-arm64"; '
+    'elif [ "$ARCH" = "armv7l" ]; then NODEEXPORTER_ARCH="linux-armv7"; '
+    'elif [ "$ARCH" = "armv6l" ]; then NODEEXPORTER_ARCH="linux-armv6"; '
+    'else echo "Unsupported architecture for Node Exporter" && exit 1; fi && '
+    'cd /tmp && '
+    'wget "https://github.com/prometheus/node_exporter/releases/download/'
+    'v${NODEEXPORTER_VERSION}/'
+    'node_exporter-${NODEEXPORTER_VERSION}.${NODEEXPORTER_ARCH}.tar.gz" && '
+    'tar xzf "node_exporter-${NODEEXPORTER_VERSION}.'
+    '${NODEEXPORTER_ARCH}.tar.gz" && '
+    'sudo cp "node_exporter-${NODEEXPORTER_VERSION}.'
+    '${NODEEXPORTER_ARCH}/node_exporter" /usr/local/bin/ && '
+    'sudo useradd --no-create-home --shell /bin/false node_exporter && '
+    'sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter && '
+    'rm -rf node_exporter-${NODEEXPORTER_VERSION}.${NODEEXPORTER_ARCH}* && '
+    'echo "Node Exporter installation completed" || '
+    'echo "Failed to install Node Exporter, continuing...";')
+
+# Node Exporter Start Commands (Cloud - Systemd)
+NODE_EXPORTER_CLOUD_START_COMMANDS = (
+    'echo "Starting Node Exporter (systemd)" && '
+    'printf "[Unit]\\nDescription=Node Exporter\\n'
+    'Wants=network-online.target\\nAfter=network-online.target\\n\\n'
+    '[Service]\\nUser=node_exporter\\nGroup=node_exporter\\nType=simple\\n'
+    'ExecStart=/usr/local/bin/node_exporter --collector.systemd '
+    '--collector.processes\\n\\n[Install]\\nWantedBy=multi-user.target\\n" | '
+    'sudo tee /etc/systemd/system/node_exporter.service > /dev/null && '
+    'sudo systemctl daemon-reload && '
+    'sudo systemctl enable node_exporter && '
+    'sudo systemctl start node_exporter && '
+    'sudo systemctl status node_exporter --no-pager && '
+    'echo "Node Exporter started successfully" || '
+    'echo "Failed to start Node Exporter, continuing...";')
+
+# DCGM Exporter Installation (v4.2.3-4.1.1)
+DCGM_EXPORTER_INSTALLATION_COMMANDS = (
+    'echo "Installing DCGM Exporter" && '
+    'if command -v nvidia-smi >/dev/null 2>&1 && '
+    'nvidia-smi -L | grep -q "GPU"; then '
+    'echo "NVIDIA GPUs detected, installing DCGM Exporter..." && '
+    'ARCH=$(uname -m) && '
+    'if [ "$ARCH" = "x86_64" ]; then GO_ARCH="amd64"; '
+    'elif [ "$ARCH" = "aarch64" ]; then GO_ARCH="arm64"; '
+    'else echo "Unsupported architecture for DCGM Exporter" && '
+    'exit 1; fi && '
+    'sudo apt-get update && '
+    'sudo apt-get install -y datacenter-gpu-manager-4-cuda12 && '
+    'sudo apt-get install -y make git golang-1.22 && '
+    'echo "export PATH=\\"/usr/lib/go-1.22/bin:\\$PATH\\"" | '
+    'sudo tee /etc/profile.d/go122.sh && '
+    'export PATH="/usr/lib/go-1.22/bin:$PATH" && '
+    'DCGM_EXPORTER_TAG="4.2.3-4.1.1" && '
+    'cd /tmp && '
+    'wget "https://github.com/NVIDIA/dcgm-exporter/archive/refs/tags/'
+    '${DCGM_EXPORTER_TAG}.tar.gz" && '
+    'tar xzf "${DCGM_EXPORTER_TAG}.tar.gz" && '
+    'cd "dcgm-exporter-${DCGM_EXPORTER_TAG}" && '
+    'make binary DCGM_SYSTEM_LIBS=1 && '
+    'sudo cp cmd/dcgm-exporter/dcgm-exporter /usr/local/bin/ && '
+    'sudo mkdir -p /etc/dcgm-exporter && '
+    'sudo wget -O /etc/dcgm-exporter/default-counters.csv '
+    '"https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/etc/'
+    'default-counters.csv" && '
+    'sudo chmod 644 /etc/dcgm-exporter/default-counters.csv && '
+    'cd /tmp && '
+    'rm -rf "dcgm-exporter-${DCGM_EXPORTER_TAG}"* '
+    '"${DCGM_EXPORTER_TAG}.tar.gz" && '
+    'echo "DCGM Exporter installation completed"; '
+    'else '
+    'echo "No NVIDIA GPUs detected, skipping DCGM Exporter installation"; '
+    'fi || '
+    'echo "Failed to install DCGM Exporter, continuing...";')
+
+# DCGM Exporter Start Commands (Cloud - Systemd)
+DCGM_EXPORTER_CLOUD_START_COMMANDS = (
+    'echo "Starting DCGM Exporter (systemd)" && '
+    'if command -v nvidia-smi >/dev/null 2>&1 && '
+    'nvidia-smi -L | grep -q "GPU" && '
+    '[ -f /usr/local/bin/dcgm-exporter ]; then '
+    'echo "Starting DCGM services and exporter..." && '
+    'sudo systemctl enable nvidia-dcgm && '
+    'sudo systemctl start nvidia-dcgm && '
+    'sudo systemctl status nvidia-dcgm --no-pager && '
+    'printf "[Unit]\\nDescription=DCGM Exporter\\n'
+    'Wants=network-online.target nvidia-dcgm.service\\n'
+    'After=network-online.target nvidia-dcgm.service\\n\\n[Service]\\n'
+    'Type=simple\\nRestart=always\\n'
+    'ExecStart=/usr/local/bin/dcgm-exporter\\n\\n[Install]\\n'
+    'WantedBy=multi-user.target\\n" | '
+    'sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null && '
+    'sudo systemctl daemon-reload && '
+    'sudo systemctl enable dcgm-exporter && '
+    'sudo systemctl start dcgm-exporter && '
+    'sudo systemctl status dcgm-exporter --no-pager && '
+    'echo "DCGM Exporter started successfully"; '
+    'else '
+    'echo "DCGM Exporter not available, skipping start"; '
+    'fi || '
+    'echo "Failed to start DCGM Exporter, continuing...";')
