@@ -358,13 +358,9 @@ if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         overlaid_config = skypilot_config.overlay_skypilot_config(
             config, saved_db_config)
         if overlaid_config != config:
-            logger.info('updating config to db')
             skypilot_config.update_config_no_lock(overlaid_config)
-        else:
-            logger.info('no config update needed')
     else:
         # if no saved config exists, stash the current config to db.
-        logger.info('stashing config to db')
         skypilot_config.update_config_no_lock(config)
 
 
