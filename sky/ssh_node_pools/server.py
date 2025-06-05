@@ -123,16 +123,26 @@ async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
     """Get the status of a specific SSH Node Pool."""
     try:
         from sky import core as sky_core
+        import re
         
         # Call ssh_status to check the context
         context_name = f"ssh-{pool_name}"
         is_ready, reason = sky_core.ssh_status(context_name)
         
+        # Strip ANSI escape codes from the reason text
+        def strip_ansi_codes(text):
+            if not text:
+                return text
+            # Remove ANSI escape sequences (color codes, formatting, etc.)
+            return re.sub(r'\x1b\[[0-9;]*m', '', text)
+        
+        cleaned_reason = strip_ansi_codes(reason) if reason else reason
+        
         return {
             "pool_name": pool_name,
             "context_name": context_name,
             "status": "Ready" if is_ready else "Not Ready",
-            "reason": reason
+            "reason": cleaned_reason
         }
     except Exception as e:
         raise fastapi.HTTPException(
