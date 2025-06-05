@@ -7,7 +7,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
@@ -75,7 +74,7 @@ class Hyperbolic(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'Hyperbolic does not support zones.'
         del accelerators, zone  # unused
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'hyperbolic')
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -84,19 +83,19 @@ class Hyperbolic(clouds.Cloud):
     @classmethod
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds='hyperbolic')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='hyperbolic')
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='hyperbolic')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='hyperbolic')
 
     @classmethod
     def get_default_instance_type(
@@ -112,8 +111,8 @@ class Hyperbolic(clouds.Cloud):
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='hyperbolic')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='hyperbolic')
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -141,8 +140,8 @@ class Hyperbolic(clouds.Cloud):
             resources: 'Resources') -> 'resources_utils.FeasibleResources':
         # Check if the instance type exists in the catalog
         if resources.instance_type is not None:
-            if service_catalog.instance_type_exists(resources.instance_type,
-                                                    'hyperbolic'):
+            if catalog.instance_type_exists(resources.instance_type,
+                                            'hyperbolic'):
                 # Remove accelerators for launchable resources
                 resources_launch = resources.copy(accelerators=None)
                 return resources_utils.FeasibleResources([resources_launch], [],
@@ -156,16 +155,16 @@ class Hyperbolic(clouds.Cloud):
         if accelerators is not None:
             assert len(accelerators) == 1, resources
             acc, acc_count = list(accelerators.items())[0]
-            (instance_list, fuzzy_candidate_list
-            ) = service_catalog.get_instance_type_for_accelerator(
-                acc,
-                acc_count,
-                use_spot=resources.use_spot,
-                cpus=resources.cpus,
-                memory=resources.memory,
-                region=resources.region,
-                zone=resources.zone,
-                clouds='hyperbolic')
+            (instance_list,
+             fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+                 acc,
+                 acc_count,
+                 use_spot=resources.use_spot,
+                 cpus=resources.cpus,
+                 memory=resources.memory,
+                 region=resources.region,
+                 zone=resources.zone,
+                 clouds='hyperbolic')
             if instance_list is None:
                 return resources_utils.FeasibleResources([],
                                                          fuzzy_candidate_list,

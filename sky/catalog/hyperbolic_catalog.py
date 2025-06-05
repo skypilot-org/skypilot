@@ -4,8 +4,8 @@ This module loads and queries the service catalog for Hyperbolic Cloud.
 """
 from typing import Dict, List, Optional, Tuple, Union
 
+from sky.catalog import common
 from sky.clouds import cloud  # Import cloud here for Region
-from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
 # Initialize cloud variable at module level
