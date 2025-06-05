@@ -35,8 +35,8 @@ def get_workspaces() -> Dict[str, Any]:
 
 
 def _update_workspaces_config(
-        workspace_modifier_fn: Callable[[Dict[str, Any]], None],
-        enforce_server_side: bool = True) -> Dict[str, Any]:
+        workspace_modifier_fn: Callable[[Dict[str, Any]],
+                                        None]) -> Dict[str, Any]:
     """Update the workspaces configuration in the config file.
 
     This function uses file locking to prevent race conditions when multiple
@@ -46,9 +46,6 @@ def _update_workspaces_config(
         workspace_modifier_fn: A function that takes the current workspaces
             dict and modifies it in-place. This ensures all read-modify-write
             operations happen atomically inside the lock.
-        enforce_server_side: If True, check if the function is called by the
-            API Server. Only set this to False when this function is being
-            called in a unit test.
 
     Returns:
         The updated workspaces configuration.
@@ -69,8 +66,7 @@ def _update_workspaces_config(
             current_config['workspaces'] = current_workspaces
 
             # Write the configuration back to the file
-            skypilot_config.update_api_server_config_no_lock(
-                current_config, enforce_server_side)
+            skypilot_config.update_api_server_config_no_lock(current_config)
 
             return current_workspaces
     except filelock.Timeout as e:
@@ -210,17 +206,13 @@ def _validate_workspace_config(workspace_name: str,
 
 
 @usage_lib.entrypoint
-def update_workspace(workspace_name: str,
-                     config: Dict[str, Any],
-                     enforce_server_side: bool = True) -> Dict[str, Any]:
+def update_workspace(workspace_name: str, config: Dict[str,
+                                                       Any]) -> Dict[str, Any]:
     """Updates a specific workspace configuration.
 
     Args:
         workspace_name: The name of the workspace to update.
         config: The new configuration for the workspace.
-        enforce_server_side: If True, check if the function is called by the
-            API Server. Only set this to False when this function is being
-            called in a unit test.
 
     Returns:
         The updated workspaces configuration.
@@ -241,8 +233,7 @@ def update_workspace(workspace_name: str,
         workspaces[workspace_name] = config
 
     # Use the internal helper function to save
-    result = _update_workspaces_config(update_workspace_fn,
-                                       enforce_server_side=enforce_server_side)
+    result = _update_workspaces_config(update_workspace_fn)
 
     # Validate the workspace by running sky check for it
     try:
@@ -256,17 +247,13 @@ def update_workspace(workspace_name: str,
 
 
 @usage_lib.entrypoint
-def create_workspace(workspace_name: str,
-                     config: Dict[str, Any],
-                     enforce_server_side: bool = True) -> Dict[str, Any]:
+def create_workspace(workspace_name: str, config: Dict[str,
+                                                       Any]) -> Dict[str, Any]:
     """Creates a new workspace configuration.
 
     Args:
         workspace_name: The name of the workspace to create.
         config: The configuration for the new workspace.
-        enforce_server_side: If True, check if the function is called by the
-            API Server. Only set this to False when this function is being
-            called in a unit test.
 
     Returns:
         The updated workspaces configuration.
@@ -290,8 +277,7 @@ def create_workspace(workspace_name: str,
         workspaces[workspace_name] = config
 
     # Use the internal helper function to save
-    result = _update_workspaces_config(create_workspace_fn,
-                                       enforce_server_side=enforce_server_side)
+    result = _update_workspaces_config(create_workspace_fn)
 
     # Validate the workspace by running sky check for it
     try:
@@ -305,15 +291,11 @@ def create_workspace(workspace_name: str,
 
 
 @usage_lib.entrypoint
-def delete_workspace(workspace_name: str,
-                     enforce_server_side: bool = True) -> Dict[str, Any]:
+def delete_workspace(workspace_name: str) -> Dict[str, Any]:
     """Deletes a workspace configuration.
 
     Args:
         workspace_name: The name of the workspace to delete.
-        enforce_server_side: If True, check if the function is called by the
-            API Server. Only set this to False when this function is being
-            called in a unit test.
 
     Returns:
         The updated workspaces configuration.
@@ -344,8 +326,7 @@ def delete_workspace(workspace_name: str,
         del workspaces[workspace_name]
 
     # Use the internal helper function to save
-    return _update_workspaces_config(delete_workspace_fn,
-                                     enforce_server_side=enforce_server_side)
+    return _update_workspaces_config(delete_workspace_fn)
 
 
 # =========================

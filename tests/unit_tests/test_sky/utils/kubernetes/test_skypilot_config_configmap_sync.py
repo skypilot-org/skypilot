@@ -162,8 +162,7 @@ class TestConfigMapSync(unittest.TestCase):
              mock.patch('sky.skypilot_config._reload_config'):
 
             config = config_utils.Config({'test': 'value'})
-            skypilot_config.update_api_server_config_no_lock(
-                config, enforce_server_side=False)
+            skypilot_config.update_api_server_config_no_lock(config)
 
             # In Kubernetes, should call both dump_yaml and ConfigMap patching
             mock_patch.assert_called_once_with(config, config_path)
@@ -190,8 +189,7 @@ class TestConfigMapSync(unittest.TestCase):
              mock.patch('sky.skypilot_config._reload_config'):
 
             config = config_utils.Config({'test': 'value'})
-            skypilot_config.update_api_server_config_no_lock(
-                config, enforce_server_side=False)
+            skypilot_config.update_api_server_config_no_lock(config)
 
             # In non-Kubernetes, should call dump_yaml but not ConfigMap patch
             mock_dump_yaml.assert_called_once_with(config_path, dict(config))

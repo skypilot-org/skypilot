@@ -756,21 +756,12 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def update_api_server_config_no_lock(config: config_utils.Config,
-                                     enforce_server_side: bool = True) -> None:
+def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
     Args:
         config: The config to save and sync.
-        enforce_server_side: If True, check if the function is called by the
-            API Server. Only set this to False when this function is being
-            called in a unit test.
     """
-    if enforce_server_side:
-        if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
-            raise ValueError(
-                'This function can only be called by the API Server.')
-
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
         global_config_path = get_user_config_path()
