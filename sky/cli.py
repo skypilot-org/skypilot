@@ -26,6 +26,7 @@ each other.
 import collections
 import copy
 import datetime
+import fnmatch
 import functools
 import getpass
 import os
@@ -208,14 +209,14 @@ def _get_cluster_records_and_set_ssh_config(
     return cluster_records
 
 
-def _get_glob_storages(storages: List[str]) -> List[str]:
-    """Returns a list of storages that match the glob pattern."""
+def _get_glob_matches(candidate_names: List[str],
+                      glob_patterns: List[str]) -> List[str]:
+    """Returns a list of names that match the glob pattern."""
     glob_storages = []
-    for storage_object in storages:
-        # TODO(zhwu): client side should not rely on global_user_state.
-        glob_storage = global_user_state.get_glob_storage_name(storage_object)
+    for glob_pattern in glob_patterns:
+        glob_storage = fnmatch.filter(candidate_names, glob_pattern)
         if not glob_storage:
-            click.echo(f'Storage {storage_object} not found.')
+            click.echo(f'Storage {glob_pattern} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -4134,7 +4135,9 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
             return
         names = [storage['name'] for storage in storages]
     else:
-        names = _get_glob_storages(names)
+        storages = sdk.get(sdk.storage_ls())
+        existing_storage_names = [storage['name'] for storage in storages]
+        names = _get_glob_matches(existing_storage_names, names)
     if names:
         if not yes:
             storage_names = ', '.join(names)
