@@ -408,7 +408,15 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
 }
 
 // SSH Node Pool Details component
-function SSHNodePoolDetails({ poolName, gpusInContext, nodesInContext }) {
+function SSHNodePoolDetails({ 
+  poolName, 
+  gpusInContext, 
+  nodesInContext, 
+  handleDeploySSHPool, 
+  handleEditSSHPool, 
+  handleDeleteSSHPool,
+  poolConfig 
+}) {
   const [statusData, setStatusData] = useState(null);
   const [statusLoading, setStatusLoading] = useState(true);
 
@@ -451,13 +459,57 @@ function SSHNodePoolDetails({ poolName, gpusInContext, nodesInContext }) {
     );
   };
 
+  const handleEditClick = () => {
+    console.log('Edit button clicked for pool:', poolName);
+    console.log('Pool config:', poolConfig);
+    console.log('handleEditSSHPool function:', handleEditSSHPool);
+    if (handleEditSSHPool) {
+      handleEditSSHPool(poolName, poolConfig);
+    } else {
+      console.error('handleEditSSHPool function not provided');
+    }
+  };
+
   return (
     <div>
       {/* SSH Node Pool Info Card */}
       <div className="mb-6">
-        <Card>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
           <div className="flex items-center justify-between px-4 pt-4">
             <h3 className="text-lg font-semibold">SSH Node Pool Details</h3>
+            <div className="flex items-center space-x-2">
+              <button
+                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+                onClick={() => {
+                  console.log('Deploy button clicked for pool:', poolName);
+                  if (handleDeploySSHPool) {
+                    handleDeploySSHPool(poolName);
+                  }
+                }}
+              >
+                <PlayIcon className="w-4 h-4 mr-2" />
+                Deploy
+              </button>
+              <button
+                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+                onClick={handleEditClick}
+              >
+                <EditIcon className="w-4 h-4 mr-2" />
+                Edit
+              </button>
+              <button
+                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
+                onClick={() => {
+                  console.log('Delete button clicked for pool:', poolName);
+                  if (handleDeleteSSHPool) {
+                    handleDeleteSSHPool(poolName);
+                  }
+                }}
+              >
+                <TrashIcon className="w-4 h-4 mr-2" />
+                Delete
+              </button>
+            </div>
           </div>
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
@@ -498,7 +550,7 @@ function SSHNodePoolDetails({ poolName, gpusInContext, nodesInContext }) {
               </div>
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* GPU and Node Details */}
@@ -512,13 +564,7 @@ function SSHNodePoolDetails({ poolName, gpusInContext, nodesInContext }) {
 }
 
 // SSH Node Pool Table component with status fetching
-function SSHNodePoolTable({ 
-  pools, 
-  handleDeploySSHPool, 
-  handleEditSSHPool, 
-  handleDeleteSSHPool, 
-  handleContextClick 
-}) {
+function SSHNodePoolTable({ pools, handleContextClick }) {
   const [poolStatuses, setPoolStatuses] = useState({});
   const [statusLoading, setStatusLoading] = useState({});
 
@@ -610,12 +656,15 @@ function SSHNodePoolTable({
             <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
             <th className="p-3 text-left font-medium text-gray-600">GPU Types</th>
             <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
-            <th className="p-3 text-left font-medium text-gray-600">Actions</th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
           {pools.map((pool) => (
-            <tr key={pool.name} className="hover:bg-gray-50">
+            <tr 
+              key={pool.name} 
+              className="hover:bg-gray-50 cursor-pointer"
+              onClick={() => handleContextClick(`ssh-${pool.name}`)}
+            >
               <td className="p-3 font-medium text-gray-700">
                 {pool.displayName}
               </td>
@@ -647,43 +696,6 @@ function SSHNodePoolTable({
               <td className="p-3">{pool.nodes}</td>
               <td className="p-3">{pool.gpuTypes}</td>
               <td className="p-3">{pool.totalGPUs}</td>
-              <td className="p-3">
-                <div className="flex items-center space-x-2">
-                  {pool.isConfigured && (
-                    <>
-                      <button
-                        className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 flex items-center"
-                        onClick={() => handleDeploySSHPool(pool.name)}
-                      >
-                        <PlayIcon className="w-3 h-3 mr-1" />
-                        Deploy
-                      </button>
-                      <button
-                        className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 flex items-center"
-                        onClick={() => handleEditSSHPool(pool.name, pool.config)}
-                      >
-                        <EditIcon className="w-3 h-3 mr-1" />
-                        Edit
-                      </button>
-                      <button
-                        className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
-                        onClick={() => handleDeleteSSHPool(pool.name)}
-                      >
-                        <TrashIcon className="w-3 h-3 mr-1" />
-                        Delete
-                      </button>
-                    </>
-                  )}
-                  {pool.isDeployed && (
-                    <button
-                      className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
-                      onClick={() => handleContextClick(`ssh-${pool.name}`)}
-                    >
-                      View Details
-                    </button>
-                  )}
-                </div>
-              </td>
             </tr>
           ))}
         </tbody>
@@ -1073,6 +1085,10 @@ export function GPUs() {
           poolName={poolName}
           gpusInContext={gpusInContext}
           nodesInContext={nodesInContext}
+          handleDeploySSHPool={handleDeploySSHPool}
+          handleEditSSHPool={handleEditSSHPool}
+          handleDeleteSSHPool={handleDeleteSSHPool}
+          poolConfig={sshNodePools[poolName]}
         />
       );
     }
@@ -1256,15 +1272,13 @@ export function GPUs() {
             <div className="flex items-center">
               <h3 className="text-lg font-semibold">SSH Node Pool</h3>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
               onClick={handleAddSSHPool}
-              className="flex items-center"
             >
               <PlusIcon className="w-4 h-4 mr-2" />
               Add SSH Node Pool
-            </Button>
+            </button>
           </div>
 
           {unifiedPools.length === 0 ? (
@@ -1279,22 +1293,10 @@ export function GPUs() {
           ) : (
             <SSHNodePoolTable 
               pools={unifiedPools} 
-              handleDeploySSHPool={handleDeploySSHPool} 
-              handleEditSSHPool={handleEditSSHPool} 
-              handleDeleteSSHPool={handleDeleteSSHPool} 
               handleContextClick={handleContextClick} 
             />
           )}
         </div>
-
-        {/* SSH Node Pool Modal */}
-        <SSHNodePoolModal
-          isOpen={sshModalOpen}
-          onClose={() => setSshModalOpen(false)}
-          onSave={handleSaveSSHPool}
-          poolData={editingPool}
-          isLoading={sshLoading}
-        />
       </div>
     );
   };
@@ -1416,6 +1418,15 @@ export function GPUs() {
       ) : (
         renderKubernetesTab()
       )}
+      
+      {/* SSH Node Pool Modal - Always available */}
+      <SSHNodePoolModal
+        isOpen={sshModalOpen}
+        onClose={() => setSshModalOpen(false)}
+        onSave={handleSaveSSHPool}
+        poolData={editingPool}
+        isLoading={sshLoading}
+      />
     </Layout>
   );
 }

@@ -134,7 +134,10 @@ async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
             if not text:
                 return text
             # Remove ANSI escape sequences (color codes, formatting, etc.)
-            return re.sub(r'\x1b\[[0-9;]*m', '', text)
+            text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+            # Remove 'disabled. Reason: ' prefix if present
+            text = text.replace('disabled. Reason: ', '')
+            return text
         
         cleaned_reason = strip_ansi_codes(reason) if reason else reason
         
