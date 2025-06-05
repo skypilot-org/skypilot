@@ -66,7 +66,7 @@ def _update_workspaces_config(
             current_config['workspaces'] = current_workspaces
 
             # Write the configuration back to the file
-            skypilot_config.update_config_no_lock(current_config)
+            skypilot_config.update_api_server_config_no_lock(current_config)
 
             return current_workspaces
     except filelock.Timeout as e:
@@ -411,7 +411,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
-            skypilot_config.update_config_no_lock(config_obj)
+            skypilot_config.update_api_server_config_no_lock(config_obj)
     except filelock.Timeout as e:
         raise RuntimeError(
             f'Failed to update configuration due to a timeout '
