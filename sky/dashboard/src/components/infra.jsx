@@ -14,6 +14,14 @@ import { getManagedJobs } from '@/data/connectors/jobs';
 import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool, sshDownNodePool, getSSHNodePoolStatus } from '@/data/connectors/ssh-node-pools';
 import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
@@ -419,6 +427,13 @@ function SSHNodePoolDetails({
 }) {
   const [statusData, setStatusData] = useState(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    action: null, // 'deploy', 'repair', or 'delete'
+    loading: false,
+  });
 
   // Fetch status when component mounts
   useEffect(() => {
@@ -484,7 +499,7 @@ function SSHNodePoolDetails({
     if (status === 'Ready') {
       return {
         deployDisabled: true,
-        repairDisabled: true
+        repairDisabled: false
       };
     } else if (status === 'Error') {
       return {
@@ -503,40 +518,97 @@ function SSHNodePoolDetails({
   const { deployDisabled, repairDisabled } = getButtonStates();
 
   const handleDeployClick = () => {
-    const confirmed = confirm(
-      `Are you sure you want to deploy SSH Node Pool "${poolName}"?\n\n` +
-      `This will:\n` +
-      `• Set up SkyPilot runtime on the configured SSH hosts\n` +
-      `• Install required components and dependencies\n` +
-      `• Make the node pool available for workloads\n\n` +
-      `This process may a few minutes to complete.`
-    );
-    
-    if (confirmed) {
-      console.log('Deploy button clicked for pool:', poolName);
-      if (handleDeploySSHPool) {
-        handleDeploySSHPool(poolName);
-      }
-    }
+    setConfirmDialog({
+      isOpen: true,
+      action: 'deploy',
+      loading: false,
+    });
   };
 
   const handleRepairClick = () => {
-    const confirmed = confirm(
-      `Are you sure you want to repair SSH Node Pool "${poolName}"?\n\n` +
-      `This will:\n` +
-      `• Attempt to fix any configuration issues\n` +
-      `• Reinstall or update components if needed\n` +
-      `• May temporarily disrupt existing workloads\n\n` +
-      `This process may take a few minutes to complete.`
-    );
+    setConfirmDialog({
+      isOpen: true,
+      action: 'repair',
+      loading: false,
+    });
+  };
+
+  const handleDeleteClick = () => {
+    setConfirmDialog({
+      isOpen: true,
+      action: 'delete',
+      loading: false,
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    setConfirmDialog(prev => ({ ...prev, loading: true }));
     
-    if (confirmed) {
-      console.log('Repair button clicked for pool:', poolName);
-      if (handleDeploySSHPool) {
-        handleDeploySSHPool(poolName);
+    try {
+      console.log(`${confirmDialog.action} button clicked for pool:`, poolName);
+      
+      if (confirmDialog.action === 'delete') {
+        if (handleDeleteSSHPool) {
+          await handleDeleteSSHPool(poolName);
+        }
+      } else {
+        // Deploy or repair
+        if (handleDeploySSHPool) {
+          await handleDeploySSHPool(poolName);
+        }
       }
+      
+      // Close dialog on success
+      setConfirmDialog({ isOpen: false, action: null, loading: false });
+    } catch (error) {
+      console.error(`Failed to ${confirmDialog.action} SSH Node Pool:`, error);
+      // Keep dialog open on error so user can retry
+      setConfirmDialog(prev => ({ ...prev, loading: false }));
     }
   };
+
+  const handleCancelAction = () => {
+    setConfirmDialog({ isOpen: false, action: null, loading: false });
+  };
+
+  const getDialogContent = () => {
+    if (confirmDialog.action === 'deploy') {
+      return {
+        title: 'Deploy SSH Node Pool',
+        description: `Are you sure you want to deploy SSH Node Pool "${poolName}"?`,
+        details: [
+          '• Set up SkyPilot runtime on the configured SSH hosts',
+          '• Install required components and dependencies',
+          '• Make the node pool available for workloads',
+          '',
+          'This process may take a few minutes to complete.'
+        ]
+      };
+    } else if (confirmDialog.action === 'repair') {
+      return {
+        title: 'Repair SSH Node Pool',
+        description: `Are you sure you want to repair SSH Node Pool "${poolName}"?`,
+        details: [
+          '• Attempt to fix any configuration issues',
+          '• Reinstall or update components if needed',
+          '• May temporarily disrupt existing workloads',
+          '',
+          'This process may take a few minutes to complete.'
+        ]
+      };
+    } else {
+      return {
+        title: 'Delete SSH Node Pool',
+        description: `Are you sure you want to delete SSH Node Pool "${poolName}"?`,
+        details: [
+          '• Clean up any deployed resources',
+          '• Remove the SSH Node Pool configuration',
+        ]
+      };
+    }
+  };
+
+  const dialogContent = getDialogContent();
 
   return (
     <div>
@@ -582,12 +654,7 @@ function SSHNodePoolDetails({
               </button> */}
               <button
                 className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
-                onClick={() => {
-                  console.log('Delete button clicked for pool:', poolName);
-                  if (handleDeleteSSHPool) {
-                    handleDeleteSSHPool(poolName);
-                  }
-                }}
+                onClick={handleDeleteClick}
               >
                 <TrashIcon className="w-4 h-4 mr-2" />
                 Delete
@@ -642,6 +709,61 @@ function SSHNodePoolDetails({
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
       />
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmDialog.isOpen} onOpenChange={handleCancelAction}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{dialogContent.title}</DialogTitle>
+            <DialogDescription>
+              {dialogContent.description}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="text-sm text-gray-600 space-y-1">
+              <p className="font-medium mb-2">This will:</p>
+              {dialogContent.details.map((detail, index) => (
+                <p key={index} className={detail === '' ? 'pt-2' : ''}>
+                  {detail}
+                </p>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={handleCancelAction}
+              disabled={confirmDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmAction}
+              disabled={confirmDialog.loading}
+              className={
+                confirmDialog.action === 'deploy'
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : confirmDialog.action === 'repair'
+                    ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                    : 'bg-red-600 hover:bg-red-700 text-white'
+              }
+            >
+              {confirmDialog.loading ? (
+                <>
+                  <CircularProgress size={16} className="mr-2" />
+                  {confirmDialog.action === 'deploy' ? 'Deploying...' : 
+                   confirmDialog.action === 'repair' ? 'Repairing...' : 'Deleting...'}
+                </>
+              ) : (
+                confirmDialog.action === 'deploy' ? 'Deploy' : 
+                confirmDialog.action === 'repair' ? 'Repair' : 'Delete'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -931,10 +1053,6 @@ export function GPUs() {
   };
 
   const handleDeleteSSHPool = async (poolName) => {
-    if (!confirm(`Are you sure you want to delete SSH Node Pool "${poolName}"?`)) {
-      return;
-    }
-
     try {
       await sshDownNodePool(poolName);
       await deleteSSHNodePool(poolName);
@@ -1367,16 +1485,10 @@ export function GPUs() {
               Add SSH Node Pool
             </button>
           </div>
-
           {unifiedPools.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-sm text-gray-500 mb-4">
-                No SSH Node Pools configured. Click &quot;Add SSH Node Pool&quot; to get started.
-              </p>
-              <p className="text-xs text-gray-400">
-                SSH Node Pools allow you to deploy Kubernetes on your own machines via SSH.
-              </p>
-            </div>
+            <p className="text-sm text-gray-500">
+              No SSH Node Pools configured. Click &quot;Add SSH Node Pool&quot; to get started.
+            </p>
           ) : (
             <SSHNodePoolTable 
               pools={unifiedPools} 
