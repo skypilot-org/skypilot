@@ -676,7 +676,7 @@ def test_autostop_config():
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
-    assert r.autostop_config.idle_minutes == 5  # default value
+    assert r.autostop_config.idle_minutes == 0  # default value
 
     # Override with idle_minutes when no existing autostop config
     r = Resources()
