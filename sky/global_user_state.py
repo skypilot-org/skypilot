@@ -303,11 +303,14 @@ def get_config_yaml(key: str) -> Optional[config_utils.Config]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(config_table).filter_by(key=key).first()
     if row:
-        return config_utils.Config(yaml.safe_load(row.value))
+        db_config = config_utils.Config(yaml.safe_load(row.value))
+        db_config.pop_nested(('db',), None)
+        return db_config
     return None
 
 
 def set_config_yaml(key: str, config: config_utils.Config):
+    config.pop_nested(('db',), None)
     config_str = common_utils.dump_yaml_str(dict(config))
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         if (SQLALCHEMY_ENGINE.dialect.name ==
@@ -343,11 +346,9 @@ saved_db_config = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
     saved_db_config = get_config_yaml(API_SERVER_CONFIG_KEY)
     file_config = skypilot_config.get_server_config()
-    file_config.pop_nested(('db',), None)
     if saved_db_config:
         # if a saved config exists, merge config from db into skypilot_config
         # and use the merged config to update the db.
-        saved_db_config.pop_nested(('db',), None)
         overlaid_config = skypilot_config.overlay_skypilot_config(
             file_config, saved_db_config)
         if overlaid_config != file_config:
