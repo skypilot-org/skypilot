@@ -3,12 +3,18 @@ import textwrap
 from unittest import mock
 
 from click import testing as cli_testing
+import pytest
 import requests
+from sqlalchemy import create_engine
 
 from sky import cli
 from sky import clouds
+from sky import core
 from sky import exceptions
+from sky import global_user_state
 from sky import server
+from sky.clouds import cloud as sky_cloud
+from sky.skylet import constants
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -321,3 +327,26 @@ class TestHelperFunctions:
         assert added_cluster_args[0][4] is None
         assert added_cluster_args[0][5] == 'ubuntu'
         mock_remove_cluster.assert_not_called()
+
+
+def _mock_realtime_kubernetes_gpu_availability(*args, **kwargs):
+    return [['kind-skypilot', [['H100', [1, 2, 4, 8], 8, 8]]]]
+
+
+class TestNoK8sInstalled:
+    # We should run this test without kubernetes installed. i.e pip install skypilot[aws], and then run this test.
+    @pytest.mark.parametrize('enable_all_clouds', [[clouds.Kubernetes()]],
+                             indirect=True)
+    def test_k8s_alias(self, enable_all_clouds, monkeypatch):
+        global_user_state.set_enabled_clouds(
+            ['kubernetes'], sky_cloud.CloudCapability.COMPUTE,
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
+
+        # Mock realtime_kubernetes_gpu_availability
+        monkeypatch.setattr(core, 'realtime_kubernetes_gpu_availability',
+                            _mock_realtime_kubernetes_gpu_availability)
+
+        cli_runner = cli_testing.CliRunner()
+
+        result = cli_runner.invoke(cli.show_gpus, ['--infra', 'k8s'])
+        assert isinstance(result.exception, exceptions.KubeAPIUnreachableError)
