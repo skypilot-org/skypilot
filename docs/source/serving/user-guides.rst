@@ -8,4 +8,4 @@ Serving User Guides
    auth
    spot-policy
    https
-   high-availability
+   serve-high-availability
