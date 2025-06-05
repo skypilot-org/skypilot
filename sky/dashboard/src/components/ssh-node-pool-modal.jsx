@@ -161,7 +161,7 @@ export function SSHNodePoolModal({
               value={poolName}
               onChange={(e) => setPoolName(e.target.value)}
               disabled={isEditing}
-              className={errors.poolName ? 'border-red-500' : ''}
+              className={`placeholder:text-gray-500 ${errors.poolName ? 'border-red-500' : ''}`}
             />
             {errors.poolName && (
               <p className="text-sm text-red-500">{errors.poolName}</p>
@@ -177,7 +177,7 @@ export function SSHNodePoolModal({
               value={hosts}
               onChange={(e) => setHosts(e.target.value)}
               rows={6}
-              className={errors.hosts ? 'border-red-500' : ''}
+              className={`placeholder:text-gray-500 ${errors.hosts ? 'border-red-500' : ''}`}
             />
             {errors.hosts && (
               <p className="text-sm text-red-500">{errors.hosts}</p>
@@ -192,7 +192,7 @@ export function SSHNodePoolModal({
               placeholder="ubuntu"
               value={sshUser}
               onChange={(e) => setSshUser(e.target.value)}
-              className={errors.sshUser ? 'border-red-500' : ''}
+              className={`placeholder:text-gray-500 ${errors.sshUser ? 'border-red-500' : ''}`}
             />
             {errors.sshUser && (
               <p className="text-sm text-red-500">{errors.sshUser}</p>
@@ -252,6 +252,7 @@ export function SSHNodePoolModal({
               placeholder="Leave empty if using SSH key"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              className="placeholder:text-gray-500"
             />
           </div>
 
@@ -264,7 +265,7 @@ export function SSHNodePoolModal({
           <Button variant="outline" onClick={handleClose} disabled={isLoading}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isLoading}>
+          <Button onClick={handleSave} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500">
             {isLoading ? (
               <>
                 <CircularProgress size={16} className="mr-2" />
