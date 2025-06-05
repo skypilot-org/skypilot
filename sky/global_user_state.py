@@ -24,6 +24,7 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 import yaml
 
+from sky import jobs as jobs_lib
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -919,31 +920,30 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
-def get_managed_job_id() -> int:
-    """Get the current managed job ID.
-    
+def initialize_managed_job_id() -> int:
+    """Initialize the managed job ID.
+
+    We must already own the managed job id lock
+
     Returns:
-        The current managed job ID as an integer.
+        The initialized managed job ID as an integer.
     """
+    jobs = jobs_lib.queue(refresh=True, skip_finished=False, all_users=True)
+    if jobs:
+        highest_job_id = max([job['job_id'] for job in jobs])
+    else:
+        highest_job_id = 0
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(config_table).filter_by(
-            key=_MANAGED_JOB_ID_KEY).first()
-        if row is None:
-            # Initialize to 0 if not set
-            session.execute(
-                config_table.insert().values(
-                    key=_MANAGED_JOB_ID_KEY, 
-                    value='0'
-                )
-            )
-            session.commit()
-            return 0
-        return int(row.value)
+        session.execute(config_table.insert().values(key=_MANAGED_JOB_ID_KEY,
+                                                     value=highest_job_id + 1))
+        session.commit()
+        return highest_job_id + 1
 
 
 def atomic_increment_managed_job_id() -> int:
     """Atomically increment and return the next managed job ID.
-    
+
     Returns:
         The next managed job ID as an integer.
     """
@@ -951,27 +951,16 @@ def atomic_increment_managed_job_id() -> int:
         # Lock row for atomic update
         row = session.query(config_table).filter_by(
             key=_MANAGED_JOB_ID_KEY).with_for_update().first()
-        
+
         if row is None:
             # Initialize to 0 if not set
-            session.execute(
-                config_table.insert().values(
-                    key=_MANAGED_JOB_ID_KEY,
-                    value='0'
-                )
-            )
-            session.commit()
-            return 0
-            
+            return initialize_managed_job_id()
+
         # Increment the ID
         next_id = int(row.value) + 1
-        session.execute(
-            config_table.update().where(
-                config_table.c.key == _MANAGED_JOB_ID_KEY
-            ).values(
-                value=str(next_id)
-            )
-        )
+        session.execute(config_table.update().where(
+            config_table.c.key == _MANAGED_JOB_ID_KEY).values(
+                value=str(next_id)))
         session.commit()
         return next_id
 
