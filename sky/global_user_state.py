@@ -24,7 +24,6 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 import yaml
 
-from sky import jobs as jobs_lib
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -920,6 +919,34 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
+def get_job_ids() -> List[int]:
+    from sky.backends import backend_utils
+    from sky.jobs.server.core import _maybe_restart_controller
+    from sky.jobs import utils as managed_job_utils
+    
+    handle = _maybe_restart_controller(True,
+                                       stopped_message='',
+                                       spinner_message='Finding '
+                                       'largest managed job id')
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    returncode, job_table_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    if returncode != 0:
+        logger.error(job_table_payload + stderr)
+        raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                           f'{returncode}.\n{job_table_payload + stderr}')
+
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    return [job['job_id'] for job in jobs]
+
 def initialize_managed_job_id() -> int:
     """Initialize the managed job ID.
 
@@ -928,7 +955,7 @@ def initialize_managed_job_id() -> int:
     Returns:
         The initialized managed job ID as an integer.
     """
-    jobs = jobs_lib.queue(refresh=True, skip_finished=False, all_users=True)
+    jobs = get_job_ids(refresh=True, skip_finished=False, all_users=True)
     if jobs:
         highest_job_id = max([job['job_id'] for job in jobs])
     else:
