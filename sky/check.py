@@ -75,7 +75,7 @@ def check_capabilities(
                 str, Dict[str, str]]]]]:
             cloud_tuple, capability, allowed = payload
             if not allowed:
-                return (False, 
+                return (capability, False, 
                         'cloud is not included in '
                         'allowed_clouds in ~/.sky/config.yaml')
             with skypilot_config.local_active_workspace_ctx(
