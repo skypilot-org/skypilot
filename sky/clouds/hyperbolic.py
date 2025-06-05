@@ -5,6 +5,7 @@ import os
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.utils import registry
@@ -103,10 +104,10 @@ class Hyperbolic(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional[DiskTier] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='hyperbolic')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='hyperbolic')
 
     @classmethod
     def get_accelerators_from_instance_type(
