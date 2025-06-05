@@ -114,6 +114,7 @@ class RequestPayload:
     # Resources the request operates on.
     cluster_name: Optional[str] = None
     status_msg: Optional[str] = None
+    managed_job_id: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -136,6 +137,7 @@ class Request:
     cluster_name: Optional[str] = None
     # Status message of the request, indicates the reason of current status.
     status_msg: Optional[str] = None
+    managed_job_id: Optional[int] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -221,6 +223,7 @@ class Request:
             user_name=user_name,
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
+            managed_job_id=self.managed_job_id,
         )
 
     def encode(self) -> RequestPayload:
@@ -242,6 +245,7 @@ class Request:
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
+                managed_job_id=self.managed_job_id,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -273,6 +277,7 @@ class Request:
                 user_id=payload.user_id,
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
+                managed_job_id=payload.managed_job_id,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -426,7 +431,8 @@ def create_table(cursor, conn):
         {COL_CLUSTER_NAME} TEXT,
         schedule_type TEXT,
         {COL_USER_ID} TEXT,
-        {COL_STATUS_MSG} TEXT)""")
+        {COL_STATUS_MSG} TEXT,
+        managed_job_id INTEGER)""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')

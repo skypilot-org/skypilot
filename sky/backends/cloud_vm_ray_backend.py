@@ -3454,6 +3454,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
+        managed_job_id: Optional[int] = None,
     ) -> None:
         """Executes generated code on the head node."""
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
@@ -3613,6 +3614,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         detach_run: bool,
+        managed_job_id: Optional[int] = None,
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -3663,10 +3665,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
+            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run, managed_job_id)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
+            self._execute_task_one_node(handle, task_copy, job_id, detach_run, managed_job_id)
 
         return job_id
 
@@ -5198,7 +5200,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
-                               detach_run: bool) -> None:
+                               detach_run: bool, managed_job_id: Optional[int]) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
 
@@ -5238,11 +5240,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                managed_job_id=managed_job_id)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
-                              detach_run: bool) -> None:
+                              detach_run: bool, managed_job_id: Optional[int]) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -5294,4 +5297,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                managed_job_id=managed_job_id)
