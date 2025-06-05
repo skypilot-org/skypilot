@@ -79,7 +79,7 @@ class Nebius(clouds.Cloud):
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
 
-        # Check if the accelerators support InfiniBand (H100 or H200)
+        # Check if the accelerators support InfiniBand (H100 or H200) and 8 GPUs
         if resources.accelerators is not None:
             for acc_name, acc_count in resources.accelerators.items():
                 if acc_name.lower() in ('h100', 'h200') and acc_count == 8:
