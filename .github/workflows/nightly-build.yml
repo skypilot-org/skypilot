@@ -3,6 +3,17 @@ on:
   schedule:
     - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
   workflow_dispatch:
+    inputs:
+      skip_buildkite:
+        description: 'Skip Buildkite tests (smoke, backward-compat, etc.)'
+        required: false
+        default: false
+        type: boolean
+      skip_test_pypi:
+        description: 'Skip publishing to Test PyPI'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   # nightly release check from https://stackoverflow.com/a/67527144
@@ -80,6 +91,7 @@ jobs:
 
       # Trigger Buildkite smoke tests
       - name: Trigger Buildkite Smoke Tests
+        if: ${{ !inputs.skip_buildkite }}
         id: trigger_buildkite
         uses: buildkite/trigger-pipeline-action@v2.3.0
         with:
@@ -99,6 +111,7 @@ jobs:
 
   wait-for-buildkite:
     needs: extract-build-number
+    if: ${{ !inputs.skip_buildkite }}
     uses: ./.github/workflows/wait-for-buildkite.yml
     with:
       organization: "skypilot-1"
@@ -110,7 +123,8 @@ jobs:
 
   publish-and-validate-test-pypi:
     needs: [nightly-build-pypi, wait-for-buildkite]
-    if: needs.wait-for-buildkite.outputs.build_status == 'success'
+    # Use `always()` to ensure this job runs even if the previous job are skipped.
+    if: ${{ !inputs.skip_test_pypi && (inputs.skip_buildkite || (always() && needs.wait-for-buildkite.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot-nightly
@@ -120,6 +134,8 @@ jobs:
 
   publish-and-validate-pypi:
     needs: [nightly-build-pypi, publish-and-validate-test-pypi]
+    # Use `always()` to ensure this job runs even if the previous job are skipped.
+    if: ${{ inputs.skip_test_pypi || (always() && needs.publish-and-validate-test-pypi.result == 'success') }}
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot-nightly
