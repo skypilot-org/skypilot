@@ -14,6 +14,11 @@ on:
         required: false
         default: false
         type: boolean
+      build_number:
+        description: 'Additional build number for same-day releases, from 1 to 99 (0 is reserved for the first release of the day).'
+        required: false
+        type: number
+        default: 0
 
 jobs:
   # nightly release check from https://stackoverflow.com/a/67527144
@@ -69,7 +74,12 @@ jobs:
       - name: Set release version
         id: set-release-version
         run: |
-          RELEASE_VERSION=$(date +%Y%m%d)
+          if [ "${{ inputs.build_number }}" -lt 0 ] || [ "${{ inputs.build_number }}" -gt 99 ]; then
+            echo "Error: build_number must be a number between 0 and 99"
+            exit 1
+          fi
+          # Format the version as YYYYMMDD00, YYYYMMDD01...
+          RELEASE_VERSION="$(date +%Y%m%d)$(printf "%02d" "${{ inputs.build_number }}")"
           sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
