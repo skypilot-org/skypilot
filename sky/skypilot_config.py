@@ -58,6 +58,12 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
+import sqlalchemy
+from sqlalchemy import db_utils
+from sqlalchemy import orm
+from sqlalchemy import postgresql
+from sqlalchemy import sqlite
+from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
@@ -109,6 +115,56 @@ ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 # Path to the client config files.
 _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
+
+SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+API_SERVER_CONFIG_KEY = 'api_server_config'
+
+Base = declarative.declarative_base()
+
+config_yaml_table = sqlalchemy.Table(
+    'config_yaml',
+    Base.metadata,
+    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('value', sqlalchemy.Text),
+)
+
+
+def create_table():
+    # Create tables if they don't exist
+    Base.metadata.create_all(bind=SQLALCHEMY_ENGINE)
+
+
+def get_config_yaml(key: str) -> Optional[config_utils.Config]:
+    assert SQLALCHEMY_ENGINE is not None
+    with orm.Session(SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_yaml_table).filter_by(key=key).first()
+    if row:
+        db_config = config_utils.Config(yaml.safe_load(row.value))
+        db_config.pop_nested(('db',), None)
+        return db_config
+    return None
+
+
+def set_config_yaml(key: str, config: config_utils.Config):
+    assert SQLALCHEMY_ENGINE is not None
+    config.pop_nested(('db',), None)
+    config_str = common_utils.dump_yaml_str(dict(config))
+    with orm.Session(SQLALCHEMY_ENGINE) as session:
+        if (SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(config_yaml_table).values(key=key,
+                                                             value=config_str)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_yaml_table.c.key],
+            set_={config_yaml_table.c.value: config_str})
+        session.execute(do_update_stmt)
+        session.commit()
 
 
 class ConfigContext:
@@ -507,26 +563,32 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
 
 
 def _reload_config_as_server() -> None:
+    global SQLALCHEMY_ENGINE
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
     _set_loaded_config_path(None)
 
-    overrides: List[config_utils.Config] = []
     server_config_path = _resolve_server_config_path()
     server_config = _get_config_from_path(server_config_path)
-    if server_config:
-        overrides.append(server_config)
 
-    # layer the configs on top of each other based on priority
-    overlaid_server_config: config_utils.Config = config_utils.Config()
-    for override in overrides:
-        overlaid_server_config = overlay_skypilot_config(
-            original_config=overlaid_server_config, override_configs=override)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(
-            f'server config: \n'
-            f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
-    _set_loaded_config(overlaid_server_config)
+        logger.debug(f'server config: \n'
+                     f'{common_utils.dump_yaml_str(dict(server_config))}')
+
+    db_url = server_config.get_nested(('db',), None)
+    if db_url and len(server_config.keys()) > 1:
+        raise ValueError(
+            'if db config is specified, no other config is allowed')
+
+    if db_url:
+        if SQLALCHEMY_ENGINE is None:
+            SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url)
+            create_table()
+        db_config = get_config_yaml(API_SERVER_CONFIG_KEY)
+        if db_config:
+            server_config = overlay_skypilot_config(server_config, db_config)
+
+    _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
 
 
@@ -759,8 +821,7 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def update_api_server_config_no_lock(config: config_utils.Config,
-                                     update_db: bool = True) -> None:
+def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
     Args:
@@ -779,20 +840,27 @@ def update_api_server_config_no_lock(config: config_utils.Config,
     if global_config_path is None:
         global_config_path = get_user_config_path()
 
-    # Always save to the local file (PVC in Kubernetes, local file otherwise)
-    common_utils.dump_yaml(global_config_path, dict(config))
-
-    if config_map_utils.is_running_in_kubernetes():
-        # In Kubernetes, sync the PVC config to ConfigMap for user convenience
-        # PVC file is the source of truth, ConfigMap is just a mirror for easy
-        # access
-        config_map_utils.patch_configmap_with_config(config, global_config_path)
-    if update_db:
-        if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+    db_updated = False
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        new_db_url = config.get_nested(('db',), None)
+        if new_db_url:
+            existing_db_url = get_nested(('db',), None)
+            if new_db_url != existing_db_url:
+                raise ValueError('Cannot change db url while server is running')
             logger.debug('saving api_server config to db')
-            # import here to avoid circular import
-            # pylint: disable=import-outside-toplevel
-            from sky import global_user_state
-            global_user_state.set_config_yaml(
-                global_user_state.API_SERVER_CONFIG_KEY, config)
+            set_config_yaml(API_SERVER_CONFIG_KEY, config)
+            db_updated = True
+
+    if not db_updated:
+        # save to the local file (PVC in Kubernetes, local file otherwise)
+        common_utils.dump_yaml(global_config_path, dict(config))
+
+        if config_map_utils.is_running_in_kubernetes():
+            # In Kubernetes, sync the PVC config to ConfigMap for user
+            # convenience.
+            # PVC file is the source of truth, ConfigMap is just a mirror for
+            # easy access.
+            config_map_utils.patch_configmap_with_config(
+                config, global_config_path)
+
     _reload_config()
