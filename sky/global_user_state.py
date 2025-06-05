@@ -29,6 +29,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import context_utils
 from sky.utils import db_utils
 from sky.utils import registry
@@ -352,7 +353,9 @@ if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
     if saved_db_config_str:
         # if a saved config exists, merge config from db into skypilot_config
         # and use the merged config to update the db.
-        saved_db_config = yaml.safe_load(saved_db_config_str)
+        saved_db_config = config_utils.Config(
+            yaml.safe_load(saved_db_config_str))
+        saved_db_config.pop_nested(('db',), None)
         overlaid_config = skypilot_config.overlay_skypilot_config(
             config, saved_db_config)
         if overlaid_config != config:
