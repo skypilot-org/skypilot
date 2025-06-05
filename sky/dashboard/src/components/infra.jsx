@@ -511,6 +511,187 @@ function SSHNodePoolDetails({ poolName, gpusInContext, nodesInContext }) {
   );
 }
 
+// SSH Node Pool Table component with status fetching
+function SSHNodePoolTable({ 
+  pools, 
+  handleDeploySSHPool, 
+  handleEditSSHPool, 
+  handleDeleteSSHPool, 
+  handleContextClick 
+}) {
+  const [poolStatuses, setPoolStatuses] = useState({});
+  const [statusLoading, setStatusLoading] = useState({});
+
+  // Fetch status for deployed pools
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      const deployedPools = pools.filter(pool => pool.isDeployed);
+      
+      for (const pool of deployedPools) {
+        setStatusLoading(prev => ({ ...prev, [pool.name]: true }));
+        
+        try {
+          const status = await getSSHNodePoolStatus(pool.name);
+          setPoolStatuses(prev => ({ ...prev, [pool.name]: status }));
+        } catch (error) {
+          console.error(`Failed to fetch status for pool ${pool.name}:`, error);
+          setPoolStatuses(prev => ({ 
+            ...prev, 
+            [pool.name]: { 
+              status: 'Error', 
+              reason: 'Failed to fetch status' 
+            } 
+          }));
+        } finally {
+          setStatusLoading(prev => ({ ...prev, [pool.name]: false }));
+        }
+      }
+    };
+
+    if (pools.length > 0) {
+      fetchStatuses();
+    }
+  }, [pools]);
+
+  const StatusDisplay = ({ pool }) => {
+    if (!pool.isDeployed) {
+      return (
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+          Not Deployed
+        </span>
+      );
+    }
+
+    if (statusLoading[pool.name]) {
+      return (
+        <div className="flex items-center">
+          <CircularProgress size={16} className="mr-2" />
+          <span className="text-gray-500 text-xs">Loading...</span>
+        </div>
+      );
+    }
+
+    const status = poolStatuses[pool.name];
+    if (!status) {
+      return (
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+          Unknown
+        </span>
+      );
+    }
+
+    const isReady = status.status === 'Ready';
+    const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
+    const textColor = isReady ? 'text-green-800' : 'text-red-800';
+    
+    return (
+      <div className="flex items-center space-x-2">
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}`}>
+          {status.status}
+        </span>
+        {!isReady && status.reason && (
+          <span className="text-xs text-gray-600" title={status.reason}>
+            ({status.reason.length > 30 ? status.reason.substring(0, 30) + '...' : status.reason})
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="p-3 text-left font-medium text-gray-600">Pool Name</th>
+            <th className="p-3 text-left font-medium text-gray-600">Status</th>
+            <th className="p-3 text-left font-medium text-gray-600">Clusters</th>
+            <th className="p-3 text-left font-medium text-gray-600">Jobs</th>
+            <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
+            <th className="p-3 text-left font-medium text-gray-600">GPU Types</th>
+            <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
+            <th className="p-3 text-left font-medium text-gray-600">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {pools.map((pool) => (
+            <tr key={pool.name} className="hover:bg-gray-50">
+              <td className="p-3 font-medium text-gray-700">
+                {pool.displayName}
+              </td>
+              <td className="p-3">
+                <StatusDisplay pool={pool} />
+              </td>
+              <td className="p-3">
+                {pool.clusters > 0 ? (
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                    {pool.clusters}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
+              </td>
+              <td className="p-3">
+                {pool.jobs > 0 ? (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                    {pool.jobs}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
+              </td>
+              <td className="p-3">{pool.nodes}</td>
+              <td className="p-3">{pool.gpuTypes}</td>
+              <td className="p-3">{pool.totalGPUs}</td>
+              <td className="p-3">
+                <div className="flex items-center space-x-2">
+                  {pool.isConfigured && (
+                    <>
+                      <button
+                        className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+                        onClick={() => handleDeploySSHPool(pool.name)}
+                      >
+                        <PlayIcon className="w-3 h-3 mr-1" />
+                        Deploy
+                      </button>
+                      <button
+                        className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+                        onClick={() => handleEditSSHPool(pool.name, pool.config)}
+                      >
+                        <EditIcon className="w-3 h-3 mr-1" />
+                        Edit
+                      </button>
+                      <button
+                        className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
+                        onClick={() => handleDeleteSSHPool(pool.name)}
+                      >
+                        <TrashIcon className="w-3 h-3 mr-1" />
+                        Delete
+                      </button>
+                    </>
+                  )}
+                  {pool.isDeployed && (
+                    <button
+                      className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                      onClick={() => handleContextClick(`ssh-${pool.name}`)}
+                    >
+                      View Details
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function GPUs() {
   // Separate loading states for different data sources
   const [kubeLoading, setKubeLoading] = useState(true);
@@ -1074,14 +1255,6 @@ export function GPUs() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
               <h3 className="text-lg font-semibold">SSH Node Pool</h3>
-              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                {sshPoolsArray.length} {sshPoolsArray.length === 1 ? 'pool' : 'pools'} configured
-              </span>
-              {sshContexts.length > 0 && (
-                <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                  {sshContexts.length} {sshContexts.length === 1 ? 'pool' : 'pools'} deployed
-                </span>
-              )}
             </div>
             <Button
               variant="outline"
@@ -1104,120 +1277,13 @@ export function GPUs() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="p-3 text-left font-medium text-gray-600">Pool Name</th>
-                    <th className="p-3 text-left font-medium text-gray-600">Status</th>
-                    <th className="p-3 text-left font-medium text-gray-600">Clusters</th>
-                    <th className="p-3 text-left font-medium text-gray-600">Jobs</th>
-                    <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
-                    <th className="p-3 text-left font-medium text-gray-600">GPU Types</th>
-                    <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
-                    <th className="p-3 text-left font-medium text-gray-600">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {unifiedPools.map((pool) => (
-                    <tr key={pool.name} className="hover:bg-gray-50">
-                      <td className="p-3 font-medium text-gray-700">
-                        {pool.displayName}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center space-x-2">
-                          {pool.isConfigured && (
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                              Configured
-                            </span>
-                          )}
-                          {pool.isDeployed && (
-                            <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                              Deployed
-                            </span>
-                          )}
-                          {!pool.isConfigured && !pool.isDeployed && (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              Unknown
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        {pool.clusters > 0 ? (
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                            {pool.clusters}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                            0
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {pool.jobs > 0 ? (
-                          <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                            {pool.jobs}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                            0
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3">{pool.nodes}</td>
-                      <td className="p-3">{pool.gpuTypes}</td>
-                      <td className="p-3">{pool.totalGPUs}</td>
-                      <td className="p-3">
-                        <div className="flex items-center space-x-2">
-                          {pool.isConfigured && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeploySSHPool(pool.name)}
-                                className="flex items-center"
-                              >
-                                <PlayIcon className="w-3 h-3 mr-1" />
-                                Deploy
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleEditSSHPool(pool.name, pool.config)}
-                                className="flex items-center"
-                              >
-                                <EditIcon className="w-3 h-3 mr-1" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeleteSSHPool(pool.name)}
-                                className="flex items-center text-red-600 hover:text-red-700"
-                              >
-                                <TrashIcon className="w-3 h-3 mr-1" />
-                                Delete
-                              </Button>
-                            </>
-                          )}
-                          {pool.isDeployed && (
-                            <Button
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleContextClick(`ssh-${pool.name}`)}
-                              className="flex items-center"
-                            >
-                              View Details
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <SSHNodePoolTable 
+              pools={unifiedPools} 
+              handleDeploySSHPool={handleDeploySSHPool} 
+              handleEditSSHPool={handleEditSSHPool} 
+              handleDeleteSSHPool={handleDeleteSSHPool} 
+              handleContextClick={handleContextClick} 
+            />
           )}
         </div>
 

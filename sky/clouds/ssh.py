@@ -216,6 +216,10 @@ class SSH(kubernetes.Kubernetes):
                 [reasons[0]] +
                 [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
             return (False, formatted)
+        
+        # Add ssh- prefix to the context
+        if not context.startswith('ssh-'):
+            context = f'ssh-{context}'
 
         # Get SSH contexts
         try:
