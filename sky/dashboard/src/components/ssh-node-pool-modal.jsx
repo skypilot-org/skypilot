@@ -10,9 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CircularProgress } from '@mui/material';
-import { uploadSSHKey, listSSHKeys } from '@/data/connectors/ssh-node-pools';
+import { uploadSSHKey } from '@/data/connectors/ssh-node-pools';
 
 export function SSHNodePoolModal({ 
   isOpen, 
@@ -24,21 +23,11 @@ export function SSHNodePoolModal({
   const [poolName, setPoolName] = useState('');
   const [hosts, setHosts] = useState('');
   const [sshUser, setSshUser] = useState('ubuntu');
-  const [selectedKeyFile, setSelectedKeyFile] = useState('');
-  const [password, setPassword] = useState('');
-  const [availableKeys, setAvailableKeys] = useState([]);
   const [keyUploadFile, setKeyUploadFile] = useState(null);
-  const [isUploadingKey, setIsUploadingKey] = useState(false);
+  const [password, setPassword] = useState('');
   const [errors, setErrors] = useState({});
 
   const isEditing = poolData !== null;
-
-  // Load available SSH keys when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      loadAvailableKeys();
-    }
-  }, [isOpen]);
 
   // Populate form when editing existing pool
   useEffect(() => {
@@ -46,48 +35,17 @@ export function SSHNodePoolModal({
       setPoolName(poolData.name || '');
       setHosts((poolData.config?.hosts || []).join('\n'));
       setSshUser(poolData.config?.user || 'ubuntu');
-      setSelectedKeyFile(poolData.config?.identity_file || '');
       setPassword(poolData.config?.password || '');
     } else {
       // Reset form for new pool
       setPoolName('');
       setHosts('');
       setSshUser('ubuntu');
-      setSelectedKeyFile('');
+      setKeyUploadFile(null);
       setPassword('');
     }
     setErrors({});
   }, [isEditing, poolData]);
-
-  const loadAvailableKeys = async () => {
-    try {
-      const keys = await listSSHKeys();
-      setAvailableKeys(keys);
-    } catch (error) {
-      console.error('Failed to load SSH keys:', error);
-    }
-  };
-
-  const handleKeyUpload = async () => {
-    if (!keyUploadFile) return;
-
-    setIsUploadingKey(true);
-    try {
-      const keyName = keyUploadFile.name;
-      await uploadSSHKey(keyName, keyUploadFile);
-      await loadAvailableKeys(); // Refresh the list
-      setSelectedKeyFile(`~/.sky/ssh_keys/${keyName}`);
-      setKeyUploadFile(null);
-      // Clear file input
-      const fileInput = document.querySelector('input[type="file"]');
-      if (fileInput) fileInput.value = '';
-    } catch (error) {
-      console.error('Failed to upload SSH key:', error);
-      setErrors({ ...errors, keyUpload: 'Failed to upload SSH key' });
-    } finally {
-      setIsUploadingKey(false);
-    }
-  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -104,15 +62,15 @@ export function SSHNodePoolModal({
       newErrors.sshUser = 'SSH user is required';
     }
 
-    if (!selectedKeyFile && !password) {
-      newErrors.auth = 'Either SSH key or password is required';
+    if (!keyUploadFile && !password) {
+      newErrors.auth = 'Either SSH key file or password is required';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validateForm()) return;
 
     const hostList = hosts
@@ -125,15 +83,23 @@ export function SSHNodePoolModal({
       user: sshUser,
     };
 
-    if (selectedKeyFile) {
-      poolConfig.identity_file = selectedKeyFile;
-    }
+    try {
+      // Upload SSH key if provided
+      if (keyUploadFile) {
+        const keyName = keyUploadFile.name;
+        await uploadSSHKey(keyName, keyUploadFile);
+        poolConfig.identity_file = `~/.sky/ssh_keys/${keyName}`;
+      }
 
-    if (password) {
-      poolConfig.password = password;
-    }
+      if (password) {
+        poolConfig.password = password;
+      }
 
-    onSave(poolName, poolConfig);
+      onSave(poolName, poolConfig);
+    } catch (error) {
+      console.error('Failed to upload SSH key:', error);
+      setErrors({ ...errors, keyUpload: 'Failed to upload SSH key' });
+    }
   };
 
   const handleClose = () => {
@@ -201,55 +167,26 @@ export function SSHNodePoolModal({
 
           {/* SSH Key Selection */}
           <div className="space-y-2">
-            <Label>SSH Private Key</Label>
-            <div className="space-y-3">
-              <Select value={selectedKeyFile} onValueChange={setSelectedKeyFile}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an SSH key..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableKeys.map((key) => (
-                    <SelectItem key={key} value={`~/.sky/ssh_keys/${key}`}>
-                      {key}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Upload new key */}
-              <div className="flex items-center space-x-2">
-                <Input
-                  type="file"
-                  accept=".pem,.key,id_rsa,id_ed25519"
-                  onChange={(e) => setKeyUploadFile(e.target.files?.[0] || null)}
-                  className="flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleKeyUpload}
-                  disabled={!keyUploadFile || isUploadingKey}
-                >
-                  {isUploadingKey ? (
-                    <CircularProgress size={16} className="mr-2" />
-                  ) : null}
-                  Upload
-                </Button>
-              </div>
-
-              {errors.keyUpload && (
-                <p className="text-sm text-red-500">{errors.keyUpload}</p>
-              )}
-            </div>
+            <Label htmlFor="keyFile">SSH Private Key File</Label>
+            <Input
+              id="keyFile"
+              type="file"
+              accept=".pem,.key,id_rsa,id_ed25519"
+              onChange={(e) => setKeyUploadFile(e.target.files?.[0] || null)}
+              className="border-0 bg-transparent p-0 shadow-none focus:ring-0 file:mr-2 file:text-sm file:py-1 file:px-3 file:border file:border-gray-300 file:rounded file:bg-gray-50 hover:file:bg-gray-100 file:cursor-pointer"
+            />
+            {errors.keyUpload && (
+              <p className="text-sm text-red-500">{errors.keyUpload}</p>
+            )}
           </div>
 
           {/* Optional Password */}
           <div className="space-y-2">
-            <Label htmlFor="password">Password (optional)</Label>
+            <Label htmlFor="password">Password (optional, if sudo requires a password)</Label>
             <Input
               id="password"
               type="password"
-              placeholder="Leave empty if using SSH key"
+              placeholder="Leave empty if using passwordless sudo"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="placeholder:text-gray-500"
