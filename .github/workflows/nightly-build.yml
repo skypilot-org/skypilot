@@ -123,7 +123,8 @@ jobs:
 
   publish-and-validate-test-pypi:
     needs: [nightly-build-pypi, wait-for-buildkite]
-    if: ${{ !inputs.skip_test_pypi && (inputs.skip_buildkite || needs.wait-for-buildkite.outputs.build_status == 'success') }}
+    # Use `always()` to ensure this job runs even if the previous job are skipped.
+    if: ${{ !inputs.skip_test_pypi && (inputs.skip_buildkite || (always() && needs.wait-for-buildkite.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot-nightly
@@ -133,6 +134,8 @@ jobs:
 
   publish-and-validate-pypi:
     needs: [nightly-build-pypi, publish-and-validate-test-pypi]
+    # Use `always()` to ensure this job runs even if the previous job are skipped.
+    if: ${{ inputs.skip_test_pypi || (always() && needs.publish-and-validate-test-pypi.result == 'success') }}
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot-nightly
