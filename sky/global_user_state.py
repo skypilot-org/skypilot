@@ -44,6 +44,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
+API_SERVER_CONFIG_KEY = 'api_server_config'
 
 Base = declarative.declarative_base()
 
@@ -305,15 +306,16 @@ def create_table():
         session.commit()
 
 
-def get_config_yaml(key: str) -> Optional[str]:
+def get_config_yaml(key: str) -> Optional[config_utils.Config]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(config_yaml_table).filter_by(key=key).first()
     if row:
-        return row.yaml
+        return config_utils.Config(yaml.safe_load(row.yaml))
     return None
 
 
-def set_config_yaml(key: str, yaml_str: str):
+def set_config_yaml(key: str, config: config_utils.Config):
+    config_str = common_utils.dump_yaml_str(dict(config))
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         if (SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -324,10 +326,10 @@ def set_config_yaml(key: str, yaml_str: str):
         else:
             raise ValueError('Unsupported database dialect')
         insert_stmnt = insert_func(config_yaml_table).values(key=key,
-                                                             yaml=yaml_str)
+                                                             yaml=config_str)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[config_yaml_table.c.key],
-            set_={config_yaml_table.c.yaml: yaml_str})
+            set_={config_yaml_table.c.yaml: config_str})
         session.execute(do_update_stmt)
         session.commit()
 
@@ -344,29 +346,29 @@ else:
     SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + _DB_PATH)
 create_table()
 
-saved_db_config_str = None
+saved_db_config = None
 if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-    saved_db_config_str = get_config_yaml('api_server')
-    config = skypilot_config.get_server_config()
-    config.pop_nested(('db',), None)
-    if saved_db_config_str:
+    saved_db_config = get_config_yaml(API_SERVER_CONFIG_KEY)
+    file_config = skypilot_config.get_server_config()
+    file_config.pop_nested(('db',), None)
+    if saved_db_config:
         # if a saved config exists, merge config from db into skypilot_config
         # and use the merged config to update the db.
-        saved_db_config = config_utils.Config(
-            yaml.safe_load(saved_db_config_str))
         saved_db_config.pop_nested(('db',), None)
         overlaid_config = skypilot_config.overlay_skypilot_config(
-            config, saved_db_config)
-        if overlaid_config != config:
-            # update the db here instead of having update_config_no_lock
+            file_config, saved_db_config)
+        if overlaid_config != file_config:
+            # update the db here instead of having
+            # update_api_server_config_no_lock
             # handle db update to avoid circular import
-            skypilot_config.update_config_no_lock(overlaid_config,
-                                                  update_db=False)
-            set_config_yaml('api_server',
-                            common_utils.dump_yaml_str(dict(overlaid_config)))
+            skypilot_config.update_api_server_config_no_lock(overlaid_config,
+                                                             update_db=False)
+            set_config_yaml(API_SERVER_CONFIG_KEY, overlaid_config)
     else:
-        # if no saved config exists, stash the current config to db.
-        set_config_yaml('api_server', common_utils.dump_yaml_str(dict(config)))
+        # if no saved config exists, stash the current config to db
+        # if one exists.
+        if file_config:
+            set_config_yaml(API_SERVER_CONFIG_KEY, file_config)
 
 
 def add_or_update_user(user: models.User):

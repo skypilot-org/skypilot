@@ -756,8 +756,8 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def update_config_no_lock(config: config_utils.Config,
-                          update_db: bool = True) -> None:
+def update_api_server_config_no_lock(config: config_utils.Config,
+                                     update_db: bool = True) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
     Args:
@@ -781,5 +781,5 @@ def update_config_no_lock(config: config_utils.Config,
         if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
             logger.debug('saving api_server config to db')
             global_user_state.set_config_yaml(
-                'api_server', common_utils.dump_yaml_str(dict(config)))
+                global_user_state.API_SERVER_CONFIG_KEY, config)
     _reload_config()
