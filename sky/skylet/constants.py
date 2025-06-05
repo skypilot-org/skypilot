@@ -379,7 +379,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
                                                        ('api_server',),
                                                        ('allowed_clouds',),
-                                                       ('workspaces',)]
+                                                       ('workspaces',), ('db',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -409,6 +409,12 @@ ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 
-# Experimental - may be deprecated in the future without notice.
-SKYPILOT_API_SERVER_DB_URL_ENV_VAR: str = (
-    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_DB_URL')
+# BEGIN constants used for service catalog.
+HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'  # pylint: disable=line-too-long
+HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
+CATALOG_SCHEMA_VERSION = 'v7'
+CATALOG_DIR = '~/.sky/catalogs'
+ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
+              'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
+              'paperspace', 'do', 'nebius', 'ssh')
+# END constants used for service catalog.
