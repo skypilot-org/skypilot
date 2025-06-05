@@ -11,7 +11,7 @@ import { useMobile } from '@/hooks/useMobile';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
-import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool, sshDownNodePool, getSSHNodePoolStatus } from '@/data/connectors/ssh-node-pools';
+import { getSSHNodePools, updateSSHNodePools, deleteSSHNodePool, deploySSHNodePool, sshDownNodePool, getSSHNodePoolStatus, streamSSHDeploymentLogs } from '@/data/connectors/ssh-node-pools';
 import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
 import { Button } from '@/components/ui/button';
 import {
@@ -435,6 +435,16 @@ function SSHNodePoolDetails({
     loading: false,
   });
 
+  // Deployment streaming dialog state
+  const [streamingDialog, setStreamingDialog] = useState({
+    isOpen: false,
+    logs: '',
+    isStreaming: false,
+    deploymentComplete: false,
+    deploymentSuccess: false,
+    requestId: null,
+  });
+
   // Fetch status when component mounts
   useEffect(() => {
     const fetchStatus = async () => {
@@ -551,15 +561,59 @@ function SSHNodePoolDetails({
         if (handleDeleteSSHPool) {
           await handleDeleteSSHPool(poolName);
         }
+        // Close dialog on success
+        setConfirmDialog({ isOpen: false, action: null, loading: false });
       } else {
-        // Deploy or repair
-        if (handleDeploySSHPool) {
-          await handleDeploySSHPool(poolName);
+        // Deploy or repair - start streaming
+        const response = await deploySSHNodePool(poolName);
+        
+        // Close confirmation dialog
+        setConfirmDialog({ isOpen: false, action: null, loading: false });
+        
+        // Open streaming dialog
+        setStreamingDialog({
+          isOpen: true,
+          logs: 'Starting deployment...\n',
+          isStreaming: true,
+          deploymentComplete: false,
+          deploymentSuccess: false,
+          requestId: response.request_id,
+        });
+
+        // Start streaming logs
+        const abortController = new AbortController();
+        
+        try {
+          await streamSSHDeploymentLogs({
+            requestId: response.request_id,
+            signal: abortController.signal,
+            onNewLog: (chunk) => {
+              setStreamingDialog(prev => ({
+                ...prev,
+                logs: prev.logs + chunk,
+              }));
+            },
+          });
+
+          // Deployment completed successfully
+          setStreamingDialog(prev => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: true,
+            logs: prev.logs + '\n✅ Deployment completed successfully!\n',
+          }));
+        } catch (error) {
+          console.error('Deployment streaming error:', error);
+          setStreamingDialog(prev => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: false,
+            logs: prev.logs + `\n❌ Deployment failed: ${error.message}\n`,
+          }));
         }
       }
-      
-      // Close dialog on success
-      setConfirmDialog({ isOpen: false, action: null, loading: false });
     } catch (error) {
       console.error(`Failed to ${confirmDialog.action} SSH Node Pool:`, error);
       // Keep dialog open on error so user can retry
@@ -569,6 +623,32 @@ function SSHNodePoolDetails({
 
   const handleCancelAction = () => {
     setConfirmDialog({ isOpen: false, action: null, loading: false });
+  };
+
+  const handleCloseStreamingDialog = () => {
+    setStreamingDialog({
+      isOpen: false,
+      logs: '',
+      isStreaming: false,
+      deploymentComplete: false,
+      deploymentSuccess: false,
+      requestId: null,
+    });
+    
+    // Refresh status after deployment
+    if (streamingDialog.deploymentComplete) {
+      setTimeout(() => {
+        const fetchStatus = async () => {
+          try {
+            const status = await getSSHNodePoolStatus(poolName);
+            setStatusData(status);
+          } catch (error) {
+            console.error('Failed to refresh status:', error);
+          }
+        };
+        fetchStatus();
+      }, 1000);
+    }
   };
 
   const getDialogContent = () => {
@@ -759,6 +839,60 @@ function SSHNodePoolDetails({
               ) : (
                 confirmDialog.action === 'deploy' ? 'Deploy' : 
                 confirmDialog.action === 'repair' ? 'Repair' : 'Delete'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deployment Streaming Dialog */}
+      <Dialog open={streamingDialog.isOpen} onOpenChange={!streamingDialog.isStreaming ? handleCloseStreamingDialog : undefined}>
+        <DialogContent className="sm:max-w-4xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>
+              Deploying SSH Node Pool: {poolName}
+            </DialogTitle>
+            <DialogDescription>
+              {streamingDialog.isStreaming 
+                ? 'Deployment in progress. Do not close this dialog.'
+                : streamingDialog.deploymentSuccess
+                  ? 'Deployment completed successfully!'
+                  : 'Deployment completed with errors.'
+              }
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="bg-black text-green-400 p-4 rounded-md font-mono text-sm max-h-96 overflow-y-auto">
+              <pre className="whitespace-pre-wrap">{streamingDialog.logs}</pre>
+              {streamingDialog.isStreaming && (
+                <div className="flex items-center mt-2">
+                  <CircularProgress size={16} className="mr-2 text-green-400" />
+                  <span className="text-green-400">Streaming logs...</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={handleCloseStreamingDialog}
+              disabled={streamingDialog.isStreaming}
+              className={
+                streamingDialog.deploymentSuccess
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : streamingDialog.deploymentComplete && !streamingDialog.deploymentSuccess
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-gray-600 hover:bg-gray-700 text-white'
+              }
+            >
+              {streamingDialog.isStreaming ? (
+                <>
+                  <CircularProgress size={16} className="mr-2" />
+                  Deploying...
+                </>
+              ) : (
+                'Close'
               )}
             </Button>
           </DialogFooter>

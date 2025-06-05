@@ -110,7 +110,11 @@ async def deploy_ssh_node_pool(request: fastapi.Request, pool_name: str) -> Dict
             schedule_type=requests_lib.ScheduleType.LONG,
         )
         
-        return {"status": "success", "message": f"SSH Node Pool '{pool_name}' deployment started"}
+        return {
+            "status": "success", 
+            "request_id": request.state.request_id,
+            "message": f"SSH Node Pool '{pool_name}' deployment started"
+        }
     except Exception as e:
         raise fastapi.HTTPException(
             status_code=500,

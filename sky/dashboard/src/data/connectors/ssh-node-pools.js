@@ -1,4 +1,8 @@
 import { ENDPOINT } from '@/data/connectors/constants';
+import { showToast } from '@/data/connectors/toast';
+
+// Configuration
+const DEFAULT_TAIL_LINES = 1000;
 
 export async function getSSHNodePools() {
   try {
@@ -164,5 +168,108 @@ export async function getSSHNodePoolStatus(poolName) {
   } catch (error) {
     console.error('Error fetching SSH Node Pool status:', error);
     throw error;
+  }
+}
+
+export async function streamSSHDeploymentLogs({
+  requestId,
+  signal,
+  onNewLog,
+}) {
+  // Measure timeout from last received data, not from start of request.
+  const inactivityTimeout = 30000; // 30 seconds of no data activity
+  let lastActivity = Date.now();
+  let timeoutId;
+
+  // Create an activity-based timeout promise
+  const createTimeoutPromise = () => {
+    return new Promise((resolve) => {
+      const checkActivity = () => {
+        const timeSinceLastActivity = Date.now() - lastActivity;
+
+        if (timeSinceLastActivity >= inactivityTimeout) {
+          resolve({ timeout: true });
+        } else {
+          // Check again after remaining time
+          timeoutId = setTimeout(
+            checkActivity,
+            inactivityTimeout - timeSinceLastActivity
+          );
+        }
+      };
+
+      timeoutId = setTimeout(checkActivity, inactivityTimeout);
+    });
+  };
+
+  const timeoutPromise = createTimeoutPromise();
+
+  // Create the fetch promise
+  const fetchPromise = (async () => {
+    try {
+      const response = await fetch(`${ENDPOINT}/api/stream?request_id=${requestId}&format=plain&tail=${DEFAULT_TAIL_LINES}&follow=true`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // Only use the signal if it's provided
+        ...(signal ? { signal } : {}),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Stream the logs
+      const reader = response.body.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Update activity timestamp when we receive data
+          lastActivity = Date.now();
+
+          const chunk = new TextDecoder().decode(value);
+          onNewLog(chunk);
+        }
+      } finally {
+        reader.cancel();
+        // Clear the timeout when streaming completes successfully
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      }
+      return { timeout: false };
+    } catch (error) {
+      // Clear timeout on any error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      // If this was an abort, just return silently
+      if (error.name === 'AbortError') {
+        return { timeout: false };
+      }
+      throw error;
+    }
+  })();
+
+  // Race the fetch against the activity-based timeout
+  const result = await Promise.race([fetchPromise, timeoutPromise]);
+
+  // Clear any remaining timeout
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  // If we timed out due to inactivity, show a more informative message
+  if (result.timeout) {
+    showToast(
+      `SSH deployment log stream timed out after ${inactivityTimeout / 1000}s of inactivity`,
+      'warning'
+    );
+    return;
   }
 } 
