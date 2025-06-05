@@ -181,7 +181,7 @@ class TestBackwardCompatibility:
         cluster_name = smoke_tests_utils.get_cluster_name()
         task_yaml = textwrap.dedent("""\
             resources:
-            autostop:
+              autostop:
                 idle_minutes: 5
             """)
 
