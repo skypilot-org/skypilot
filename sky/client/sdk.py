@@ -1420,6 +1420,39 @@ def local_down() -> server_common.RequestId:
     return server_common.get_request_id(response)
 
 
+def _update_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
+    file = os.path.expanduser(file)
+    if not os.path.exists(file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH Node Pool config file {file} does not exist. '
+                             'Please check if the file exists and the path is correct.')
+    config = ssh_utils.load_ssh_targets(file)
+    config = ssh_utils.get_cluster_config(config, infra)
+    pools_config = {}
+    for name, pool_config in config.items():
+        hosts_info = ssh_utils.prepare_hosts_info(
+            name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
+        pools_config[name] = {'hosts': hosts_info}
+    requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
+                    json={'pools_config': pools_config},
+                    cookies=server_common.get_api_cookie_jar())
+
+
+def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
+    if not os.path.exists(os.path.expanduser(key_file_path)):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH key file not found: {key_file_path}')
+    
+    with open(os.path.expanduser(key_file_path), 'rb') as key_file:
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/keys',
+            files={'key_file': (key_name, key_file, 'application/octet-stream')},
+            data={'key_name': key_name},
+            cookies=server_common.get_api_cookie_jar())
+    
+    return response.json()['key_path']
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -1467,38 +1500,6 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
                              cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
-
-def _update_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
-    file = os.path.expanduser(file)
-    if not os.path.exists(file):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'SSH Node Pool config file {file} does not exist. '
-                             'Please check if the file exists and the path is correct.')
-    config = ssh_utils.load_ssh_targets(file)
-    config = ssh_utils.get_cluster_config(config, infra)
-    pools_config = {}
-    for name, pool_config in config.items():
-        hosts_info = ssh_utils.prepare_hosts_info(
-            name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
-        pools_config[name] = {'hosts': hosts_info}
-    requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
-                    json={'pools_config': pools_config},
-                    cookies=server_common.get_api_cookie_jar())
-
-
-def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
-    if not os.path.exists(os.path.expanduser(key_file_path)):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'SSH key file not found: {key_file_path}')
-    
-    with open(os.path.expanduser(key_file_path), 'rb') as key_file:
-        response = requests.post(
-            f'{server_common.get_server_url()}/ssh_node_pools/keys',
-            files={'key_file': (key_name, key_file, 'application/octet-stream')},
-            data={'key_name': key_name},
-            cookies=server_common.get_api_cookie_jar())
-    
-    return response.json()['key_path']
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
