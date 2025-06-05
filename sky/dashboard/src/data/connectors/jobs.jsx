@@ -363,6 +363,12 @@ export async function handleJobAction(action, jobId, cluster) {
       requestBody = { all_users: true, refresh: true };
       jobId = 'controller';
       break;
+    case 'preempt':
+      logStarter = 'Preempting';
+      logMiddle = 'preempted';
+      apiPath = 'jobs/preempt';
+      requestBody = { job_ids: [jobId] };
+      break;
     default:
       throw new Error(`Invalid action: ${action}`);
   }
