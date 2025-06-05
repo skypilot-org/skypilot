@@ -309,15 +309,23 @@ def make_job_command_with_user_switching(username: str,
 
 
 def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+            resources_str: str, managed_job_id: Optional[int] = None) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _CURSOR.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
-    _CONN.commit()
+    if managed_job_id is None:
+        _CURSOR.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+            run_timestamp, None, resources_str))
+        _CONN.commit()
+    else:
+        _CURSOR.execute(
+            'INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+            (managed_job_id, job_name, username, job_submitted_at, JobStatus.INIT.value,
+            run_timestamp, None, resources_str))
+        _CONN.commit()
+
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
     for row in rows:
@@ -951,7 +959,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+                resources_str: str, managed_job_id: Optional[int] = None) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -966,7 +974,8 @@ class JobLibCodeGen:
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
-            f'{resources_str!r})',
+            f'{resources_str!r},'
+            f'{managed_job_id!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)
