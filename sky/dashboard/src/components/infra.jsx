@@ -469,16 +469,20 @@ function SSHNodePoolDetails({
 
   const StatusBadge = ({ status, reason }) => {
     const isReady = status === 'Ready';
+    const isNotReady = status === 'Not Ready';
     const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
     const textColor = isReady ? 'text-green-800' : 'text-red-800';
+    
+    // Show helpful hint for "Not Ready" status
+    const displayReason = isNotReady ? 'Click Deploy to set up this node pool' : reason;
     
     return (
       <div className="flex items-center space-x-2">
         <span className={`px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}`}>
           {status}
         </span>
-        {!isReady && reason && (
-          <span className="text-sm text-gray-600">({reason})</span>
+        {!isReady && displayReason && (
+          <span className="text-sm text-gray-600">({displayReason})</span>
         )}
       </div>
     );
