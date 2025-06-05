@@ -9,6 +9,7 @@ from sky import clouds
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
+from sky.provision.nebius import constants as nebius_constants
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -76,8 +77,16 @@ class Nebius(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        
+        # Check if the instance type supports InfiniBand (H100 or H200)
+        if resources.instance_type is not None:
+            platform, _ = resources.instance_type.split('_')
+            if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
+                # Remove CUSTOM_NETWORK_TIER from unsupported features for InfiniBand-capable instances
+                unsupported.pop(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER, None)
+        
+        return unsupported
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -230,11 +239,28 @@ class Nebius(clouds.Cloud):
             'filesystems': resources_vars_fs
         }
 
+        docker_run_options = []
+        
         if acc_dict is not None:
             # Nebius cloud's docker runtime information does not contain
             # 'nvidia-container-runtime', causing no GPU option to be added to
             # the docker run command. We patch this by adding it here.
-            resources_vars['docker_run_options'] = ['--gpus all']
+            docker_run_options.append('--gpus all')
+
+        # Check for InfiniBand support with network_tier: best
+        is_infiniband_capable = platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS
+        if (is_infiniband_capable and 
+            resources.network_tier == resources_utils.NetworkTier.BEST and
+            resources.extract_docker_image() is not None):
+            # Add InfiniBand device access and IPC_LOCK capability for docker containers
+            docker_run_options.extend(nebius_constants.INFINIBAND_DOCKER_OPTIONS)
+            
+            # Add InfiniBand environment variables to docker run options
+            for env_var, env_value in nebius_constants.INFINIBAND_ENV_VARS.items():
+                docker_run_options.extend(['-e', f'{env_var}={env_value}'])
+
+        if docker_run_options:
+            resources_vars['docker_run_options'] = docker_run_options
 
         return resources_vars
 
