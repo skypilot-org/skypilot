@@ -28,7 +28,6 @@ import copy
 import datetime
 import fnmatch
 import functools
-import getpass
 import os
 import pathlib
 import shlex
@@ -6247,7 +6246,8 @@ def api_info():
     api_server_info = sdk.api_info()
     api_server_user = api_server_info.get('user')
     if api_server_user is not None:
-        user = models.User(id=api_server_user['id'], name=api_server_user['name'])
+        user = models.User(id=api_server_user['id'],
+                           name=api_server_user['name'])
     else:
         user = models.User.get_current_user()
     dashboard_url = server_common.get_dashboard_url(url)

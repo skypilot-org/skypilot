@@ -1,9 +1,9 @@
 """Data Models for SkyPilot."""
 
-import getpass
-import os
 import collections
 import dataclasses
+import getpass
+import os
 from typing import Any, Dict, Optional
 
 from sky.skylet import constants

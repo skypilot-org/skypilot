@@ -1,13 +1,12 @@
 """RBAC (Role-Based Access Control) functionality for SkyPilot API Server."""
 
 import enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
-from sky.utils import common_utils
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
@@ -89,16 +88,33 @@ def get_role_permissions(
     return config_permissions
 
 
-def get_workspace_policy_permissions() -> Dict[str, List[str]]:
-    """Get all workspace policy permissions from config."""
-    current_config = skypilot_config.to_dict()
-    current_workspaces = current_config.get('workspaces', {})
+def get_workspace_policy_permissions(
+        workspace_name: Optional[str] = None) -> Dict[str, List[str]]:
+    """Get workspace policy permissions from config.
+
+    Args:
+        workspace_name: The name of the workspace to get the policy permissions
+            for. If None, return all workspace policy permissions.
+
+    Returns:
+        A dictionary of workspace policy permissions.
+        Example:
+        {
+            'workspace1': ['user1', 'user2'],
+            'workspace2': ['user3', 'user4']
+        }
+    """
+    current_workspaces = workspaces_core.get_workspaces()
     workspaces_to_policy = {}
-    all_users = global_user_state.get_all_users()
     for workspace_name, workspace_config in current_workspaces.items():
-        users = common_utils.get_workspace_users(workspace_config, all_users)
-        workspaces_to_policy[workspace_name] = users
+        if workspace_config.get('private', False):
+            # This only list out the users explicitly allowed.
+            # Admin users should be automatically included during checks.
+            users = workspace_config.get('allowed_users', [])
+            workspaces_to_policy[workspace_name] = users
+        else:
+            workspaces_to_policy[workspace_name] = ['*']
     if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces_to_policy:
         workspaces_to_policy[constants.SKYPILOT_DEFAULT_WORKSPACE] = ['*']
-    logger.info(f'Workspace policy permissions: {workspaces_to_policy}')
+    logger.debug(f'Workspace policy permissions: {workspaces_to_policy}')
     return workspaces_to_policy

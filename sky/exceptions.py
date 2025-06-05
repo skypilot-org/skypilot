@@ -584,6 +584,7 @@ class RequestAlreadyExistsError(Exception):
     """Raised when a request is already exists."""
     pass
 
+
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
     pass

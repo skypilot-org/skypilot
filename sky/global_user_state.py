@@ -258,7 +258,8 @@ def create_table():
             'user_hash',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries=common_utils.get_current_user().id)
+            value_to_replace_existing_entries=common_utils.get_current_user(
+            ).id)
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'clusters',
@@ -877,7 +878,7 @@ def get_cluster_from_name(
 
 def get_clusters() -> List[Dict[str, Any]]:
     current_user = common_utils.get_current_user()
-    
+
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         rows = session.query(cluster_table).order_by(
             sqlalchemy.desc(cluster_table.c.launched_at)).all()

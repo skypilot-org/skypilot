@@ -712,10 +712,10 @@ def queue(cluster_name: str,
     """
     all_jobs = not skip_finished
     if all_users:
-        user = None
+        user_hash = None
     else:
-        user = common_utils.get_current_user()
-    code = job_lib.JobLibCodeGen.get_job_queue(user, all_jobs)
+        user_hash = common_utils.get_current_user().id
+    code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
         cluster_name,

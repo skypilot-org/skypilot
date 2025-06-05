@@ -37,7 +37,6 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.workspaces import core as workspaces_core
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -54,6 +53,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import types
@@ -241,7 +241,8 @@ def override_request_env_and_config(
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
         client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server)
+        using_remote_api_server=request_body.using_remote_api_server,
+        user=user)
     try:
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')

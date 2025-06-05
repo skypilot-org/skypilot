@@ -34,7 +34,6 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.workspaces import core as workspaces_core
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -52,6 +51,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import requests
@@ -2578,25 +2578,25 @@ def get_clusters(
     """
     records = global_user_state.get_clusters()
     current_user = common_utils.get_current_user()
-    
+
     # Filter by user if requested
     if not all_users:
         records = [
             record for record in records
             if record['user_hash'] == current_user.id
         ]
-    
+
     accessible_workspaces = workspaces_core.workspaces_for_user(current_user)
-    
+
     workspace_filtered_records = []
     for record in records:
-        cluster_workspace = record.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+        cluster_workspace = record.get('workspace',
+                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
         if cluster_workspace in accessible_workspaces:
             workspace_filtered_records.append(record)
-    
+
     records = workspace_filtered_records
-            
-    
+
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
