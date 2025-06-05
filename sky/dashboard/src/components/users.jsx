@@ -19,7 +19,9 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getUsersWithCounts } from '@/data/connectors/users';
+import { getUsers } from '@/data/connectors/users';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
@@ -30,6 +32,21 @@ import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import { ENDPOINT } from '@/data/connectors/constants';
 
+// Helper functions for username parsing
+const parseUsername = (username) => {
+  if (username && username.includes('@')) {
+    return username.split('@')[0];
+  }
+  return username || 'N/A';
+};
+
+const getFullEmail = (username) => {
+  if (username && username.includes('@')) {
+    return username;
+  }
+  return '-';
+};
+
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 export function Users() {
@@ -39,7 +56,9 @@ export function Users() {
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getUsersWithCounts);
+    dashboardCache.invalidate(getUsers);
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -96,10 +115,36 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
 
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
-      if (setLoading && showLoading) setLoading(true); // Use parent setLoading if available
+      if (setLoading && showLoading) setLoading(true);
       if (showLoading) setIsLoading(true);
       try {
-        const processedUsers = await dashboardCache.get(getUsersWithCounts);
+        // Fetch data using cache like workspaces.jsx
+        const [usersData, clustersData, managedJobsResponse] = 
+          await Promise.all([
+            dashboardCache.get(getUsers),
+            dashboardCache.get(getClusters),
+            dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+          ]);
+
+        const jobsData = managedJobsResponse.jobs || [];
+
+        // Process users data like getUsersWithCounts function
+        const processedUsers = (usersData || []).map((user) => {
+          const userClusters = (clustersData || []).filter(
+            (c) => c.user_hash === user.userId
+          );
+          const userJobs = (jobsData || []).filter(
+            (j) => j.user_hash === user.userId
+          );
+          return {
+            ...user,
+            usernameDisplay: parseUsername(user.username),
+            fullEmail: getFullEmail(user.username),
+            clusterCount: userClusters.length,
+            jobCount: userJobs.length,
+          };
+        });
+
         setUsersWithCounts(processedUsers);
         setHasInitiallyLoaded(true);
       } catch (error) {
@@ -208,7 +253,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
         throw new Error(errorData.detail || 'Failed to update role');
       }
       // Invalidate cache before fetching new data
-      dashboardCache.invalidate(getUsersWithCounts);
+      dashboardCache.invalidate(getUsers);
       await fetchDataAndProcess(true); // Refresh data
       handleCancelEdit(); // Exit edit mode
     } catch (error) {
