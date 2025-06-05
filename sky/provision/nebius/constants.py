@@ -16,4 +16,26 @@ INFINIBAND_ENV_VARS = {
 }
 
 # Docker run options for InfiniBand support
-INFINIBAND_DOCKER_OPTIONS = ['--device=/dev/infiniband', '--cap-add=IPC_LOCK']
+INFINIBAND_DOCKER_OPTIONS = [
+    '--device=/dev/infiniband',
+    '--cap-add=IPC_LOCK'
+]
+
+# InfiniBand fabric mapping by platform and region
+# Based on Nebius documentation
+INFINIBAND_FABRIC_MAPPING = {
+    # H100 platforms
+    ('gpu-h100-sxm', 'eu-north1'): ['fabric-2', 'fabric-3', 'fabric-4', 'fabric-6'],
+    
+    # H200 platforms  
+    ('gpu-h200-sxm', 'eu-north1'): ['fabric-7'],
+    ('gpu-h200-sxm', 'eu-west1'): ['fabric-5'],
+    ('gpu-h200-sxm', 'us-central1'): ['us-central1-a'],
+}
+
+def get_default_fabric(platform: str, region: str) -> str:
+    """Get the default (first) fabric for a given platform and region."""
+    fabrics = INFINIBAND_FABRIC_MAPPING.get((platform, region), [])
+    if not fabrics:
+        raise ValueError(f'No InfiniBand fabric available for platform {platform} in region {region}')
+    return fabrics[0]

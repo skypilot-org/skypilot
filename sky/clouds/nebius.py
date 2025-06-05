@@ -240,7 +240,8 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
-            'filesystems': resources_vars_fs
+            'filesystems': resources_vars_fs,
+            'network_tier': resources.network_tier
         }
 
         docker_run_options = []
