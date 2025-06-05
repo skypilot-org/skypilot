@@ -196,8 +196,10 @@ class LaunchBody(RequestBody):
     task: str
     cluster_name: str
     retry_until_up: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     idle_minutes_to_autostop: Optional[int] = None
     dryrun: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     down: bool = False
     backend: Optional[str] = None
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
