@@ -146,13 +146,6 @@ cluster_yaml_table = sqlalchemy.Table(
     sqlalchemy.Column('yaml', sqlalchemy.Text),
 )
 
-config_yaml_table = sqlalchemy.Table(
-    'config_yaml',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('yaml', sqlalchemy.Text),
-)
-
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -309,9 +302,9 @@ def create_table():
 
 def get_config_yaml(key: str) -> Optional[config_utils.Config]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
-        row = session.query(config_yaml_table).filter_by(key=key).first()
+        row = session.query(config_table).filter_by(key=key).first()
     if row:
-        return config_utils.Config(yaml.safe_load(row.yaml))
+        return config_utils.Config(yaml.safe_load(row.value))
     return None
 
 
@@ -326,11 +319,11 @@ def set_config_yaml(key: str, config: config_utils.Config):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(config_yaml_table).values(key=key,
-                                                             yaml=config_str)
+        insert_stmnt = insert_func(config_table).values(key=key,
+                                                        value=config_str)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[config_yaml_table.c.key],
-            set_={config_yaml_table.c.yaml: config_str})
+            index_elements=[config_table.c.key],
+            set_={config_table.c.value: config_str})
         session.execute(do_update_stmt)
         session.commit()
 
