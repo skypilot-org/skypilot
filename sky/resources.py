@@ -45,7 +45,9 @@ class AutostopConfig:
     # to be complete.
     enabled: bool
     # If enabled is False, these values are ignored.
-    idle_minutes: int = 5
+    # Keep the default value to 0 to make the behavior consistent with the CLI
+    # flags.
+    idle_minutes: int = 0
     down: bool = False
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
