@@ -660,6 +660,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           <div className="p-3 bg-gray-50 border rounded-lg">
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
+  private: true
+  allowed_users:
+    - user1
+    - user2
   gcp:
     project_id: xxx
     disabled: false

@@ -20,6 +20,7 @@ import uuid
 import jsonschema
 
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -999,3 +1000,20 @@ def _get_cgroup_memory_limit() -> Optional[int]:
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
+
+
+def get_workspace_users(workspace_config: Dict[str, Any],
+                        all_users: List[models.User]) -> List[str]:
+    """Get the private users for a workspace."""
+    if 'private' in workspace_config and workspace_config['private']:
+        user_ids = []
+        user_names = workspace_config['allowed_users']
+        all_users_map = {user.name: user.id for user in all_users}
+        for user_name in user_names:
+            if user_name not in all_users_map:
+                logger.warning(f'User {user_name} not found in all users')
+                continue
+            user_ids.append(all_users_map[user_name])
+        return user_ids
+    else:
+        return ['*']

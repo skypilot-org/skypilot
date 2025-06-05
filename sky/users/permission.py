@@ -3,6 +3,7 @@ import contextlib
 import logging
 import os
 import threading
+import time
 from typing import List
 
 import casbin
@@ -18,6 +19,7 @@ logger = sky_logging.init_logger(__name__)
 # Filelocks for the policy update.
 POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
+POLICY_REFRESH_INTERVAL_SECONDS = 60
 
 _enforcer_instance = None
 _lock = threading.Lock()
@@ -25,6 +27,9 @@ _lock = threading.Lock()
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
+
+    _policy_refresh_thread_started = False
+    _stop_refresh_loop = False
 
     def __init__(self):
         global _enforcer_instance
@@ -45,6 +50,22 @@ class PermissionService:
         else:
             self.enforcer = _enforcer_instance.enforcer
         self._maybe_initialize_policies()
+        self._start_policy_refresh_thread()
+
+    def _start_policy_refresh_thread(self):
+        if getattr(self, '_policy_refresh_thread_started', False):
+            return
+        self._policy_refresh_thread_started = True
+        thread = threading.Thread(target=self._policy_refresh_loop, daemon=True)
+        thread.start()
+
+    def _policy_refresh_loop(self):
+        while not self._stop_refresh_loop:
+            try:
+                self._load_policy_no_lock()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to refresh policy: {e}')
+            time.sleep(POLICY_REFRESH_INTERVAL_SECONDS)
 
     def _maybe_initialize_policies(self):
         """Initialize policies if they don't already exist."""
@@ -65,6 +86,12 @@ class PermissionService:
                 for item in blocklist:
                     expected_policies.append(
                         [role, item['path'], item['method']])
+
+        # Add workspace policy
+        workspace_policy_permissions = rbac.get_workspace_policy_permissions()
+        for workspace_name, users in workspace_policy_permissions.items():
+            for user in users:
+                expected_policies.append([user, workspace_name, '*'])
 
         # Check if all expected policies already exist
         policies_exist = all(
@@ -87,6 +114,9 @@ class PermissionService:
                         path = item['path']
                         method = item['method']
                         self.enforcer.add_policy(role, path, method)
+            for workspace_name, users in workspace_policy_permissions.items():
+                for user in users:
+                    self.enforcer.add_policy(user, workspace_name, '*')
             self.enforcer.save_policy()
         else:
             logger.debug('Policies already exist, skipping initialization')
@@ -143,6 +173,10 @@ class PermissionService:
         self._load_policy()
         return self.enforcer.get_roles_for_user(user)
 
+    def get_user_roles_no_load_policy(self, user: str) -> List[str]:
+        """Get all roles for a user without loading policy."""
+        return self.enforcer.get_roles_for_user(user)
+
     def check_permission(self, user: str, path: str, method: str) -> bool:
         """Check permission."""
         # We intentionally don't load the policy here, as it is a hot path, and
@@ -161,6 +195,37 @@ class PermissionService:
         """Load policy from storage with lock."""
         with _policy_lock():
             self._load_policy_no_lock()
+
+    def check_workspace_permission(self, user: str,
+                                   workspace_name: str) -> bool:
+        """Check workspace permission."""
+        return self.enforcer.enforce(user, workspace_name, '*')
+
+    def add_workspace_policy(self, workspace_name: str, users: List[str]):
+        """Add workspace policy."""
+        with _policy_lock():
+            for user in users:
+                self.enforcer.add_policy(user, workspace_name, '*')
+            self.enforcer.save_policy()
+
+    def update_workspace_policy(self, workspace_name: str, users: List[str]):
+        """Update workspace policy."""
+        with _policy_lock():
+            self._load_policy_no_lock()
+            self.enforcer.remove_filtered_policy(1, workspace_name)
+            for user in users:
+                self.enforcer.add_policy(user, workspace_name, '*')
+            self.enforcer.save_policy()
+
+    def remove_workspace_policy(self, workspace_name: str):
+        """Remove workspace policy."""
+        with _policy_lock():
+            self.enforcer.remove_filtered_policy(1, workspace_name)
+            self.enforcer.save_policy()
+
+    def stop_policy_refresh(self):
+        """Stop the policy refresh loop."""
+        self._stop_refresh_loop = True
 
 
 @contextlib.contextmanager

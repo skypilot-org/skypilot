@@ -3,8 +3,11 @@
 import enum
 from typing import Dict, List
 
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.skylet import constants
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -84,3 +87,18 @@ def get_role_permissions(
             }
         }
     return config_permissions
+
+
+def get_workspace_policy_permissions() -> Dict[str, List[str]]:
+    """Get all workspace policy permissions from config."""
+    current_config = skypilot_config.to_dict()
+    current_workspaces = current_config.get('workspaces', {})
+    workspaces_to_policy = {}
+    all_users = global_user_state.get_all_users()
+    for workspace_name, workspace_config in current_workspaces.items():
+        users = common_utils.get_workspace_users(workspace_config, all_users)
+        workspaces_to_policy[workspace_name] = users
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces_to_policy:
+        workspaces_to_policy[constants.SKYPILOT_DEFAULT_WORKSPACE] = ['*']
+    logger.info(f'Workspace policy permissions: {workspaces_to_policy}')
+    return workspaces_to_policy

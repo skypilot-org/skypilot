@@ -35,6 +35,7 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -105,7 +106,10 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/dashboard/'):
+        # TODO(hailong): should have a list of paths
+        # that are not checked for RBAC
+        if (request.url.path.startswith('/dashboard/') or
+                request.url.path.startswith('/api/')):
             return await call_next(request)
 
         auth_user = _get_auth_user_header(request)
@@ -113,9 +117,18 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return await call_next(request)
 
         permission_service = users_rest.permission_service
+        roles = permission_service.get_user_roles_no_load_policy(auth_user.id)
+        if 'admin' in roles:
+            return await call_next(request)
+
         # Check the role permission
         if permission_service.check_permission(auth_user.id, request.url.path,
                                                request.method):
+            return fastapi.responses.JSONResponse(
+                status_code=403, content={'detail': 'Forbidden'})
+
+        if not permission_service.check_workspace_permission(
+                auth_user.id, skypilot_config.get_active_workspace()):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
