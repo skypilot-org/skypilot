@@ -2342,6 +2342,7 @@ def get_endpoint_debug_message() -> str:
 def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
+    cloud: clouds.Cloud,
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
@@ -2386,11 +2387,17 @@ def combine_pod_config_fields(
     yaml_obj = yaml.safe_load(yaml_content)
     # We don't use override_configs in `skypilot_config.get_nested`, as merging
     # the pod config requires special handling.
-    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
-                                                   default_value={},
-                                                   override_configs={})
-    override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
-        'pod_config', {}))
+    if isinstance(cloud, clouds.SSH):
+        kubernetes_config = skypilot_config.get_nested(('ssh', 'pod_config'),
+                                                       default_value={},
+                                                       override_configs={})
+        override_pod_config = (cluster_config_overrides.get('ssh', {}).get(
+            'pod_config', {}))
+    else:
+        kubernetes_config = skypilot_config.get_nested(
+            ('kubernetes', 'pod_config'), default_value={}, override_configs={})
+        override_pod_config = (cluster_config_overrides.get(
+            'kubernetes', {}).get('pod_config', {}))
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
