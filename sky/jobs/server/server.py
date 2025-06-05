@@ -22,10 +22,14 @@ router = fastapi.APIRouter()
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
     managed_job_id = global_user_state.atomic_increment_managed_job_id()
-    jobs_launch_body.managed_job_id = managed_job_id
+    _jobs_launch_body = payloads._JobsLaunchBody(
+        task=jobs_launch_body.task,
+        name=jobs_launch_body.name,
+        managed_job_id=managed_job_id,
+    )
     executor.schedule_request(request_id=request.state.request_id,
                               request_name='jobs.launch',
-                              request_body=jobs_launch_body,
+                              request_body=_jobs_launch_body,
                               func=core.launch,
                               schedule_type=api_requests.ScheduleType.LONG,
                               request_cluster_name=common.JOB_CONTROLLER_NAME,
