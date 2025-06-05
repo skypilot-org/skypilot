@@ -756,13 +756,15 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def update_config_no_lock(config: config_utils.Config) -> None:
+def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
     Args:
         config: The config to save and sync.
     """
-    global_config_path = os.path.expanduser(get_user_config_path())
+    global_config_path = _resolve_server_config_path()
+    if global_config_path is None:
+        global_config_path = get_user_config_path()
 
     # Always save to the local file (PVC in Kubernetes, local file otherwise)
     common_utils.dump_yaml(global_config_path, dict(config))
