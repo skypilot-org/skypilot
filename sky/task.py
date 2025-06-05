@@ -292,6 +292,8 @@ class Task:
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
+        # The priority of the managed job running this task.
+        self._job_priority: Optional[int] = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -629,6 +631,10 @@ class Task:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
+        job = config.pop('job', None)
+        if job is not None and 'priority' in job:
+            task.set_job_priority(job['priority'])
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -829,6 +835,23 @@ class Task:
           self: The current task, with service set.
         """
         self._service = service
+        return self
+
+    @property
+    def job_priority(self) -> Optional[int]:
+        """The priority of the managed job running this task."""
+        return self._job_priority
+
+    def set_job_priority(self, priority: int) -> 'Task':
+        """Sets the job priority for this task.
+
+        Args:
+          priority: an integer between 0 and 1000.
+
+        Returns:
+          self: The current task, with job priority set.
+        """
+        self._job_priority = priority
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
@@ -1273,6 +1296,9 @@ class Task:
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
+
+        if self.job_priority is not None:
+            add_if_not_none('job', {'priority': self.job_priority})
 
         add_if_not_none('num_nodes', self.num_nodes)
 

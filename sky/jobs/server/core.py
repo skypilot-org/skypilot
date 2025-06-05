@@ -20,7 +20,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds.service_catalog import common as service_catalog_common
+from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
@@ -91,6 +91,7 @@ def launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
+    priority = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -100,6 +101,20 @@ def launch(
                     'name only and comment out the task names (so that they '
                     'will be auto-generated) .')
         task_names.add(task_.name)
+        if task_.job_priority is not None:
+            if (priority is not None and priority != task_.job_priority):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple tasks in the DAG have different priorities. '
+                        'Either specify a priority in only one task, or set '
+                        'the same priority for each task.')
+            priority = task_.job_priority
+
+    if priority is None:
+        priority = managed_job_constants.DEFAULT_PRIORITY
+
+    if priority < 0 or priority > 1000:
+        raise ValueError(f'Priority must be between 0 and 1000, got {priority}')
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -186,6 +201,7 @@ def launch(
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             'dashboard_user_id': common.SERVER_ID,
+            'priority': priority,
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
                 remote_user_config_path=remote_user_config_path,
@@ -362,7 +378,8 @@ def _maybe_restart_controller(
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
-          all_users: bool = False) -> List[Dict[str, Any]]:
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -433,6 +450,9 @@ def queue(refresh: bool,
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
+    if job_ids:
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
 
     return jobs
 
@@ -505,8 +525,12 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool) -> int:
+def tail_logs(name: Optional[str],
+              job_id: Optional[int],
+              follow: bool,
+              controller: bool,
+              refresh: bool,
+              tail: Optional[int] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -549,7 +573,8 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                          job_id=job_id,
                                          job_name=name,
                                          follow=follow,
-                                         controller=controller)
+                                         controller=controller,
+                                         tail=tail)
 
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:

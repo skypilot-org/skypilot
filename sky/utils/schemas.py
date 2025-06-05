@@ -66,14 +66,10 @@ _AUTOSTOP_SCHEMA = {
 
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
-
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
-    all_clouds = list(service_catalog.ALL_CLOUDS)
+    all_clouds = list(constants.ALL_CLOUDS)
     all_clouds.remove('kubernetes')
     cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
 
@@ -110,7 +106,7 @@ def _get_single_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
+                'case_insensitive_enum': list(constants.ALL_CLOUDS)
             },
             'region': {
                 'type': 'string',
@@ -221,6 +217,9 @@ def _get_single_resources_schema():
                 'type': 'integer',
             },
             'disk_tier': {
+                'type': 'string',
+            },
+            'network_tier': {
                 'type': 'string',
             },
             'ports': {
@@ -646,6 +645,18 @@ def get_task_schema():
             'service': {
                 'type': 'object',
             },
+            'job': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'priority': {
+                        'type': 'integer',
+                        'minimum': 0,
+                        'maximum': 1000,
+                    },
+                },
+            },
             'setup': {
                 'type': 'string',
             },
@@ -841,7 +852,6 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
     from sky.utils import kubernetes_enums
 
     resources_schema = {
@@ -1044,6 +1054,25 @@ def get_config_schema():
                 },
             }
         },
+        'ssh': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_node_pools': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -1077,6 +1106,9 @@ def get_config_schema():
             'required': [],
             'properties': {
                 **_NETWORK_CONFIG_SCHEMA,
+                'tenant_id': {
+                    'type': 'string',
+                },
             },
             'additionalProperties': {
                 'type': 'object',
@@ -1128,7 +1160,7 @@ def get_config_schema():
         'items': {
             'type': 'string',
             'case_insensitive_enum':
-                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+                (list(constants.ALL_CLOUDS) + ['cloudflare'])
         }
     }
 
@@ -1175,14 +1207,14 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(
-        service_catalog.ALL_CLOUDS) + ['cloudflare']
-    # Create pattern for non-GCP clouds (all clouds except gcp)
-    non_gcp_clouds = [
+    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
+    # Create pattern for not supported clouds, i.e.
+    # all clouds except gcp, kubernetes, ssh
+    not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() != 'gcp'
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
     ]
-    non_gcp_cloud_regex = '|'.join(non_gcp_clouds)
+    not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -1192,7 +1224,7 @@ def get_config_schema():
             'additionalProperties': False,
             'patternProperties': {
                 # Pattern for non-GCP clouds - only allows 'disabled' property
-                f'^({non_gcp_cloud_regex})$': {
+                f'^({not_supported_cloud_regex})$': {
                     'type': 'object',
                     'additionalProperties': False,
                     'properties': {
@@ -1214,6 +1246,54 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         }
+                    },
+                    'additionalProperties': False,
+                },
+                'ssh': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_node_pools': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'kubernetes': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_contexts': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'nebius': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'credentials_file_path': {
+                            'type': 'string',
+                        },
+                        'tenant_id': {
+                            'type': 'string',
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
                     },
                     'additionalProperties': False,
                 },
@@ -1249,6 +1329,9 @@ def get_config_schema():
         'properties': {
             # TODO Replace this with whatever syang cooks up
             'workspace': {
+                'type': 'string',
+            },
+            'db': {
                 'type': 'string',
             },
             'jobs': controller_resources_schema,

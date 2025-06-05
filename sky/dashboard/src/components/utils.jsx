@@ -8,9 +8,10 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { REFRESH_INTERVALS } from '@/lib/config';
 
 // Refresh interval in milliseconds
-export const REFRESH_INTERVAL = 30000;
+export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 function capitalizeFirstWord(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -335,7 +336,7 @@ export function LogFilter({ logs, controller = false }) {
       )}
       <div
         className="logs-container"
-        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
+        dangerouslySetInnerHTML={{ __html: filteredLogs }}
       />
     </div>
   );

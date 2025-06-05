@@ -32,13 +32,16 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import core
+
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(skypilot_config.get_workspaces().keys())
+    available_workspaces = list(core.get_workspaces().keys())
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])
@@ -148,6 +151,10 @@ def check_capabilities(
         combinations = list(itertools.product(clouds_to_check, capabilities))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
+        if not config_allowed_cloud_names:
+            for capability in capabilities:
+                global_user_state.set_enabled_clouds([], capability,
+                                                     current_workspace_name)
         if not combinations:
             if disallowed_explicit_check_message:
                 echo(f'\n{disallowed_explicit_check_message}')
@@ -155,7 +162,6 @@ def check_capabilities(
                 _summary_message(enabled_clouds, cloud2ctx2text,
                                  current_workspace_name, hide_workspace_str,
                                  disallowed_cloud_names))
-
             return {}
 
         workspace_str = f' for workspace: {current_workspace_name!r}'
@@ -263,7 +269,7 @@ def check_capabilities(
         # Check all workspaces
         workspaces_to_check = available_workspaces
 
-        hide_per_cloud_details_flag = (not verbose and
+        hide_per_cloud_details_flag = (not verbose and clouds is None and
                                        len(workspaces_to_check) > 1)
 
         for ws_name in workspaces_to_check:
@@ -513,6 +519,18 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                 f'{str_to_format}'
                 f'{colorama.Style.RESET_ALL}')
 
+    # For SSH, determine which contexts are disabled due to allowed_node_pools
+    disabled_due_to_allowed_node_pools = set()
+    if isinstance(cloud_type, sky_clouds.SSH):
+        # Get all node pool contexts from file
+        all_node_pool_contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+        # Get allowed contexts (after filtering)
+        allowed_contexts = sky_clouds.SSH.existing_allowed_contexts()
+        # Contexts that exist in file but not in allowed list are disabled
+        # due to allowed_node_pools configuration
+        disabled_due_to_allowed_node_pools = (set(all_node_pool_contexts) -
+                                              set(allowed_contexts))
+
     # Format the context info with consistent styling
     contexts_formatted = []
     for i, context in enumerate(filtered_contexts):
@@ -528,11 +546,22 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
         text_suffix = ''
         if show_details:
             if ctx2text is not None:
-                text_suffix = (
-                    f': {ctx2text[context]}' if context in ctx2text else
-                    (': ' + _red_color('disabled. ') +
-                     _dim_color('Reason: Not set up. Use `sky ssh up --infra '
-                                f'{context.lstrip("ssh-")}` to set up.')))
+                if context in ctx2text:
+                    text_suffix = f': {ctx2text[context]}'
+                elif (isinstance(cloud_type, sky_clouds.SSH) and
+                      context in disabled_due_to_allowed_node_pools):
+                    # Context is disabled due to allowed_node_pools config
+                    text_suffix = (': ' + _red_color('disabled. ') +
+                                   _dim_color('Reason: Not included in '
+                                              'allowed_node_pools '
+                                              'configuration.'))
+                else:
+                    # Default case - not set up
+                    text_suffix = (': ' + _red_color('disabled. ') +
+                                   _dim_color('Reason: Not set up. Use '
+                                              '`sky ssh up --infra '
+                                              f'{context.lstrip("ssh-")}` '
+                                              'to set up.'))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
     identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)

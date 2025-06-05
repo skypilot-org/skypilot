@@ -222,7 +222,7 @@ class ManagedJobReachedMaxRetriesError(Exception):
 class ManagedJobStatusError(Exception):
     """Raised when a managed job task status update is invalid.
 
-    For instance, a RUNNING job cannot become SUBMITTED.
+    For instance, a RUNNING job cannot become PENDING.
     """
     pass
 
@@ -486,6 +486,16 @@ class ApiServerConnectionError(RuntimeError):
             f'Could not connect to SkyPilot API server at {server_url}. '
             f'Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')
+
+
+class ApiServerAuthenticationError(RuntimeError):
+    """Raised when authentication is required for the API server."""
+
+    def __init__(self, server_url: str):
+        super().__init__(
+            f'Authentication required for SkyPilot API server at {server_url}. '
+            f'Please run:\n'
+            f'  sky api login -e {server_url}')
 
 
 class APIVersionMismatchError(RuntimeError):

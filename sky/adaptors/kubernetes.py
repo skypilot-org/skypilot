@@ -1,6 +1,7 @@
 """Kubernetes adaptors"""
 import logging
 import os
+import platform
 from typing import Any, Callable, Optional, Set
 
 from sky import sky_logging
@@ -18,6 +19,13 @@ urllib3 = common.LazyImport('urllib3',
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
+
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+# From kubernetes package, keep a copy here to avoid actually importing
+# kubernetes package when parsing the KUBECONFIG env var to do credential
+# file mounts.
+ENV_KUBECONFIG_PATH_SEPARATOR = ';' if platform.system() == 'Windows' else ':'
 
 DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
 # The name for the environment variable that stores the in-cluster context name
@@ -66,12 +74,20 @@ def _api_logging_decorator(logger_src: str, level: int):
     return decorated_api
 
 
+def _get_config_file() -> str:
+    # Kubernetes load the kubeconfig from the KUBECONFIG env var on
+    # package initialization. So we have to reload the KUBECOFNIG env var
+    # everytime in case the KUBECONFIG env var is changed.
+    return os.environ.get('KUBECONFIG', '~/.kube/config')
+
+
 def _load_config(context: Optional[str] = None):
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def _load_config_from_kubeconfig(context: Optional[str] = None):
         try:
-            kubernetes.config.load_kube_config(context=context)
+            kubernetes.config.load_kube_config(config_file=_get_config_file(),
+                                               context=context)
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             context_name = '(current-context)' if context is None else context
@@ -137,6 +153,10 @@ def _load_config(context: Optional[str] = None):
             _load_config_from_kubeconfig()
     else:
         _load_config_from_kubeconfig(context)
+
+
+def list_kube_config_contexts():
+    return kubernetes.config.list_kube_config_contexts(_get_config_file())
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)

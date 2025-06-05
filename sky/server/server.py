@@ -26,6 +26,7 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import core
@@ -34,8 +35,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -59,6 +58,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -127,6 +127,11 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         auth_user = _get_auth_user_header(request)
+
+        # Add user to database if auth_user is present
+        if auth_user is not None:
+            global_user_state.add_or_update_user(auth_user)
+
         body = await request.body()
         if auth_user and body:
             try:
@@ -137,10 +142,16 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.debug(f'Overriding user for {request.state.request_id}: '
                              f'{auth_user.name}, {auth_user.id}')
                 if 'env_vars' in original_json:
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
+                    if isinstance(original_json.get('env_vars'), dict):
+                        original_json['env_vars'][
+                            constants.USER_ID_ENV_VAR] = auth_user.id
+                        original_json['env_vars'][
+                            constants.USER_ENV_VAR] = auth_user.name
+                    else:
+                        logger.warning(
+                            f'"env_vars" in request body is not a dictionary '
+                            f'for request {request.state.request_id}. '
+                            'Skipping user info injection into body.')
                 request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
         return await call_next(request)
 
@@ -255,14 +266,16 @@ app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
 
 
 @app.get('/token')
-async def token(request: fastapi.Request) -> fastapi.responses.HTMLResponse:
-    # If we have auth info, save this user to the database.
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
     user = _get_auth_user_header(request)
-    if user is not None:
-        global_user_state.add_or_update_user(user)
 
     token_data = {
         'v': 1,  # Token version number, bump for backwards incompatible.
@@ -312,25 +325,15 @@ async def check(request: fastapi.Request,
 
 @app.get('/enabled_clouds')
 async def enabled_clouds(request: fastapi.Request,
-                         workspace: Optional[str] = None) -> None:
+                         workspace: Optional[str] = None,
+                         expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.EnabledCloudsBody(workspace=workspace),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
-@app.get('/workspaces')
-async def get_workspace_config(request: fastapi.Request) -> None:
-    """Gets workspace config on the server."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='workspaces',
-        request_body=payloads.RequestBody(),
-        func=skypilot_config.get_workspaces,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -386,7 +389,7 @@ async def list_accelerators(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerators,
+        func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -401,7 +404,7 @@ async def list_accelerator_counts(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerator_counts,
+        func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -420,6 +423,10 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
     context.initialize()
+    ctx = context.get()
+    assert ctx is not None
+    # TODO(aylei): generalize this to all requests without a db record.
+    ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
@@ -1198,13 +1205,10 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-    websocket: fastapi.WebSocket,
-    cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()
-) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
-    cluster_name = cluster_name_body.cluster_name
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     cluster_records = core.status(cluster_name, all_users=True)

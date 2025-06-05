@@ -8,6 +8,7 @@ import colorama
 
 from sky import admin_policy
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
@@ -21,7 +22,6 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -1010,11 +1010,29 @@ def storage_delete(name: str) -> None:
 # = Catalog Observe =
 # ===================
 @usage_lib.entrypoint
-def enabled_clouds(workspace: Optional[str] = None) -> List[clouds.Cloud]:
+def enabled_clouds(workspace: Optional[str] = None,
+                   expand: bool = False) -> List[str]:
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
-    return global_user_state.get_cached_enabled_clouds(
+    cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
+    with skypilot_config.local_active_workspace_ctx(workspace):
+        if not expand:
+            return [cloud.canonical_name() for cloud in cached_clouds]
+        enabled_ssh_infras = []
+        enabled_k8s_infras = []
+        enabled_cloud_infras = []
+        for cloud in cached_clouds:
+            cloud_infra = cloud.expand_infras()
+            if isinstance(cloud, clouds.SSH):
+                enabled_ssh_infras.extend(cloud_infra)
+            elif isinstance(cloud, clouds.Kubernetes):
+                enabled_k8s_infras.extend(cloud_infra)
+            else:
+                enabled_cloud_infras.extend(cloud_infra)
+        all_infras = sorted(enabled_ssh_infras) + sorted(
+            enabled_k8s_infras) + sorted(enabled_cloud_infras)
+        return all_infras
 
 
 @usage_lib.entrypoint
@@ -1043,7 +1061,7 @@ def realtime_kubernetes_gpu_availability(
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None
     ) -> List[models.RealtimeGpuAvailability]:
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
+        counts, capacity, available = catalog.list_accelerator_realtime(
             gpus_only=True,
             clouds='ssh' if is_ssh else 'kubernetes',
             name_filter=name_filter,

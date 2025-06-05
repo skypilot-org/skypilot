@@ -192,6 +192,17 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "events" ]
       verbs: [ "get", "list", "watch" ]
+    # Required for syncing workspace config changes to ConfigMap
+    - apiGroups: [ "" ]
+      resources: [ "configmaps" ]
+      verbs: [ "get", "patch" ]
+    # Required for high-availability controller
+    - apiGroups: ["apps"]
+      resources: ["deployments", "deployments/status"]
+      verbs: ["*"]
+    - apiGroups: [""]
+      resources: ["persistentvolumeclaims"]
+      verbs: ["*"]
   # Cluster-scoped rules for API server.
   clusterRules:
     # Required for getting node resources.
