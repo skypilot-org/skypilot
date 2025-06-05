@@ -46,6 +46,7 @@ export function InfrastructureSection({
   handleContextClick,
   contextStats = {},
   isSSH = false, // To differentiate between SSH and Kubernetes
+  actionButton = null, // Optional action button for the header
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -83,18 +84,21 @@ export function InfrastructureSection({
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
-          <div className="flex items-center mb-4">
-            <h3 className="text-lg font-semibold">{title}</h3>
-            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {safeContexts.length}{' '}
-              {safeContexts.length === 1
-                ? isSSH
-                  ? 'pool'
-                  : 'context'
-                : isSSH
-                  ? 'pools'
-                  : 'contexts'}
-            </span>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <h3 className="text-lg font-semibold">{title}</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {safeContexts.length}{' '}
+                {safeContexts.length === 1
+                  ? isSSH
+                    ? 'pool'
+                    : 'context'
+                  : isSSH
+                    ? 'pools'
+                    : 'contexts'}
+              </span>
+            </div>
+            {actionButton}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -1549,111 +1553,28 @@ export function GPUs() {
   };
 
   const renderSSHNodePoolInfrastructure = () => {
-    // Convert SSH Node Pool configurations to display format
-    const sshPoolsArray = Object.entries(sshNodePools).map(([name, config]) => ({
-      name,
-      config,
-      displayName: name,
-      hostCount: config.hosts ? config.hosts.length : 0,
-    }));
-
-    // Create a unified list combining configured and deployed pools
-    const allSSHPools = new Map();
-    
-    // Add configured pools
-    sshPoolsArray.forEach(pool => {
-      allSSHPools.set(pool.name, {
-        name: pool.name,
-        displayName: pool.name,
-        isConfigured: true,
-        isDeployed: false,
-        config: pool.config,
-        hostCount: pool.hostCount,
-        clusters: 0,
-        jobs: 0,
-        nodes: 0,
-        gpuTypes: '-',
-        totalGPUs: 0,
-      });
-    });
-
-    // Add deployed pools and merge with configured ones
-    sshContexts.forEach(context => {
-      const poolName = context.replace(/^ssh-/, '');
-      const gpus = groupedPerContextGPUs[context] || [];
-      const nodes = groupedPerNodeGPUs[context] || [];
-      const totalGpus = gpus.reduce((sum, gpu) => sum + (gpu.gpu_total || 0), 0);
-      
-      const contextStatsKey = `ssh/${poolName}`;
-      const stats = contextStats[contextStatsKey] || { clusters: 0, jobs: 0 };
-      
-      const gpuTypes = (() => {
-        const typeCounts = gpus.reduce((acc, gpu) => {
-          acc[gpu.gpu_name] = (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
-          return acc;
-        }, {});
-        return Object.keys(typeCounts).join(', ') || '-';
-      })();
-
-      if (allSSHPools.has(poolName)) {
-        // Update existing configured pool with deployed info
-        const existingPool = allSSHPools.get(poolName);
-        allSSHPools.set(poolName, {
-          ...existingPool,
-          isDeployed: true,
-          clusters: stats.clusters,
-          jobs: stats.jobs,
-          nodes: nodes.length,
-          gpuTypes,
-          totalGPUs: totalGpus,
-        });
-      } else {
-        // Add deployed-only pool
-        allSSHPools.set(poolName, {
-          name: poolName,
-          displayName: poolName,
-          isConfigured: false,
-          isDeployed: true,
-          config: null,
-          hostCount: 0,
-          clusters: stats.clusters,
-          jobs: stats.jobs,
-          nodes: nodes.length,
-          gpuTypes,
-          totalGPUs: totalGpus,
-        });
-      }
-    });
-
-    const unifiedPools = Array.from(allSSHPools.values());
-
     return (
-      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
-        <div className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <h3 className="text-lg font-semibold">SSH Node Pool</h3>
-            </div>
-            <button
-              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
-              onClick={handleAddSSHPool}
-            >
-              <PlusIcon className="w-4 h-4 mr-2" />
-              Add SSH Node Pool
-            </button>
-          </div>
-          {unifiedPools.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              No SSH Node Pools configured. Click &quot;Add SSH Node Pool&quot; to get started.
-            </p>
-          ) : (
-            <SSHNodePoolTable 
-              pools={unifiedPools} 
-              handleContextClick={handleContextClick} 
-            />
-          )}
-        </div>
-      </div>
+      <InfrastructureSection
+        title="SSH Node Pool"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={sshContexts}
+        gpus={sshGPUs}
+        groupedPerContextGPUs={groupedPerContextGPUs}
+        groupedPerNodeGPUs={groupedPerNodeGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={contextStats}
+        isSSH={true}
+        actionButton={
+          <button
+            className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+            onClick={handleAddSSHPool}
+          >
+            <PlusIcon className="w-4 h-4 mr-2" />
+            Add SSH Node Pool
+          </button>
+        }
+      />
     );
   };
 
