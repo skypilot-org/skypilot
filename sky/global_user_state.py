@@ -358,7 +358,12 @@ if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         overlaid_config = skypilot_config.overlay_skypilot_config(
             config, saved_db_config)
         if overlaid_config != config:
-            skypilot_config.update_config_no_lock(overlaid_config)
+            # update the db here instead of having update_config_no_lock
+            # handle db update to avoid circular import
+            skypilot_config.update_config_no_lock(overlaid_config,
+                                                  update_db=False)
+            set_config_yaml('api_server',
+                            common_utils.dump_yaml_str(dict(overlaid_config)))
     else:
         # if no saved config exists, stash the current config to db.
         set_config_yaml('api_server', common_utils.dump_yaml_str(dict(config)))
