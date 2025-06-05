@@ -1,6 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
-import itertools
 import os
 import traceback
 from types import ModuleType
@@ -75,9 +74,8 @@ def check_capabilities(
                 str, Dict[str, str]]]]]:
             cloud_tuple, capability, allowed = payload
             if not allowed:
-                return (capability, False, 
-                        'cloud is not included in '
-                        'allowed_clouds in ~/.sky/config.yaml')
+                return (capability, False, f'{cloud_tuple[0]} is not included '
+                        'in allowed_clouds in ~/.sky/config.yaml')
             with skypilot_config.local_active_workspace_ctx(
                     current_workspace_name):
                 # Have to override again for specific thread, as the
@@ -107,8 +105,10 @@ def check_capabilities(
 
         if clouds is not None:
             cloud_list = clouds
+            check_explicit = True
         else:
             cloud_list = get_all_clouds()
+            check_explicit = False
 
         clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
 
@@ -139,29 +139,15 @@ def check_capabilities(
         disallowed_cloud_names = [
             c for c in get_all_clouds() if c not in config_allowed_cloud_names
         ]
-        # Check only the clouds which are allowed in the config.
-        # clouds_to_check = [
-        #     c for c in clouds_to_check if c[0] in config_allowed_cloud_names
-        # ]
 
-        # combinations = list(itertools.product(clouds_to_check, capabilities))
         combinations = []
         for c in clouds_to_check:
             allowed = c[0] in config_allowed_cloud_names
-            for capability in capabilities:
-                combinations.append((c, capability, allowed))
+            if allowed or check_explicit:
+                for capability in capabilities:
+                    combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
-        # if not config_allowed_cloud_names:
-        #     for capability in capabilities:
-        #         global_user_state.set_enabled_clouds([], capability,
-        #                                              current_workspace_name)
-        # if not combinations:
-        #     echo(
-        #         _summary_message(enabled_clouds, cloud2ctx2text,
-        #                          current_workspace_name, hide_workspace_str,
-        #                          disallowed_cloud_names))
-        #     return {}
 
         workspace_str = f' for workspace: {current_workspace_name!r}'
         if hide_workspace_str:
