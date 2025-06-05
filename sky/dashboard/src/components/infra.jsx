@@ -488,6 +488,31 @@ function SSHNodePoolDetails({
     );
   };
 
+  // Clean up SSH deployment logs
+  const cleanSSHDeploymentLogs = (logs) => {
+    if (!logs) return '';
+    
+    return logs
+      .split('\n')
+      .map(line => {
+        // Remove ANSI escape codes
+        line = line.replace(/\x1b\[[0-9;]*m/g, '');
+        
+        // Skip debug lines (starting with D)
+        if (line.match(/^D \d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
+          return null;
+        }
+        
+        // Clean up tree characters and extra formatting
+        line = line.replace(/├──/g, '├─');
+        line = line.replace(/└──/g, '└─');
+        
+        return line;
+      })
+      .filter(line => line !== null && line.trim() !== '')
+      .join('\n');
+  };
+
   const handleEditClick = () => {
     console.log('Edit button clicked for pool:', poolName);
     console.log('Pool config:', poolConfig);
@@ -729,13 +754,6 @@ function SSHNodePoolDetails({
                 </svg>
                 Repair
               </button>
-              {/* <button
-                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
-                onClick={handleEditClick}
-              >
-                <EditIcon className="w-4 h-4 mr-2" />
-                Edit
-              </button> */}
               <button
                 className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
                 onClick={handleDeleteClick}
@@ -868,7 +886,7 @@ function SSHNodePoolDetails({
 
           <div className="py-4">
             <div className="bg-black text-green-400 p-4 rounded-md font-mono text-sm max-h-96 overflow-y-auto">
-              <pre className="whitespace-pre-wrap">{streamingDialog.logs}</pre>
+              <pre className="whitespace-pre-wrap">{cleanSSHDeploymentLogs(streamingDialog.logs)}</pre>
               {streamingDialog.isStreaming && (
                 <div className="flex items-center mt-2">
                   <CircularProgress size={16} className="mr-2 text-green-400" />

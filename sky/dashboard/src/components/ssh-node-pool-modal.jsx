@@ -173,7 +173,7 @@ export function SSHNodePoolModal({
             <Label htmlFor="hosts">Hosts (one per line)</Label>
             <Textarea
               id="hosts"
-              placeholder="192.168.1.10&#10;192.168.1.11&#10;hostname.example.com"
+              placeholder={`192.168.1.10\n192.168.1.11\nhostname.example.com`}
               value={hosts}
               onChange={(e) => setHosts(e.target.value)}
               rows={6}
