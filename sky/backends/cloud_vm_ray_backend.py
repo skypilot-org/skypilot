@@ -3510,7 +3510,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Add the managed job to job queue database.
                 managed_job_codegen = managed_jobs.ManagedJobCodeGen()
                 managed_job_code = managed_job_codegen.set_pending(
-                    job_id,
                     managed_job_id,
                     managed_job_dag,
                     skypilot_config.get_active_workspace(
@@ -3582,12 +3581,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str) -> int:
+                 job_name: Optional[str], resources_str: str, managed_job_id: Optional[int] = None) -> int:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
-            resources_str=resources_str)
+            resources_str=resources_str,
+            managed_job_id=managed_job_id)
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -3627,7 +3627,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
-        print("HIII: {}".format(managed_job_id))
         if task.run is None and self._setup_cmd is None:
             # This message is fine without mentioning setup, as there are two
             # cases when run section is empty:
@@ -3666,7 +3665,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id = self._add_job(handle, task_copy.name, resources_str)
+        job_id = self._add_job(handle, task_copy.name, resources_str, managed_job_id)
+        if managed_job_id is not None:
+            assert job_id == managed_job_id, f"Job ID {job_id} and managed job ID {managed_job_id} should be the same for managed jobs"
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods

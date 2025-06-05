@@ -293,6 +293,17 @@ class Request:
             raise
 
 
+def kill_managed_job_requests(managed_job_ids: Optional[List[int]] = None):
+    """Kill all pending requests for a managed job."""
+    request_ids = [
+        request_task.request_id for request_task in get_request_tasks(
+            managed_job_ids=managed_job_ids,
+            all_managed_jobs=managed_job_ids is None,
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    ]
+    kill_requests(request_ids)
+
+
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     """Kill all pending and running requests for a cluster.
 
@@ -533,6 +544,8 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    all_managed_jobs: bool = False,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -574,6 +587,12 @@ def get_request_tasks(
         request_names_str = ','.join(
             repr(name) for name in include_request_names)
         filters.append(f'name IN ({request_names_str})')
+    if managed_job_ids is not None:
+        managed_job_ids_str = ','.join(repr(id) for id in managed_job_ids)
+        # TODO: fix this so there can be no SQL injection
+        filters.append(f'managed_job_id IN ({managed_job_ids_str})')
+    if all_managed_jobs:
+        filters.append(f'managed_job_id IS NOT NULL')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
