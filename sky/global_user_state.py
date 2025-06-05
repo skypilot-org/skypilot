@@ -1036,6 +1036,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 
 def get_job_ids() -> List[int]:
+    import sky.backends
     from sky.backends import backend_utils
     from sky.jobs.server.core import _maybe_restart_controller
     from sky.jobs import utils as managed_job_utils
