@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 @dataclasses.dataclass
 class User:
+    """Dataclass to store user information."""
     # User hash
     id: str
     # Display name of the user

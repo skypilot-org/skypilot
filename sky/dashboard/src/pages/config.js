@@ -11,6 +11,7 @@ import { CircularProgress } from '@mui/material';
 import { SaveIcon, RotateCwIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { VersionDisplay } from '@/components/elements/version-display';
+import { ENDPOINT } from '@/data/connectors/constants';
 
 export default function ConfigPage() {
   const router = useRouter();
@@ -47,6 +48,23 @@ export default function ConfigPage() {
     setError(null);
     setSaveSuccess(false);
     try {
+      // Check user role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const currentUserRole = data.role;
+
+      if (currentUserRole != 'admin') {
+        setError(
+          new Error(`${data.name} is logged in as no admin, cannot edit config`)
+        );
+        setSaving(false);
+        return;
+      }
+
       let parsedConfig = yaml.load(editableConfig);
 
       // If the config is empty, only comments, or only whitespace,

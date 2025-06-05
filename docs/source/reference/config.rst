@@ -77,8 +77,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       spec:
         runtimeClassName: nvidia
   
-  :ref: `ssh <config-yaml-ssh>`:
-    :ref: `allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+  :ref:`ssh <config-yaml-ssh>`:
+    :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
 
@@ -145,6 +145,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+
+  :ref:`rbac <config-yaml-rbac>`:
+    :ref:`default_role <config-yaml-rbac-default-role>`: admin
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -1070,8 +1073,10 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+.. _config-yaml-ssh:
+
 ``ssh``
-~~~~~~~~~~~~~~~
+~~~~~~~
 
 Advanced SSH node pool configuration (optional).
 
@@ -1224,6 +1229,22 @@ Example:
     ssh_proxy_command:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
+.. _config-yaml-rbac:
+
+``rbac``
+~~~~~~~~
+
+RBAC configuration (optional).
+
+.. _config-yaml-rbac-default-role:
+
+``rbac.default_role``
+~~~~~~~~~~~~~~~~~~~~~
+
+Default role for users (optional).  Either ``admin`` or ``user``.
+
+If not specified, the default role is ``admin``.
 
 .. _config-yaml-db:
 

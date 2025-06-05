@@ -40,6 +40,7 @@ import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
+import { ENDPOINT } from '@/data/connectors/constants';
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -122,112 +123,158 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 };
 
 // Workspace card component
-const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => (
-  <Card key={workspace.name}>
-    <CardHeader>
-      <CardTitle className="text-base font-normal">
-        <span className="font-semibold">Workspace:</span> {workspace.name}
-      </CardTitle>
-    </CardHeader>
-    <CardContent className="text-sm pb-2">
-      <div className="py-2 flex items-center justify-between">
-        <div className="flex items-center text-gray-600">
-          <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
-          <span>Clusters (Running / Total)</span>
-        </div>
-        <button
-          onClick={() => {
-            router.push({
-              pathname: '/clusters',
-              query: { workspace: workspace.name },
-            });
-          }}
-          className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-        >
-          {workspace.runningClusterCount} / {workspace.totalClusterCount}
-        </button>
-      </div>
-      <div className="py-2 flex items-center justify-between border-t border-gray-100">
-        <div className="flex items-center text-gray-600">
-          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
-          <span>Managed Jobs</span>
-        </div>
-        <button
-          onClick={() => {
-            router.push({
-              pathname: '/jobs',
-              query: { workspace: workspace.name },
-            });
-          }}
-          className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-        >
-          {workspace.managedJobsCount}
-        </button>
-      </div>
-    </CardContent>
+const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
+  const handleEdit = async () => {
+    try {
+      // Get current user's role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const currentUserRole = data.role;
 
-    <div className="px-6 pb-3 text-sm pt-3">
-      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
-        Enabled Infra
-      </h4>
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {workspace.clouds.map((cloud) => (
-          <div key={cloud} className="flex items-center text-gray-700">
-            <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
-            <span>{cloud}</span>
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot edit workspace`);
+        return;
+      }
+
+      onEdit(workspace.name);
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  return (
+    <Card key={workspace.name}>
+      <CardHeader>
+        <CardTitle className="text-base font-normal">
+          <span className="font-semibold">Workspace:</span> {workspace.name}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm pb-2">
+        <div className="py-2 flex items-center justify-between">
+          <div className="flex items-center text-gray-600">
+            <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+            <span>Clusters (Running / Total)</span>
           </div>
-        ))}
-      </div>
-    </div>
+          <button
+            onClick={() => {
+              router.push({
+                pathname: '/clusters',
+                query: { workspace: workspace.name },
+              });
+            }}
+            className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+          >
+            {workspace.runningClusterCount} / {workspace.totalClusterCount}
+          </button>
+        </div>
+        <div className="py-2 flex items-center justify-between border-t border-gray-100">
+          <div className="flex items-center text-gray-600">
+            <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+            <span>Managed Jobs</span>
+          </div>
+          <button
+            onClick={() => {
+              router.push({
+                pathname: '/jobs',
+                query: { workspace: workspace.name },
+              });
+            }}
+            className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+          >
+            {workspace.managedJobsCount}
+          </button>
+        </div>
+      </CardContent>
 
-    <CardFooter className="flex justify-end pt-3 gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onDelete(workspace.name)}
-        disabled={workspace.name === 'default'}
-        title={
-          workspace.name === 'default'
-            ? 'Cannot delete default workspace'
-            : 'Delete workspace'
-        }
-        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-      >
-        Delete
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onEdit(workspace.name)}
-      >
-        Edit
-      </Button>
-    </CardFooter>
-  </Card>
-);
+      <div className="px-6 pb-3 text-sm pt-3">
+        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+          Enabled Infra
+        </h4>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {workspace.clouds.map((cloud) => (
+            <div key={cloud} className="flex items-center text-gray-700">
+              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+              <span>{cloud}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <CardFooter className="flex justify-end pt-3 gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onDelete(workspace.name)}
+          disabled={workspace.name === 'default'}
+          title={
+            workspace.name === 'default'
+              ? 'Cannot delete default workspace'
+              : 'Delete workspace'
+          }
+          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+        >
+          Delete
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleEdit}>
+          Edit
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
 
 // Create new workspace card component
-const CreateWorkspaceCard = ({ onClick }) => (
-  <Card
-    key="create-new"
-    className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
-    onClick={onClick}
-  >
-    <div className="flex-1 flex items-center justify-center p-6">
-      <div className="text-center">
-        <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
-          <span className="text-3xl text-sky-600">+</span>
+const CreateWorkspaceCard = ({ onClick }) => {
+  const handleClick = async () => {
+    try {
+      // Get current user's role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const currentUserRole = data.role;
+
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot create workspace`);
+        return;
+      }
+
+      onClick();
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  return (
+    <Card
+      key="create-new"
+      className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
+      onClick={handleClick}
+    >
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
+            <span className="text-3xl text-sky-600">+</span>
+          </div>
+          <h3 className="text-lg font-medium text-sky-700 mb-2">
+            Create New Workspace
+          </h3>
+          <p className="text-sm text-gray-500">
+            Set up a new workspace with custom infrastructure configurations
+          </p>
         </div>
-        <h3 className="text-lg font-medium text-sky-700 mb-2">
-          Create New Workspace
-        </h3>
-        <p className="text-sm text-gray-500">
-          Set up a new workspace with custom infrastructure configurations
-        </p>
       </div>
-    </div>
-  </Card>
-);
+    </Card>
+  );
+};
 
 // Statistics summary component
 const StatsSummary = ({
@@ -442,13 +489,32 @@ export function Workspaces() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleDeleteWorkspace = (workspaceName) => {
-    setDeleteState({
-      confirmOpen: true,
-      workspaceToDelete: workspaceName,
-      deleting: false,
-      error: null,
-    });
+  const handleDeleteWorkspace = async (workspaceName) => {
+    try {
+      // Get current user's role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const currentUserRole = data.role;
+
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot delete workspace`);
+        return;
+      }
+
+      setDeleteState({
+        confirmOpen: true,
+        workspaceToDelete: workspaceName,
+        deleting: false,
+        error: null,
+      });
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      alert(`Error: ${error.message}`);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -493,6 +559,29 @@ export function Workspaces() {
     });
   };
 
+  const handleEditAllConfigs = async () => {
+    try {
+      // Get current user's role first
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const currentUserRole = data.role;
+
+      if (currentUserRole != 'admin') {
+        alert(`${data.name} is logged in as no admin, cannot edit config`);
+        return;
+      }
+
+      router.push('/config');
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
   const preStyle = {
     backgroundColor: '#f5f5f5',
     padding: '16px',
@@ -520,7 +609,7 @@ export function Workspaces() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => router.push('/config')}
+            onClick={handleEditAllConfigs}
             className="ml-4 px-2 py-1 text-xs"
             disabled={
               loading ||
