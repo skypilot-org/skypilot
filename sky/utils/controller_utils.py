@@ -253,6 +253,8 @@ def _get_cloud_dependencies_installation_commands(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+    enabled_k8s_or_ssh: List[str] = []
+    k8s_or_ssh_cmd_index: Optional[int] = None
 
     for cloud in enabled_clouds:
         cloud_python_dependencies: List[str] = copy.deepcopy(
@@ -273,29 +275,34 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
                             f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
         elif isinstance(cloud, clouds.Kubernetes):
-            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-            commands.append(
-                f'echo -en "\\r{step_prefix}Kubernetes{empty_str}" && '
-                # Install k8s + skypilot dependencies
-                'sudo bash -c "if '
-                '! command -v curl &> /dev/null || '
-                '! command -v socat &> /dev/null || '
-                '! command -v netcat &> /dev/null; '
-                'then apt update &> /dev/null && '
-                'apt install curl socat netcat -y &> /dev/null; '
-                'fi" && '
-                # Install kubectl
-                'ARCH=$(uname -m) && '
-                'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                '  ARCH="arm64"; '
-                'else '
-                '  ARCH="amd64"; '
-                'fi && '
-                '(command -v kubectl &>/dev/null || '
-                '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
-                '/bin/linux/$ARCH/kubectl" && '
-                'sudo install -o root -g root -m 0755 '
-                'kubectl /usr/local/bin/kubectl))')
+            # Only install Kubernetes and SSH dependencies once.
+            if not enabled_k8s_or_ssh:
+                k8s_or_ssh_cmd_index = len(commands)
+                step_prefix = prefix_str.replace('<step>',
+                                                 str(len(commands) + 1))
+                commands.append(
+                    f'echo -en "\\r{step_prefix}<k8s_or_ssh>{empty_str}" && '
+                    # Install k8s + skypilot dependencies
+                    'sudo bash -c "if '
+                    '! command -v curl &> /dev/null || '
+                    '! command -v socat &> /dev/null || '
+                    '! command -v netcat &> /dev/null; '
+                    'then apt update &> /dev/null && '
+                    'apt install curl socat netcat -y &> /dev/null; '
+                    'fi" && '
+                    # Install kubectl
+                    'ARCH=$(uname -m) && '
+                    'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                    '  ARCH="arm64"; '
+                    'else '
+                    '  ARCH="amd64"; '
+                    'fi && '
+                    '(command -v kubectl &>/dev/null || '
+                    '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
+                    '/bin/linux/$ARCH/kubectl" && '
+                    'sudo install -o root -g root -m 0755 '
+                    'kubectl /usr/local/bin/kubectl))')
+            enabled_k8s_or_ssh.append(repr(cloud))
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -313,6 +320,11 @@ def _get_cloud_dependencies_installation_commands(
                             'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1')
 
         python_packages.update(cloud_python_dependencies)
+
+    if k8s_or_ssh_cmd_index is not None:
+        commands[k8s_or_ssh_cmd_index] = commands[k8s_or_ssh_cmd_index].replace(
+            '<k8s_or_ssh>',
+            '/'.join([cloud for cloud in sorted(enabled_k8s_or_ssh)]))
 
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
