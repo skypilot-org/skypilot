@@ -11,8 +11,8 @@ import filelock
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.catalog import constants as service_catalog_constants
 from sky.clouds import cloud as cloud_lib
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -28,8 +28,7 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 _ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
-    os.path.expanduser(service_catalog_constants.CATALOG_DIR),
-    service_catalog_constants.CATALOG_SCHEMA_VERSION)
+    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
 os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
 
 
@@ -96,7 +95,7 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     def _get_modified_catalogs() -> List[str]:
         """Returns a list of modified catalogs relative to the catalog dir."""
         modified_catalogs = []
-        for cloud_name in service_catalog_constants.ALL_CLOUDS:
+        for cloud_name in constants.ALL_CLOUDS:
             cloud_catalog_dir = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR,
                                              cloud_name)
             if not os.path.exists(cloud_catalog_dir):
@@ -114,9 +113,8 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     modified_catalog_path_map = {}  # Map of remote: local catalog paths
     for catalog in modified_catalog_list:
         # Use relative paths for remote to handle varying usernames on the cloud
-        remote_path = os.path.join(
-            service_catalog_constants.CATALOG_DIR,
-            service_catalog_constants.CATALOG_SCHEMA_VERSION, catalog)
+        remote_path = os.path.join(constants.CATALOG_DIR,
+                                   constants.CATALOG_SCHEMA_VERSION, catalog)
         local_path = os.path.expanduser(remote_path)
         modified_catalog_path_map[remote_path] = local_path
     return modified_catalog_path_map
@@ -198,8 +196,8 @@ def read_catalog(filename: str,
         # Atomic check, to avoid conflicts with other processes.
         with filelock.FileLock(meta_path + '.lock'):
             if _need_update():
-                url = f'{service_catalog_constants.HOSTED_CATALOG_DIR_URL}/{service_catalog_constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-                url_fallback = f'{service_catalog_constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{service_catalog_constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+                url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+                url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
                 headers = {'User-Agent': 'SkyPilot/0.7'}
                 update_frequency_str = ''
                 if pull_frequency_hours is not None:

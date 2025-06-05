@@ -378,7 +378,8 @@ def _maybe_restart_controller(
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
-          all_users: bool = False) -> List[Dict[str, Any]]:
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -449,6 +450,9 @@ def queue(refresh: bool,
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
+    if job_ids:
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
 
     return jobs
 
