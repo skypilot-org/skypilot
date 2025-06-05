@@ -80,7 +80,8 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
                     workspace_name: config
                 })
 
-            return core._update_workspaces_config(modifier_fn)
+            return core._update_workspaces_config(modifier_fn,
+                                                  enforce_server_side=False)
 
         # Create multiple threads that try to update workspaces simultaneously
         num_threads = 5
@@ -161,7 +162,8 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
                 workspaces['test'] = {'aws': {'disabled': True}}
 
             with self.assertRaises(RuntimeError) as context:
-                core._update_workspaces_config(modifier_fn)
+                core._update_workspaces_config(modifier_fn,
+                                               enforce_server_side=False)
 
             self.assertIn('timeout', str(context.exception).lower())
             self.assertIn('lock', str(context.exception).lower())
@@ -191,7 +193,8 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
                 }
             })
 
-        result1 = core._update_workspaces_config(first_modifier)
+        result1 = core._update_workspaces_config(first_modifier,
+                                                 enforce_server_side=False)
         expected_workspaces1 = {
             'default': {},
             'workspace1': {

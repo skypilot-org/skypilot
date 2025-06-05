@@ -67,7 +67,8 @@ class TestWorkspaceManagement(unittest.TestCase):
             workspaces.clear()
             workspaces.update(new_workspaces)
 
-        result = core._update_workspaces_config(modifier_fn)
+        result = core._update_workspaces_config(modifier_fn,
+                                                enforce_server_side=False)
 
         # Verify the function called the right methods
         mock_dump_yaml.assert_called_once()
@@ -114,7 +115,9 @@ class TestWorkspaceManagement(unittest.TestCase):
         expected_workspaces['dev'] = new_config
         mock_update_workspaces_config.return_value = expected_workspaces
 
-        result = core.update_workspace('dev', new_config)
+        result = core.update_workspace('dev',
+                                       new_config,
+                                       enforce_server_side=False)
 
         # Verify the internal helper was called with a function
         mock_update_workspaces_config.assert_called_once()
@@ -145,7 +148,9 @@ class TestWorkspaceManagement(unittest.TestCase):
         expected_return = {'updated': 'workspaces'}
         mock_update_workspaces_config.return_value = expected_return
 
-        result = core.create_workspace('staging', new_config)
+        result = core.create_workspace('staging',
+                                       new_config,
+                                       enforce_server_side=False)
 
         # Verify that _update_workspaces_config was called with a function
         mock_update_workspaces_config.assert_called_once()
@@ -184,7 +189,7 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Should raise ValueError when workspace already exists
         with self.assertRaises(ValueError) as cm:
-            core.create_workspace('dev', new_config)
+            core.create_workspace('dev', new_config, enforce_server_side=False)
 
         self.assertIn("already exists", str(cm.exception))
 
@@ -202,7 +207,7 @@ class TestWorkspaceManagement(unittest.TestCase):
         del expected_workspaces['dev']
         mock_update_workspaces_config.return_value = expected_workspaces
 
-        result = core.delete_workspace('dev')
+        result = core.delete_workspace('dev', enforce_server_side=False)
 
         # Verify the internal helper was called with a function
         mock_update_workspaces_config.assert_called_once()
@@ -215,7 +220,8 @@ class TestWorkspaceManagement(unittest.TestCase):
             'workspaces'].copy()
 
         with self.assertRaises(ValueError) as cm:
-            core.delete_workspace(constants.SKYPILOT_DEFAULT_WORKSPACE)
+            core.delete_workspace(constants.SKYPILOT_DEFAULT_WORKSPACE,
+                                  enforce_server_side=False)
 
         self.assertIn("Cannot delete the default workspace", str(cm.exception))
 
@@ -226,14 +232,14 @@ class TestWorkspaceManagement(unittest.TestCase):
             'workspaces'].copy()
 
         with self.assertRaises(ValueError) as cm:
-            core.delete_workspace('nonexistent')
+            core.delete_workspace('nonexistent', enforce_server_side=False)
 
         self.assertIn("does not exist", str(cm.exception))
 
     def test_create_workspace_invalid_name(self):
         """Test creating a workspace with invalid name should fail."""
         with self.assertRaises(ValueError) as cm:
-            core.create_workspace('', {})
+            core.create_workspace('', {}, enforce_server_side=False)
 
         self.assertIn("non-empty string", str(cm.exception))
 

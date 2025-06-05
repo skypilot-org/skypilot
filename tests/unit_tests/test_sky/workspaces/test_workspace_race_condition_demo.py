@@ -82,7 +82,8 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                 time.sleep(0.01)
                 workspaces[workspace_name] = config
 
-            return core._update_workspaces_config(modifier_fn)
+            return core._update_workspaces_config(modifier_fn,
+                                                  enforce_server_side=False)
 
         # Create two threads that update different workspaces simultaneously
         # Using valid workspace configurations
@@ -182,7 +183,8 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
             workspaces.clear()
             workspaces.update(initial_workspaces)
 
-        core._update_workspaces_config(setup_modifier)
+        core._update_workspaces_config(setup_modifier,
+                                       enforce_server_side=False)
 
         # Define concurrent operations
         def create_workspace():
@@ -194,7 +196,8 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                     }
                 }
 
-            return core._update_workspaces_config(modifier)
+            return core._update_workspaces_config(modifier,
+                                                  enforce_server_side=False)
 
         def update_workspace():
 
@@ -209,7 +212,8 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                         }
                     }
 
-            return core._update_workspaces_config(modifier)
+            return core._update_workspaces_config(modifier,
+                                                  enforce_server_side=False)
 
         def delete_workspace():
 
@@ -217,7 +221,8 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
                 if 'workspace_3' in workspaces:
                     del workspaces['workspace_3']
 
-            return core._update_workspaces_config(modifier)
+            return core._update_workspaces_config(modifier,
+                                                  enforce_server_side=False)
 
         # Run all operations concurrently
         operations = [create_workspace, update_workspace, delete_workspace]
