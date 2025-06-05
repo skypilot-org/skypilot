@@ -85,6 +85,7 @@ REQUEST_COLUMNS = [
     'schedule_type',
     COL_USER_ID,
     COL_STATUS_MSG,
+    'managed_job_id',
 ]
 
 
@@ -436,6 +437,8 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, 'managed_job_id',
+                                 'INTEGER')
 
 
 _DB = None

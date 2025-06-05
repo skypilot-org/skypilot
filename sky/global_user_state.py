@@ -1036,64 +1036,60 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 @_init_db
 def get_managed_job_id() -> int:
-    # Retry with exponential backoff if database is locked
-    max_retries = 5
-    retry_delay = 0.1  # Initial delay in seconds
-
-    for attempt in range(max_retries):
-        try:
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                row = session.query(config_table).filter_by(
-                    key=_MANAGED_JOB_ID_KEY).first()
-                if row is None:
-                    # Insert 0 if the row does not exist
-                    new_row = config_table.insert().values(
-                        key=_MANAGED_JOB_ID_KEY, value='0')
-                    session.execute(new_row)
-                    session.commit()
-                    return 0
-                return int(row.value)
-        except sqlalchemy.exc.OperationalError as e:
-            if 'database is locked' in str(e) and attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-                continue
-            raise
-    raise RuntimeError('Failed to get managed job id')
+    """Get the current managed job ID.
+    
+    Returns:
+        The current managed job ID as an integer.
+    """
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_table).filter_by(
+            key=_MANAGED_JOB_ID_KEY).first()
+        if row is None:
+            # Initialize to 0 if not set
+            session.execute(
+                config_table.insert().values(
+                    key=_MANAGED_JOB_ID_KEY, 
+                    value='0'
+                )
+            )
+            session.commit()
+            return 0
+        return int(row.value)
 
 
 def atomic_increment_managed_job_id() -> int:
-    # Retry with exponential backoff if database is locked
-    max_retries = 5
-    retry_delay = 0.1  # Initial delay in seconds
-
-    for attempt in range(max_retries):
-        try:
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                # Get current value and increment atomically within transaction
-                row = session.query(config_table).filter_by(
-                    key=_MANAGED_JOB_ID_KEY).with_for_update().first()
-                if row is None:
-                    new_row = config_table.insert().values(
-                        key=_MANAGED_JOB_ID_KEY, value='0')
-                    session.execute(new_row)
-                    session.commit()
-                    return 0
-                current_id = int(row.value)
-                next_id = current_id + 1
-                # Use update() instead of directly setting row.value
-                session.execute(config_table.update().where(
-                    config_table.c.key == _MANAGED_JOB_ID_KEY).values(
-                        value=str(next_id)))
-                session.commit()
-                return next_id
-        except sqlalchemy.exc.OperationalError as e:
-            if 'database is locked' in str(e) and attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-                continue
-            raise
-    raise RuntimeError('Failed to increment managed job id')
+    """Atomically increment and return the next managed job ID.
+    
+    Returns:
+        The next managed job ID as an integer.
+    """
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Lock row for atomic update
+        row = session.query(config_table).filter_by(
+            key=_MANAGED_JOB_ID_KEY).with_for_update().first()
+        
+        if row is None:
+            # Initialize to 0 if not set
+            session.execute(
+                config_table.insert().values(
+                    key=_MANAGED_JOB_ID_KEY,
+                    value='0'
+                )
+            )
+            session.commit()
+            return 0
+            
+        # Increment the ID
+        next_id = int(row.value) + 1
+        session.execute(
+            config_table.update().where(
+                config_table.c.key == _MANAGED_JOB_ID_KEY
+            ).values(
+                value=str(next_id)
+            )
+        )
+        session.commit()
+        return next_id
 
 
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',

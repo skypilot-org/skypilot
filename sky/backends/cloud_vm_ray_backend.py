@@ -3511,6 +3511,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 managed_job_codegen = managed_jobs.ManagedJobCodeGen()
                 managed_job_code = managed_job_codegen.set_pending(
                     job_id,
+                    managed_job_id,
                     managed_job_dag,
                     skypilot_config.get_active_workspace(
                         force_user_workspace=True),
