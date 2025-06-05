@@ -524,17 +524,6 @@ class SSHUpBody(RequestBody):
     cleanup: bool = False
 
 
-class UpdateSSHNodePoolsBody(RequestBody):
-    """The request body for the update ssh node pools endpoint."""
-    pools_config: Dict[str, Any]
-
-
-class UploadSSHKeyBody(RequestBody):
-    """The request body for the upload ssh key endpoint."""
-    key_name: str
-    key_content: str
-
-
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""
     service_name: str
