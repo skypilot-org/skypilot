@@ -711,9 +711,10 @@ def queue(cluster_name: str,
         exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
-    user_hash: Optional[str] = common_utils.get_user_hash()
     if all_users:
         user_hash = None
+    else:
+        user_hash = common_utils.get_current_user().id
     code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
@@ -829,7 +830,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_user_hash())
+                        user_hash=common_utils.get_current_user().id)
 
 
 @usage_lib.entrypoint

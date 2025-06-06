@@ -11,7 +11,7 @@ import signal
 import sqlite3
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -464,7 +464,7 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
-def update_request(request_id: str):
+def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
     yield request

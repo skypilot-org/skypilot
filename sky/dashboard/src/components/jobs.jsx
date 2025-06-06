@@ -141,7 +141,7 @@ const formatSubmittedTime = (timestamp) => {
       years: 'yrs',
     };
     if (unitMap[unit]) {
-      return `~ ${num} ${unitMap[unit]} ago`;
+      return `${num} ${unitMap[unit]} ago`;
     }
   }
 
@@ -1007,6 +1007,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
+        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
       />
     </div>
   );

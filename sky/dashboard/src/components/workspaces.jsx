@@ -122,8 +122,30 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   return null;
 };
 
+// Workspace badge component for private/public status
+const WorkspaceBadge = ({ isPrivate }) => {
+  if (isPrivate) {
+    return (
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+        Private
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+      Public
+    </span>
+  );
+};
+
 // Workspace card component
-const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
+const WorkspaceCard = ({
+  workspace,
+  onDelete,
+  onEdit,
+  router,
+  rawWorkspacesData,
+}) => {
   const handleEdit = async () => {
     try {
       // Get current user's role first
@@ -147,11 +169,20 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
     }
   };
 
+  // Get the workspace configuration to check if it's private
+  const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
+  const isPrivate = workspaceConfig.private === true;
+
   return (
     <Card key={workspace.name}>
       <CardHeader>
         <CardTitle className="text-base font-normal">
-          <span className="font-semibold">Workspace:</span> {workspace.name}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-semibold">Workspace:</span> {workspace.name}
+            </div>
+            <WorkspaceBadge isPrivate={isPrivate} />
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-sm pb-2">
@@ -529,7 +560,11 @@ export function Workspaces() {
         deleting: false,
         error: null,
       });
-      await fetchData();
+
+      // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
+      dashboardCache.invalidate(getWorkspaces);
+
+      await fetchData(true); // Show loading during refresh
     } catch (error) {
       console.error('Error deleting workspace:', error);
       setDeleteState((prev) => ({
@@ -664,6 +699,7 @@ export function Workspaces() {
               onDelete={handleDeleteWorkspace}
               onEdit={(name) => router.push(`/workspaces/${name}`)}
               router={router}
+              rawWorkspacesData={rawWorkspacesData}
             />
           ))}
           <CreateWorkspaceCard onClick={() => router.push('/workspace/new')} />
