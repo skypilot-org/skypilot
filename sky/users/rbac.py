@@ -1,13 +1,12 @@
 """RBAC (Role-Based Access Control) functionality for SkyPilot API Server."""
 
 import enum
-from typing import Dict, List, Optional
+from typing import Dict, List
 
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
-from sky.utils import common_utils
+from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -89,14 +88,8 @@ def get_role_permissions(
     return config_permissions
 
 
-def get_workspace_policy_permissions(
-        workspace_names: Optional[str] = None) -> Dict[str, List[str]]:
+def get_workspace_policy_permissions() -> Dict[str, List[str]]:
     """Get workspace policy permissions from config.
-
-    Args:
-        workspace_names: The names of the workspaces to get the policy
-                         permissions for. If None, return all workspace
-                         policy permissions.
 
     Returns:
         A dictionary of workspace policy permissions.
@@ -111,14 +104,9 @@ def get_workspace_policy_permissions(
                                                     default_value={})
     if constants.SKYPILOT_DEFAULT_WORKSPACE not in current_workspaces:
         current_workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
-    if workspace_names is not None:
-        current_workspaces = {
-            k: v for k, v in current_workspaces.items() if k in workspace_names
-        }
     workspaces_to_policy = {}
-    all_users = global_user_state.get_all_users()
     for workspace_name, workspace_config in current_workspaces.items():
-        users = common_utils.get_workspace_users(workspace_config, all_users)
+        users = workspaces_utils.get_workspace_users(workspace_config)
         workspaces_to_policy[workspace_name] = users
     logger.debug(f'Workspace policy permissions: {workspaces_to_policy}')
     return workspaces_to_policy

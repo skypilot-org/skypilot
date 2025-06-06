@@ -18,6 +18,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import schemas
+from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -239,8 +240,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
         workspaces[workspace_name] = config
-        all_users = global_user_state.get_all_users()
-        users = common_utils.get_workspace_users(config, all_users)
+        users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
         permission_service.update_workspace_policy(workspace_name, users)
 
@@ -288,8 +288,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
                              'Use update instead.')
         workspaces[workspace_name] = config
         # Add policy for the workspace and allowed users
-        all_users = global_user_state.get_all_users()
-        users = common_utils.get_workspace_users(config, all_users)
+        users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
         permission_service.add_workspace_policy(workspace_name, users)
 
@@ -407,14 +406,10 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         'delete': {}
     }
 
-    # Get all users to check workspace policy.
-    all_users = global_user_state.get_all_users()
-
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
         if workspace_name not in current_workspaces:
-            users = common_utils.get_workspace_users(new_workspace_config,
-                                                     all_users)
+            users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['add'][workspace_name] = users
             continue
 
@@ -424,8 +419,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if current_workspace_config != new_workspace_config:
             _validate_workspace_config(workspace_name, new_workspace_config)
             workspaces_to_check.append((workspace_name, 'update'))
-            users = common_utils.get_workspace_users(new_workspace_config,
-                                                     all_users)
+            users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['update'][workspace_name] = users
 
     # Check for workspace deletions
