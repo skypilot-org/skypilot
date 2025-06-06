@@ -26,8 +26,6 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
-import { getUsers } from '@/data/connectors/users';
-import dashboardCache from '@/lib/cache';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -49,24 +47,22 @@ export function SidebarProvider({ children }) {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
 
-          // Try to get role from cached users data
+          // Get role from direct API endpoint to avoid cache interference
+          // Using cache would cause race condition, which leads to unexpected
+          // behavior in workspaces and users page.
           const getUserRole = async () => {
             try {
-              const usersData = await dashboardCache.get(getUsers);
-              if (usersData && Array.isArray(usersData)) {
-                const currentUser = usersData.find(
-                  (user) =>
-                    user.username === data.user.name ||
-                    user.name === data.user.name
-                );
-                if (currentUser && currentUser.role) {
-                  setUserRole(currentUser.role);
+              const response = await fetch(`${ENDPOINT}/users/role`);
+              if (response.ok) {
+                const roleData = await response.json();
+                if (roleData.role) {
+                  setUserRole(roleData.role);
                 }
               }
             } catch (error) {
-              // If users data is not available or there's an error,
+              // If role data is not available or there's an error,
               // we just don't show the role - it's not critical
-              console.log('Could not fetch user role from cache:', error);
+              console.log('Could not fetch user role:', error);
             }
           };
 
