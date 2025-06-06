@@ -397,11 +397,10 @@ function ActiveTab({
 
                     {/* Task YAML - Collapsible */}
                     {clusterData.task_yaml &&
-                      clusterData.task_yaml !== '{}' &&
-                      !clusterData.cluster.startsWith('sky-jobs-controller-') &&
-                      !clusterData.cluster.startsWith(
-                        'sky-serve-controller-'
-                      ) && (
+                      clusterData.task_yaml !== '{}' && 
+                      !clusterData.cluster.startsWith('sky-jobs-controller-') && 
+                      !clusterData.cluster.startsWith('sky-serve-controller-') &&
+                      (
                         <div>
                           <div className="flex items-center mb-2">
                             <button
