@@ -345,7 +345,9 @@ def _mock_get_kubernetes_node_info(*args, **kwargs):
 
 
 class TestNoK8sInstalled:
-
+    # We should run this test without kubernetes installed. i.e pip install skypilot[aws],
+    # and then run this test.
+    # This test is to ensure that the cli show-gpus command works without kubernetes installed.
     @pytest.mark.parametrize('enable_all_clouds', [[clouds.Kubernetes()]],
                              indirect=True)
     def test_k8s_alias(self, enable_all_clouds, monkeypatch):
