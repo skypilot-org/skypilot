@@ -13,6 +13,8 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.users import rbac
 
+logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
+logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
 logger = sky_logging.init_logger(__name__)
 
 # Filelocks for the policy update.
@@ -38,9 +40,6 @@ class PermissionService:
                     model_path = os.path.join(os.path.dirname(__file__),
                                               'model.conf')
                     enforcer = casbin.Enforcer(model_path, adapter)
-                    logging.getLogger('casbin.policy').setLevel(
-                        sky_logging.ERROR)
-                    logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
                     self.enforcer = enforcer
         else:
             self.enforcer = _enforcer_instance.enforcer
@@ -48,6 +47,7 @@ class PermissionService:
 
     def _maybe_initialize_policies(self):
         """Initialize policies if they don't already exist."""
+        # TODO(zhwu): we should avoid running this on client side.
         logger.debug(f'Initializing policies in process: {os.getpid()}')
 
         # Check if policies are already initialized by looking for existing
@@ -65,6 +65,17 @@ class PermissionService:
                 for item in blocklist:
                     expected_policies.append(
                         [role, item['path'], item['method']])
+
+        # Add workspace policy
+        workspace_policy_permissions = rbac.get_workspace_policy_permissions()
+        logger.debug(f'Workspace policy permissions from config: '
+                     f'{workspace_policy_permissions}')
+
+        for workspace_name, users in workspace_policy_permissions.items():
+            for user in users:
+                expected_policies.append([user, workspace_name, '*'])
+                logger.debug(f'Expected workspace policy: user={user}, '
+                             f'workspace={workspace_name}')
 
         # Check if all expected policies already exist
         policies_exist = all(
@@ -86,8 +97,17 @@ class PermissionService:
                     for item in blocklist:
                         path = item['path']
                         method = item['method']
+                        logger.debug(f'Adding role policy: role={role}, '
+                                     f'path={path}, method={method}')
                         self.enforcer.add_policy(role, path, method)
+
+            for workspace_name, users in workspace_policy_permissions.items():
+                for user in users:
+                    logger.debug(f'Initializing workspace policy: user={user}, '
+                                 f'workspace={workspace_name}')
+                    self.enforcer.add_policy(user, workspace_name, '*')
             self.enforcer.save_policy()
+            logger.debug('Policies initialized successfully')
         else:
             logger.debug('Policies already exist, skipping initialization')
 
@@ -140,10 +160,11 @@ class PermissionService:
         Returns:
             A list of role names that the user has.
         """
-        self._load_policy()
+        self._load_policy_no_lock()
         return self.enforcer.get_roles_for_user(user)
 
-    def check_permission(self, user: str, path: str, method: str) -> bool:
+    def check_endpoint_permission(self, user: str, path: str,
+                                  method: str) -> bool:
         """Check permission."""
         # We intentionally don't load the policy here, as it is a hot path, and
         # we don't support updating the policy.
@@ -157,10 +178,77 @@ class PermissionService:
         """Load policy from storage."""
         self.enforcer.load_policy()
 
-    def _load_policy(self):
+    def load_policy(self):
         """Load policy from storage with lock."""
         with _policy_lock():
             self._load_policy_no_lock()
+
+    def check_workspace_permission(self, user: str,
+                                   workspace_name: str) -> bool:
+        """Check workspace permission.
+
+        This method checks if a user has permission to access a specific
+        workspace.
+
+        For private workspaces, the user must have explicit permission.
+
+        For public workspaces, the permission is granted via a wildcard policy
+        ('*').
+        """
+        role = self.get_user_roles(user)
+        if rbac.RoleName.ADMIN.value in role:
+            return True
+        # The Casbin model matcher already handles the wildcard '*' case:
+        # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
+        # r.act == p.act
+        # This means if there's a policy ('*', workspace_name, '*'), it will
+        # match any user
+        result = self.enforcer.enforce(user, workspace_name, '*')
+        logger.debug(f'Workspace permission check: user={user}, '
+                     f'workspace={workspace_name}, result={result}')
+        return result
+
+    def add_workspace_policy(self, workspace_name: str, users: List[str]):
+        """Add workspace policy.
+
+        Args:
+            workspace_name: Name of the workspace
+            users: List of user IDs that should have access.
+                   For public workspaces, this should be ['*'].
+                   For private workspaces, this should be specific user IDs.
+        """
+        with _policy_lock():
+            for user in users:
+                logger.debug(f'Adding workspace policy: user={user}, '
+                             f'workspace={workspace_name}')
+                self.enforcer.add_policy(user, workspace_name, '*')
+            self.enforcer.save_policy()
+
+    def update_workspace_policy(self, workspace_name: str, users: List[str]):
+        """Update workspace policy.
+
+        Args:
+            workspace_name: Name of the workspace
+            users: List of user IDs that should have access.
+                   For public workspaces, this should be ['*'].
+                   For private workspaces, this should be specific user IDs.
+        """
+        with _policy_lock():
+            self._load_policy_no_lock()
+            # Remove all existing policies for this workspace
+            self.enforcer.remove_filtered_policy(1, workspace_name)
+            # Add new policies
+            for user in users:
+                logger.debug(f'Updating workspace policy: user={user}, '
+                             f'workspace={workspace_name}')
+                self.enforcer.add_policy(user, workspace_name, '*')
+            self.enforcer.save_policy()
+
+    def remove_workspace_policy(self, workspace_name: str):
+        """Remove workspace policy."""
+        with _policy_lock():
+            self.enforcer.remove_filtered_policy(1, workspace_name)
+            self.enforcer.save_policy()
 
 
 @contextlib.contextmanager
@@ -176,3 +264,7 @@ def _policy_lock():
                            f'{POLICY_UPDATE_LOCK_PATH}. '
                            'Please try again or manually remove the lock '
                            f'file if you believe it is stale.') from e
+
+
+# Singleton instance of PermissionService for other modules to use.
+permission_service = PermissionService()

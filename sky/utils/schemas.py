@@ -1256,6 +1256,15 @@ def get_config_schema():
             'properties': {
                 # Explicit definition for GCP allows both project_id and
                 # disabled
+                'private': {
+                    'type': 'boolean',
+                },
+                'allowed_users': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
