@@ -48,26 +48,28 @@ export function SidebarProvider({ children }) {
       .then((data) => {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
-          
+
           // Try to get role from cached users data
           const getUserRole = async () => {
             try {
               const usersData = await dashboardCache.get(getUsers);
               if (usersData && Array.isArray(usersData)) {
-                const currentUser = usersData.find(user => 
-                  user.username === data.user.name || user.name === data.user.name
+                const currentUser = usersData.find(
+                  (user) =>
+                    user.username === data.user.name ||
+                    user.name === data.user.name
                 );
                 if (currentUser && currentUser.role) {
                   setUserRole(currentUser.role);
                 }
               }
             } catch (error) {
-              // If users data is not available or there's an error, 
+              // If users data is not available or there's an error,
               // we just don't show the role - it's not critical
               console.log('Could not fetch user role from cache:', error);
             }
           };
-          
+
           getUserRole();
         }
       })
@@ -163,6 +165,19 @@ export function TopBar() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [dropdownRef]);
+
+  // Function to get user initial
+  const getUserInitial = (email) => {
+    if (!email) return '?';
+
+    // If it's an email, get the first letter of the username part
+    if (email.includes('@')) {
+      return email.split('@')[0].charAt(0).toUpperCase();
+    }
+
+    // If it's just a name, get the first letter
+    return email.charAt(0).toUpperCase();
+  };
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
@@ -360,12 +375,14 @@ export function TopBar() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                className="inline-flex items-center justify-center rounded-full transition-colors duration-150 cursor-pointer hover:ring-2 hover:ring-blue-200"
                 title="User Profile"
               >
-                <UserCircleIcon
-                  className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`}
-                />
+                <div
+                  className={`${isMobile ? 'w-8 h-8' : 'w-9 h-9'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium text-sm hover:bg-blue-700 transition-colors`}
+                >
+                  {getUserInitial(userEmail)}
+                </div>
               </button>
 
               {isDropdownOpen && (

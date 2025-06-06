@@ -162,6 +162,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 permission.permission_service.add_user_if_not_exists(
                     auth_user.id)
 
+        # Store user info in request.state for access by GET endpoints
+        if auth_user is not None:
+            request.state.auth_user = auth_user
+        else:
+            request.state.auth_user = None
+
         body = await request.body()
         if auth_user and body:
             try:

@@ -14,10 +14,15 @@ router = fastapi.APIRouter()
 # pylint: disable=redefined-builtin
 async def get(request: fastapi.Request) -> None:
     """Gets workspace config on the server."""
+    # Have to manually inject user info into the request body because the
+    # request body is not available in the GET endpoint.
+    request_body = payloads.RequestBody(
+        env_vars=request.state.auth_user.to_env_vars())
+
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='workspaces.get',
-        request_body=payloads.RequestBody(),
+        request_body=request_body,
         func=core.get_workspaces,
         schedule_type=api_requests.ScheduleType.SHORT,
     )

@@ -18,7 +18,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { CircularProgress } from '@mui/material';
-import { SaveIcon, TrashIcon, CheckIcon, RotateCwIcon, User } from 'lucide-react';
+import {
+  SaveIcon,
+  TrashIcon,
+  CheckIcon,
+  RotateCwIcon,
+  User,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,

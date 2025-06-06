@@ -29,6 +29,7 @@ _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
 # = Workspace Management =
 # =========================
 
+
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     return workspaces_for_user(common_utils.get_current_user().id)
@@ -511,23 +512,7 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     user_workspaces = {}
 
     for workspace_name, workspace_config in workspaces.items():
-        if is_workspace_private(workspace_config):
-            # For private workspaces, check explicit permission
-            if permission.permission_service.check_workspace_permission(
-                    user_id, workspace_name):
-                user_workspaces[workspace_name] = workspace_config
-        else:
-            # For public workspaces, all users have access
-            # But we still check permissions to be consistent with the policy
-            # system.
-            if permission.permission_service.check_workspace_permission(
-                    user_id, workspace_name):
-                user_workspaces[workspace_name] = workspace_config
-            else:
-                # If the permission check fails for a public workspace,
-                # it means the policy might not be set up correctly
-                logger.warning(f'Public workspace {workspace_name} permission '
-                               f'check failed for user {user_id}. This might '
-                               f'indicate a policy setup issue.')
-
+        if permission.permission_service.check_workspace_permission(
+                user_id, workspace_name):
+            user_workspaces[workspace_name] = workspace_config
     return user_workspaces
