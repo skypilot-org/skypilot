@@ -95,7 +95,7 @@ jobs:
       commit: ${{ github.sha }}
       branch: master
       message: "nightly-build-pypi"
-      pipeline: "skypilot-1/smoke-tests"
+      pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--aws"}'
       timeout_minutes: 120
     secrets:

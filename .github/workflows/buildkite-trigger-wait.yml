@@ -19,7 +19,7 @@ on:
       pipeline:
         required: true
         type: string
-        description: "Buildkite pipeline name (e.g., skypilot-1/smoke-tests)"
+        description: "Buildkite pipeline name (e.g., smoke-tests)"
       build_env_vars:
         required: false
         type: string
