@@ -347,12 +347,14 @@ def _execute_dag(
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
                                               task)
 
+    regen_managed_job_id = False
     if not cluster_exists:
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and
                 not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
+            regen_managed_job_id = True
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
@@ -412,6 +414,8 @@ def _execute_dag(
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+            if regen_managed_job_id:
+                _managed_job_id = global_user_state.atomic_increment_managed_job_id()
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '

@@ -47,7 +47,7 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
-    managed_job_id: int,
+    managed_job_id: Optional[int],
     name: Optional[str] = None,
     stream_logs: bool = True,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
