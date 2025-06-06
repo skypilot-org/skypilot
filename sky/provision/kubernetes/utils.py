@@ -2342,7 +2342,7 @@ def get_endpoint_debug_message() -> str:
 def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
-    cloud: clouds.Cloud,
+    cloud: Optional[clouds.Cloud] = None,
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
