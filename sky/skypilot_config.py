@@ -134,7 +134,7 @@ def create_table():
     Base.metadata.create_all(bind=SQLALCHEMY_ENGINE)
 
 
-def get_config_yaml(key: str) -> Optional[config_utils.Config]:
+def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
     assert SQLALCHEMY_ENGINE is not None
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(config_yaml_table).filter_by(key=key).first()
@@ -145,7 +145,7 @@ def get_config_yaml(key: str) -> Optional[config_utils.Config]:
     return None
 
 
-def set_config_yaml(key: str, config: config_utils.Config):
+def _set_config_yaml_to_db(key: str, config: config_utils.Config):
     assert SQLALCHEMY_ENGINE is not None
     config.pop_nested(('db',), None)
     config_str = common_utils.dump_yaml_str(dict(config))
@@ -584,7 +584,7 @@ def _reload_config_as_server() -> None:
         if SQLALCHEMY_ENGINE is None:
             SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url)
             create_table()
-        db_config = get_config_yaml(API_SERVER_CONFIG_KEY)
+        db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
         if db_config:
             if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                 logger.debug(f'Config loaded from db:\n'
@@ -845,13 +845,13 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     db_updated = False
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        new_db_url = config.get_nested(('db',), None)
-        if new_db_url:
-            existing_db_url = get_nested(('db',), None)
-            if new_db_url != existing_db_url:
+        existing_db_url = get_nested(('db',), None)
+        if existing_db_url:
+            new_db_url = config.get_nested(('db',), None)
+            if new_db_url and new_db_url != existing_db_url:
                 raise ValueError('Cannot change db url while server is running')
             logger.debug('saving api_server config to db')
-            set_config_yaml(API_SERVER_CONFIG_KEY, config)
+            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
             db_updated = True
 
     if not db_updated:
