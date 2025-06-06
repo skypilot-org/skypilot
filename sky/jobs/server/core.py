@@ -88,6 +88,9 @@ def launch(
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
+
+    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
@@ -175,12 +178,20 @@ def launch(
                     controller_utils.translate_local_file_mounts_to_two_hop(
                         task_))
 
+    # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as f:
+                                     mode='w') as f, \
+         tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
+                                     mode='w') as original_user_yaml_path:
+        original_user_yaml_path.write(user_dag_str)
+        original_user_yaml_path.flush()
+
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
+        remote_original_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
@@ -189,6 +200,8 @@ def launch(
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         vars_to_fill = {
+            'remote_original_user_yaml_path': remote_original_user_yaml_path,
+            'original_user_dag_path': original_user_yaml_path.name,
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
             'local_to_controller_file_mounts': local_to_controller_file_mounts,
