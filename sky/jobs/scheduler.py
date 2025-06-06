@@ -191,8 +191,8 @@ def maybe_schedule_next_jobs() -> None:
         pass
 
 
-def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str,
-               priority: int) -> None:
+def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
+               env_file_path: str, priority: int) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -203,7 +203,8 @@ def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str,
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path,
+        state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                    original_user_yaml_path, env_file_path,
                                     common_utils.get_user_hash(), priority)
     maybe_schedule_next_jobs()
 
@@ -312,6 +313,9 @@ if __name__ == '__main__':
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
+    parser.add_argument('--user-yaml-path',
+                        type=str,
+                        help='The path to the original user job yaml file.')
     parser.add_argument('--job-id',
                         required=True,
                         type=int,
@@ -325,4 +329,5 @@ if __name__ == '__main__':
         default=500,
         help='Job priority (0-1000, lower is higher). Default: 500.')
     args = parser.parse_args()
-    submit_job(args.job_id, args.dag_yaml, args.env_file, args.priority)
+    submit_job(args.job_id, args.dag_yaml, args.user_yaml_path,
+               args.env_file, args.priority)
