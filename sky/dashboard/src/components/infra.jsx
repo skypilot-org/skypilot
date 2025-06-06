@@ -732,38 +732,33 @@ function SSHNodePoolDetails({
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <div className="text-gray-600 font-medium text-base">
-                  Status
-                </div>
-                <div className="text-base mt-1">
-                  {statusLoading ? (
-                    <div className="flex items-center">
-                      <CircularProgress size={16} className="mr-2" />
-                      <span className="text-gray-500">Loading...</span>
-                    </div>
-                  ) : statusData ? (
-                    <StatusBadge status={statusData.status} reason={statusData.reason} />
-                  ) : (
-                    <span className="text-gray-500">Unknown</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
                   Pool Name
                 </div>
                 <div className="text-base mt-1">{poolName}</div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">
-                  Context Name
-                </div>
-                <div className="text-base mt-1">{statusData?.context_name || `ssh-${poolName}`}</div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
                   Nodes
                 </div>
                 <div className="text-base mt-1">{nodesInContext ? nodesInContext.length : 0}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
+                <div className="text-base mt-1">
+                  {statusLoading ? (
+                      <div className="flex items-center">
+                        <CircularProgress size={16} className="mr-2"/>
+                        <span className="text-gray-500">Loading...</span>
+                      </div>
+                  ) : statusData ? (
+                      <StatusBadge status={statusData.status}
+                                   reason={statusData.reason}/>
+                  ) : (
+                      <span className="text-gray-500">Unknown</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
