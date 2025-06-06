@@ -560,10 +560,10 @@ export function Workspaces() {
         deleting: false,
         error: null,
       });
-      
+
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
       dashboardCache.invalidate(getWorkspaces);
-      
+
       await fetchData(true); // Show loading during refresh
     } catch (error) {
       console.error('Error deleting workspace:', error);
