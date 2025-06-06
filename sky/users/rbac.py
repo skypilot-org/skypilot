@@ -3,10 +3,11 @@
 import enum
 from typing import Dict, List, Optional
 
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
-from sky.workspaces import core as workspaces_core
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -89,32 +90,35 @@ def get_role_permissions(
 
 
 def get_workspace_policy_permissions(
-        workspace_name: Optional[str] = None) -> Dict[str, List[str]]:
+        workspace_names: Optional[str] = None) -> Dict[str, List[str]]:
     """Get workspace policy permissions from config.
 
     Args:
-        workspace_name: The name of the workspace to get the policy permissions
-            for. If None, return all workspace policy permissions.
+        workspace_names: The names of the workspaces to get the policy
+                         permissions for. If None, return all workspace
+                         policy permissions.
 
     Returns:
         A dictionary of workspace policy permissions.
         Example:
         {
-            'workspace1': ['user1', 'user2'],
-            'workspace2': ['user3', 'user4']
+            'workspace1': ['user1-id', 'user2-id'],
+            'workspace2': ['user3-id', 'user4-id']
+            'default': ['*']
         }
     """
-    current_workspaces = workspaces_core.get_workspaces()
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in current_workspaces:
+        current_workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    if workspace_names is not None:
+        current_workspaces = {
+            k: v for k, v in current_workspaces.items() if k in workspace_names
+        }
     workspaces_to_policy = {}
+    all_users = global_user_state.get_all_users()
     for workspace_name, workspace_config in current_workspaces.items():
-        if workspace_config.get('private', False):
-            # This only list out the users explicitly allowed.
-            # Admin users should be automatically included during checks.
-            users = workspace_config.get('allowed_users', [])
-            workspaces_to_policy[workspace_name] = users
-        else:
-            workspaces_to_policy[workspace_name] = ['*']
-    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces_to_policy:
-        workspaces_to_policy[constants.SKYPILOT_DEFAULT_WORKSPACE] = ['*']
+        users = common_utils.get_workspace_users(workspace_config, all_users)
+        workspaces_to_policy[workspace_name] = users
     logger.debug(f'Workspace policy permissions: {workspaces_to_policy}')
     return workspaces_to_policy

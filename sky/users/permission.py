@@ -180,10 +180,7 @@ class PermissionService:
         Returns:
             A list of role names that the user has.
         """
-        return self.enforcer.get_roles_for_user(user)
-
-    def get_user_roles_no_load_policy(self, user: str) -> List[str]:
-        """Get all roles for a user without loading policy."""
+        self._load_policy_no_lock()
         return self.enforcer.get_roles_for_user(user)
 
     def check_endpoint_permission(self, user: str, path: str,

@@ -2586,7 +2586,7 @@ def get_clusters(
             if record['user_hash'] == current_user.id
         ]
 
-    accessible_workspaces = workspaces_core.workspaces_for_user(current_user)
+    accessible_workspaces = workspaces_core.workspaces_for_user(current_user.id)
 
     workspace_filtered_records = []
     for record in records:

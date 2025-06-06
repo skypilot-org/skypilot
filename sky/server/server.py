@@ -117,10 +117,6 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return await call_next(request)
 
         permission_service = permission.permission_service
-        roles = permission_service.get_user_roles_no_load_policy(auth_user.id)
-        if 'admin' in roles:
-            return await call_next(request)
-
         # Check the role permission
         if permission_service.check_endpoint_permission(auth_user.id,
                                                         request.url.path,

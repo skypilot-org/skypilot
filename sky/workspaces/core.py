@@ -239,7 +239,8 @@ def update_workspace(workspace_name: str, config: Dict[str,
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
         workspaces[workspace_name] = config
-        users = _get_workspace_users(config)
+        all_users = global_user_state.get_all_users()
+        users = common_utils.get_workspace_users(config, all_users)
         permission_service = permission.permission_service
         permission_service.update_workspace_policy(workspace_name, users)
 
@@ -287,7 +288,8 @@ def create_workspace(workspace_name: str, config: Dict[str,
                              'Use update instead.')
         workspaces[workspace_name] = config
         # Add policy for the workspace and allowed users
-        users = _get_workspace_users(config)
+        all_users = global_user_state.get_all_users()
+        users = common_utils.get_workspace_users(config, all_users)
         permission_service = permission.permission_service
         permission_service.add_workspace_policy(workspace_name, users)
 
@@ -405,10 +407,14 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         'delete': {}
     }
 
+    # Get all users to check workspace policy.
+    all_users = global_user_state.get_all_users()
+
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
         if workspace_name not in current_workspaces:
-            users = _get_workspace_users(new_workspace_config)
+            users = common_utils.get_workspace_users(new_workspace_config,
+                                                     all_users)
             workspaces_to_check_policy['add'][workspace_name] = users
             continue
 
@@ -418,7 +424,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if current_workspace_config != new_workspace_config:
             _validate_workspace_config(workspace_name, new_workspace_config)
             workspaces_to_check.append((workspace_name, 'update'))
-            users = _get_workspace_users(new_workspace_config)
+            users = common_utils.get_workspace_users(new_workspace_config,
+                                                     all_users)
             workspaces_to_check_policy['update'][workspace_name] = users
 
     # Check for workspace deletions
@@ -485,7 +492,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
     """
     active_workspace = skypilot_config.get_active_workspace()
     if not permission.permission_service.check_workspace_permission(
-            user.id, skypilot_config.get_active_workspace()):
+            user.id, active_workspace):
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have '
             f'permission to access workspace {active_workspace}')
@@ -504,11 +511,11 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
 
 
 @annotations.lru_cache(scope='request', maxsize=1)
-def workspaces_for_user(user: models.User) -> List[str]:
+def workspaces_for_user(user_id: str) -> List[str]:
     """Returns the workspaces that the user has access to.
 
     Args:
-        user: The user to check.
+        user_id: The user id to check.
 
     Returns:
         A list of workspace names that the user has access to.
@@ -520,48 +527,20 @@ def workspaces_for_user(user: models.User) -> List[str]:
         if is_workspace_private(workspace_config):
             # For private workspaces, check explicit permission
             if permission.permission_service.check_workspace_permission(
-                    user.id, workspace_name):
+                    user_id, workspace_name):
                 user_workspaces.append(workspace_name)
         else:
             # For public workspaces, all users have access
             # But we still check permissions to be consistent with the policy
             # system.
             if permission.permission_service.check_workspace_permission(
-                    user.id, workspace_name):
+                    user_id, workspace_name):
                 user_workspaces.append(workspace_name)
             else:
                 # If the permission check fails for a public workspace,
                 # it means the policy might not be set up correctly
                 logger.warning(f'Public workspace {workspace_name} permission '
-                               f'check failed for user {user.id}. This might '
+                               f'check failed for user {user_id}. This might '
                                f'indicate a policy setup issue.')
 
     return user_workspaces
-
-
-def _get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
-    """Get the users that should have access to a workspace.
-
-    Args:
-        workspace_config: The configuration of the workspace.
-        all_users: List of all users in the system.
-
-    Returns:
-        List of user IDs that should have access to the workspace.
-        For private workspaces, returns specific user IDs.
-        For public workspaces, returns ['*'] to indicate all users.
-    """
-    if 'private' in workspace_config and workspace_config['private']:
-        user_ids = []
-        all_users = global_user_state.get_all_users()
-        user_names = workspace_config.get('allowed_users', [])
-        all_users_map = {user.name: user.id for user in all_users}
-        for user_name in user_names:
-            if user_name not in all_users_map:
-                logger.warning(f'User {user_name} not found in all users')
-                continue
-            user_ids.append(all_users_map[user_name])
-        return user_ids
-    else:
-        # Public workspace - return '*' to indicate all users should have access
-        return ['*']
