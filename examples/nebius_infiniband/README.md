@@ -158,22 +158,14 @@ While the previous section covered InfiniBand setup for managed Kubernetes servi
 
 SkyPilot simplifies the process of setting up InfiniBand-enabled GPU clusters on Nebius VMs. When you launch a cluster with the appropriate configurations, SkyPilot will automatically create a GPU cluster with InfiniBand support and add VMs to the GPU cluster.
 
-To enable automatic InfiniBand setup, you need to configure your `~/.sky/config.yaml` file with the following settings:
+To enable automatic InfiniBand setup, you can simply choose the best network in your SkyPilot YAML:
 
 ```yaml
-nebius:
-  eu-north1:
-    project_id: <project_id>
-    fabric: <fabric>
+resources:
+  network_tier: best
 ```
 
-Where:
-- `<project_id>`: Your Nebius project identifier
-- `<fabric>`: The GPU cluster configuration identifier that determines the InfiniBand fabric type
-
-For detailed information about fabric selection based on your GPU requirements, consult the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu#fabrics).
-
-Additional configuration options are available in the [SkyPilot Nebius configuration reference](https://docs.skypilot.co/en/latest/reference/config.html#nebius).
+SkyPilot will automatically configure the InfiniBand with the correct fabric for you. (Note that, Infiniband is only supported by two GPU types, H100:8 and H200:8. Refer to [Nebius Docs](https://docs.nebius.com/compute/clusters/gpu#fabrics)).
 
 ### Running Performance Tests
 
@@ -188,16 +180,16 @@ sky launch -c infiniband nccl_vm_ib.yaml
 Result example:
 
 ```
-#                                                              out-of-place                       in-place
-#       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw 
-#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)
-   536870912     134217728     float     sum      -1   2424.4  221.45  415.21      0   2391.0  224.53  421.00      
-  1073741824     268435456     float     sum      -1   4528.1  237.13  444.62      0   4533.5  236.85  444.09      
-  2147483648     536870912     float     sum      -1   8795.2  244.17  457.81      0   8783.6  244.49  458.42      
-  4294967296    1073741824     float     sum      -1    17442  246.25  461.71      0    17386  247.03  463.19      
-  8589934592    2147483648     float     sum      -1    34430  249.49  467.79      0    34443  249.39  467.61      
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)       
+   536870912     134217728     float     sum      -1   2399.1  223.78  419.59      0   2354.3  228.04  427.57      0
+  1073741824     268435456     float     sum      -1   4469.9  240.22  450.41      0   4463.1  240.58  451.09      0
+  2147483648     536870912     float     sum      -1   8678.7  247.44  463.96      0   8667.1  247.77  464.57      0
+  4294967296    1073741824     float     sum      -1    17053  251.86  472.24      0    17112  250.99  470.60      0
+  8589934592    2147483648     float     sum      -1    33792  254.20  476.62      0    33735  254.63  477.42      0
 # Out of bounds values : 0 OK
-# Avg bus bandwidth    : 450.146
+# Avg bus bandwidth    : 457.407 
 ```
 
 2. InfiniBand Direct Test:

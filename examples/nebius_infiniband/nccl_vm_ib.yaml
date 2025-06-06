@@ -2,9 +2,10 @@
 # with InfiniBand on Nebius VMs.
 resources:
   cloud: nebius
-  region: eu-north1
+  region: us-central1
   accelerators: H100:8
   image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
+  network_tier: best
 
 num_nodes: 2
 
@@ -35,9 +36,9 @@ run: |
       -bind-to none \
       -x LD_LIBRARY_PATH \
       -x NCCL_SOCKET_IFNAME \
-      -x NCCL_IB_HCA=mlx5 \
+      -x NCCL_IB_HCA \
       -x NCCL_ALGO=NVLSTree \
-      -x UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1 \
+      -x UCX_NET_DEVICES \
       -x SHARP_COLL_ENABLE_PCI_RELAXED_ORDERING=1 \
       -x NCCL_COLLNET_ENABLE=0 \
       --mca plm_rsh_args "-p $SSH_PORT" \
@@ -49,9 +50,3 @@ run: |
   else
     echo "worker node"
   fi
-
-config:
-  docker:
-    run_options:
-      - --device=/dev/infiniband
-      - --cap-add=IPC_LOCK
