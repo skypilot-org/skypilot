@@ -329,6 +329,7 @@ grafana:
   persistence:
     enabled: true
     size: 10Gi
+  # Serve under a subpath by default to avoid conflicts with API server.
   ingress:
     enabled: true
     path: "/grafana"
@@ -340,4 +341,10 @@ grafana:
       root_url: "%(protocol)s://%(domain)s/grafana"
       enforce_domain: false
       serve_from_sub_path: true
-
+  sidecar:
+    # Enable datasources discovery in grafana sidecar.
+    datasources:
+      enabled: true
+    # Enable dashboards discovery in grafana sidecar.
+    dashboards:
+      enabled: true
