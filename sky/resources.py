@@ -1633,6 +1633,152 @@ class Resources:
         # self <= other
         return True
 
+    def get_mismatch_reason(
+        self,
+        other: 'Resources',
+        requested_num_nodes: int = 1,
+        check_ports: bool = False,
+    ) -> List[str]:
+        """Returns a list of fields that don't match between this and other resources.
+
+        Args:
+            other: Resources of the launched cluster.
+            requested_num_nodes: Number of nodes that the current task
+              requests from the cluster.
+            check_ports: Whether to check the ports field.
+
+        Returns:
+            A list of field names that don't match. Empty list if all fields match.
+        """
+        mismatched_fields = []
+
+        assert other.cloud is not None, 'Other cloud must be specified'
+
+        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
+            mismatched_fields.append('cloud')
+
+        if self.region is not None and self.region != other.region:
+            mismatched_fields.append('region')
+
+        if self.zone is not None and self.zone != other.zone:
+            mismatched_fields.append('zone')
+
+        if self.image_id is not None:
+            if other.image_id is None:
+                mismatched_fields.append('image_id')
+            elif other.region is None:
+                # Current image_id should be a subset of other.image_id
+                if not self.image_id.items() <= other.image_id.items():
+                    mismatched_fields.append('image_id')
+            else:
+                this_image = (self.image_id.get(other.region) or
+                              self.image_id.get(None))
+                other_image = (other.image_id.get(other.region) or
+                               other.image_id.get(None))
+                if this_image != other_image:
+                    mismatched_fields.append('image_id')
+
+        if (self._instance_type is not None and
+                self._instance_type != other.instance_type):
+            mismatched_fields.append('instance_type')
+
+        # Check CPU requirements (convert strings to numbers for comparison)
+        if self.cpus is not None and other.cpus is not None:
+            try:
+                # Handle string CPUs like "4" or "4+"
+                self_cpus_str = str(self.cpus)
+                other_cpus_str = str(other.cpus)
+                
+                if self_cpus_str.endswith('+'):
+                    self_cpus_min = float(self_cpus_str[:-1])
+                    other_cpus_val = float(other_cpus_str.rstrip('+'))
+                    if self_cpus_min > other_cpus_val:
+                        mismatched_fields.append('cpus')
+                else:
+                    self_cpus_val = float(self_cpus_str)
+                    other_cpus_val = float(other_cpus_str.rstrip('+'))
+                    # For exact specification, require exact match or more
+                    if self_cpus_val > other_cpus_val:
+                        mismatched_fields.append('cpus')
+            except (ValueError, TypeError):
+                # If we can't parse CPU values, skip this check
+                pass
+
+        # Check memory requirements
+        if self.memory is not None and other.memory is not None:
+            try:
+                # Handle memory like "8" or "8+" (in GB) or "2x" (multiple of CPU)
+                self_memory_str = str(self.memory)
+                other_memory_str = str(other.memory)
+                
+                # Skip complex memory specifications like "2x" for now
+                if not (self_memory_str.endswith('x') or other_memory_str.endswith('x')):
+                    if self_memory_str.endswith('+'):
+                        self_memory_min = float(self_memory_str[:-1])
+                        other_memory_val = float(other_memory_str.rstrip('+'))
+                        if self_memory_min > other_memory_val:
+                            mismatched_fields.append('memory')
+                    else:
+                        self_memory_val = float(self_memory_str)
+                        other_memory_val = float(other_memory_str.rstrip('+'))
+                        if self_memory_val > other_memory_val:
+                            mismatched_fields.append('memory')
+            except (ValueError, TypeError):
+                # If we can't parse memory values, skip this check
+                pass
+
+        other_accelerators = other.accelerators
+        if self.accelerators is not None:
+            if other_accelerators is None:
+                mismatched_fields.append('accelerators')
+            else:
+                for acc in self.accelerators:
+                    if acc not in other_accelerators:
+                        mismatched_fields.append('accelerators')
+                        break
+                    if self.accelerators[acc] > other_accelerators[acc]:
+                        mismatched_fields.append('accelerators')
+                        break
+
+        if (self.accelerator_args is not None and
+                self.accelerator_args != other.accelerator_args):
+            mismatched_fields.append('accelerator_args')
+
+        if self.use_spot_specified and self.use_spot != other.use_spot:
+            mismatched_fields.append('use_spot')
+
+        if self.disk_tier is not None:
+            if other.disk_tier is None:
+                mismatched_fields.append('disk_tier')
+            elif self.disk_tier != resources_utils.DiskTier.BEST:
+                if not (self.disk_tier <= other.disk_tier):
+                    mismatched_fields.append('disk_tier')
+
+        if self.network_tier is not None:
+            if other.network_tier is None:
+                mismatched_fields.append('network_tier')
+            elif not self.network_tier <= other.network_tier:
+                mismatched_fields.append('network_tier')
+
+        if check_ports:
+            if self.ports is not None:
+                if other.ports is None:
+                    mismatched_fields.append('ports')
+                else:
+                    self_ports = resources_utils.port_ranges_to_set(self.ports)
+                    other_ports = resources_utils.port_ranges_to_set(other.ports)
+                    if not self_ports <= other_ports:
+                        mismatched_fields.append('ports')
+
+        if self.requires_fuse and not other.requires_fuse:
+            # On Kubernetes, we can't launch a task that requires FUSE on a pod
+            # that wasn't initialized with FUSE support at the start.
+            # Other clouds don't have this limitation.
+            if other.cloud.is_same_cloud(clouds.Kubernetes()):
+                mismatched_fields.append('requires_fuse')
+
+        return mismatched_fields
+
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
         """Whether this Resources matches the blocked Resources.
 

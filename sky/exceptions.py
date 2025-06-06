@@ -228,8 +228,95 @@ class ManagedJobStatusError(Exception):
 
 
 class ResourcesMismatchError(Exception):
-    """Raised when resources are mismatched."""
-    pass
+    """Raised when resources are mismatched.
+    
+    This exception can optionally store detailed information about why
+    resources don't match to provide better error messages to users.
+    """
+    
+    def __init__(
+        self, 
+        message: str, 
+        requested_resources: Optional[str] = None,
+        existing_resources: Optional[str] = None,
+        mismatched_fields: Optional[List[str]] = None,
+        cluster_name: Optional[str] = None
+    ) -> None:
+        super().__init__(message)
+        self.requested_resources = requested_resources
+        self.existing_resources = existing_resources  
+        self.mismatched_fields = mismatched_fields or []
+        self.cluster_name = cluster_name
+        
+    def add_mismatch_details(
+        self,
+        requested_resources: str,
+        existing_resources: str, 
+        mismatched_fields: List[str],
+        cluster_name: str
+    ) -> None:
+        """Add detailed mismatch information to the exception."""
+        self.requested_resources = requested_resources
+        self.existing_resources = existing_resources
+        self.mismatched_fields = mismatched_fields
+        self.cluster_name = cluster_name
+
+    def get_detailed_reason(self) -> str:
+        """Get a detailed explanation of why resources don't match."""
+        if not self.mismatched_fields:
+            return str(self)
+        
+        field_explanations = []
+        for field in self.mismatched_fields:
+            if field == 'region':
+                field_explanations.append("Region mismatch")
+            elif field == 'zone':
+                field_explanations.append("Zone mismatch")
+            elif field == 'accelerators':
+                field_explanations.append("Accelerator type or count mismatch")
+            elif field == 'instance_type':
+                field_explanations.append("Instance type mismatch")
+            elif field == 'cpus':
+                field_explanations.append("CPU count insufficient")
+            elif field == 'memory':
+                field_explanations.append("Memory insufficient") 
+            elif field == 'disk_tier':
+                field_explanations.append("Disk tier mismatch")
+            elif field == 'network_tier':
+                field_explanations.append("Network tier mismatch")
+            elif field == 'requires_fuse':
+                field_explanations.append("FUSE support mismatch")
+            elif field == 'use_spot':
+                field_explanations.append("Spot vs on-demand instance mismatch")
+            elif field == 'ports':
+                field_explanations.append("Required ports not available")
+            elif field == 'num_nodes':
+                field_explanations.append("Insufficient number of nodes in cluster")
+            elif field == 'cloud':
+                field_explanations.append("Cloud provider mismatch")
+            elif field == 'image_id':
+                field_explanations.append("Image ID mismatch")
+            elif field == 'accelerator_args':
+                field_explanations.append("Accelerator arguments mismatch")
+            else:
+                field_explanations.append(f"{field} mismatch")
+        
+        details = f"Resource mismatch reasons: {', '.join(field_explanations)}"
+        if self.requested_resources and self.existing_resources:
+            details += f"\n  Requested: {self.requested_resources}"
+            details += f"\n  Existing:  {self.existing_resources}"
+        if self.cluster_name:
+            details += f"\n  Cluster:   {self.cluster_name}"
+        
+        return details
+
+    def __str__(self) -> str:
+        """Enhanced string representation with detailed mismatch information."""
+        base_message = super().__str__()
+        if self.mismatched_fields:
+            detailed_reason = self.get_detailed_reason()
+            return f"{base_message}\n\n{detailed_reason}"
+        return base_message
 
 
 class SkyPilotExcludeArgsBaseException(Exception):

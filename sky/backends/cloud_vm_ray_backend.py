@@ -2787,7 +2787,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'Task requested resources {example_resource} in region '  # pylint: disable=line-too-long
                             f'{example_resource.region!r}'
                             ', but the existing cluster '
-                            f'is in region {launched_resources.region!r}.')
+                            f'is in region {launched_resources.region!r}.',
+                            requested_resources=str(example_resource),
+                            existing_resources=str(launched_resources),
+                            mismatched_fields=['region'],
+                            cluster_name=cluster_name)
                 if (example_resource.zone is not None and
                         example_resource.zone != launched_resources.zone):
                     zone_str = (f'is in zone {launched_resources.zone!r}.'
@@ -2798,7 +2802,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'Task requested resources {example_resource} in zone '  # pylint: disable=line-too-long
                             f'{example_resource.zone!r},'
                             'but the existing cluster '
-                            f'{zone_str}')
+                            f'{zone_str}',
+                            requested_resources=str(example_resource),
+                            existing_resources=str(launched_resources),
+                            mismatched_fields=['zone'],
+                            cluster_name=cluster_name)
                 if (example_resource.requires_fuse and
                         not launched_resources.requires_fuse):
                     # Will not be reached for non-k8s case since the
@@ -2809,12 +2817,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'Task requires FUSE support for mounting object '
                             'stores, but the existing cluster with '
                             f'{launched_resources!r} does not support FUSE '
-                            f'mounting. Launch a new cluster to run this task.')
+                            f'mounting. Launch a new cluster to run this task.',
+                            requested_resources=str(example_resource),
+                            existing_resources=str(launched_resources),
+                            mismatched_fields=['requires_fuse'],
+                            cluster_name=cluster_name)
             requested_resource_str = ', '.join(requested_resource_list)
             if isinstance(task.resources, list):
                 requested_resource_str = f'[{requested_resource_str}]'
             elif isinstance(task.resources, set):
                 requested_resource_str = f'{{{requested_resource_str}}}'
+            
+            # For the general case
+            detailed_mismatched_fields = []
+            if task.resources:
+                first_resource = list(task.resources)[0]
+                detailed_mismatched_fields = first_resource.get_mismatch_reason(
+                    launched_resources,
+                    requested_num_nodes=task.num_nodes,
+                    check_ports=check_ports)
+                
+                # Check if the issue is insufficient number of nodes
+                if task.num_nodes > handle.launched_nodes:
+                    detailed_mismatched_fields.append('num_nodes')
+            
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     'Requested resources do not match the existing '
@@ -2822,7 +2848,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'  Requested:\t{requested_resource_str}\n'
                     f'  Existing:\t{handle.launched_nodes}x '
                     f'{handle.launched_resources}\n'
-                    f'{mismatch_str}')
+                    f'{mismatch_str}',
+                    requested_resources=requested_resource_str,
+                    existing_resources=f'{handle.launched_nodes}x {handle.launched_resources}',
+                    mismatched_fields=detailed_mismatched_fields,
+                    cluster_name=cluster_name)
         else:
             # For fractional acc count clusters, we round up the number of accs
             # to 1 (sky/utils/resources_utils.py::make_ray_custom_resources_str)
