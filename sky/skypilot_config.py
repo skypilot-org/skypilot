@@ -59,10 +59,9 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
 import sqlalchemy
-from sqlalchemy import db_utils
 from sqlalchemy import orm
-from sqlalchemy import postgresql
-from sqlalchemy import sqlite
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 
 from sky import exceptions
@@ -72,6 +71,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
+from sky.utils import db_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils.kubernetes import config_map_utils
@@ -586,6 +586,9 @@ def _reload_config_as_server() -> None:
             create_table()
         db_config = get_config_yaml(API_SERVER_CONFIG_KEY)
         if db_config:
+            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                logger.debug(f'Config loaded from db:\n'
+                             f'{common_utils.dump_yaml_str(dict(db_config))}')
             server_config = overlay_skypilot_config(server_config, db_config)
 
     _set_loaded_config(server_config)
