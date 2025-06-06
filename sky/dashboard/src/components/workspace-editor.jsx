@@ -170,6 +170,22 @@ const WorkspaceConfigDescription = ({
   return null;
 };
 
+// Workspace badge component for private/public status
+const WorkspaceBadge = ({ isPrivate }) => {
+  if (isPrivate) {
+    return (
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+        Private
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+      Public
+    </span>
+  );
+};
+
 // Detailed allowed users component for workspace editor
 const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
   if (!workspaceConfig.private) return null;
@@ -621,8 +637,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   <Card className="h-full">
                     <CardHeader>
                       <CardTitle className="text-base font-normal">
-                        <span className="font-semibold">Workspace:</span>{' '}
-                        {workspaceName}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold">Workspace:</span>{' '}
+                            {workspaceName}
+                          </div>
+                          <WorkspaceBadge isPrivate={originalConfig.private === true} />
+                        </div>
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm pb-2 flex-1">
@@ -739,8 +760,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                               {`${workspaceName || 'my-workspace'}:
   private: true
   allowed_users:
-  - user1
-  - user2
+  - user1@mydomain.com
+  - user2@mydomain.com
   gcp:
     project_id: xxx
     disabled: false
