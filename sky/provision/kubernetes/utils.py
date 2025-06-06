@@ -1578,9 +1578,15 @@ def _get_kubeconfig_text_for_context(context: Optional[str] = None) -> str:
     command = 'kubectl config view --minify'
     if context is not None:
         command += f' --context={context}'
+
+    # Ensure subprocess inherits the current environment properly
+    # This fixes the issue where kubectl can't find ~/.kube/config in API server context
+    env = os.environ.copy()
+
     proc = subprocess.run(command,
                           shell=True,
                           check=False,
+                          env=env,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE)
     if proc.returncode != 0:
