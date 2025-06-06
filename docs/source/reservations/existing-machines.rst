@@ -206,13 +206,13 @@ SkyPilot automatically select one with available resources.
 Attaching NFS and other volumes
 -------------------------------
 
-SkyPilot jobs can access NFS, shared disks or local high-performance storage like NVMe drives available on your host machines in a SSH Node Pool.
+SkyPilot jobs can access NFS, shared disks, or local high-performance storage like NVMe drives available on your host machines in a SSH Node Pool.
 
 Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
 
 .. tab-set::
 
-    .. tab-item:: Attaching a path on the host
+    .. tab-item:: Mounting a path on the host (NFS)
       :name: ssh-volumes-hostpath-nfs
 
       Any path available on the host can be directly mounted to SkyPilot jobs. For example, to mount a NFS share available on the hosts:
