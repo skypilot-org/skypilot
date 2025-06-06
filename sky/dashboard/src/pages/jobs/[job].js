@@ -5,7 +5,13 @@ import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { useSingleManagedJob } from '@/data/connectors/jobs';
 import Link from 'next/link';
-import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  CheckIcon,
+} from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
@@ -314,6 +320,8 @@ function JobDetailsContent({
   const [controllerLogs, setControllerLogs] = useState('');
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
+  const [isCopied, setIsCopied] = useState(false);
+  const [isCommandCopied, setIsCommandCopied] = useState(false);
 
   // Add state for tracking incremental refresh
   const [currentLogLength, setCurrentLogLength] = useState(0);
@@ -387,6 +395,40 @@ function JobDetailsContent({
       ...prev,
       [index]: !prev[index],
     }));
+  };
+
+  const copyYamlToClipboard = async () => {
+    try {
+      const yamlDocs = formatYaml(jobData.dag_yaml);
+      let textToCopy = '';
+
+      if (yamlDocs.length === 1) {
+        // Single document - use the formatted content directly
+        textToCopy = yamlDocs[0].content;
+      } else if (yamlDocs.length > 1) {
+        // Multiple documents - join them with document separators
+        textToCopy = yamlDocs.map((doc) => doc.content).join('\n---\n');
+      } else {
+        // Fallback to raw YAML if formatting fails
+        textToCopy = jobData.dag_yaml;
+      }
+
+      await navigator.clipboard.writeText(textToCopy);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy YAML to clipboard:', err);
+    }
+  };
+
+  const copyCommandToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(jobData.entrypoint);
+      setIsCommandCopied(true);
+      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy command to clipboard:', err);
+    }
   };
 
   const formatYaml = (yamlString) => {
@@ -980,7 +1022,28 @@ function JobDetailsContent({
       {/* Entrypoint section - spans both columns */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
-          <div className="text-gray-600 font-medium text-base">Entrypoint</div>
+          <div className="flex items-center">
+            <div className="text-gray-600 font-medium text-base">
+              Entrypoint
+            </div>
+            {jobData.entrypoint && (
+              <Tooltip
+                content={isCommandCopied ? 'Copied!' : 'Copy command'}
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={copyCommandToClipboard}
+                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                >
+                  {isCommandCopied ? (
+                    <CheckIcon className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <CopyIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </Tooltip>
+            )}
+          </div>
 
           <div className="space-y-4 mt-3">
             {/* Launch Command */}
@@ -997,19 +1060,35 @@ function JobDetailsContent({
             {/* Task YAML - Collapsible */}
             {jobData.dag_yaml && jobData.dag_yaml !== '{}' && (
               <div>
-                <button
-                  onClick={toggleYamlExpanded}
-                  className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                >
-                  <div className="flex items-center">
+                <div className="flex items-center mb-2">
+                  <button
+                    onClick={toggleYamlExpanded}
+                    className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                  >
                     {isYamlExpanded ? (
                       <ChevronDownIcon className="w-4 h-4 mr-1" />
                     ) : (
                       <ChevronRightIcon className="w-4 h-4 mr-1" />
                     )}
                     <span className="text-base">Show SkyPilot YAML</span>
-                  </div>
-                </button>
+                  </button>
+
+                  <Tooltip
+                    content={isCopied ? 'Copied!' : 'Copy YAML'}
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={copyYamlToClipboard}
+                      className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                    >
+                      {isCopied ? (
+                        <CheckIcon className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <CopyIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                  </Tooltip>
+                </div>
 
                 {isYamlExpanded && (
                   <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">

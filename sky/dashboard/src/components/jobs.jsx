@@ -354,8 +354,7 @@ export function ManagedJobsTable({
     setConfirmationModal({
       isOpen: true,
       title: 'Restart Controller',
-      message:
-        'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
+      message: 'Are you sure you want to restart the controller?',
       onConfirm: async () => {
         try {
           setIsRestarting(true);
@@ -863,8 +862,8 @@ export function ManagedJobsTable({
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller is launching. Please wait
-                          for it to be ready.
+                          The managed job controller is launching. It will be
+                          ready shortly.
                         </p>
                         <div className="flex items-center">
                           <CircularProgress size={12} className="mr-2" />
@@ -878,8 +877,8 @@ export function ManagedJobsTable({
                     {controllerStopped && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller has been stopped. Please
-                          restart it to check the latest job status.
+                          The managed job controller has been stopped. Restart
+                          to check the latest job status.
                         </p>
                         <Button
                           variant="outline"
