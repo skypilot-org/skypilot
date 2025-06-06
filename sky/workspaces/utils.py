@@ -1,3 +1,4 @@
+"""Utils for workspaces."""
 from typing import Any, Dict, List
 
 from sky import global_user_state

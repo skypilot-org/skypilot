@@ -3,7 +3,6 @@ import contextlib
 import logging
 import os
 import threading
-import time
 from typing import List
 
 import casbin
@@ -30,9 +29,6 @@ _lock = threading.Lock()
 class PermissionService:
     """Permission service for SkyPilot API Server."""
 
-    _policy_refresh_thread_started = False
-    _stop_refresh_loop = False
-
     def __init__(self):
         global _enforcer_instance
         if _enforcer_instance is None:
@@ -49,22 +45,6 @@ class PermissionService:
         else:
             self.enforcer = _enforcer_instance.enforcer
         self._maybe_initialize_policies()
-        self._start_policy_refresh_thread()
-
-    def _start_policy_refresh_thread(self):
-        if getattr(self, '_policy_refresh_thread_started', False):
-            return
-        self._policy_refresh_thread_started = True
-        thread = threading.Thread(target=self._policy_refresh_loop, daemon=True)
-        thread.start()
-
-    def _policy_refresh_loop(self):
-        while not self._stop_refresh_loop:
-            try:
-                self._load_policy_no_lock()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Failed to refresh policy: {e}')
-            time.sleep(POLICY_REFRESH_INTERVAL_SECONDS)
 
     def _maybe_initialize_policies(self):
         """Initialize policies if they don't already exist."""
@@ -269,10 +249,6 @@ class PermissionService:
         with _policy_lock():
             self.enforcer.remove_filtered_policy(1, workspace_name)
             self.enforcer.save_policy()
-
-    def stop_policy_refresh(self):
-        """Stop the policy refresh loop."""
-        self._stop_refresh_loop = True
 
 
 @contextlib.contextmanager
