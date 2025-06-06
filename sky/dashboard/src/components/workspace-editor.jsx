@@ -85,8 +85,9 @@ const WorkspaceConfigDescription = ({
     if (cloud === 'private' || cloud === 'allowed_users') {
       return;
     }
-    
-    const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
+
+    const cloudName =
+      CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
     const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
 
     if (cloudConfig?.disabled === true) {
@@ -175,14 +176,16 @@ const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
 
   // Get allowed users from config
   const allowedUsersFromConfig = workspaceConfig.allowed_users || [];
-  
+
   // Get all admin users
-  const adminUsers = (allUsers || []).filter(user => user.role === 'admin');
-  const adminUsernames = adminUsers.map(user => user.username);
-  
+  const adminUsers = (allUsers || []).filter((user) => user.role === 'admin');
+  const adminUsernames = adminUsers.map((user) => user.username);
+
   // Combine allowed users and admin users, remove duplicates
-  const allAllowedUsers = [...new Set([...allowedUsersFromConfig, ...adminUsernames])];
-  
+  const allAllowedUsers = [
+    ...new Set([...allowedUsersFromConfig, ...adminUsernames]),
+  ];
+
   if (allAllowedUsers.length === 0) {
     return (
       <div className="mt-4">
@@ -261,7 +264,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         getWorkspaces(),
         getUsers(),
       ]);
-      
+
       const config = allWorkspaces[workspaceName] || {};
       setWorkspaceConfig(config);
       setOriginalConfig(config);
@@ -681,9 +684,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       </div>
 
                       {/* Detailed allowed users for private workspaces */}
-                      <DetailedAllowedUsers 
-                        workspaceConfig={originalConfig} 
-                        allUsers={allUsers} 
+                      <DetailedAllowedUsers
+                        workspaceConfig={originalConfig}
+                        allUsers={allUsers}
                       />
                     </div>
                   </Card>
