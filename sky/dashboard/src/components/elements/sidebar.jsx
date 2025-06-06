@@ -49,28 +49,28 @@ export function SidebarProvider({ children }) {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
 
-          // Try to get role from cached users data
-          const getUserRole = async () => {
-            try {
-              const usersData = await dashboardCache.get(getUsers);
-              if (usersData && Array.isArray(usersData)) {
-                const currentUser = usersData.find(
-                  (user) =>
-                    user.username === data.user.name ||
-                    user.name === data.user.name
-                );
-                if (currentUser && currentUser.role) {
-                  setUserRole(currentUser.role);
-                }
-              }
-            } catch (error) {
-              // If users data is not available or there's an error,
-              // we just don't show the role - it's not critical
-              console.log('Could not fetch user role from cache:', error);
-            }
-          };
+          // // Try to get role from cached users data
+          // const getUserRole = async () => {
+          //   try {
+          //     const usersData = await dashboardCache.get(getUsers);
+          //     if (usersData && Array.isArray(usersData)) {
+          //       const currentUser = usersData.find(
+          //         (user) =>
+          //           user.username === data.user.name ||
+          //           user.name === data.user.name
+          //       );
+          //       if (currentUser && currentUser.role) {
+          //         setUserRole(currentUser.role);
+          //       }
+          //     }
+          //   } catch (error) {
+          //     // If users data is not available or there's an error,
+          //     // we just don't show the role - it's not critical
+          //     console.log('Could not fetch user role from cache:', error);
+          //   }
+          // };
 
-          getUserRole();
+          // getUserRole();
         }
       })
       .catch((error) => {
