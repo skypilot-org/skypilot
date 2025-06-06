@@ -1083,7 +1083,7 @@ def initialize_managed_job_id() -> int:
         return None
     
     if jobs:
-        highest_job_id = max([job['job_id'] for job in jobs])
+        highest_job_id = max(jobs)
     else:
         highest_job_id = 0
 
