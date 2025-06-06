@@ -1,7 +1,5 @@
-import sys
 import tempfile
 import textwrap
-import traceback
 from unittest import mock
 
 from click import testing as cli_testing
@@ -14,13 +12,29 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import server
+from sky.client import sdk
 from sky.clouds import cloud as sky_cloud
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
 ]
+
+
+@pytest.fixture
+def _mock_db_conn(tmp_path, monkeypatch):
+    # Create a temporary database file
+    db_path = tmp_path / 'state_testing.db'
+
+    sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
+
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+                        sqlalchemy_engine)
+
+    global_user_state.create_table()
 
 
 def mock_server_api_version(monkeypatch, version):
@@ -335,14 +349,26 @@ def _mock_realtime_kubernetes_gpu_availability(*args, **kwargs):
     return [['kind-skypilot', [['H100', [1, 2, 4, 8], 8, 8]]]]
 
 
+# Mock get_kubernetes_node_info
+def _mock_get_kubernetes_node_info(*args, **kwargs):
+    node_info = models.KubernetesNodeInfo(name='skypilot-control-plane',
+                                          accelerator_type='H100',
+                                          total={'accelerator_count': 8},
+                                          free={'accelerators_available': 8})
+    return models.KubernetesNodesInfo(
+        node_info_dict={'skypilot-control-plane': node_info}, hint='')
+
+
 class TestNoK8sInstalled:
-    # We should run this test without kubernetes installed. i.e pip install skypilot[aws], and then run this test.
+
     @pytest.mark.parametrize('enable_all_clouds', [[clouds.Kubernetes()]],
                              indirect=True)
-    def test_k8s_alias(self, enable_all_clouds, monkeypatch):
+    def test_k8s_alias(self, enable_all_clouds, _mock_db_conn, monkeypatch):
         global_user_state.set_enabled_clouds(
             ['kubernetes'], sky_cloud.CloudCapability.COMPUTE,
             constants.SKYPILOT_DEFAULT_WORKSPACE)
+        monkeypatch.setattr(kubernetes_utils, 'get_kubernetes_node_info',
+                            _mock_get_kubernetes_node_info)
 
         # Mock realtime_kubernetes_gpu_availability
         monkeypatch.setattr(core, 'realtime_kubernetes_gpu_availability',
@@ -350,11 +376,6 @@ class TestNoK8sInstalled:
 
         cli_runner = cli_testing.CliRunner()
 
-        result = cli_runner.invoke(cli.show_gpus, ['--infra', 'k8s'])
-        if result.exception:
-            print('\nTraceback:', file=sys.stderr, flush=True)
-            traceback.print_exception(type(result.exception),
-                                      result.exception,
-                                      result.exception.__traceback__,
-                                      file=sys.stderr)
-        assert isinstance(result.exception, exceptions.KubeAPIUnreachableError)
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'k8s'])
+        assert 'Kubernetes' in result.output
+        assert not result.exit_code
