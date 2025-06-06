@@ -208,7 +208,7 @@ def test_install_server_version_command():
 @pytest.fixture
 def mock_all_dependencies():
     """Mock all dependencies used in reload_for_new_request."""
-    with mock.patch('sky.utils.common_utils.set_client_status') as mock_status, \
+    with mock.patch('sky.utils.common_utils.set_request_context') as mock_status, \
          mock.patch('sky.usage.usage_lib.messages.reset') as mock_reset, \
          mock.patch('sky.sky_logging.reload_logger') as mock_logger:
         yield {
