@@ -29,13 +29,9 @@ _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
 # = Workspace Management =
 # =========================
 
-
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
-    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
-    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
-        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
-    return workspaces
+    return workspaces_for_user(common_utils.get_current_user().id)
 
 
 def _update_workspaces_config(
@@ -500,31 +496,33 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
 
 
 @annotations.lru_cache(scope='request', maxsize=1)
-def workspaces_for_user(user_id: str) -> List[str]:
+def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     """Returns the workspaces that the user has access to.
 
     Args:
         user_id: The user id to check.
 
     Returns:
-        A list of workspace names that the user has access to.
+        A map from workspace name to workspace configuration.
     """
-    workspaces = get_workspaces()
-    user_workspaces = []
+    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
+        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    user_workspaces = {}
 
     for workspace_name, workspace_config in workspaces.items():
         if is_workspace_private(workspace_config):
             # For private workspaces, check explicit permission
             if permission.permission_service.check_workspace_permission(
                     user_id, workspace_name):
-                user_workspaces.append(workspace_name)
+                user_workspaces[workspace_name] = workspace_config
         else:
             # For public workspaces, all users have access
             # But we still check permissions to be consistent with the policy
             # system.
             if permission.permission_service.check_workspace_permission(
                     user_id, workspace_name):
-                user_workspaces.append(workspace_name)
+                user_workspaces[workspace_name] = workspace_config
             else:
                 # If the permission check fails for a public workspace,
                 # it means the policy might not be set up correctly
