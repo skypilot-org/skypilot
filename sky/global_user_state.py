@@ -18,8 +18,6 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-import sky
-import sky.exceptions
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -28,9 +26,11 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 import yaml
 
+import sky
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+import sky.exceptions
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -1038,16 +1038,16 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 def get_job_ids() -> List[int]:
     import sky.backends
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
     from sky.backends import backend_utils
-    from sky.jobs.server.core import _maybe_restart_controller
+    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
     from sky.jobs import utils as managed_job_utils
+    from sky.jobs.server.core import _maybe_restart_controller
 
     try:
         handle = _maybe_restart_controller(True,
-                                        stopped_message='',
-                                        spinner_message='Finding '
-                                        'largest managed job id')
+                                           stopped_message='',
+                                           spinner_message='Finding '
+                                           'largest managed job id')
         backend = backend_utils.get_backend_from_handle(handle)
     except sky.exceptions.ClusterDoesNotExist:
         raise
@@ -1081,7 +1081,7 @@ def initialize_managed_job_id() -> int:
         jobs = get_job_ids()
     except sky.exceptions.ClusterDoesNotExist:
         return None
-    
+
     if jobs:
         highest_job_id = max(jobs)
     else:
