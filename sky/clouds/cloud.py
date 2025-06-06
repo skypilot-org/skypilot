@@ -141,8 +141,7 @@ class Cloud:
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
     _SUPPORTED_NETWORK_TIERS = {
-        resources_utils.NetworkTier.STANDARD, 
-        resources_utils.NetworkTier.HIGH,
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.HIGH,
         resources_utils.NetworkTier.BEST
     }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
@@ -735,11 +734,12 @@ class Cloud:
             exceptions.NotSupportedError: If the network tier is not supported.
         """
         del instance_type  # unused by default, but can be overridden
-        
-        # BEST tier is always allowed - clouds will map it to their best available
+
+        # BEST tier is always allowed - clouds will map it to their best
+        # available
         if network_tier == resources_utils.NetworkTier.BEST:
             return
-            
+
         # For other tiers, check if supported
         if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
             with ux_utils.print_exception_no_traceback():

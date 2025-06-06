@@ -37,7 +37,10 @@ def get_default_fabric(platform: str, region: str) -> str:
     """Get the default (first) fabric for a given platform and region."""
     fabrics = INFINIBAND_FABRIC_MAPPING.get((platform, region), [])
     if not fabrics:
-        raise ValueError(
-            f'No InfiniBand fabric available for platform {platform} '
-            f'in region {region}')
+        # Select north europe region as default
+        fabrics = INFINIBAND_FABRIC_MAPPING.get(('gpu-h100-sxm', 'eu-north1'), [])
+        if not fabrics:
+            raise ValueError(
+                f'No InfiniBand fabric available for platform {platform} '
+                f'in region {region}')
     return fabrics[0]

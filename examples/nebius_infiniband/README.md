@@ -195,22 +195,22 @@ Result example:
 2. NCCL Performance Test (setting up NCCL):
 
 ```bash
-sky launch -c infiniband nccl_ib.yaml
+sky launch -c infiniband nccl_no_docker_ib.yaml
 ```
 
 Result example:
 
 ```
-#                                                              out-of-place                       in-place          
+#                                                              out-of-place                       in-place
 #       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
-#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)       
-   536870912     134217728     float     sum      -1   2399.1  223.78  419.59      0   2354.3  228.04  427.57      0
-  1073741824     268435456     float     sum      -1   4469.9  240.22  450.41      0   4463.1  240.58  451.09      0
-  2147483648     536870912     float     sum      -1   8678.7  247.44  463.96      0   8667.1  247.77  464.57      0
-  4294967296    1073741824     float     sum      -1    17053  251.86  472.24      0    17112  250.99  470.60      0
-  8589934592    2147483648     float     sum      -1    33792  254.20  476.62      0    33735  254.63  477.42      0
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)
+   536870912     134217728     float     sum      -1   2378.7  225.70  423.19      0   2358.1  227.68  426.89      0
+  1073741824     268435456     float     sum      -1   4464.5  240.50  450.95      0   4461.2  240.69  451.29      0
+  2147483648     536870912     float     sum      -1   8697.7  246.90  462.94      0   8699.8  246.84  462.83      0
+  4294967296    1073741824     float     sum      -1    17406  246.75  462.66      0    17185  249.93  468.62      0
+  8589934592    2147483648     float     sum      -1    33782  254.28  476.77      0    33732  254.65  477.48      0
 # Out of bounds values : 0 OK
-# Avg bus bandwidth    : 457.407 
+# Avg bus bandwidth    : 456.361
 ```
 
 3. InfiniBand Direct Test:
