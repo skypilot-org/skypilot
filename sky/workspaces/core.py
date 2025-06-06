@@ -202,11 +202,6 @@ def _validate_workspace_config(workspace_name: str,
         common_utils.validate_schema(
             workspace_config, workspace_schema,
             f'Invalid configuration for workspace {workspace_name!r}: ')
-        if 'private' in workspace_config and workspace_config['private']:
-            if ('allowed_users' not in workspace_config or
-                    not workspace_config['allowed_users']):
-                raise ValueError(
-                    'Allowed users must be specified for private workspaces.')
     except exceptions.InvalidSkyPilotConfigError as e:
         # We need to replace this exception with a ValueError because: a) it is
         # more user-friendly and b) it will not be caught by the try-except by
@@ -489,7 +484,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
             user.id, active_workspace):
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have '
-            f'permission to access workspace {active_workspace}')
+            f'permission to access workspace {active_workspace!r}')
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
