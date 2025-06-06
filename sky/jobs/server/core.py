@@ -178,10 +178,11 @@ def launch(
                     controller_utils.translate_local_file_mounts_to_two_hop(
                         task_))
 
-    with (tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as f,
-          tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
-                                     mode='w') as original_user_yaml_path):
+    # Has to use `\` to avoid yapf issue.
+    with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
+                                     mode='w') as f, \
+         tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
+                                     mode='w') as original_user_yaml_path:
         original_user_yaml_path.write(user_dag_str)
         original_user_yaml_path.flush()
 
@@ -189,7 +190,8 @@ def launch(
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
-        remote_original_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml'
+        remote_original_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'

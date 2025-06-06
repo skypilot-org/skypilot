@@ -338,6 +338,9 @@ function JobDetailsContent({
   // Add refs to track active requests and prevent duplicates
   const activeLogsRequest = useRef(null);
   const activeControllerLogsRequest = useRef(null);
+  
+  // Track aborted controllers to prevent double-abort
+  const abortedControllers = useRef(new WeakSet());
 
   // Auto-scroll refs
   const logsContainerRef = useRef(null);
@@ -352,6 +355,49 @@ function JobDetailsContent({
   // Configuration for performance
   const BATCH_UPDATE_INTERVAL = 100; // Batch updates every 100ms
   const THROTTLE_INTERVAL = 50; // Minimum time between updates
+
+  // Helper function to safely abort an AbortController
+  const safeAbort = useCallback((controller, description = 'request') => {
+    if (!controller) return;
+    
+    // Check if we've already aborted this controller
+    if (abortedControllers.current.has(controller)) {
+      console.log(`${description} controller already aborted previously, skipping`);
+      return;
+    }
+    
+    try {
+      // Additional safety checks
+      if (typeof controller.abort !== 'function') {
+        console.warn(`Controller for ${description} does not have abort method`);
+        return;
+      }
+      
+      // Check if already aborted via signal
+      if (controller.signal && controller.signal.aborted) {
+        console.log(`${description} already aborted via signal, skipping`);
+        abortedControllers.current.add(controller); // Mark as aborted
+        return;
+      }
+      
+      // Attempt to abort
+      controller.abort();
+      abortedControllers.current.add(controller); // Mark as aborted
+      console.log(`Successfully aborted ${description}`);
+      
+    } catch (error) {
+      // Handle any type of error that might occur during abort
+      console.log(`Caught error while aborting ${description}:`, error.name, error.message);
+      
+      // Mark as aborted even if there was an error to prevent retry
+      abortedControllers.current.add(controller);
+      
+      // Only warn for unexpected errors (not AbortError or InvalidStateError)
+      if (error.name !== 'AbortError' && error.name !== 'InvalidStateError') {
+        console.warn(`Unexpected error aborting ${description}:`, error);
+      }
+    }
+  }, []);
 
   // Custom hook for auto-scrolling
   const scrollToBottom = useCallback((logType) => {
@@ -665,9 +711,9 @@ function JobDetailsContent({
             console.log(`Cleaning up ${logType} request`);
             active = false;
 
-            // Abort the controller if it matches the current one
+            // Safely abort the controller if it matches the current one
             if (activeRequestRef.current === controller) {
-              activeRequestRef.current.abort();
+              safeAbort(controller, logType);
               activeRequestRef.current = null;
             }
 
@@ -690,9 +736,9 @@ function JobDetailsContent({
           console.log(`Cleaning up ${logType} request`);
           active = false;
 
-          // Abort the controller if it matches the current one
+          // Safely abort the controller if it matches the current one and hasn't been cleaned up yet
           if (activeRequestRef.current === controller) {
-            activeRequestRef.current.abort();
+            safeAbort(controller, `${logType} cleanup`);
             activeRequestRef.current = null;
           }
 
@@ -714,14 +760,14 @@ function JobDetailsContent({
         active = false;
       };
     },
-    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk]
+    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk, safeAbort]
   );
 
   // Fetch both logs and controller logs in parallel, regardless of activeTab
   useEffect(() => {
     // Cancel any existing request
     if (activeLogsRequest.current) {
-      activeLogsRequest.current.abort();
+      safeAbort(activeLogsRequest.current, 'logs');
       activeLogsRequest.current = null;
     }
 
@@ -730,12 +776,12 @@ function JobDetailsContent({
       const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
       return cleanup;
     }
-  }, [jobData.id, fetchLogs, setIsLoadingLogs, isPending, isRecovering]);
+  }, [jobData.id, fetchLogs, setIsLoadingLogs, isPending, isRecovering, safeAbort]);
 
   useEffect(() => {
     // Cancel any existing request
     if (activeControllerLogsRequest.current) {
-      activeControllerLogsRequest.current.abort();
+      safeAbort(activeControllerLogsRequest.current, 'controller logs');
       activeControllerLogsRequest.current = null;
     }
 
@@ -749,14 +795,14 @@ function JobDetailsContent({
       );
       return cleanup;
     }
-  }, [jobData.id, fetchLogs, setIsLoadingControllerLogs, isPreStart]);
+  }, [jobData.id, fetchLogs, setIsLoadingControllerLogs, isPreStart, safeAbort]);
 
   // Handle refresh for logs
   useEffect(() => {
     if (refreshFlag > 0 && activeTab === 'logs') {
       // Cancel any existing request
       if (activeLogsRequest.current) {
-        activeLogsRequest.current.abort();
+        safeAbort(activeLogsRequest.current, 'logs refresh');
         activeLogsRequest.current = null;
       }
 
@@ -770,14 +816,14 @@ function JobDetailsContent({
       );
       return cleanup;
     }
-  }, [refreshFlag, activeTab, jobData.id, fetchLogs, setIsLoadingLogs]);
+  }, [refreshFlag, activeTab, jobData.id, fetchLogs, setIsLoadingLogs, safeAbort]);
 
   // Handle refresh for controller logs
   useEffect(() => {
     if (refreshFlag > 0 && activeTab === 'controllerlogs') {
       // Cancel any existing request
       if (activeControllerLogsRequest.current) {
-        activeControllerLogsRequest.current.abort();
+        safeAbort(activeControllerLogsRequest.current, 'controller logs refresh');
         activeControllerLogsRequest.current = null;
       }
 
@@ -797,6 +843,7 @@ function JobDetailsContent({
     jobData.id,
     fetchLogs,
     setIsLoadingControllerLogs,
+    safeAbort,
   ]);
 
   // Comprehensive cleanup when component unmounts or user navigates away
@@ -806,12 +853,12 @@ function JobDetailsContent({
 
       // Abort all active log requests
       if (activeLogsRequest.current) {
-        activeLogsRequest.current.abort();
+        safeAbort(activeLogsRequest.current, 'logs cleanup');
         activeLogsRequest.current = null;
       }
 
       if (activeControllerLogsRequest.current) {
-        activeControllerLogsRequest.current.abort();
+        safeAbort(activeControllerLogsRequest.current, 'controller logs cleanup');
         activeControllerLogsRequest.current = null;
       }
 
@@ -831,7 +878,7 @@ function JobDetailsContent({
       setIsRefreshingLogs(false);
       setIsRefreshingControllerLogs(false);
     };
-  }, []); // Empty dependency array means this runs only on unmount
+  }, [safeAbort]); // Empty dependency array means this runs only on unmount
 
   // Handle page visibility changes to pause streaming when tab is not active
   useEffect(() => {
@@ -843,11 +890,11 @@ function JobDetailsContent({
         // Uncomment if you want to completely stop streaming when tab is not visible
         /*
         if (activeLogsRequest.current) {
-          activeLogsRequest.current.abort();
+          safeAbort(activeLogsRequest.current, 'logs visibility');
           activeLogsRequest.current = null;
         }
         if (activeControllerLogsRequest.current) {
-          activeControllerLogsRequest.current.abort();
+          safeAbort(activeControllerLogsRequest.current, 'controller logs visibility');
           activeControllerLogsRequest.current = null;
         }
         */
