@@ -8,7 +8,13 @@ import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, CheckIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  CheckIcon,
+} from 'lucide-react';
 import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
@@ -359,7 +365,10 @@ function ActiveTab({
                       Entrypoint
                     </div>
                     {clusterData.command && (
-                      <Tooltip content={isCommandCopied ? "Copied!" : "Copy command"} className="text-muted-foreground">
+                      <Tooltip
+                        content={isCommandCopied ? 'Copied!' : 'Copy command'}
+                        className="text-muted-foreground"
+                      >
                         <button
                           onClick={copyCommandToClipboard}
                           className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
@@ -405,7 +414,10 @@ function ActiveTab({
                               </span>
                             </button>
 
-                            <Tooltip content={isCopied ? "Copied!" : "Copy YAML"} className="text-muted-foreground">
+                            <Tooltip
+                              content={isCopied ? 'Copied!' : 'Copy YAML'}
+                              className="text-muted-foreground"
+                            >
                               <button
                                 onClick={copyYamlToClipboard}
                                 className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"

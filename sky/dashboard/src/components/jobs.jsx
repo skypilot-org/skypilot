@@ -354,8 +354,7 @@ export function ManagedJobsTable({
     setConfirmationModal({
       isOpen: true,
       title: 'Restart Controller',
-      message:
-        'Are you sure you want to restart the controller?',
+      message: 'Are you sure you want to restart the controller?',
       onConfirm: async () => {
         try {
           setIsRestarting(true);

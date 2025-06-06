@@ -5,7 +5,13 @@ import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { useSingleManagedJob } from '@/data/connectors/jobs';
 import Link from 'next/link';
-import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, CheckIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  CheckIcon,
+} from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
@@ -391,7 +397,7 @@ function JobDetailsContent({
     }));
   };
 
-    const copyYamlToClipboard = async () => {
+  const copyYamlToClipboard = async () => {
     try {
       const yamlDocs = formatYaml(jobData.dag_yaml);
       let textToCopy = '';
@@ -401,7 +407,7 @@ function JobDetailsContent({
         textToCopy = yamlDocs[0].content;
       } else if (yamlDocs.length > 1) {
         // Multiple documents - join them with document separators
-        textToCopy = yamlDocs.map(doc => doc.content).join('\n---\n');
+        textToCopy = yamlDocs.map((doc) => doc.content).join('\n---\n');
       } else {
         // Fallback to raw YAML if formatting fails
         textToCopy = jobData.dag_yaml;
@@ -1017,9 +1023,14 @@ function JobDetailsContent({
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
           <div className="flex items-center">
-            <div className="text-gray-600 font-medium text-base">Entrypoint</div>
+            <div className="text-gray-600 font-medium text-base">
+              Entrypoint
+            </div>
             {jobData.entrypoint && (
-              <Tooltip content={isCommandCopied ? "Copied!" : "Copy command"} className="text-muted-foreground">
+              <Tooltip
+                content={isCommandCopied ? 'Copied!' : 'Copy command'}
+                className="text-muted-foreground"
+              >
                 <button
                   onClick={copyCommandToClipboard}
                   className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
@@ -1049,7 +1060,7 @@ function JobDetailsContent({
             {/* Task YAML - Collapsible */}
             {jobData.dag_yaml && jobData.dag_yaml !== '{}' && (
               <div>
-                                                <div className="flex items-center mb-2">
+                <div className="flex items-center mb-2">
                   <button
                     onClick={toggleYamlExpanded}
                     className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
@@ -1062,7 +1073,10 @@ function JobDetailsContent({
                     <span className="text-base">Show SkyPilot YAML</span>
                   </button>
 
-                  <Tooltip content={isCopied ? "Copied!" : "Copy YAML"} className="text-muted-foreground">
+                  <Tooltip
+                    content={isCopied ? 'Copied!' : 'Copy YAML'}
+                    className="text-muted-foreground"
+                  >
                     <button
                       onClick={copyYamlToClipboard}
                       className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
