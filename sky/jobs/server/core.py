@@ -37,6 +37,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import sky
@@ -441,6 +442,13 @@ def queue(refresh: bool,
             return user_hash == common_utils.get_user_hash()
 
         jobs = list(filter(user_hash_matches_or_missing, jobs))
+
+    accessible_workspaces = workspaces_core.get_workspaces()
+    jobs = list(
+        filter(
+            lambda job: job.get('workspace', skylet_constants.
+                                SKYPILOT_DEFAULT_WORKSPACE) in
+            accessible_workspaces, jobs))
 
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
