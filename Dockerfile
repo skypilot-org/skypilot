@@ -26,9 +26,44 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash && \
     # Install uv and skypilot
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
-    ~/.local/bin/uv pip install skypilot-nightly[all] --system && \
-    # Cleanup all caches to reduce the image size
-    conda clean -afy && \
+    ~/.local/bin/uv pip install --prerelease allow azure-cli --system
+
+# Add source code
+COPY . /skypilot-src
+
+# Install SkyPilot
+# If triggered from release/nightly build pipeline, install from wheel file
+# Otherwise install from source in editable mode
+RUN cd /skypilot-src && \
+    if ls dist/skypilot-*.whl 1> /dev/null 2>&1; then \
+        echo "Installing from wheel file" && \
+        WHEEL_FILE=$(ls dist/skypilot-*.whl) && \
+        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system; \
+    else \
+        echo "Installing in editable mode" && \
+        ~/.local/bin/uv pip install -e ".[all]" --system; \
+    fi
+
+
+RUN sky -v && \
+    sky api info
+
+# Set up Node.js and build dashboard (only when installing from source)
+RUN if [ ! -f /skypilot-src/dist/skypilot-*.whl ]; then \
+        echo "Setting up Node.js and building dashboard" && \
+        curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
+        apt-get update && \
+        apt-get install -y nodejs && \
+        cd /skypilot-src/sky/dashboard && \
+        npm ci && \
+        npm run build; \
+    else \
+        echo "Skipping dashboard build as wheel file exists"; \
+    fi
+
+# Cleanup all caches to reduce the image size
+RUN conda clean -afy && \
     ~/.local/bin/uv cache clean && \
-    rm -rf ~/.cache/pip ~/.cache/uv
+    rm -rf ~/.cache/pip ~/.cache/uv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
