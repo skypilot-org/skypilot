@@ -5,7 +5,6 @@ from unittest import mock
 from click import testing as cli_testing
 import pytest
 import requests
-from sqlalchemy import create_engine
 
 from sky import cli
 from sky import clouds
@@ -14,7 +13,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import server
-from sky.client import sdk
 from sky.clouds import cloud as sky_cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -22,19 +20,6 @@ from sky.skylet import constants
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
 ]
-
-
-@pytest.fixture
-def _mock_db_conn(tmp_path, monkeypatch):
-    # Create a temporary database file
-    db_path = tmp_path / 'state_testing.db'
-
-    sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
-
-    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
-                        sqlalchemy_engine)
-
-    global_user_state.create_table()
 
 
 def mock_server_api_version(monkeypatch, version):
@@ -363,7 +348,7 @@ class TestNoK8sInstalled:
 
     @pytest.mark.parametrize('enable_all_clouds', [[clouds.Kubernetes()]],
                              indirect=True)
-    def test_k8s_alias(self, enable_all_clouds, _mock_db_conn, monkeypatch):
+    def test_k8s_alias(self, enable_all_clouds, monkeypatch):
         global_user_state.set_enabled_clouds(
             ['kubernetes'], sky_cloud.CloudCapability.COMPUTE,
             constants.SKYPILOT_DEFAULT_WORKSPACE)
