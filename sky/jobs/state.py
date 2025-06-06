@@ -1078,6 +1078,49 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
         return local_log_file[-1] if local_log_file else None
 
 
+def get_preemptible_jobs(priority: int) -> List[Dict[str, Any]]:
+    """Get all the preemptible jobs."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            'SELECT * '
+            'FROM spot '
+            'LEFT OUTER JOIN job_info '
+            'ON spot.spot_job_id=job_info.spot_job_id '
+            'WHERE status = ? AND priority > ? '
+            # Order by descending priority value (lower priority jobs first),
+            # then by descending job id (newer jobs first).
+            # Prefer to preempt new jobs over old jobs as we expect less work
+            # will be lost.
+            'ORDER BY priority DESC, spot_job_id DESC',
+            (ManagedJobStatus.RUNNING.value, priority)).fetchall()
+        # TODO(cooperc): split out from get_managed_jobs to a separate function.
+        jobs = []
+        for row in rows:
+            job_dict = dict(zip(columns, row))
+            job_dict['status'] = ManagedJobStatus(job_dict['status'])
+            job_dict['schedule_state'] = ManagedJobScheduleState(
+                job_dict['schedule_state'])
+            if job_dict['job_name'] is None:
+                job_dict['job_name'] = job_dict['task_name']
+
+            # Add YAML content and command for managed jobs
+            dag_yaml_path = job_dict.get('dag_yaml_path')
+            if dag_yaml_path:
+                try:
+                    with open(dag_yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['dag_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError):
+                    job_dict['dag_yaml'] = None
+
+                # Generate a command that could be used to launch this job
+                # Format: sky jobs launch <yaml_path>
+            else:
+                job_dict['dag_yaml'] = None
+
+            jobs.append(job_dict)
+        return jobs
+
+
 # === Scheduler state functions ===
 # Only the scheduler should call these functions. They may require holding the
 # scheduler lock to work correctly.

@@ -32,6 +32,7 @@ import {
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  StopCircle,
 } from 'lucide-react';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
@@ -1033,6 +1034,16 @@ export function Status2Actions({
     });
   };
 
+  const handlePreemptClick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await handleJobAction('preempt', jobId);
+    } catch (error) {
+      console.error('Error preempting job:', error);
+    }
+  };
+
   return (
     <div className="flex items-center space-x-4">
       <Tooltip
@@ -1049,19 +1060,34 @@ export function Status2Actions({
         </button>
       </Tooltip>
       {managed && (
-        <Tooltip
-          key="controllerlogs"
-          content="View Controller Logs"
-          className="capitalize text-sm text-muted-foreground"
-        >
-          <button
-            onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+        <>
+          <Tooltip
+            key="controllerlogs"
+            content="View Controller Logs"
+            className="capitalize text-sm text-muted-foreground"
           >
-            <MonitorPlay className="w-4 h-4" />
-            {withLabel && <span className="ml-2">Controller Logs</span>}
-          </button>
-        </Tooltip>
+            <button
+              onClick={(e) => handleLogsClick(e, 'controllerlogs')}
+              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+            >
+              <MonitorPlay className="w-4 h-4" />
+              {withLabel && <span className="ml-2">Controller Logs</span>}
+            </button>
+          </Tooltip>
+          <Tooltip
+            key="preempt"
+            content="Preempt Job"
+            className="capitalize text-sm text-muted-foreground"
+          >
+            <button
+              onClick={handlePreemptClick}
+              className="text-red-600 hover:text-red-700 font-medium inline-flex items-center h-8"
+            >
+              <StopCircle className="w-4 h-4" />
+              {withLabel && <span className="ml-1.5">Preempt</span>}
+            </button>
+          </Tooltip>
+        </>
       )}
     </div>
   );
