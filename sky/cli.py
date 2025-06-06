@@ -6080,10 +6080,26 @@ def api():
               'to manage the process lifecycle and collect logs directly. '
               'This is useful when the API server is managed by systems '
               'like systemd and Kubernetes.')
+@click.option('--metrics',
+              type=bool,
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Export metrics of API server.')
+@click.option('--metrics-port',
+              type=Optional[int],
+              default=None,
+              required=False,
+              help='Port to export metrics of API server.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str], foreground: bool):
+def api_start(deploy: bool, host: Optional[str], foreground: bool,
+              metrics: bool, metrics_port: int):
     """Starts the SkyPilot API server locally."""
-    sdk.api_start(deploy=deploy, host=host, foreground=foreground)
+    sdk.api_start(deploy=deploy,
+                  host=host,
+                  foreground=foreground,
+                  metrics=metrics,
+                  metrics_port=metrics_port)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
