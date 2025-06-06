@@ -32,11 +32,13 @@ import {
   ServerIcon,
   BriefcaseIcon,
   TickIcon,
+  StarIcon,
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
+import { getUsers } from '@/data/connectors/users';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -79,7 +81,12 @@ const WorkspaceConfigDescription = ({
   );
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
-    const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()];
+    // Skip non-cloud configuration keys
+    if (cloud === 'private' || cloud === 'allowed_users') {
+      return;
+    }
+    
+    const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
     const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
 
     if (cloudConfig?.disabled === true) {
@@ -162,6 +169,61 @@ const WorkspaceConfigDescription = ({
   return null;
 };
 
+// Detailed allowed users component for workspace editor
+const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
+  if (!workspaceConfig.private) return null;
+
+  // Get allowed users from config
+  const allowedUsersFromConfig = workspaceConfig.allowed_users || [];
+  
+  // Get all admin users
+  const adminUsers = (allUsers || []).filter(user => user.role === 'admin');
+  const adminUsernames = adminUsers.map(user => user.username);
+  
+  // Combine allowed users and admin users, remove duplicates
+  const allAllowedUsers = [...new Set([...allowedUsersFromConfig, ...adminUsernames])];
+  
+  if (allAllowedUsers.length === 0) {
+    return (
+      <div className="mt-4">
+        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+          Allowed Users (0)
+        </h4>
+        <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
+          No users configured (workspace may be inaccessible)
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+        Allowed Users ({allAllowedUsers.length})
+      </h4>
+      <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
+        {allAllowedUsers.map((username) => {
+          const isAdmin = adminUsernames.includes(username);
+          return (
+            <div
+              key={username}
+              className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+            >
+              <span className="font-medium text-gray-700">{username}</span>
+              {isAdmin && (
+                <span className="inline-flex items-center text-blue-600">
+                  <StarIcon className="w-3 h-3 mr-1" />
+                  Admin
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
   const [workspaceConfig, setWorkspaceConfig] = useState({});
@@ -173,6 +235,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
 
   // Delete state
   const [deleteState, setDeleteState] = useState({
@@ -194,10 +257,15 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setLoading(true);
     setError(null);
     try {
-      const allWorkspaces = await getWorkspaces();
+      const [allWorkspaces, usersResponse] = await Promise.all([
+        getWorkspaces(),
+        getUsers(),
+      ]);
+      
       const config = allWorkspaces[workspaceName] || {};
       setWorkspaceConfig(config);
       setOriginalConfig(config);
+      setAllUsers(usersResponse || []);
 
       // Format as YAML with workspace name as top-level key
       const fullConfig = { [workspaceName]: config };
@@ -611,6 +679,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           enabledClouds={workspaceStats.clouds}
                         />
                       </div>
+
+                      {/* Detailed allowed users for private workspaces */}
+                      <DetailedAllowedUsers 
+                        workspaceConfig={originalConfig} 
+                        allUsers={allUsers} 
+                      />
                     </div>
                   </Card>
                 </div>
@@ -662,14 +736,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                               {`${workspaceName || 'my-workspace'}:
   private: true
   allowed_users:
-    - user1
-    - user2
+  - user1
+  - user2
   gcp:
     project_id: xxx
     disabled: false
   kubernetes:
     allowed_contexts:
-      - context-1`}
+    - context-1`}
                             </pre>
                           </div>
                         </div>
