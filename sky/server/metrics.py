@@ -22,7 +22,8 @@ sky_apiserver_requests_total = prom.Counter(
     ['path', 'method', 'status'],
 )
 
-# Time spent processing API server requests, grouped by path, method, and status.
+# Time spent processing API server requests, grouped by path, method, and
+# status.
 sky_apiserver_request_duration_seconds = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
@@ -93,8 +94,8 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             raise
         finally:
             sky_apiserver_requests_total.labels(path=path,
-                                       method=method,
-                                       status=status_code_group).inc()
+                                                method=method,
+                                                status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
                 sky_apiserver_request_duration_seconds.labels(

@@ -153,11 +153,12 @@ async def test_middleware_successful_request(prometheus_middleware):
     call_next.assert_called_once_with(request)
 
     # Check that request count was recorded
-    total_requests = _get_metric_value_from_registry('sky_apiserver_requests_total', {
-        'path': '/api/v1/status',
-        'method': 'GET',
-        'status': '2xx'
-    })
+    total_requests = _get_metric_value_from_registry(
+        'sky_apiserver_requests_total', {
+            'path': '/api/v1/status',
+            'method': 'GET',
+            'status': '2xx'
+        })
     assert total_requests == 1.0
 
     # Check that duration was recorded for non-streaming APIs
@@ -196,11 +197,12 @@ async def test_middleware_streaming_request(prometheus_middleware):
     assert result == response
 
     # Check that request count was recorded
-    total_requests = _get_metric_value_from_registry('sky_apiserver_requests_total', {
-        'path': '/api/v1/logs',
-        'method': 'GET',
-        'status': '2xx'
-    })
+    total_requests = _get_metric_value_from_registry(
+        'sky_apiserver_requests_total', {
+            'path': '/api/v1/logs',
+            'method': 'GET',
+            'status': '2xx'
+        })
     assert total_requests == 1.0
 
     # Check that duration was NOT recorded for streaming APIs
@@ -226,11 +228,12 @@ async def test_middleware_exception_handling(prometheus_middleware):
         await prometheus_middleware.dispatch(request, call_next)
 
     # Check that 5xx metric was recorded even with exception
-    total_requests = _get_metric_value_from_registry('sky_apiserver_requests_total', {
-        'path': '/api/v1/failing',
-        'method': 'POST',
-        'status': '5xx'
-    })
+    total_requests = _get_metric_value_from_registry(
+        'sky_apiserver_requests_total', {
+            'path': '/api/v1/failing',
+            'method': 'POST',
+            'status': '5xx'
+        })
     assert total_requests == 1.0
 
 
