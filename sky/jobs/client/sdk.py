@@ -190,6 +190,20 @@ def cancel(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+def preempt(job_ids: List[int]) -> server_common.RequestId:
+    """Preempt managed jobs."""
+    body = payloads.JobsPreemptBody(job_ids=job_ids)
+    response = requests.post(
+        f'{server_common.get_server_url()}/jobs/preempt',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
+    )
+    return server_common.get_request_id(response=response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,

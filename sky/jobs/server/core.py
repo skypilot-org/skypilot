@@ -538,6 +538,25 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+def preempt(job_ids: Optional[List[int]] = None) -> None:
+    """Preempt managed jobs."""
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_utils.Controllers.JOBS_CONTROLLER,
+        stopped_message='No jobs are running.')
+    code = managed_job_utils.ManagedJobCodeGen.preempt_jobs_by_id(job_ids)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to preempt managed job',
+                                       stdout + stderr)
+    logger.info(stdout)
+
+
+@usage_lib.entrypoint
 def tail_logs(name: Optional[str],
               job_id: Optional[int],
               follow: bool,
