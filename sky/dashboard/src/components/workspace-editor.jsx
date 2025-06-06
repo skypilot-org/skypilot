@@ -642,7 +642,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             <span className="font-semibold">Workspace:</span>{' '}
                             {workspaceName}
                           </div>
-                          <WorkspaceBadge isPrivate={originalConfig.private === true} />
+                          <WorkspaceBadge
+                            isPrivate={originalConfig.private === true}
+                          />
                         </div>
                       </CardTitle>
                     </CardHeader>
