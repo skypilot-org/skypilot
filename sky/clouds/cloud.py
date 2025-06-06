@@ -726,10 +726,19 @@ class Cloud:
         """Errors out if the network tier is not supported by the
         cloud provider.
 
+        For BEST tier: always succeeds, will use best available tier.
+
         Raises:
             exceptions.NotSupportedError: If the network tier is not supported.
         """
-        del instance_type  # unused
+        del instance_type  # unused by default, but can be overridden
+
+        # BEST tier is always allowed - clouds will map it to their best
+        # available
+        if network_tier == resources_utils.NetworkTier.BEST:
+            return
+
+        # For other tiers, check if supported
         if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
