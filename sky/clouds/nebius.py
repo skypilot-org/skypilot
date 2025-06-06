@@ -256,17 +256,19 @@ class Nebius(clouds.Cloud):
         is_infiniband_capable = (
             platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS)
         if (is_infiniband_capable and
-                resources.network_tier == resources_utils.NetworkTier.BEST and
-                resources.extract_docker_image() is not None):
-            # Add InfiniBand device access and IPC_LOCK capability for
-            # docker containers
-            docker_run_options.extend(
-                nebius_constants.INFINIBAND_DOCKER_OPTIONS)
+                resources.network_tier == resources_utils.NetworkTier.BEST):
+            # For Docker containers, add InfiniBand device access and IPC_LOCK capability
+            if resources.extract_docker_image() is not None:
+                docker_run_options.extend(
+                    nebius_constants.INFINIBAND_DOCKER_OPTIONS)
 
-            # Add InfiniBand environment variables to docker run options
-            for env_var, env_value in (
-                    nebius_constants.INFINIBAND_ENV_VARS.items()):
-                docker_run_options.extend(['-e', f'{env_var}={env_value}'])
+                # Add InfiniBand environment variables to docker run options
+                for env_var, env_value in (
+                        nebius_constants.INFINIBAND_ENV_VARS.items()):
+                    docker_run_options.extend(['-e', f'{env_var}={env_value}'])
+            
+            # For all InfiniBand-capable instances, add environment variables
+            resources_vars['env_vars'] = nebius_constants.INFINIBAND_ENV_VARS
 
         if docker_run_options:
             resources_vars['docker_run_options'] = docker_run_options

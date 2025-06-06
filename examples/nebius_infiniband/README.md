@@ -171,7 +171,7 @@ SkyPilot will automatically configure the InfiniBand with the correct fabric for
 
 You can verify your InfiniBand setup by running either of these tests:
 
-1. NCCL Performance Test:
+1. NCCL Performance Test (with specific docker image):
 
 ```bash
 sky launch -c infiniband nccl_vm_ib.yaml
@@ -192,7 +192,28 @@ Result example:
 # Avg bus bandwidth    : 457.407 
 ```
 
-2. InfiniBand Direct Test:
+2. NCCL Performance Test (setting up NCCL):
+
+```bash
+sky launch -c infiniband nccl_ib.yaml
+```
+
+Result example:
+
+```
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)       
+   536870912     134217728     float     sum      -1   2399.1  223.78  419.59      0   2354.3  228.04  427.57      0
+  1073741824     268435456     float     sum      -1   4469.9  240.22  450.41      0   4463.1  240.58  451.09      0
+  2147483648     536870912     float     sum      -1   8678.7  247.44  463.96      0   8667.1  247.77  464.57      0
+  4294967296    1073741824     float     sum      -1    17053  251.86  472.24      0    17112  250.99  470.60      0
+  8589934592    2147483648     float     sum      -1    33792  254.20  476.62      0    33735  254.63  477.42      0
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 457.407 
+```
+
+3. InfiniBand Direct Test:
 
 ```bash
 sky launch -c infiniband infiniband.yaml
