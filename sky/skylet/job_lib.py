@@ -1029,6 +1029,8 @@ class JobLibCodeGen:
             # it was using ray job submit before #4318, and switched to raw
             # process. Using the old skylet version will cause the job status
             # to be stuck in PENDING state or transition to FAILED_DRIVER state.
+            # We also disallow job submission when SKYLET_VERSION is older than 14,
+            # as we increase the number of arguements that are passed to add_job.
             '\nif int(constants.SKYLET_VERSION) < 14: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
