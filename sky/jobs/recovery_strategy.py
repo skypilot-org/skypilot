@@ -43,6 +43,88 @@ MAX_JOB_CHECKING_RETRY = 10
 _AUTODOWN_MINUTES = 5
 
 
+class PreemptionStrategyExecutor:
+    """Preemption strategy for managed job clusters."""
+
+    def __init__(self, task: 'task_lib.Task', job_id: int) -> None:
+        self.task = task
+        self.job_id = job_id
+
+    @classmethod
+    def make(cls, task: 'task_lib.Task',
+             job_id: int) -> 'PreemptionStrategyExecutor':
+        strategy = task.job_preemption_strategy
+        if strategy is None or strategy == 'none':
+            logger.info('Using no-op preemption strategy.')
+            # Default no-op preemption strategy. (Does not preempt.)
+            return PreemptionStrategyExecutor(task, job_id)
+        elif strategy == 'simple':
+            logger.info('Using simple preemption strategy.')
+            return SimplePreemptionStrategyExecutor(task, job_id)
+        else:
+            raise ValueError(f'Invalid preemption strategy: {strategy}')
+
+    def preempt(self) -> bool:
+        """Preempt a job so that this job can run.
+
+        Returns:
+            True if preempted, False otherwise.
+        """
+        return False
+
+
+class SimplePreemptionStrategyExecutor(PreemptionStrategyExecutor):
+    """Simple preemption strategy for managed job clusters."""
+
+    def preempt(self) -> bool:
+        # Find a lower priority RUNNING job with resources >= this job's
+        # request.
+        # Get all the RUNNING jobs that we could preempt.
+        self_from_database = state.get_managed_jobs(self.job_id)
+        logger.info(f'Self from database: {self_from_database}')
+        if not self_from_database:
+            logger.info('No self from database found.')
+            return False
+        self_from_database = self_from_database[0]
+        self_priority = self_from_database['priority']
+        logger.info(f'Self priority: {self_priority}')
+        preemptible_jobs = state.get_preemptible_jobs(self_priority)
+        logger.info(f'Found {len(preemptible_jobs)} preemptible jobs.')
+        if not preemptible_jobs:
+            logger.info('No preemptible jobs found.')
+        for job in preemptible_jobs:
+            logger.info(f'Checking job {job["job_id"]}')
+            # Get the job's cluster name.
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                job['task_name'], job['job_id'])
+            logger.info(f'Cluster name: {cluster_name}')
+            # Get the job cluster
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                logger.info('Not a CVMRH, skipping.')
+                continue
+            logger.info(f'Handle: {handle}')
+            logger.info(
+                f'{len(self.task.resources)} resources: {self.task.resources}')
+            for resource in self.task.resources:
+                if resource.less_demanding_than(handle.launched_resources):
+                    # Preempt the job.
+                    managed_job_utils.preempt_jobs_by_id([job['job_id']])
+                    logger.info(f'Preempted job {job["job_id"]}\'s cluster '
+                                f'{cluster_name} with resources '
+                                f'{handle.launched_resources} to run this job.')
+                    return True
+                else:
+                    logger.info(f'Job {job["job_id"]}\'s cluster '
+                                f'{cluster_name} has resources '
+                                f'{handle.launched_resources} which is not '
+                                f'less demanding than this job\'s resources '
+                                f'{self.task.resources}.')
+        return False
+
+
+# Recovery strategy executor.
 class StrategyExecutor:
     """Handle the launching, recovery and termination of managed job clusters"""
 
@@ -68,6 +150,7 @@ class StrategyExecutor:
         self.job_id = job_id
         self.task_id = task_id
         self.restart_cnt_on_failure = 0
+        self.preemption_executor = PreemptionStrategyExecutor.make(task, job_id)
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
@@ -279,6 +362,7 @@ class StrategyExecutor:
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
+            should_wait = True
             try:
                 with scheduler.scheduled_launch(self.job_id):
                     # The job state may have been PENDING during backoff -
@@ -345,6 +429,12 @@ class StrategyExecutor:
                             return None
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
+                        if self.preemption_executor.preempt():
+                            logger.info('Preempted a job to run this job.')
+                            # Immediately try again without backing off.
+                            # TODO(cooperc): This could increment the retry
+                            # count to more than the max_retry.
+                            should_wait = False
                     except Exception as e:  # pylint: disable=broad-except
                         # If the launch fails, it will be recovered by the
                         # following code.
@@ -397,11 +487,12 @@ class StrategyExecutor:
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
                 state.set_backoff_pending(self.job_id, self.task_id)
-                # Calculate the backoff time and sleep.
-                gap_seconds = backoff.current_backoff()
-                logger.info('Retrying to launch the cluster in '
-                            f'{gap_seconds:.1f} seconds.')
-                time.sleep(gap_seconds)
+                if should_wait:
+                    # Calculate the backoff time and sleep.
+                    gap_seconds = backoff.current_backoff()
+                    logger.info('Retrying to launch the cluster in '
+                                f'{gap_seconds:.1f} seconds.')
+                    time.sleep(gap_seconds)
                 continue
             else:
                 # The inner loop should either return or throw

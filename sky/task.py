@@ -294,6 +294,8 @@ class Task:
         self._service: Optional[service_spec.SkyServiceSpec] = None
         # The priority of the managed job running this task.
         self._job_priority: Optional[int] = None
+        # The preemption strategy for this task.
+        self._job_preemption_strategy: Optional[str] = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -632,8 +634,11 @@ class Task:
         task.set_service(service)
 
         job = config.pop('job', None)
-        if job is not None and 'priority' in job:
-            task.set_job_priority(job['priority'])
+        if job is not None:
+            if 'priority' in job:
+                task.set_job_priority(job['priority'])
+            if 'preemption_strategy' in job:
+                task.set_job_preemption_strategy(job['preemption_strategy'])
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task
@@ -852,6 +857,16 @@ class Task:
           self: The current task, with job priority set.
         """
         self._job_priority = priority
+        return self
+
+    @property
+    def job_preemption_strategy(self) -> Optional[str]:
+        """The preemption strategy for this task."""
+        return self._job_preemption_strategy
+
+    def set_job_preemption_strategy(self, strategy: str) -> 'Task':
+        """Sets the preemption strategy for this task."""
+        self._job_preemption_strategy = strategy
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
@@ -1297,8 +1312,13 @@ class Task:
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 
+        config['job'] = {}
+
         if self.job_priority is not None:
-            add_if_not_none('job', {'priority': self.job_priority})
+            config['job']['priority'] = self.job_priority
+
+        if self.job_preemption_strategy is not None:
+            config['job']['preemption_strategy'] = self.job_preemption_strategy
 
         add_if_not_none('num_nodes', self.num_nodes)
 
