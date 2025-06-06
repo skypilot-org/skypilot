@@ -89,7 +89,7 @@ jobs:
 
   smoke-tests:
     needs: nightly-build-pypi
-    if: ${{ !inputs.skip_buildkite }}
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_buildkite || github.event_name == 'schedule' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
@@ -103,16 +103,17 @@ jobs:
 
   publish-and-validate-both:
     needs: [nightly-build-pypi, smoke-tests]
-    if: ${{ inputs.skip_buildkite || (always() && needs.smoke-tests.result == 'success') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.skip_buildkite) || (always() && needs.smoke-tests.result == 'success') }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
       expected_version: ${{ needs.nightly-build-pypi.outputs.version }}
-      skip_test_pypi: ${{ inputs.skip_test_pypi }}
+      skip_test_pypi: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test_pypi || false }}
     secrets: inherit
 
   trigger-helm-release:
     needs: [publish-and-validate-both]
+    if: ${{ needs.publish-and-validate-both.result == 'success' }}
     uses: ./.github/workflows/helm-docker-release.yaml
     with:
       package_name: skypilot-nightly
