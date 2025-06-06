@@ -94,8 +94,8 @@ def prometheus_middleware():
     middleware = metrics.PrometheusMiddleware(app=MagicMock())
 
     # Clear metric values before each test
-    metrics.http_requests_total.clear()
-    metrics.http_request_duration_seconds.clear()
+    metrics.sky_apiserver_requests_total.clear()
+    metrics.sky_apiserver_request_duration_seconds.clear()
 
     return middleware
 
@@ -104,8 +104,8 @@ def _get_metric_value_from_registry(metric_name, labels=None):
     """Helper function to get metric value from the prometheus registry."""
     registry = CollectorRegistry()
     # Register the actual metrics to the test registry
-    registry.register(metrics.http_requests_total)
-    registry.register(metrics.http_request_duration_seconds)
+    registry.register(metrics.sky_apiserver_requests_total)
+    registry.register(metrics.sky_apiserver_request_duration_seconds)
 
     # Generate the metrics output
     output = generate_latest(registry).decode('utf-8')
@@ -153,7 +153,7 @@ async def test_middleware_successful_request(prometheus_middleware):
     call_next.assert_called_once_with(request)
 
     # Check that request count was recorded
-    total_requests = _get_metric_value_from_registry('http_requests_total', {
+    total_requests = _get_metric_value_from_registry('sky_apiserver_requests_total', {
         'path': '/api/v1/status',
         'method': 'GET',
         'status': '2xx'
@@ -162,7 +162,7 @@ async def test_middleware_successful_request(prometheus_middleware):
 
     # Check that duration was recorded for non-streaming APIs
     duration_count = _get_metric_value_from_registry(
-        'http_request_duration_seconds_count', {
+        'sky_apiserver_request_duration_seconds_count', {
             'path': '/api/v1/status',
             'method': 'GET',
             'status': '2xx'
@@ -171,7 +171,7 @@ async def test_middleware_successful_request(prometheus_middleware):
 
     # Check that the duration sum is reasonable
     duration_sum = _get_metric_value_from_registry(
-        'http_request_duration_seconds_sum', {
+        'sky_apiserver_request_duration_seconds_sum', {
             'path': '/api/v1/status',
             'method': 'GET',
             'status': '2xx'
@@ -196,7 +196,7 @@ async def test_middleware_streaming_request(prometheus_middleware):
     assert result == response
 
     # Check that request count was recorded
-    total_requests = _get_metric_value_from_registry('http_requests_total', {
+    total_requests = _get_metric_value_from_registry('sky_apiserver_requests_total', {
         'path': '/api/v1/logs',
         'method': 'GET',
         'status': '2xx'
@@ -205,7 +205,7 @@ async def test_middleware_streaming_request(prometheus_middleware):
 
     # Check that duration was NOT recorded for streaming APIs
     duration_count = _get_metric_value_from_registry(
-        'http_request_duration_seconds_count', {
+        'sky_apiserver_request_duration_seconds_count', {
             'path': '/api/v1/logs',
             'method': 'GET',
             'status': '2xx'
@@ -226,7 +226,7 @@ async def test_middleware_exception_handling(prometheus_middleware):
         await prometheus_middleware.dispatch(request, call_next)
 
     # Check that 5xx metric was recorded even with exception
-    total_requests = _get_metric_value_from_registry('http_requests_total', {
+    total_requests = _get_metric_value_from_registry('sky_apiserver_requests_total', {
         'path': '/api/v1/failing',
         'method': 'POST',
         'status': '5xx'
@@ -257,7 +257,7 @@ async def test_middleware_different_status_codes(prometheus_middleware):
 
         # Verify the correct status group was recorded
         total_requests = _get_metric_value_from_registry(
-            'http_requests_total', {
+            'sky_apiserver_requests_total', {
                 'path': f'/test/{status_code}',
                 'method': 'GET',
                 'status': expected_group
@@ -293,5 +293,5 @@ def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""
     yield
     # Clear all metrics after each test
-    metrics.http_requests_total.clear()
-    metrics.http_request_duration_seconds.clear()
+    metrics.sky_apiserver_requests_total.clear()
+    metrics.sky_apiserver_request_duration_seconds.clear()

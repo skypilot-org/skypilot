@@ -15,17 +15,17 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-# Total number of HTTP requests, grouped by path, method, and status.
-http_requests_total = prom.Counter(
-    'http_requests_total',
-    'Total number of HTTP requests',
+# Total number of API server requests, grouped by path, method, and status.
+sky_apiserver_requests_total = prom.Counter(
+    'sky_apiserver_requests_total',
+    'Total number of API server requests',
     ['path', 'method', 'status'],
 )
 
-# Time spent processing HTTP requests, grouped by path, method, and status.
-http_request_duration_seconds = prom.Histogram(
-    'http_request_duration_seconds',
-    'Time spent processing HTTP requests',
+# Time spent processing API server requests, grouped by path, method, and status.
+sky_apiserver_request_duration_seconds = prom.Histogram(
+    'sky_apiserver_request_duration_seconds',
+    'Time spent processing API server requests',
     ['path', 'method', 'status'],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
              float('inf')),
@@ -92,12 +92,12 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             status_code_group = '5xx'
             raise
         finally:
-            http_requests_total.labels(path=path,
+            sky_apiserver_requests_total.labels(path=path,
                                        method=method,
                                        status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
-                http_request_duration_seconds.labels(
+                sky_apiserver_request_duration_seconds.labels(
                     path=path, method=method,
                     status=status_code_group).observe(duration)
 
