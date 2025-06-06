@@ -61,5 +61,6 @@ class TestWorkspacePermissions(unittest.TestCase):
             users, ['*'],
             "Workspace without 'private' key should default to public")
 
+
 if __name__ == '__main__':
     unittest.main()

@@ -139,7 +139,13 @@ const WorkspaceBadge = ({ isPrivate }) => {
 };
 
 // Workspace card component
-const WorkspaceCard = ({ workspace, onDelete, onEdit, router, rawWorkspacesData }) => {
+const WorkspaceCard = ({
+  workspace,
+  onDelete,
+  onEdit,
+  router,
+  rawWorkspacesData,
+}) => {
   const handleEdit = async () => {
     try {
       // Get current user's role first

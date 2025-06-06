@@ -9,12 +9,12 @@ const parseUsername = (username, userId) => {
   }
   // If no email, show username with userId in parentheses only if they're different
   const usernameBase = username || 'N/A';
-  
+
   // Skip showing userId if it's the same as username
   if (userId && userId !== usernameBase) {
     return `${usernameBase} (${userId})`;
   }
-  
+
   return usernameBase;
 };
 
