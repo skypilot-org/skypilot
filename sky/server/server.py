@@ -182,6 +182,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                             f'"env_vars" in request body is not a dictionary '
                             f'for request {request.state.request_id}. '
                             'Skipping user info injection into body.')
+                else:
+                    original_json['env_vars'] = {}
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
                 request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
         return await call_next(request)
 
