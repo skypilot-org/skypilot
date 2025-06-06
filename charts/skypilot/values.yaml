@@ -322,22 +322,14 @@ prometheus:
 # Set configuration for Grafana helm chart
 grafana:
   enabled: false
+  service:
+    type: LoadBalancer
+  image:
+    tag: "11.6.2"
   # Refer to https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md for available values.
   persistence:
     enabled: true
     size: 10Gi
-  # Serve under a subpath by default to avoid conflicts with API server.
-  ingress:
-    enabled: true
-    path: "/grafana"
-    ingressClassName: nginx
-    hosts: null
-  grafana.ini:
-    server:
-      domain: localhost
-      root_url: "%(protocol)s://%(domain)s/grafana"
-      enforce_domain: false
-      serve_from_sub_path: true
   sidecar:
     # Enable datasources discovery in grafana sidecar.
     datasources:
