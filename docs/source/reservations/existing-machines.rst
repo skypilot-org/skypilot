@@ -262,6 +262,8 @@ Volume mounting can be done directly in the task YAML on a per-task basis, or gl
     .. tab-item:: Nebius shared filesystem
       :name: ssh-volumes-nebius-shared-filesystem
 
+      SSH Node Pools running on Nebius VMs can access Nebius shared filesystems.
+
       When creating a VM on the Nebius console, attach your desired shared file system to the VM (``Create virtual machine`` -> ``Attach shared filesystem``):
 
       * Ensure ``Auto mount`` is enabled.
