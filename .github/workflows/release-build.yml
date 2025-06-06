@@ -280,7 +280,7 @@ jobs:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
       branch: ${{ needs.release-build.outputs.test_branch }}
       message: "Release ${{ needs.release-build.outputs.release_version }}"
-      pipeline: "skypilot-1/full-smoke-tests-run"
+      pipeline: "full-smoke-tests-run"
       timeout_minutes: 240
       wait: true
       fail_on_buildkite_failure: true
@@ -294,7 +294,7 @@ jobs:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
       branch: ${{ needs.release-build.outputs.test_branch }}
       message: "Release ${{ needs.release-build.outputs.release_version }}"
-      pipeline: "skypilot-1/quicktest-core"
+      pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--base-branch ${{ needs.release-build.outputs.previous_release_branch }}"}'
       timeout_minutes: 180
       wait: true
@@ -309,7 +309,7 @@ jobs:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
       branch: ${{ needs.release-build.outputs.test_branch }}
       message: "Release ${{ needs.release-build.outputs.release_version }}"
-      pipeline: "skypilot-1/release"
+      pipeline: "release"
       wait: false
       fail_on_buildkite_failure: false
     secrets:
