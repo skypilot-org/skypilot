@@ -176,6 +176,15 @@ def _execute(
             for storage in task.storage_mounts.values():
                 # Ensure the storage is constructed.
                 storage.construct()
+        for resource in task.resources:
+            # For backward compatibility, we need to override the autostop
+            # config at server-side for legacy clients.
+            # TODO(aylei): remove this after we bump the API version.
+            resource.override_autostop_config(
+                down=down, idle_minutes=idle_minutes_to_autostop)
+            if resource.autostop_config is not None:
+                down = resource.autostop_config.down
+                idle_minutes_to_autostop = resource.autostop_config.idle_minutes
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_options=admin_policy.RequestOptions(
@@ -187,7 +196,6 @@ def _execute(
         return _execute_dag(
             dag,
             dryrun=dryrun,
-            down=down,
             stream_logs=stream_logs,
             handle=handle,
             backend=backend,
@@ -197,7 +205,6 @@ def _execute(
             cluster_name=cluster_name,
             detach_setup=detach_setup,
             detach_run=detach_run,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
@@ -210,7 +217,6 @@ def _execute(
 def _execute_dag(
     dag: 'sky.Dag',
     dryrun: bool,
-    down: bool,
     stream_logs: bool,
     handle: Optional[backends.ResourceHandle],
     backend: Optional[backends.Backend],
@@ -220,7 +226,6 @@ def _execute_dag(
     cluster_name: Optional[str],
     detach_setup: bool,
     detach_run: bool,
-    idle_minutes_to_autostop: Optional[int],
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
@@ -280,38 +285,35 @@ def _execute_dag(
     # we aren't sure which resources will be launched, and different
     # resources may have different autostop configs.
     if isinstance(backend, backends.CloudVmRayBackend):
-        if down and idle_minutes_to_autostop is None:
-            # Use auto{stop,down} to terminate the cluster after the task is
-            # done.
-            idle_minutes_to_autostop = 0
-        elif not down and idle_minutes_to_autostop is None:
-            # No autostop config specified on command line, use the
-            # config from resources.
-            # TODO(cooperc): This should be done after provisioning, in order to
-            # support different autostop configs for different resources.
-            # Blockers:
-            # - Need autostop config to set requested_features before
-            #   provisioning.
-            # - Need to send info message about idle_minutes_to_autostop==0 here
-            # - Need to check if autostop is supported by the backend.
-            resources = list(task.resources)
-            for resource in resources:
-                if resource.autostop_config != resources[0].autostop_config:
-                    raise ValueError(
-                        'All resources must have the same autostop config.')
-            resource_autostop_config = resources[0].autostop_config
+        # No autostop config specified on command line, use the
+        # config from resources.
+        # TODO(cooperc): This should be done after provisioning, in order to
+        # support different autostop configs for different resources.
+        # Blockers:
+        # - Need autostop config to set requested_features before
+        #   provisioning.
+        # - Need to send info message about idle_minutes_to_autostop==0 here
+        # - Need to check if autostop is supported by the backend.
+        resources = list(task.resources)
+        for resource in resources:
+            if resource.autostop_config != resources[0].autostop_config:
+                raise ValueError(
+                    'All resources must have the same autostop config.')
+        resource_autostop_config = resources[0].autostop_config
 
-            if resource_autostop_config is not None:
-                if resource_autostop_config.enabled:
-                    idle_minutes_to_autostop = (
-                        resource_autostop_config.idle_minutes)
-                    down = resource_autostop_config.down
-                else:
-                    # Autostop is explicitly disabled, so cancel it if it's
-                    # already set.
-                    assert not resource_autostop_config.enabled
-                    idle_minutes_to_autostop = -1
-                    down = False
+        idle_minutes_to_autostop: Optional[int] = None
+        down = False
+        if resource_autostop_config is not None:
+            if resource_autostop_config.enabled:
+                idle_minutes_to_autostop = (
+                    resource_autostop_config.idle_minutes)
+                down = resource_autostop_config.down
+            else:
+                # Autostop is explicitly disabled, so cancel it if it's
+                # already set.
+                assert not resource_autostop_config.enabled
+                idle_minutes_to_autostop = -1
+                down = False
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
                 # idle_minutes_to_autostop=0 can cause the following problem:
@@ -337,13 +339,6 @@ def _execute_dag(
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
-
-    elif idle_minutes_to_autostop is not None:
-        # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Backend {backend.NAME} does not support autostop, please try'
-                f' {backends.CloudVmRayBackend.NAME}')
 
     if Stage.CLONE_DISK in stages:
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
@@ -529,13 +524,16 @@ def launch(
             running/pending jobs are found in the job queue. Setting this
             flag is equivalent to running
             ``sky.launch(...)`` and then
-            ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
-            will not be autostopped.
+            ``sky.autostop(idle_minutes=<minutes>)``. If set, the autostop
+            config specified in the task' resources will be overridden by
+            this parameter.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
             cluster will be torn down after the specified idle time.
             Note that if errors occur during provisioning/data syncing/setting
-            up, the cluster will not be torn down for debugging purposes.
+            up, the cluster will not be torn down for debugging purposes. If
+            set, the autostop config specified in the task' resources will be
+            overridden by this parameter.
         dryrun: if True, do not actually launch the cluster.
         stream_logs: if True, show the logs in the terminal.
         backend: backend to use.  If None, use the default backend
