@@ -25,7 +25,7 @@ def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
         all_users_map = {user.name: user.id for user in all_users}
         for user_name in user_names:
             if user_name not in all_users_map:
-                logger.warning(f'User {user_name} not found in all users')
+                logger.debug(f'User {user_name} not found in all users')
                 continue
             user_ids.append(all_users_map[user_name])
         return user_ids
