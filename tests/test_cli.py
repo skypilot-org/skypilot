@@ -3,12 +3,19 @@ import textwrap
 from unittest import mock
 
 from click import testing as cli_testing
+import pytest
 import requests
 
 from sky import cli
 from sky import clouds
+from sky import core
 from sky import exceptions
+from sky import global_user_state
+from sky import models
 from sky import server
+from sky.clouds import cloud as sky_cloud
+from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import constants
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -321,3 +328,41 @@ class TestHelperFunctions:
         assert added_cluster_args[0][4] is None
         assert added_cluster_args[0][5] == 'ubuntu'
         mock_remove_cluster.assert_not_called()
+
+
+def _mock_realtime_kubernetes_gpu_availability(*args, **kwargs):
+    return [['kind-skypilot', [['H100', [1, 2, 4, 8], 8, 8]]]]
+
+
+# Mock get_kubernetes_node_info
+def _mock_get_kubernetes_node_info(*args, **kwargs):
+    node_info = models.KubernetesNodeInfo(name='skypilot-control-plane',
+                                          accelerator_type='H100',
+                                          total={'accelerator_count': 8},
+                                          free={'accelerators_available': 8})
+    return models.KubernetesNodesInfo(
+        node_info_dict={'skypilot-control-plane': node_info}, hint='')
+
+
+class TestNoK8sInstalled:
+    # We should run this test without kubernetes installed. i.e pip install skypilot[aws],
+    # and then run this test.
+    # This test is to ensure that the cli show-gpus command works without kubernetes installed.
+    @pytest.mark.parametrize('enable_all_clouds', [[clouds.Kubernetes()]],
+                             indirect=True)
+    def test_k8s_alias(self, enable_all_clouds, monkeypatch):
+        global_user_state.set_enabled_clouds(
+            ['kubernetes'], sky_cloud.CloudCapability.COMPUTE,
+            constants.SKYPILOT_DEFAULT_WORKSPACE)
+        monkeypatch.setattr(kubernetes_utils, 'get_kubernetes_node_info',
+                            _mock_get_kubernetes_node_info)
+
+        # Mock realtime_kubernetes_gpu_availability
+        monkeypatch.setattr(core, 'realtime_kubernetes_gpu_availability',
+                            _mock_realtime_kubernetes_gpu_availability)
+
+        cli_runner = cli_testing.CliRunner()
+
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'k8s'])
+        assert 'Kubernetes' in result.output
+        assert not result.exit_code
