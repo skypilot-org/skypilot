@@ -484,7 +484,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
             user.id, active_workspace):
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have '
-            f'permission to access workspace {active_workspace}')
+            f'permission to access workspace {active_workspace!r}')
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
