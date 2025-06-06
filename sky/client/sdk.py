@@ -85,7 +85,8 @@ def stream_response(request_id: Optional[str],
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 print(line, flush=True, end='', file=output_stream)
-        return get(request_id)
+        if request_id is not None:
+            return get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
