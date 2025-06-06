@@ -12,7 +12,7 @@ const cleanErrorMessage = (error) => {
   }
 
   // Capitalize first letter and return
-  return message.charAt(0).toUpperCase() + message.slice(1);
+  return message;
 };
 
 // Error display component
