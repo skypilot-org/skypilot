@@ -15,6 +15,5 @@ include sky/jobs/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*
 include sky/server/html/*
-include sky/users/model.conf
 recursive-include sky/dashboard/out *
 include sky/users/*.conf
