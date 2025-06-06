@@ -378,8 +378,8 @@ export function TopBar() {
                 className="inline-flex items-center justify-center rounded-full transition-colors duration-150 cursor-pointer hover:ring-2 hover:ring-blue-200"
                 title="User Profile"
               >
-                <div
-                  className={`${isMobile ? 'w-8 h-8' : 'w-9 h-9'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium text-sm hover:bg-blue-700 transition-colors`}
+                <div 
+                  className={`${isMobile ? 'w-6 h-6' : 'w-7 h-7'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium ${isMobile ? 'text-xs' : 'text-sm'} hover:bg-blue-700 transition-colors`}
                 >
                   {getUserInitial(userEmail)}
                 </div>
