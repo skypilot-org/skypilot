@@ -20,7 +20,6 @@ logger = sky_logging.init_logger(__name__)
 # Filelocks for the policy update.
 POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
-POLICY_REFRESH_INTERVAL_SECONDS = 60
 
 _enforcer_instance = None
 _lock = threading.Lock()
