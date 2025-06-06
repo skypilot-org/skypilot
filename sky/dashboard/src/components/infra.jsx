@@ -532,8 +532,7 @@ function SSHNodePoolDetails({
   const getButtonStates = () => {
     if (!statusData) {
       return {
-        deployDisabled: true,
-        repairDisabled: true
+        deployDisabled: true
       };
     }
 
@@ -541,37 +540,26 @@ function SSHNodePoolDetails({
     
     if (status === 'Ready') {
       return {
-        deployDisabled: true,
-        repairDisabled: false
+        deployDisabled: true
       };
     } else if (status === 'Error') {
       return {
-        deployDisabled: true,
-        repairDisabled: false
+        deployDisabled: true
       };
     } else {
       // Not Ready or other status
       return {
-        deployDisabled: false,
-        repairDisabled: true
+        deployDisabled: false
       };
     }
   };
 
-  const { deployDisabled, repairDisabled } = getButtonStates();
+  const { deployDisabled } = getButtonStates();
 
   const handleDeployClick = () => {
     setConfirmDialog({
       isOpen: true,
       action: 'deploy',
-      loading: false,
-    });
-  };
-
-  const handleRepairClick = () => {
-    setConfirmDialog({
-      isOpen: true,
-      action: 'repair',
       loading: false,
     });
   };
@@ -597,7 +585,7 @@ function SSHNodePoolDetails({
         // Close dialog on success
         setConfirmDialog({ isOpen: false, action: null, loading: false });
       } else {
-        // Deploy or repair - start streaming
+        // Deploy - start streaming
         const response = await deploySSHNodePool(poolName);
         
         // Close confirmation dialog
@@ -697,18 +685,6 @@ function SSHNodePoolDetails({
           'This process may take a few minutes to complete.'
         ]
       };
-    } else if (confirmDialog.action === 'repair') {
-      return {
-        title: 'Repair SSH Node Pool',
-        description: `Are you sure you want to repair SSH Node Pool "${poolName}"?`,
-        details: [
-          '• Attempt to fix any configuration issues',
-          '• Reinstall or update components if needed',
-          '• May temporarily disrupt existing workloads',
-          '',
-          'This process may take a few minutes to complete.'
-        ]
-      };
     } else {
       return {
         title: 'Delete SSH Node Pool',
@@ -744,21 +720,6 @@ function SSHNodePoolDetails({
                 Deploy
               </button>
               <button
-                className={`px-3 py-1 text-sm border rounded flex items-center ${
-                  repairDisabled
-                    ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100'
-                }`}
-                onClick={repairDisabled ? undefined : handleRepairClick}
-                disabled={repairDisabled}
-              >
-                <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Repair
-              </button>
-              <button
                 className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
                 onClick={handleDeleteClick}
               >
@@ -771,38 +732,33 @@ function SSHNodePoolDetails({
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <div className="text-gray-600 font-medium text-base">
-                  Status
-                </div>
-                <div className="text-base mt-1">
-                  {statusLoading ? (
-                    <div className="flex items-center">
-                      <CircularProgress size={16} className="mr-2" />
-                      <span className="text-gray-500">Loading...</span>
-                    </div>
-                  ) : statusData ? (
-                    <StatusBadge status={statusData.status} reason={statusData.reason} />
-                  ) : (
-                    <span className="text-gray-500">Unknown</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
                   Pool Name
                 </div>
                 <div className="text-base mt-1">{poolName}</div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">
-                  Context Name
-                </div>
-                <div className="text-base mt-1">{statusData?.context_name || `ssh-${poolName}`}</div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
                   Nodes
                 </div>
                 <div className="text-base mt-1">{nodesInContext ? nodesInContext.length : 0}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
+                <div className="text-base mt-1">
+                  {statusLoading ? (
+                      <div className="flex items-center">
+                        <CircularProgress size={16} className="mr-2"/>
+                        <span className="text-gray-500">Loading...</span>
+                      </div>
+                  ) : statusData ? (
+                      <StatusBadge status={statusData.status}
+                                   reason={statusData.reason}/>
+                  ) : (
+                      <span className="text-gray-500">Unknown</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -851,20 +807,16 @@ function SSHNodePoolDetails({
               className={
                 confirmDialog.action === 'deploy'
                   ? 'bg-green-600 hover:bg-green-700 text-white'
-                  : confirmDialog.action === 'repair'
-                    ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                    : 'bg-red-600 hover:bg-red-700 text-white'
+                  : 'bg-red-600 hover:bg-red-700 text-white'
               }
             >
               {confirmDialog.loading ? (
                 <>
                   <CircularProgress size={16} className="mr-2" />
-                  {confirmDialog.action === 'deploy' ? 'Deploying...' : 
-                   confirmDialog.action === 'repair' ? 'Repairing...' : 'Deleting...'}
+                  {confirmDialog.action === 'deploy' ? 'Deploying...' : 'Deleting...'}
                 </>
               ) : (
-                confirmDialog.action === 'deploy' ? 'Deploy' : 
-                confirmDialog.action === 'repair' ? 'Repair' : 'Delete'
+                confirmDialog.action === 'deploy' ? 'Deploy' : 'Delete'
               )}
             </Button>
           </DialogFooter>

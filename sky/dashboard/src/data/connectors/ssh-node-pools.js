@@ -177,7 +177,7 @@ export async function streamSSHDeploymentLogs({
   onNewLog,
 }) {
   // Measure timeout from last received data, not from start of request.
-  const inactivityTimeout = 30000; // 30 seconds of no data activity
+  const inactivityTimeout = 300000; // 5 minutes of no data activity
   let lastActivity = Date.now();
   let timeoutId;
 
