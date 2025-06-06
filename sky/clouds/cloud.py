@@ -141,8 +141,7 @@ class Cloud:
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
     _SUPPORTED_NETWORK_TIERS = {
-        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.HIGH,
-        resources_utils.NetworkTier.BEST
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
     }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
@@ -727,7 +726,6 @@ class Cloud:
         """Errors out if the network tier is not supported by the
         cloud provider.
 
-        For HIGH tier: fails if not supported on this cloud/instance.
         For BEST tier: always succeeds, will use best available tier.
 
         Raises:
