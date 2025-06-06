@@ -3,11 +3,19 @@ import { getClusters } from './clusters';
 import { getManagedJobs } from './jobs';
 
 // Helper functions for username parsing
-const parseUsername = (username) => {
+const parseUsername = (username, userId) => {
   if (username && username.includes('@')) {
     return username.split('@')[0];
   }
-  return username || 'N/A';
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || 'N/A';
+  
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+  
+  return usernameBase;
 };
 
 const getFullEmail = (username) => {
@@ -68,7 +76,7 @@ export async function getUsersWithCounts() {
     );
     return {
       ...user,
-      usernameDisplay: parseUsername(user.username),
+      usernameDisplay: parseUsername(user.username, user.userId),
       fullEmail: getFullEmail(user.username),
       clusterCount: userClusters.length,
       jobCount: userJobs.length,
