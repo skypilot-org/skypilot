@@ -338,7 +338,7 @@ function JobDetailsContent({
   // Add refs to track active requests and prevent duplicates
   const activeLogsRequest = useRef(null);
   const activeControllerLogsRequest = useRef(null);
-  
+
   // Track aborted controllers to prevent double-abort
   const abortedControllers = useRef(new WeakSet());
 
@@ -359,39 +359,46 @@ function JobDetailsContent({
   // Helper function to safely abort an AbortController
   const safeAbort = useCallback((controller, description = 'request') => {
     if (!controller) return;
-    
+
     // Check if we've already aborted this controller
     if (abortedControllers.current.has(controller)) {
-      console.log(`${description} controller already aborted previously, skipping`);
+      console.log(
+        `${description} controller already aborted previously, skipping`
+      );
       return;
     }
-    
+
     try {
       // Additional safety checks
       if (typeof controller.abort !== 'function') {
-        console.warn(`Controller for ${description} does not have abort method`);
+        console.warn(
+          `Controller for ${description} does not have abort method`
+        );
         return;
       }
-      
+
       // Check if already aborted via signal
       if (controller.signal && controller.signal.aborted) {
         console.log(`${description} already aborted via signal, skipping`);
         abortedControllers.current.add(controller); // Mark as aborted
         return;
       }
-      
+
       // Attempt to abort
       controller.abort();
       abortedControllers.current.add(controller); // Mark as aborted
       console.log(`Successfully aborted ${description}`);
-      
     } catch (error) {
       // Handle any type of error that might occur during abort
-      console.log(`Caught error while aborting ${description}:`, error.name, error.message);
-      
+      console.log(
+        `Caught error while aborting ${description}:`,
+        error.name,
+        error.message
+      );
+
       // Mark as aborted even if there was an error to prevent retry
       abortedControllers.current.add(controller);
-      
+
       // Only warn for unexpected errors (not AbortError or InvalidStateError)
       if (error.name !== 'AbortError' && error.name !== 'InvalidStateError') {
         console.warn(`Unexpected error aborting ${description}:`, error);
@@ -776,7 +783,14 @@ function JobDetailsContent({
       const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
       return cleanup;
     }
-  }, [jobData.id, fetchLogs, setIsLoadingLogs, isPending, isRecovering, safeAbort]);
+  }, [
+    jobData.id,
+    fetchLogs,
+    setIsLoadingLogs,
+    isPending,
+    isRecovering,
+    safeAbort,
+  ]);
 
   useEffect(() => {
     // Cancel any existing request
@@ -795,7 +809,13 @@ function JobDetailsContent({
       );
       return cleanup;
     }
-  }, [jobData.id, fetchLogs, setIsLoadingControllerLogs, isPreStart, safeAbort]);
+  }, [
+    jobData.id,
+    fetchLogs,
+    setIsLoadingControllerLogs,
+    isPreStart,
+    safeAbort,
+  ]);
 
   // Handle refresh for logs
   useEffect(() => {
@@ -816,14 +836,24 @@ function JobDetailsContent({
       );
       return cleanup;
     }
-  }, [refreshFlag, activeTab, jobData.id, fetchLogs, setIsLoadingLogs, safeAbort]);
+  }, [
+    refreshFlag,
+    activeTab,
+    jobData.id,
+    fetchLogs,
+    setIsLoadingLogs,
+    safeAbort,
+  ]);
 
   // Handle refresh for controller logs
   useEffect(() => {
     if (refreshFlag > 0 && activeTab === 'controllerlogs') {
       // Cancel any existing request
       if (activeControllerLogsRequest.current) {
-        safeAbort(activeControllerLogsRequest.current, 'controller logs refresh');
+        safeAbort(
+          activeControllerLogsRequest.current,
+          'controller logs refresh'
+        );
         activeControllerLogsRequest.current = null;
       }
 
@@ -858,7 +888,10 @@ function JobDetailsContent({
       }
 
       if (activeControllerLogsRequest.current) {
-        safeAbort(activeControllerLogsRequest.current, 'controller logs cleanup');
+        safeAbort(
+          activeControllerLogsRequest.current,
+          'controller logs cleanup'
+        );
         activeControllerLogsRequest.current = null;
       }
 
