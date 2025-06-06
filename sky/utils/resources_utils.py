@@ -53,6 +53,7 @@ class DiskTier(enum.Enum):
 class NetworkTier(enum.Enum):
     """All network tiers supported by SkyPilot."""
     STANDARD = 'standard'
+    HIGH = 'high'
     BEST = 'best'
 
     @classmethod
@@ -63,7 +64,9 @@ class NetworkTier(enum.Enum):
     def cli_help_message(cls) -> str:
         return (
             f'Network tier. Could be one of {", ".join(cls.supported_tiers())}'
-            f'. Default: {cls.STANDARD.value}')
+            f'. If {cls.BEST.value} is specified, use the best network tier '
+            'available on the specified instance. '
+            f'Default: {cls.STANDARD.value}')
 
     @classmethod
     def from_str(cls, tier: str) -> 'NetworkTier':
