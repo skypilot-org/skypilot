@@ -326,4 +326,15 @@ grafana:
   persistence:
     enabled: true
     size: 10Gi
+  ingress:
+    enabled: true
+    path: "/grafana"
+    ingressClassName: nginx
+    hosts: null
+  grafana.ini:
+    server:
+      domain: localhost
+      root_url: "%(protocol)s://%(domain)s/grafana"
+      enforce_domain: false
+      serve_from_sub_path: true
 
