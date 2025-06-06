@@ -234,27 +234,22 @@ class ResourcesMismatchError(Exception):
     resources don't match to provide better error messages to users.
     """
 
-    def __init__(
-        self,
-        message: str,
-        requested_resources: Optional[str] = None,
-        existing_resources: Optional[str] = None,
-        mismatched_fields: Optional[List[str]] = None,
-        cluster_name: Optional[str] = None
-    ) -> None:
+    def __init__(self,
+                 message: str,
+                 requested_resources: Optional[str] = None,
+                 existing_resources: Optional[str] = None,
+                 mismatched_fields: Optional[List[str]] = None,
+                 cluster_name: Optional[str] = None) -> None:
         super().__init__(message)
         self.requested_resources = requested_resources
         self.existing_resources = existing_resources
         self.mismatched_fields = mismatched_fields or []
         self.cluster_name = cluster_name
 
-    def add_mismatch_details(
-        self,
-        requested_resources: str,
-        existing_resources: str,
-        mismatched_fields: List[str],
-        cluster_name: str
-    ) -> None:
+    def add_mismatch_details(self, requested_resources: str,
+                             existing_resources: str,
+                             mismatched_fields: List[str],
+                             cluster_name: str) -> None:
         """Add detailed mismatch information to the exception."""
         self.requested_resources = requested_resources
         self.existing_resources = existing_resources
@@ -291,7 +286,8 @@ class ResourcesMismatchError(Exception):
             elif field == 'ports':
                 field_explanations.append("Required ports not available")
             elif field == 'num_nodes':
-                field_explanations.append("Insufficient number of nodes in cluster")
+                field_explanations.append(
+                    "Insufficient number of nodes in cluster")
             elif field == 'cloud':
                 field_explanations.append("Cloud provider mismatch")
             elif field == 'image_id':

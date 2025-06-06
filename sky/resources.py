@@ -1712,7 +1712,8 @@ class Resources:
                 other_memory_str = str(other.memory)
 
                 # Skip complex memory specifications like "2x" for now
-                if not (self_memory_str.endswith('x') or other_memory_str.endswith('x')):
+                if not (self_memory_str.endswith('x') or
+                        other_memory_str.endswith('x')):
                     if self_memory_str.endswith('+'):
                         self_memory_min = float(self_memory_str[:-1])
                         other_memory_val = float(other_memory_str.rstrip('+'))
@@ -1766,7 +1767,8 @@ class Resources:
                     mismatched_fields.append('ports')
                 else:
                     self_ports = resources_utils.port_ranges_to_set(self.ports)
-                    other_ports = resources_utils.port_ranges_to_set(other.ports)
+                    other_ports = resources_utils.port_ranges_to_set(
+                        other.ports)
                     if not self_ports <= other_ports:
                         mismatched_fields.append('ports')
 

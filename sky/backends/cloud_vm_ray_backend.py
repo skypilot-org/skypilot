@@ -2850,7 +2850,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{handle.launched_resources}\n'
                     f'{mismatch_str}',
                     requested_resources=requested_resource_str,
-                    existing_resources=f'{handle.launched_nodes}x {handle.launched_resources}',
+                    existing_resources=
+                    f'{handle.launched_nodes}x {handle.launched_resources}',
                     mismatched_fields=detailed_mismatched_fields,
                     cluster_name=cluster_name)
         else:
