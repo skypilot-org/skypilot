@@ -6087,15 +6087,17 @@ def api():
               is_flag=True,
               default=False,
               required=False,
-              help='Export metrics of API server.')
+              help='When set to True, SkyPilot API server will collect and '
+              'export metrics.')
 @click.option('--metrics-port',
-              type=Optional[int],
+              type=int,
               default=None,
               required=False,
-              help='Port to export metrics of API server.')
+              help='Port to export metrics of API server, only effective when '
+              '--metrics is set to True.')
 @usage_lib.entrypoint
 def api_start(deploy: bool, host: Optional[str], foreground: bool,
-              metrics: bool, metrics_port: int):
+              metrics: bool, metrics_port: Optional[int]):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
                   host=host,

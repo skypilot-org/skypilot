@@ -49,7 +49,12 @@ apiService:
   #      - hostname_in_ssh_config
   # Optional secret that contains SSH keys for the API server to use, all the entries in the secret will be mounted to ~/.ssh/ directory in the API server.
   sshKeySecret: null
-  
+  # Metrics configuration for the API server.
+  metrics:
+    # Whether to enable metrics collection, default to false. If this is enabled and the API server image does not support metrics, the deployment will fail.
+    enabled: false
+    # The port to expose the metrics on, default to 9090.
+    port: 9090
 
   # Skip resource check for the API server, not recommended for production deployment
   skipResourceCheck: false
