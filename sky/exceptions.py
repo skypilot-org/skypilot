@@ -229,14 +229,14 @@ class ManagedJobStatusError(Exception):
 
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched.
-    
+
     This exception can optionally store detailed information about why
     resources don't match to provide better error messages to users.
     """
-    
+
     def __init__(
-        self, 
-        message: str, 
+        self,
+        message: str,
         requested_resources: Optional[str] = None,
         existing_resources: Optional[str] = None,
         mismatched_fields: Optional[List[str]] = None,
@@ -244,14 +244,14 @@ class ResourcesMismatchError(Exception):
     ) -> None:
         super().__init__(message)
         self.requested_resources = requested_resources
-        self.existing_resources = existing_resources  
+        self.existing_resources = existing_resources
         self.mismatched_fields = mismatched_fields or []
         self.cluster_name = cluster_name
-        
+
     def add_mismatch_details(
         self,
         requested_resources: str,
-        existing_resources: str, 
+        existing_resources: str,
         mismatched_fields: List[str],
         cluster_name: str
     ) -> None:
@@ -265,7 +265,7 @@ class ResourcesMismatchError(Exception):
         """Get a detailed explanation of why resources don't match."""
         if not self.mismatched_fields:
             return str(self)
-        
+
         field_explanations = []
         for field in self.mismatched_fields:
             if field == 'region':
@@ -279,7 +279,7 @@ class ResourcesMismatchError(Exception):
             elif field == 'cpus':
                 field_explanations.append("CPU count insufficient")
             elif field == 'memory':
-                field_explanations.append("Memory insufficient") 
+                field_explanations.append("Memory insufficient")
             elif field == 'disk_tier':
                 field_explanations.append("Disk tier mismatch")
             elif field == 'network_tier':
@@ -300,14 +300,14 @@ class ResourcesMismatchError(Exception):
                 field_explanations.append("Accelerator arguments mismatch")
             else:
                 field_explanations.append(f"{field} mismatch")
-        
+
         details = f"Resource mismatch reasons: {', '.join(field_explanations)}"
         if self.requested_resources and self.existing_resources:
             details += f"\n  Requested: {self.requested_resources}"
             details += f"\n  Existing:  {self.existing_resources}"
         if self.cluster_name:
             details += f"\n  Cluster:   {self.cluster_name}"
-        
+
         return details
 
     def __str__(self) -> str:

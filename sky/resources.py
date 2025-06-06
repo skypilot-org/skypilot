@@ -1688,7 +1688,7 @@ class Resources:
                 # Handle string CPUs like "4" or "4+"
                 self_cpus_str = str(self.cpus)
                 other_cpus_str = str(other.cpus)
-                
+
                 if self_cpus_str.endswith('+'):
                     self_cpus_min = float(self_cpus_str[:-1])
                     other_cpus_val = float(other_cpus_str.rstrip('+'))
@@ -1710,7 +1710,7 @@ class Resources:
                 # Handle memory like "8" or "8+" (in GB) or "2x" (multiple of CPU)
                 self_memory_str = str(self.memory)
                 other_memory_str = str(other.memory)
-                
+
                 # Skip complex memory specifications like "2x" for now
                 if not (self_memory_str.endswith('x') or other_memory_str.endswith('x')):
                     if self_memory_str.endswith('+'):

@@ -2827,7 +2827,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 requested_resource_str = f'[{requested_resource_str}]'
             elif isinstance(task.resources, set):
                 requested_resource_str = f'{{{requested_resource_str}}}'
-            
+
             # For the general case
             detailed_mismatched_fields = []
             if task.resources:
@@ -2836,11 +2836,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     launched_resources,
                     requested_num_nodes=task.num_nodes,
                     check_ports=check_ports)
-                
+
                 # Check if the issue is insufficient number of nodes
                 if task.num_nodes > handle.launched_nodes:
                     detailed_mismatched_fields.append('num_nodes')
-            
+
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     'Requested resources do not match the existing '
