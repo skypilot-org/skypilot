@@ -231,7 +231,7 @@ def launch(
 
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
-        with common.with_server_user_hash():
+        with common.with_server_user():
             # Always launch the controller in the default workspace.
             with skypilot_config.local_active_workspace_ctx(
                     skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):

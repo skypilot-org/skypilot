@@ -298,6 +298,12 @@ def get_current_user() -> 'models.User':
     return models.User.get_current_user()
 
 
+def set_current_user(user: 'models.User'):
+    """Sets the current user."""
+    global _current_user
+    _current_user = user
+
+
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
     """Returns the current client entrypoint.
 
