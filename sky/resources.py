@@ -1636,19 +1636,18 @@ class Resources:
     def get_mismatch_reason(
         self,
         other: 'Resources',
-        requested_num_nodes: int = 1,
         check_ports: bool = False,
     ) -> List[str]:
-        """Returns a list of fields that don't match between this and other resources.
+        """Returns a list of fields that don't match between this and other
+        resources.
 
         Args:
             other: Resources of the launched cluster.
-            requested_num_nodes: Number of nodes that the current task
-              requests from the cluster.
             check_ports: Whether to check the ports field.
 
         Returns:
-            A list of field names that don't match. Empty list if all fields match.
+            A list of field names that don't match. Empty list if all fields
+            match.
         """
         mismatched_fields = []
 
@@ -1707,7 +1706,8 @@ class Resources:
         # Check memory requirements
         if self.memory is not None and other.memory is not None:
             try:
-                # Handle memory like "8" or "8+" (in GB) or "2x" (multiple of CPU)
+                # Handle memory like "8" or "8+" (in GB) or "2x"
+                # (multiple of CPU)
                 self_memory_str = str(self.memory)
                 other_memory_str = str(other.memory)
 
@@ -1752,7 +1752,7 @@ class Resources:
             if other.disk_tier is None:
                 mismatched_fields.append('disk_tier')
             elif self.disk_tier != resources_utils.DiskTier.BEST:
-                if not (self.disk_tier <= other.disk_tier):
+                if not self.disk_tier <= other.disk_tier:
                     mismatched_fields.append('disk_tier')
 
         if self.network_tier is not None:

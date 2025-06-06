@@ -2769,10 +2769,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         requested_resource_list = []
         for resource in task.resources:
             if (task.num_nodes <= handle.launched_nodes and
-                    resource.less_demanding_than(
-                        launched_resources,
-                        requested_num_nodes=task.num_nodes,
-                        check_ports=check_ports)):
+                    resource.less_demanding_than(launched_resources,
+                                                 check_ports=check_ports)):
                 valid_resource = resource
                 break
             else:
@@ -2833,9 +2831,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if task.resources:
                 first_resource = list(task.resources)[0]
                 detailed_mismatched_fields = first_resource.get_mismatch_reason(
-                    launched_resources,
-                    requested_num_nodes=task.num_nodes,
-                    check_ports=check_ports)
+                    launched_resources, check_ports=check_ports)
 
                 # Check if the issue is insufficient number of nodes
                 if task.num_nodes > handle.launched_nodes:
