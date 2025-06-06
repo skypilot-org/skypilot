@@ -6056,7 +6056,6 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
 @click.option('--deploy',
               type=bool,
               is_flag=True,
@@ -6089,7 +6088,6 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool):
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
