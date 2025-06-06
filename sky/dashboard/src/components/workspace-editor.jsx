@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { CircularProgress } from '@mui/material';
-import { SaveIcon, TrashIcon, CheckIcon, RotateCwIcon } from 'lucide-react';
+import { SaveIcon, TrashIcon, CheckIcon, RotateCwIcon, User } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -229,10 +229,15 @@ const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
               className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
             >
               <span className="font-medium text-gray-700">{username}</span>
-              {isAdmin && (
+              {isAdmin ? (
                 <span className="inline-flex items-center text-blue-600">
                   <StarIcon className="w-3 h-3 mr-1" />
                   Admin
+                </span>
+              ) : (
+                <span className="inline-flex items-center text-gray-600">
+                  <User className="w-3 h-3 mr-1" />
+                  User
                 </span>
               )}
             </div>

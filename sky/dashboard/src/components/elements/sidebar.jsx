@@ -20,11 +20,14 @@ import {
   BookDocIcon,
   UserCircleIcon,
   UsersIcon,
+  StarIcon,
 } from '@/components/elements/icons';
-import { Settings } from 'lucide-react';
+import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import { getUsers } from '@/data/connectors/users';
+import dashboardCache from '@/lib/cache';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -32,17 +35,40 @@ const SidebarContext = createContext(null);
 export function SidebarProvider({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [userEmail, setUserEmail] = useState(null);
+  const [userRole, setUserRole] = useState(null);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
   };
 
   useEffect(() => {
+    // Fetch user info from health endpoint
     fetch(`${ENDPOINT}/api/health`)
       .then((res) => res.json())
       .then((data) => {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
+          
+          // Try to get role from cached users data
+          const getUserRole = async () => {
+            try {
+              const usersData = await dashboardCache.get(getUsers);
+              if (usersData && Array.isArray(usersData)) {
+                const currentUser = usersData.find(user => 
+                  user.username === data.user.name || user.name === data.user.name
+                );
+                if (currentUser && currentUser.role) {
+                  setUserRole(currentUser.role);
+                }
+              }
+            } catch (error) {
+              // If users data is not available or there's an error, 
+              // we just don't show the role - it's not critical
+              console.log('Could not fetch user role from cache:', error);
+            }
+          };
+          
+          getUserRole();
         }
       })
       .catch((error) => {
@@ -52,7 +78,7 @@ export function SidebarProvider({ children }) {
 
   return (
     <SidebarContext.Provider
-      value={{ isSidebarOpen, toggleSidebar, userEmail }}
+      value={{ isSidebarOpen, toggleSidebar, userEmail, userRole }}
     >
       {children}
     </SidebarContext.Provider>
@@ -120,7 +146,7 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
-  const { userEmail } = useSidebar();
+  const { userEmail, userRole } = useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -357,8 +383,23 @@ export function TopBar() {
                           {displayName}
                         </div>
                         {emailToDisplay && (
-                          <div className="px-4 pt-0 pb-2 text-xs text-gray-500">
+                          <div className="px-4 pt-0 pb-1 text-xs text-gray-500">
                             {emailToDisplay}
+                          </div>
+                        )}
+                        {userRole && (
+                          <div className="px-4 pt-0 pb-2 text-xs">
+                            {userRole === 'admin' ? (
+                              <span className="inline-flex items-center text-blue-600">
+                                <StarIcon className="w-3 h-3 mr-1" />
+                                Admin
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center text-gray-600">
+                                <User className="w-3 h-3 mr-1" />
+                                User
+                              </span>
+                            )}
                           </div>
                         )}
                       </>
