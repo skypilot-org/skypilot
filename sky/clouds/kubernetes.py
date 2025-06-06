@@ -188,8 +188,8 @@ class Kubernetes(clouds.Cloud):
             # Try kubeconfig if present
             current_context = (
                 kubernetes_utils.get_current_kube_config_context_name())
-            if (current_context is None and
-                    kubernetes_utils.is_incluster_config_available()):
+            if ((current_context is None or current_context.startswith('ssh-'))
+                    and kubernetes_utils.is_incluster_config_available()):
                 # If no kubeconfig contexts found, use in-cluster if available
                 current_context = kubernetes.in_cluster_context_name()
             allowed_contexts = []
