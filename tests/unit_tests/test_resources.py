@@ -664,3 +664,102 @@ def test_network_tier_repr():
     r = Resources(network_tier='standard')
     repr_str = str(r)
     assert 'network_tier=standard' in repr_str
+
+
+def test_autostop_config():
+    """Test autostop config override functionality."""
+    # Override with down=True when no existing autostop config
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(down=True)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 0  # default value
+
+    # Override with idle_minutes when no existing autostop config
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(idle_minutes=10)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is False  # default value
+    assert r.autostop_config.idle_minutes == 10
+
+    # Override with both down and idle_minutes when no existing config
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(down=True, idle_minutes=15)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 15
+
+    # Override when there's an existing autostop config
+    r = Resources(autostop={'idle_minutes': 20, 'down': False})
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is False
+    assert r.autostop_config.idle_minutes == 20
+
+    # Override only down flag
+    r.override_autostop_config(down=True)
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 20  # unchanged
+
+    # Override existing config with new idle_minutes
+    r = Resources(autostop={'idle_minutes': 25, 'down': True})
+    assert r.autostop_config.idle_minutes == 25
+    assert r.autostop_config.down is True
+
+    r.override_autostop_config(idle_minutes=30)
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True  # unchanged
+    assert r.autostop_config.idle_minutes == 30
+
+    # Override existing config with both parameters
+    r = Resources(autostop={'idle_minutes': 35, 'down': False})
+    r.override_autostop_config(down=True, idle_minutes=40)
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 40
+
+    # Call override with default parameters (should do nothing)
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config()  # both parameters are default (False, None)
+    assert r.autostop_config is None  # should remain None
+
+    # Call override with default parameters on existing config
+    r = Resources(autostop={'idle_minutes': 45, 'down': True})
+    original_config = r.autostop_config
+
+    r.override_autostop_config()  # should do nothing
+    assert r.autostop_config is original_config  # same object
+    assert r.autostop_config.idle_minutes == 45  # unchanged
+    assert r.autostop_config.down is True  # unchanged
+
+    # Override with down=False (should still create config if none exists)
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(down=False, idle_minutes=50)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is False
+    assert r.autostop_config.idle_minutes == 50
+
+    # Test with disabled autostop config
+    r = Resources(autostop=False)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is False
+
+    r.override_autostop_config(down=True, idle_minutes=55)
+    assert r.autostop_config.enabled is False  # should remain disabled
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 55
