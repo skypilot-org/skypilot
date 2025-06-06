@@ -1434,7 +1434,7 @@ def _update_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
             name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
         pools_config[name] = {'hosts': hosts_info}
     requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
-                    json={'pools_config': pools_config},
+                    json=pools_config,
                     cookies=server_common.get_api_cookie_jar())
 
 
