@@ -11,7 +11,6 @@ const cleanErrorMessage = (error) => {
     message = message.split('failed:')[1].trim();
   }
 
-  // Capitalize first letter and return
   return message;
 };
 
