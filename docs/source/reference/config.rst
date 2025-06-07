@@ -1251,11 +1251,18 @@ If not specified, the default role is ``admin``.
 ``db``
 ~~~~~~
 
-Database configuration (optional).
+API Server Database configuration (optional).
 
 Specify the database connection string to use for SkyPilot. If not specified, SkyPilot will use a SQLite database initialized in ~/.sky directory.
 If a postgres database URL is specified, SkyPilot will use the database to persist API server state.
 Currently, managed job controller state is not persisted in remote database even if `db` is specified.
+
+.. warning::
+
+  If `db` is specified in the config, no other configuration parameter can be specified in the config file.
+
+  Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
+
 
 Example:
 
