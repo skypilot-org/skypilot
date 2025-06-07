@@ -429,6 +429,7 @@ def prepare_request(
     request_cluster_name: Optional[str] = None,
     schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
     is_skypilot_system: bool = False,
+    request_managed_job_id: Optional[int] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
@@ -445,7 +446,8 @@ def prepare_request(
                                    created_at=time.time(),
                                    schedule_type=schedule_type,
                                    user_id=user_id,
-                                   cluster_name=request_cluster_name)
+                                   cluster_name=request_cluster_name,
+                                   managed_job_id=request_managed_job_id)
 
     if not api_requests.create_if_not_exists(request):
         raise exceptions.RequestAlreadyExistsError(
@@ -465,6 +467,7 @@ def schedule_request(
         schedule_type: api_requests.ScheduleType = (
             api_requests.ScheduleType.LONG),
         is_skypilot_system: bool = False,
+        request_managed_job_id: Optional[int] = None,
         precondition: Optional[preconditions.Precondition] = None) -> None:
     """Enqueue a request to the request queue.
 
@@ -487,7 +490,8 @@ def schedule_request(
             caller.
     """
     prepare_request(request_id, request_name, request_body, func,
-                    request_cluster_name, schedule_type, is_skypilot_system)
+                    request_cluster_name, schedule_type, is_skypilot_system,
+                    request_managed_job_id)
 
     def enqueue():
         input_tuple = (request_id, ignore_return_value)

@@ -308,16 +308,27 @@ def make_job_command_with_user_switching(username: str,
     return ['sudo', '-H', 'su', '--login', username, '-c', command]
 
 
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            managed_job_id: Optional[int] = None) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _CURSOR.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
-    _CONN.commit()
+    if managed_job_id is None:
+        _CURSOR.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str))
+        _CONN.commit()
+    else:
+        _CURSOR.execute(
+            'INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+            (managed_job_id, job_name, username, job_submitted_at,
+             JobStatus.INIT.value, run_timestamp, None, resources_str))
+        _CONN.commit()
+
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
     for row in rows:
@@ -950,8 +961,12 @@ class JobLibCodeGen:
     ]
 
     @classmethod
-    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+    def add_job(cls,
+                job_name: Optional[str],
+                username: str,
+                run_timestamp: str,
+                resources_str: str,
+                managed_job_id: Optional[int] = None) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -959,14 +974,17 @@ class JobLibCodeGen:
             # it was using ray job submit before #4318, and switched to raw
             # process. Using the old skylet version will cause the job status
             # to be stuck in PENDING state or transition to FAILED_DRIVER state.
-            '\nif int(constants.SKYLET_VERSION) < 9: '
+            # We also disallow job submission when SKYLET_VERSION is older than 14,
+            # as we increase the number of arguements that are passed to add_job.
+            '\nif int(constants.SKYLET_VERSION) < 14: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
             '\njob_id = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
-            f'{resources_str!r})',
+            f'{resources_str!r},'
+            f'{managed_job_id!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)
