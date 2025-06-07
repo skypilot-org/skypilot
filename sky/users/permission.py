@@ -44,12 +44,16 @@ class PermissionService:
                     self.enforcer = enforcer
         else:
             self.enforcer = _enforcer_instance.enforcer
-        self._maybe_initialize_policies()
+        with _policy_lock():
+            self._maybe_initialize_policies()
 
-    def _maybe_initialize_policies(self):
+    def _maybe_initialize_policies(self) -> None:
         """Initialize policies if they don't already exist."""
         # TODO(zhwu): we should avoid running this on client side.
         logger.debug(f'Initializing policies in process: {os.getpid()}')
+        self._load_policy_no_lock()
+
+        policy_updated = False
 
         # Check if policies are already initialized by looking for existing
         # permission policies in the enforcer
@@ -101,54 +105,68 @@ class PermissionService:
                         logger.debug(f'Adding role policy: role={role}, '
                                      f'path={path}, method={method}')
                         self.enforcer.add_policy(role, path, method)
+                        policy_updated = True
 
             for workspace_name, users in workspace_policy_permissions.items():
                 for user in users:
                     logger.debug(f'Initializing workspace policy: user={user}, '
                                  f'workspace={workspace_name}')
                     self.enforcer.add_policy(user, workspace_name, '*')
-            self.enforcer.save_policy()
+                    policy_updated = True
             logger.debug('Policies initialized successfully')
         else:
             logger.debug('Policies already exist, skipping initialization')
 
         # Always ensure users have default roles (this is idempotent)
         all_users = global_user_state.get_all_users()
-        for user in all_users:
-            self.add_user_if_not_exists(user.id)
+        for existing_user in all_users:
+            user_added = self._add_user_if_not_exists_no_lock(existing_user.id)
+            policy_updated = policy_updated or user_added
 
-    def add_user_if_not_exists(self, user: str) -> None:
+        if policy_updated:
+            self.enforcer.save_policy()
+
+    def add_user_if_not_exists(self, user_id: str) -> None:
         """Add user role relationship."""
         with _policy_lock():
-            user_roles = self.enforcer.get_roles_for_user(user)
-            if not user_roles:
-                logger.info(f'User {user} has no roles, adding'
-                            f' default role {rbac.get_default_role()}')
-                self.enforcer.add_grouping_policy(user, rbac.get_default_role())
-                self.enforcer.save_policy()
+            self._add_user_if_not_exists_no_lock(user_id)
 
-    def update_role(self, user: str, new_role: str):
+    def _add_user_if_not_exists_no_lock(self, user_id: str) -> bool:
+        """Add user role relationship without lock.
+
+        Returns:
+            True if the user was added, False otherwise.
+        """
+        user_roles = self.enforcer.get_roles_for_user(user_id)
+        if not user_roles:
+            logger.info(f'User {user_id} has no roles, adding'
+                        f' default role {rbac.get_default_role()}')
+            self.enforcer.add_grouping_policy(user_id, rbac.get_default_role())
+            return True
+        return False
+
+    def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
         with _policy_lock():
             # Get current roles
             self._load_policy_no_lock()
             # Avoid calling get_user_roles, as it will require the lock.
-            current_roles = self.enforcer.get_roles_for_user(user)
+            current_roles = self.enforcer.get_roles_for_user(user_id)
             if not current_roles:
-                logger.warning(f'User {user} has no roles')
+                logger.warning(f'User {user_id} has no roles')
             else:
                 # TODO(hailong): how to handle multiple roles?
                 current_role = current_roles[0]
                 if current_role == new_role:
-                    logger.info(f'User {user} already has role {new_role}')
+                    logger.info(f'User {user_id} already has role {new_role}')
                     return
-                self.enforcer.remove_grouping_policy(user, current_role)
+                self.enforcer.remove_grouping_policy(user_id, current_role)
 
             # Update user role
-            self.enforcer.add_grouping_policy(user, new_role)
+            self.enforcer.add_grouping_policy(user_id, new_role)
             self.enforcer.save_policy()
 
-    def get_user_roles(self, user: str) -> List[str]:
+    def get_user_roles(self, user_id: str) -> List[str]:
         """Get all roles for a user.
 
         This method returns all roles that the user has, including inherited
@@ -162,9 +180,9 @@ class PermissionService:
             A list of role names that the user has.
         """
         self._load_policy_no_lock()
-        return self.enforcer.get_roles_for_user(user)
+        return self.enforcer.get_roles_for_user(user_id)
 
-    def check_endpoint_permission(self, user: str, path: str,
+    def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
         """Check permission."""
         # We intentionally don't load the policy here, as it is a hot path, and
@@ -173,7 +191,7 @@ class PermissionService:
         # it is a hot path in every request. It is ok to have a stale policy,
         # as long as it is eventually consistent.
         # self._load_policy_no_lock()
-        return self.enforcer.enforce(user, path, method)
+        return self.enforcer.enforce(user_id, path, method)
 
     def _load_policy_no_lock(self):
         """Load policy from storage."""
@@ -184,7 +202,7 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
-    def check_workspace_permission(self, user: str,
+    def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.
 
@@ -200,7 +218,7 @@ class PermissionService:
             # When it is not on API server, we allow all users to access all
             # workspaces, as the workspace check has been done on API server.
             return True
-        role = self.get_user_roles(user)
+        role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
             return True
         # The Casbin model matcher already handles the wildcard '*' case:
@@ -208,12 +226,13 @@ class PermissionService:
         # r.act == p.act
         # This means if there's a policy ('*', workspace_name, '*'), it will
         # match any user
-        result = self.enforcer.enforce(user, workspace_name, '*')
-        logger.debug(f'Workspace permission check: user={user}, '
+        result = self.enforcer.enforce(user_id, workspace_name, '*')
+        logger.debug(f'Workspace permission check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
         return result
 
-    def add_workspace_policy(self, workspace_name: str, users: List[str]):
+    def add_workspace_policy(self, workspace_name: str,
+                             users: List[str]) -> None:
         """Add workspace policy.
 
         Args:
@@ -229,7 +248,8 @@ class PermissionService:
                 self.enforcer.add_policy(user, workspace_name, '*')
             self.enforcer.save_policy()
 
-    def update_workspace_policy(self, workspace_name: str, users: List[str]):
+    def update_workspace_policy(self, workspace_name: str,
+                                users: List[str]) -> None:
         """Update workspace policy.
 
         Args:
@@ -249,7 +269,7 @@ class PermissionService:
                 self.enforcer.add_policy(user, workspace_name, '*')
             self.enforcer.save_policy()
 
-    def remove_workspace_policy(self, workspace_name: str):
+    def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
         with _policy_lock():
             self.enforcer.remove_filtered_policy(1, workspace_name)
@@ -264,7 +284,7 @@ def _policy_lock():
                                POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
             yield
     except filelock.Timeout as e:
-        raise RuntimeError(f'Failed to load policy due to a timeout '
+        raise RuntimeError(f'Failed to reload policy due to a timeout '
                            f'when trying to acquire the lock at '
                            f'{POLICY_UPDATE_LOCK_PATH}. '
                            'Please try again or manually remove the lock '
