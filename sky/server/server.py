@@ -60,6 +60,7 @@ from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.workspaces import server as workspaces_rest
+from sky.ssh_node_pools import server as ssh_node_pools_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -297,6 +298,9 @@ app.include_router(users_rest.router, prefix='/users', tags=['users'])
 app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
+app.include_router(ssh_node_pools_rest.router,
+                   prefix='/ssh_node_pools',
+                   tags=['ssh_node_pools'])
 
 
 @app.get('/token')
