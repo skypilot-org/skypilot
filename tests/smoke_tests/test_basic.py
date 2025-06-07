@@ -1140,3 +1140,24 @@ def test_lambda_cloud_open_ports():
             except Exception as e:
                 print(f'Warning: Failed to clean up test firewall rule: {e}')
                 # Don't fail the test if cleanup fails
+
+
+def test_cli_output(generic_cloud: str):
+    """Test that CLI commands properly stream output."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cli_output',
+        [
+            ('s=$(sky check) && echo "$s" && echo "===Validating check output===" && '
+             'echo "$s" | grep "Enabled infra"'),
+            # Get the launch plan output before the prompting
+            (
+                f's=$(yes no | sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} || true) && '
+                'echo "$s" && echo "===Validating launch plan===" && '
+                'echo "$s" | grep "CHOSEN" && '
+                'border=$(echo "$s" | grep -A 1 "Considered resources" | tail -n +2) && '
+                'echo $border && echo "===Table should have 3 borders===" && '
+                # Strawman idea: validate the table has 3 borders to ensure it is completed.
+                'echo "$s" | grep -- "$border" | wc -l | grep 3'),
+        ])
+    smoke_tests_utils.run_one_test(test)
