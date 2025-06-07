@@ -161,7 +161,7 @@ def _check_workspaces_have_no_active_resources(
                 f'{len(workspace_clusters)} active cluster(s): {cluster_list}')
 
         if workspace_active_jobs:
-            job_names = [job['job_id'] for job in workspace_active_jobs]
+            job_names = [str(job['job_id']) for job in workspace_active_jobs]
             job_list = ', '.join(job_names)
             workspace_errors.append(
                 f'{len(workspace_active_jobs)} active managed job(s): '
