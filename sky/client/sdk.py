@@ -47,6 +47,7 @@ from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import dag_utils
+from sky.utils.kubernetes import ssh_utils
 from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -1419,10 +1420,63 @@ def local_down() -> server_common.RequestId:
     return server_common.get_request_id(response)
 
 
+def _update_remote_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
+    """Update the SSH node pools on the remote server.
+
+    This function will also upload the local SSH key to the remote server, and
+    replace the file path to the remote SSH key file path.
+
+    Args:
+        file: The path to the local SSH node pools config file.
+        infra: The name of the cluster configuration in the local SSH node
+            pools config file. If None, all clusters in the file are updated.
+    """
+    file = os.path.expanduser(file)
+    if not os.path.exists(file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH Node Pool config file {file} does not exist. '
+                             'Please check if the file exists and the path is correct.')
+    config = ssh_utils.load_ssh_targets(file)
+    config = ssh_utils.get_cluster_config(config, infra)
+    pools_config = {}
+    for name, pool_config in config.items():
+        hosts_info = ssh_utils.prepare_hosts_info(
+            name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
+        pools_config[name] = {'hosts': hosts_info}
+    requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
+                    json=pools_config,
+                    cookies=server_common.get_api_cookie_jar())
+
+
+def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
+    """Upload the SSH key to the remote server and wait for the key to be
+    uploaded.
+
+    Args:
+        key_name: The name of the SSH key.
+        key_file_path: The path to the local SSH key file.
+
+    Returns:
+        The path for the remote SSH key file on the API server.
+    """
+    if not os.path.exists(os.path.expanduser(key_file_path)):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'SSH key file not found: {key_file_path}')
+    
+    with open(os.path.expanduser(key_file_path), 'rb') as key_file:
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/keys',
+            files={'key_file': (key_name, key_file, 'application/octet-stream')},
+            data={'key_name': key_name},
+            cookies=server_common.get_api_cookie_jar())
+    
+    return response.json()['key_path']
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_up(infra: Optional[str] = None, file: Optional[str] = None) -> server_common.RequestId:
     """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
 
     Args:
@@ -1432,6 +1486,8 @@ def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
+    if file is not None:
+        _update_remote_ssh_node_pools(file, infra)
     body = payloads.SSHUpBody(
         infra=infra,
         cleanup=False,
