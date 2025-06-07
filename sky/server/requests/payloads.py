@@ -394,6 +394,11 @@ class JobsCancelBody(RequestBody):
     all_users: bool = False
 
 
+class JobsPreemptBody(RequestBody):
+    """The request body for the jobs preempt endpoint."""
+    job_ids: List[int]
+
+
 class JobsLogsBody(RequestBody):
     """The request body for the jobs logs endpoint."""
     name: Optional[str] = None

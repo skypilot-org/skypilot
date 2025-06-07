@@ -546,6 +546,30 @@ def cancel_job_by_name(job_name: str,
     return f'{job_name!r} {msg}'
 
 
+def preempt_jobs_by_id(job_ids: List[int]) -> str:
+    """Preempt jobs by id."""
+    for job_id in job_ids:
+        jobs_from_db = managed_job_state.get_managed_jobs(job_id)
+        if not jobs_from_db:
+            logger.info(f'Job {job_id} not found. Skipped.')
+            continue
+        job = jobs_from_db[0]
+        if job['status'].is_terminal():
+            logger.info(f'Job {job_id} is already in terminal state ')
+            continue
+        elif job['status'] < managed_job_state.ManagedJobStatus.STARTING:
+            logger.info(f'Job {job_id} isn\'t STARTING yet. Skipped.')
+            continue
+        # Find the corresponding cluster name.
+        cluster_name = generate_managed_job_cluster_name(
+            job['task_name'], job_id)
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is None:
+            logger.info(f'Cluster {cluster_name} not found. Skipped.')
+        terminate_cluster(cluster_name)
+    return f'Jobs with IDs {job_ids} are scheduled to be preempted.'
+
+
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
                       tail: Optional[int] = None) -> Tuple[str, int]:
@@ -1397,6 +1421,20 @@ class ManagedJobCodeGen:
             msg = utils.cancel_job_by_name({job_name!r})
         else:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
+        print(msg, end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def preempt_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
+        code = textwrap.dedent(f"""\
+        if managed_job_version < 7:
+            # Backwards compatibility from before preemption was added.
+            # TODO(cooperc): Remove compatibility before 0.12.0
+            raise RuntimeError('Outdated jobs controller does not support '
+                               'preemption. Launch a new job to update the '
+                               'jobs controller.')
+        msg = utils.preempt_jobs_by_id({job_ids})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)

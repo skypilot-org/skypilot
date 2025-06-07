@@ -655,6 +655,13 @@ def get_task_schema():
                         'minimum': 0,
                         'maximum': 1000,
                     },
+                    'preemption_strategy': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            'none',
+                            'simple',
+                        ],
+                    },
                 },
             },
             'setup': {
