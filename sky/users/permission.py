@@ -11,6 +11,7 @@ import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.skylet import constants
 from sky.users import rbac
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
@@ -195,6 +196,10 @@ class PermissionService:
         For public workspaces, the permission is granted via a wildcard policy
         ('*').
         """
+        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+            # When it is not on API server, we allow all users to access all
+            # workspaces, as the workspace check has been done on API server.
+            return True
         role = self.get_user_roles(user)
         if rbac.RoleName.ADMIN.value in role:
             return True
