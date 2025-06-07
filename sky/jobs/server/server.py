@@ -1,8 +1,6 @@
 """REST API for managed jobs."""
-import os
 
 import fastapi
-import httpx
 
 from sky import sky_logging
 from sky.jobs.server import core
@@ -13,7 +11,6 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as api_requests
 from sky.skylet import constants
 from sky.utils import common
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
