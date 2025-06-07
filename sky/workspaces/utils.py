@@ -42,12 +42,13 @@ def get_workspace_users(workspace_config: Dict[str, Any]) -> List[str]:
                 if len(all_user_map[user_name_or_id]) > 1:
                     user_ids_str = ', '.join(all_user_map[user_name_or_id])
                     raise ValueError(
-                        f'User {user_name_or_id} has multiple IDs: '
+                        f'User {user_name_or_id!r} has multiple IDs: '
                         f'{user_ids_str}. Please specify the user '
                         f'ID instead.')
                 user_ids.append(all_user_map[user_name_or_id][0])
             else:
-                logger.warning(f'User {user_name_or_id} not found in all users')
+                logger.warning(
+                    f'User {user_name_or_id!r} not found in all users')
                 continue
         return user_ids
     else:
