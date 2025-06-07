@@ -208,7 +208,7 @@ def test_install_server_version_command():
 @pytest.fixture
 def mock_all_dependencies():
     """Mock all dependencies used in reload_for_new_request."""
-    with mock.patch('sky.utils.common_utils.set_client_status') as mock_status, \
+    with mock.patch('sky.utils.common_utils.set_request_context') as mock_status, \
          mock.patch('sky.usage.usage_lib.messages.reset') as mock_reset, \
          mock.patch('sky.sky_logging.reload_logger') as mock_logger:
         yield {
@@ -233,6 +233,7 @@ allowed_clouds:
         client_entrypoint='test_entry',
         client_command='test_cmd',
         using_remote_api_server=False,
+        user=mock.Mock(id='test_user'),
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['aws']
@@ -244,6 +245,7 @@ allowed_clouds:
         client_entrypoint='test_entry',
         client_command='test_cmd',
         using_remote_api_server=False,
+        user=mock.Mock(id='test_user'),
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['gcp']

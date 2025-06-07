@@ -258,7 +258,8 @@ def create_table():
             'user_hash',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries=common_utils.get_user_hash())
+            value_to_replace_existing_entries=common_utils.get_current_user(
+            ).id)
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'clusters',
@@ -436,7 +437,7 @@ def add_or_update_cluster(cluster_name: str,
             cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
-    user_hash = common_utils.get_user_hash()
+    user_hash = common_utils.get_current_user().id
     active_workspace = skypilot_config.get_active_workspace()
 
     conditional_values = {}

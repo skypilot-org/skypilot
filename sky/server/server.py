@@ -49,6 +49,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import permission
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
@@ -105,17 +106,21 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/dashboard/'):
+        # TODO(hailong): should have a list of paths
+        # that are not checked for RBAC
+        if (request.url.path.startswith('/dashboard/') or
+                request.url.path.startswith('/api/')):
             return await call_next(request)
 
         auth_user = _get_auth_user_header(request)
         if auth_user is None:
             return await call_next(request)
 
-        permission_service = users_rest.permission_service
+        permission_service = permission.permission_service
         # Check the role permission
-        if permission_service.check_permission(auth_user.id, request.url.path,
-                                               request.method):
+        if permission_service.check_endpoint_permission(auth_user.id,
+                                                        request.url.path,
+                                                        request.method):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -154,8 +159,14 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
-                users_rest.permission_service.add_user_if_not_exists(
+                permission.permission_service.add_user_if_not_exists(
                     auth_user.id)
+
+        # Store user info in request.state for access by GET endpoints
+        if auth_user is not None:
+            request.state.auth_user = auth_user
+        else:
+            request.state.auth_user = None
 
         body = await request.body()
         if auth_user and body:
@@ -177,6 +188,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                             f'"env_vars" in request body is not a dictionary '
                             f'for request {request.state.request_id}. '
                             'Skipping user info injection into body.')
+                else:
+                    original_json['env_vars'] = {}
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
                 request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
         return await call_next(request)
 

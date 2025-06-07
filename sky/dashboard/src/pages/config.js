@@ -59,7 +59,9 @@ export default function ConfigPage() {
 
       if (currentUserRole != 'admin') {
         setError(
-          new Error(`${data.name} is logged in as no admin, cannot edit config`)
+          new Error(
+            `${data.name} is logged in as non-admin and cannot edit config`
+          )
         );
         setSaving(false);
         return;

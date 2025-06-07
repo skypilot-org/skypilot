@@ -221,7 +221,7 @@ def up(
         # for the first time; otherwise it is a name conflict.
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
-        with common.with_server_user_hash():
+        with common.with_server_user():
             with skypilot_config.local_active_workspace_ctx(
                     constants.SKYPILOT_DEFAULT_WORKSPACE):
                 controller_job_id, controller_handle = execution.launch(

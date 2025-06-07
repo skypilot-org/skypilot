@@ -16,8 +16,6 @@ logger = sky_logging.init_logger(__name__)
 
 router = fastapi.APIRouter()
 
-permission_service = permission.PermissionService()
-
 
 @router.get('')
 async def users() -> List[Dict[str, Any]]:
@@ -25,7 +23,7 @@ async def users() -> List[Dict[str, Any]]:
     all_users = []
     user_list = global_user_state.get_all_users()
     for user in user_list:
-        user_roles = permission_service.get_user_roles(user.id)
+        user_roles = permission.permission_service.get_user_roles(user.id)
         all_users.append({
             'id': user.id,
             'name': user.name,
@@ -44,7 +42,7 @@ async def get_current_user_role(request: fastapi.Request):
     user_name = request.headers['X-Auth-Request-Email']
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    user_roles = permission_service.get_user_roles(user_hash)
+    user_roles = permission.permission_service.get_user_roles(user_hash)
     return {'name': user_name, 'role': user_roles[0] if user_roles else ''}
 
 
@@ -63,4 +61,4 @@ async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
                                     detail=f'User {user_id} does not exist')
 
     # Update user role in casbin policy
-    permission_service.update_role(user_id, role)
+    permission.permission_service.update_role(user_id, role)

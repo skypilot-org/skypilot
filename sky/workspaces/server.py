@@ -14,10 +14,18 @@ router = fastapi.APIRouter()
 # pylint: disable=redefined-builtin
 async def get(request: fastapi.Request) -> None:
     """Gets workspace config on the server."""
+    # Have to manually inject user info into the request body because the
+    # request body is not available in the GET endpoint.
+    auth_user = request.state.auth_user
+    auth_user_env_vars_kwargs = {
+        'env_vars': auth_user.to_env_vars()
+    } if auth_user else {}
+    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
+
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='workspaces.get',
-        request_body=payloads.RequestBody(),
+        request_body=request_body,
         func=core.get_workspaces,
         schedule_type=api_requests.ScheduleType.SHORT,
     )
@@ -65,10 +73,15 @@ async def delete(request: fastapi.Request,
 @router.get('/config')
 async def get_config(request: fastapi.Request) -> None:
     """Gets the entire SkyPilot configuration."""
+    auth_user = request.state.auth_user
+    auth_user_env_vars_kwargs = {
+        'env_vars': auth_user.to_env_vars()
+    } if auth_user else {}
+    get_config_body = payloads.GetConfigBody(**auth_user_env_vars_kwargs)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='workspaces.get_config',
-        request_body=payloads.GetConfigBody(),
+        request_body=get_config_body,
         func=core.get_config,
         schedule_type=api_requests.ScheduleType.SHORT,
     )
