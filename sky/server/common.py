@@ -9,11 +9,13 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import typing
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Union
 from urllib import parse
 import uuid
 
@@ -319,7 +321,9 @@ def get_request_id(response: 'requests.Response') -> RequestId:
 
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
-                      foreground: bool = False):
+                      foreground: bool = False,
+                      metrics: bool = False,
+                      metrics_port: Optional[int] = None):
     """Starts a SkyPilot API server locally."""
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
@@ -349,21 +353,26 @@ def _start_api_server(deploy: bool = False,
             args += ['--deploy']
         if host is not None:
             args += [f'--host={host}']
+        if metrics_port is not None:
+            args += [f'--metrics-port={metrics_port}']
 
         if foreground:
             # Replaces the current process with the API server
             os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+            _set_metrics_env_var(os.environ, metrics, deploy)
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
+        # For spawn mode, copy the environ to avoid polluting the SDK process.
+        server_env = os.environ.copy()
+        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        _set_metrics_env_var(server_env, metrics, deploy)
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        server_env = os.environ.copy()
-        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         with open(log_path, 'w', encoding='utf-8') as log_file:
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
@@ -427,6 +436,26 @@ def _start_api_server(deploy: bool = False,
         logger.info(
             ux_utils.finishing_message(
                 f'SkyPilot API server started. {dashboard_msg}'))
+
+
+def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
+                         deploy: bool):
+    """Sets the metrics environment variables.
+
+    Args:
+        env: The environment variables to set.
+        metrics: Whether to enable metrics.
+        deploy: Whether the server is running in deploy mode, which means
+            multiple processes might be running.
+    """
+    if metrics:
+        env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
+        if deploy:
+            metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
+            shutil.rmtree(metrics_dir, ignore_errors=True)
+            os.makedirs(metrics_dir, exist_ok=True)
+            # Refer to https://prometheus.github.io/client_python/multiprocess/
+            env['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
 
 
 def check_server_healthy(
@@ -562,7 +591,9 @@ def get_skypilot_version_on_disk() -> str:
 
 def check_server_healthy_or_start_fn(deploy: bool = False,
                                      host: str = '127.0.0.1',
-                                     foreground: bool = False):
+                                     foreground: bool = False,
+                                     metrics: bool = False,
+                                     metrics_port: Optional[int] = None):
     api_server_status = None
     try:
         api_server_status = check_server_healthy()
@@ -583,7 +614,8 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             # have started the server while we were waiting for the lock.
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host, foreground)
+                _start_api_server(deploy, host, foreground, metrics,
+                                  metrics_port)
 
 
 def check_server_healthy_or_start(func):

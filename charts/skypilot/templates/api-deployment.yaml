@@ -13,6 +13,13 @@ spec:
       app: {{ .Release.Name }}-api
   template:
     metadata:
+      annotations:
+        {{- if .Values.apiService.metrics.enabled }}
+        # Well-known annotations for Prometheus to scrape the metrics.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
       labels:
         app: {{ .Release.Name }}-api
         # This label indicates that the API server is ready to serve requests.
@@ -125,7 +132,7 @@ spec:
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start --deploy --foreground
+            exec sky api start --deploy --foreground{{- if .Values.apiService.metrics.enabled }} --metrics --metrics-port {{ .Values.apiService.metrics.port }} {{- end }}
           else
             # For backward compatibility, run in background if --foreground is not supported.
             # TODO(aylei): this will bedropped in 0.11.0.

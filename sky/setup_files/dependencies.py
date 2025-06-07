@@ -60,6 +60,8 @@ install_requires = [
     'psycopg2-binary',
     'casbin',
     'sqlalchemy_adapter',
+    # Required for API server metrics
+    'prometheus_client>=0.8.0',
 ]
 
 local_ray = [
