@@ -115,8 +115,24 @@ def get_cluster_config(targets: Dict[str, Any],
 
 def prepare_hosts_info(cluster_name: str,
                        cluster_config: Dict[str, Any],
-                       upload_ssh_key_func: Optional[Callable[[str, str], str]] = None) -> List[Dict[str, str]]:
-    """Prepare list of hosts with resolved user, identity_file, and password."""
+                       upload_ssh_key_func: Optional[Callable[
+                           [str, str], str]] = None) -> List[Dict[str, str]]:
+    """Prepare list of hosts with resolved user, identity_file, and password.
+
+    Args:
+        cluster_name: The name of the cluster.
+        cluster_config: The configuration for the cluster.
+        upload_ssh_key_func: A function to upload the SSH key to the remote
+            server and wait for the key to be uploaded. This function will take
+            the key name and the local key file path as input, and return the
+            path for the remote SSH key file on the API server. This function
+            will only be set in `sky ssh up -f` mode, and if this function is
+            set, any ssh config will not be allowed as we don't support
+            uploading any ssh config to the API server.
+
+    Returns:
+        A list of hosts with resolved user, identity_file, and password.
+    """
     if 'hosts' not in cluster_config or not cluster_config['hosts']:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(

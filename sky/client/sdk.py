@@ -1420,7 +1420,17 @@ def local_down() -> server_common.RequestId:
     return server_common.get_request_id(response)
 
 
-def _update_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
+def _update_remote_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
+    """Update the SSH node pools on the remote server.
+
+    This function will also upload the local SSH key to the remote server, and
+    replace the file path to the remote SSH key file path.
+
+    Args:
+        file: The path to the local SSH node pools config file.
+        infra: The name of the cluster configuration in the local SSH node
+            pools config file. If None, all clusters in the file are updated.
+    """
     file = os.path.expanduser(file)
     if not os.path.exists(file):
         with ux_utils.print_exception_no_traceback():
@@ -1439,6 +1449,16 @@ def _update_ssh_node_pools(file: str, infra: Optional[str] = None) -> None:
 
 
 def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
+    """Upload the SSH key to the remote server and wait for the key to be
+    uploaded.
+
+    Args:
+        key_name: The name of the SSH key.
+        key_file_path: The path to the local SSH key file.
+
+    Returns:
+        The path for the remote SSH key file on the API server.
+    """
     if not os.path.exists(os.path.expanduser(key_file_path)):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'SSH key file not found: {key_file_path}')
@@ -1467,7 +1487,7 @@ def ssh_up(infra: Optional[str] = None, file: Optional[str] = None) -> server_co
         request_id: The request ID of the SSH cluster deployment request.
     """
     if file is not None:
-        _update_ssh_node_pools(file, infra)
+        _update_remote_ssh_node_pools(file, infra)
     body = payloads.SSHUpBody(
         infra=infra,
         cleanup=False,
