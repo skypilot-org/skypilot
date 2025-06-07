@@ -866,4 +866,5 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Advanced: Use OAuth/Okta Proxy <examples/api-server-auth-proxy>
+    Advanced: High Availability Controller <examples/high-availability>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
