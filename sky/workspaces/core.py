@@ -224,10 +224,12 @@ def update_workspace(workspace_name: str, config: Dict[str,
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
     """
-    # Check for active clusters and managed jobs in the workspace
-    _check_workspace_has_no_active_resources(workspace_name, 'update')
-
     _validate_workspace_config(workspace_name, config)
+
+    # Check for active clusters and managed jobs in the workspace
+    # TODO(zhwu): we should allow the edits that only contain changes to
+    # allowed_users or private.
+    _check_workspace_has_no_active_resources(workspace_name, 'update')
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
