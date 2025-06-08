@@ -385,6 +385,15 @@ def get_all_users() -> List[models.User]:
     return [models.User(id=row.id, name=row.name) for row in rows]
 
 
+def get_user_with_existence(user_id: str) -> Tuple[models.User, bool]:
+    """Returns the user and whether the user exists."""
+    with orm.Session(SQLALCHEMY_ENGINE) as session:
+        row = session.query(user_table).filter_by(id=user_id).first()
+    if row is None:
+        return models.User(id=user_id), False
+    return models.User(id=row.id, name=row.name), True
+
+
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
