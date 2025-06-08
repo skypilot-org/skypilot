@@ -36,7 +36,7 @@ async def get_current_user_role(request: fastapi.Request):
     # TODO(hailong): is there a reliable way to get the user
     # hash for the request without 'X-Auth-Request-Email' header?
     auth_user = request.state.auth_user
-    if not auth_user:
+    if auth_user is None:
         return {'name': '', 'role': rbac.RoleName.ADMIN.value}
     user_roles = permission.permission_service.get_user_roles(auth_user.id)
     return {'name': auth_user.name, 'role': user_roles[0] if user_roles else ''}
