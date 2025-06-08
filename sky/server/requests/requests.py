@@ -204,7 +204,8 @@ class Request:
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
-        user_name = global_user_state.get_user(self.user_id).name
+        user = global_user_state.get_user(self.user_id)
+        user_name = user.name if user is not None else None
         return RequestPayload(
             request_id=self.request_id,
             name=self.name,

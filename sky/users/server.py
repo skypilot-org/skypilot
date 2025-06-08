@@ -51,8 +51,8 @@ async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
     if role not in supported_roles:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
-    user_info, user_exists = global_user_state.get_user_with_existence(user_id)
-    if not user_exists:
+    user_info = global_user_state.get_user(user_id)
+    if user_info is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
 

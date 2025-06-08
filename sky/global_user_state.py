@@ -371,11 +371,11 @@ def add_or_update_user(user: models.User) -> bool:
             raise ValueError('Unsupported database dialect')
 
 
-def get_user(user_id: str) -> models.User:
+def get_user(user_id: str) -> Optional[models.User]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
-        return models.User(id=user_id)
+        return None
     return models.User(id=row.id, name=row.name)
 
 
@@ -383,15 +383,6 @@ def get_all_users() -> List[models.User]:
     with orm.Session(SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
     return [models.User(id=row.id, name=row.name) for row in rows]
-
-
-def get_user_with_existence(user_id: str) -> Tuple[models.User, bool]:
-    """Returns the user and whether the user exists."""
-    with orm.Session(SQLALCHEMY_ENGINE) as session:
-        row = session.query(user_table).filter_by(id=user_id).first()
-    if row is None:
-        return models.User(id=user_id), False
-    return models.User(id=row.id, name=row.name), True
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -858,6 +849,8 @@ def get_cluster_from_name(
     if row is None:
         return None
     user_hash = _get_user_hash_or_current_user(row.user_hash)
+    user = get_user(user_hash)
+    user_name = user.name if user is not None else None
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -875,7 +868,7 @@ def get_cluster_from_name(
         'cluster_ever_up': bool(row.cluster_ever_up),
         'status_updated_at': row.status_updated_at,
         'user_hash': user_hash,
-        'user_name': get_user(user_hash).name,
+        'user_name': user_name,
         'config_hash': row.config_hash,
         'workspace': row.workspace,
         'last_creation_yaml': row.last_creation_yaml,
@@ -892,6 +885,8 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         user_hash = _get_user_hash_or_current_user(row.user_hash)
+        user = get_user(user_hash)
+        user_name = user.name if user is not None else None
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
@@ -909,7 +904,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'cluster_ever_up': bool(row.cluster_ever_up),
             'status_updated_at': row.status_updated_at,
             'user_hash': user_hash,
-            'user_name': get_user(user_hash).name,
+            'user_name': user_name,
             'config_hash': row.config_hash,
             'workspace': row.workspace,
             'last_creation_yaml': row.last_creation_yaml,
