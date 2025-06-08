@@ -3,7 +3,7 @@ import contextlib
 import logging
 import os
 import threading
-from typing import List
+from typing import Generator, List
 
 import casbin
 import filelock
@@ -277,7 +277,7 @@ class PermissionService:
 
 
 @contextlib.contextmanager
-def _policy_lock():
+def _policy_lock() -> Generator[None, None, None]:
     """Context manager for policy update lock."""
     try:
         with filelock.FileLock(POLICY_UPDATE_LOCK_PATH,
