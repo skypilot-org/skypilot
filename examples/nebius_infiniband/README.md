@@ -27,34 +27,37 @@ sky launch -c nccl_network_tier nccl_network_tier.yaml
 
 This enables the InfiniBand for inter-GPU communication, and SkyPilot will automatically setup the environment variables for you.
 
-.. dropdown:: Equivalent way to turn on InfiniBand manually
+<details>
+<summary>Equivalent way to turn on InfiniBand manually</summary>
 
-  With Nebius managed Kubernetes cluster, you can also turn on InfiniBand manually:
+With Nebius managed Kubernetes cluster, you can also turn on InfiniBand manually:
 
-  1. Set the following config in your SkyPilot task YAML to enable InfiniBand:
+1. Set the following config in your SkyPilot task YAML to enable InfiniBand:
 
-  ```yaml
-  config:
-    kubernetes:
-      pod_config:
-        spec:
-          containers:
-          - securityContext:
-              capabilities:
-                add:
-                - IPC_LOCK
-  ```
+```yaml
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            capabilities:
+              add:
+              - IPC_LOCK
+```
 
-  2. Configure the environment variables in your task:
+2. Configure the environment variables in your task:
 
-  ```bash
-  run: |
-    export NCCL_IB_HCA=mlx5
-    export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
-    ... your own run script ...
-  ```
+```bash
+run: |
+  export NCCL_IB_HCA=mlx5
+  export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+  ... your own run script ...
+```
 
-  Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml)
+Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml)
+
+</details>
 
 
 ### Running NCCL test using SkyPilot
