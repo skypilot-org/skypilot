@@ -1,7 +1,15 @@
 import React from 'react';
 import Head from 'next/head';
-import { Layout } from '@/components/elements/layout';
-import { Workspaces } from '@/components/workspaces'; // This component will be created next
+import dynamic from 'next/dynamic';
+
+const Layout = dynamic(
+  () => import('@/components/elements/layout').then((mod) => mod.Layout),
+  { ssr: false }
+);
+const Workspaces = dynamic(
+  () => import('@/components/workspaces').then((mod) => mod.Workspaces),
+  { ssr: false }
+);
 
 export default function WorkspacesPage() {
   return (

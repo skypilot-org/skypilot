@@ -39,9 +39,11 @@ export function SidebarProvider({ children }) {
     setIsSidebarOpen((prev) => !prev);
   };
 
+  const baseUrl = window.location.origin;
+  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
   useEffect(() => {
     // Fetch user info from health endpoint
-    fetch(`${ENDPOINT}/api/health`)
+    fetch(`${fullEndpoint}/api/health`)
       .then((res) => res.json())
       .then((data) => {
         if (data.user && data.user.name) {
@@ -52,7 +54,7 @@ export function SidebarProvider({ children }) {
           // behavior in workspaces and users page.
           const getUserRole = async () => {
             try {
-              const response = await fetch(`${ENDPOINT}/users/role`);
+              const response = await fetch(`${fullEndpoint}/users/role`);
               if (response.ok) {
                 const roleData = await response.json();
                 if (roleData.role) {
@@ -72,7 +74,7 @@ export function SidebarProvider({ children }) {
       .catch((error) => {
         console.error('Error fetching user data:', error);
       });
-  }, []);
+  }, [fullEndpoint]);
 
   return (
     <SidebarContext.Provider
