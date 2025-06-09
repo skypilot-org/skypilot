@@ -1,9 +1,14 @@
 """SSH Node Pool management API endpoints."""
+import re
 from typing import Any, Dict, List
 
 import fastapi
 
-from sky.ssh_node_pools import core
+from sky import core as sky_core
+from sky.server.requests import executor
+from sky.server.requests import payloads
+from sky.server.requests import requests as requests_lib
+from sky.ssh_node_pools import core as ssh_node_pools_core
 from sky.utils import common_utils
 
 router = fastapi.APIRouter()
@@ -13,7 +18,7 @@ router = fastapi.APIRouter()
 async def get_ssh_node_pools() -> Dict[str, Any]:
     """Get all SSH Node Pool configurations."""
     try:
-        return core.get_all_pools()
+        return ssh_node_pools_core.get_all_pools()
     except Exception as e:
         raise fastapi.HTTPException(
             status_code=500,
@@ -25,22 +30,19 @@ async def get_ssh_node_pools() -> Dict[str, Any]:
 async def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
     """Update SSH Node Pool configurations."""
     try:
-        core.update_pools(pools_config)
+        ssh_node_pools_core.update_pools(pools_config)
         return {'status': 'success'}
     except Exception as e:
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=
-            f'Failed to update SSH Node Pools:'
-            f' {common_utils.format_exception(e)}'
-        )
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Failed to update SSH Node Pools:'
+                                    f' {common_utils.format_exception(e)}')
 
 
 @router.delete('/{pool_name}')
 async def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
     """Delete a SSH Node Pool configuration."""
     try:
-        if core.delete_pool(pool_name):
+        if ssh_node_pools_core.delete_pool(pool_name):
             return {'status': 'success'}
         else:
             raise fastapi.HTTPException(
@@ -49,12 +51,9 @@ async def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
     except fastapi.HTTPException:
         raise
     except Exception as e:
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail=
-            'Failed to delete SSH Node Pool: '
-            f'{common_utils.format_exception(e)}'
-        )
+        raise fastapi.HTTPException(status_code=500,
+                                    detail='Failed to delete SSH Node Pool: '
+                                    f'{common_utils.format_exception(e)}')
 
 
 @router.post('/keys')
@@ -70,7 +69,8 @@ async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
                                         detail='Missing key_name or key_file')
 
         key_content = await key_file.read()
-        key_path = core.upload_ssh_key(key_name, key_content.decode())
+        key_path = ssh_node_pools_core.upload_ssh_key(key_name,
+                                                      key_content.decode())
 
         return {'status': 'success', 'key_path': key_path}
     except fastapi.HTTPException:
@@ -86,12 +86,11 @@ async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
 async def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
     try:
-        return core.list_ssh_keys()
+        return ssh_node_pools_core.list_ssh_keys()
     except Exception as e:
+        exception_msg = common_utils.format_exception(e)
         raise fastapi.HTTPException(
-            status_code=500,
-            detail=f'Failed to list SSH keys: {common_utils.format_exception(e)}'
-        )
+            status_code=500, detail=f'Failed to list SSH keys: {exception_msg}')
 
 
 @router.post('/{pool_name}/deploy')
@@ -99,12 +98,6 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
                                pool_name: str) -> Dict[str, str]:
     """Deploy SSH Node Pool using existing ssh_up functionality."""
     try:
-        # Import here to avoid circular dependencies
-        from sky import core as sky_core
-        from sky.server.requests import executor
-        from sky.server.requests import payloads
-        from sky.server.requests import requests as requests_lib
-
         ssh_up_body = payloads.SSHUpBody(infra=pool_name, cleanup=False)
         executor.schedule_request(
             request_id=request.state.request_id,
@@ -120,24 +113,17 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
             'message': f'SSH Node Pool `{pool_name}` deployment started'
         }
     except Exception as e:
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail=
-            f'Failed to deploy SSH Node Pool: '
-            f'{common_utils.format_exception(e)}'
-        )
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=f'Failed to deploy SSH Node Pool: '
+                                    f'{common_utils.format_exception(e)}')
 
 
 @router.get('/{pool_name}/status')
 async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
     """Get the status of a specific SSH Node Pool."""
     try:
-        import re
-
-        from sky import core as sky_core
-
         # Call ssh_status to check the context
-        context_name = f"ssh-{pool_name}"
+        context_name = f'ssh-{pool_name}'
         is_ready, reason = sky_core.ssh_status(context_name)
 
         # Strip ANSI escape codes from the reason text
@@ -161,7 +147,5 @@ async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
     except Exception as e:
         raise fastapi.HTTPException(
             status_code=500,
-            detail=
-            f'Failed to get SSH Node Pool status: '
-            f'{common_utils.format_exception(e)}'
-        )
+            detail=f'Failed to get SSH Node Pool status: '
+            f'{common_utils.format_exception(e)}')

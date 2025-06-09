@@ -109,12 +109,15 @@ export async function listSSHKeys() {
 
 export async function deploySSHNodePool(poolName) {
   try {
-    const response = await fetch(`${ENDPOINT}/ssh_node_pools/${poolName}/deploy`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(
+      `${ENDPOINT}/ssh_node_pools/${poolName}/deploy`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -153,12 +156,15 @@ export async function sshDownNodePool(poolName) {
 
 export async function getSSHNodePoolStatus(poolName) {
   try {
-    const response = await fetch(`${ENDPOINT}/ssh_node_pools/${poolName}/status`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(
+      `${ENDPOINT}/ssh_node_pools/${poolName}/status`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -171,11 +177,7 @@ export async function getSSHNodePoolStatus(poolName) {
   }
 }
 
-export async function streamSSHDeploymentLogs({
-  requestId,
-  signal,
-  onNewLog,
-}) {
+export async function streamSSHDeploymentLogs({ requestId, signal, onNewLog }) {
   // Measure timeout from last received data, not from start of request.
   const inactivityTimeout = 300000; // 5 minutes of no data activity
   let lastActivity = Date.now();
@@ -207,14 +209,17 @@ export async function streamSSHDeploymentLogs({
   // Create the fetch promise
   const fetchPromise = (async () => {
     try {
-      const response = await fetch(`${ENDPOINT}/api/stream?request_id=${requestId}&format=plain&tail=${DEFAULT_TAIL_LINES}&follow=true`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        // Only use the signal if it's provided
-        ...(signal ? { signal } : {}),
-      });
+      const response = await fetch(
+        `${ENDPOINT}/api/stream?request_id=${requestId}&format=plain&tail=${DEFAULT_TAIL_LINES}&follow=true`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          // Only use the signal if it's provided
+          ...(signal ? { signal } : {}),
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -272,4 +277,4 @@ export async function streamSSHDeploymentLogs({
     );
     return;
   }
-} 
+}

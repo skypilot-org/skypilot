@@ -23,16 +23,18 @@ class SSHNodePoolManager:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f) or {}
         except Exception as e:
-            raise RuntimeError(f'Failed to read SSH Node Pool config: {e}') from e
+            raise RuntimeError(
+                f'Failed to read SSH Node Pool config: {e}') from e
 
     def save_all_pools(self, pools_config: Dict[str, Any]) -> None:
         """Write SSH Node Pool configurations to YAML file."""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, 'w') as f:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(pools_config, f, default_flow_style=False)
         except Exception as e:
-            raise RuntimeError(f'Failed to save SSH Node Pool config: {e}') from e
+            raise RuntimeError(
+                f'Failed to save SSH Node Pool config: {e}') from e
 
     def update_pools(self, pools_config: Dict[str, Any]) -> None:
         """Update SSH Node Pool configurations."""
@@ -67,7 +69,7 @@ class SSHNodePoolManager:
 
         key_path = self.keys_dir / key_name
         try:
-            with open(key_path, 'w') as f:
+            with open(key_path, 'w', encoding='utf-8') as f:
                 f.write(key_content)
             os.chmod(key_path, 0o600)  # Set secure permissions
             return str(key_path)
@@ -80,7 +82,7 @@ class SSHNodePoolManager:
             return []
         try:
             return [f.name for f in self.keys_dir.iterdir() if f.is_file()]
-        except Exception: # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             return []
 
     def _validate_pool_config(self, config: Dict[str, Any]) -> None:
@@ -97,10 +99,8 @@ class SSHNodePoolManager:
 
         # Validate authentication - must have either identity_file or password
         if not config.get('identity_file') and not config.get('password'):
-            raise ValueError(
-                'Pool configuration must include '
-                'either `identity_file` or `password`'
-            )
+            raise ValueError('Pool configuration must include '
+                             'either `identity_file` or `password`')
 
 
 def get_all_pools() -> Dict[str, Any]:

@@ -13,12 +13,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { CircularProgress } from '@mui/material';
 import { uploadSSHKey } from '@/data/connectors/ssh-node-pools';
 
-export function SSHNodePoolModal({ 
-  isOpen, 
-  onClose, 
-  onSave, 
+export function SSHNodePoolModal({
+  isOpen,
+  onClose,
+  onSave,
   poolData = null, // null for new pool, object for editing
-  isLoading = false 
+  isLoading = false,
 }) {
   const [poolName, setPoolName] = useState('');
   const [hosts, setHosts] = useState('');
@@ -75,8 +75,8 @@ export function SSHNodePoolModal({
 
     const hostList = hosts
       .split('\n')
-      .map(host => host.trim())
-      .filter(host => host.length > 0);
+      .map((host) => host.trim())
+      .filter((host) => host.length > 0);
 
     const poolConfig = {
       hosts: hostList,
@@ -113,7 +113,9 @@ export function SSHNodePoolModal({
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? `Edit SSH Node Pool: ${poolData?.name}` : 'Add SSH Node Pool'}
+            {isEditing
+              ? `Edit SSH Node Pool: ${poolData?.name}`
+              : 'Add SSH Node Pool'}
           </DialogTitle>
         </DialogHeader>
 
@@ -182,7 +184,9 @@ export function SSHNodePoolModal({
 
           {/* Optional Password */}
           <div className="space-y-2">
-            <Label htmlFor="password">Password (optional, if sudo requires a password)</Label>
+            <Label htmlFor="password">
+              Password (optional, if sudo requires a password)
+            </Label>
             <Input
               id="password"
               type="password"
@@ -193,27 +197,31 @@ export function SSHNodePoolModal({
             />
           </div>
 
-          {errors.auth && (
-            <p className="text-sm text-red-500">{errors.auth}</p>
-          )}
+          {errors.auth && <p className="text-sm text-red-500">{errors.auth}</p>}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={isLoading}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500">
+          <Button
+            onClick={handleSave}
+            disabled={isLoading}
+            className="bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
+          >
             {isLoading ? (
               <>
                 <CircularProgress size={16} className="mr-2" />
                 Saving...
               </>
+            ) : isEditing ? (
+              'Update Pool'
             ) : (
-              isEditing ? 'Update Pool' : 'Create Pool'
+              'Create Pool'
             )}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
-} 
+}

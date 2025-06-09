@@ -179,10 +179,8 @@ def prepare_hosts_info(
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                print(
-                    f'{RED}Warning: Host missing \'ip\' field, '
-                    f'skipping: {host}{NC}'
-                )
+                print(f'{RED}Warning: Host missing \'ip\' field, '
+                      f'skipping: {host}{NC}')
                 continue
 
             # Check if this is an SSH config hostname
@@ -194,8 +192,9 @@ def prepare_hosts_info(
             # Use host-specific values or fall back to cluster defaults
             host_user = '' if is_ssh_config_host else host.get(
                 'user', cluster_user)
-            host_identity_file = '' if is_ssh_config_host else _maybe_hardcode_identity_file(
-                i, host.get('identity_file', cluster_identity_file))
+            host_identity_file = '' if is_ssh_config_host else (
+                _maybe_hardcode_identity_file(
+                    i, host.get('identity_file', cluster_identity_file)))
             host_password = host.get('password', cluster_password)
 
             hosts_info.append({

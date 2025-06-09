@@ -233,11 +233,8 @@ class SSH(kubernetes.Kubernetes):
                     f'Node Pools from {SSH_NODE_POOLS_PATH}.')
 
         if context not in existing_allowed_contexts:
-            return (
-                False,
-                f'SSH Node Pool {context} is not set up. '
-                f'Run `sky ssh up --infra {context}` to set up.'
-            )
+            return (False, f'SSH Node Pool {context} is not set up. '
+                    f'Run `sky ssh up --infra {context}` to set up.')
 
         # Check if the context is valid
         suc, text = super()._check_single_context(context)
