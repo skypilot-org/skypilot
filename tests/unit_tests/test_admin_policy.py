@@ -342,7 +342,7 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
             with mock.patch(
                     'example_policy.client_policy.logger') as mock_logger:
                 mutated_request = (UseLocalGcpCredentialsPolicy.
-                                  cpalidate_and_mutate(user_request))
+                                   cpalidate_and_mutate(user_request))
 
                 # Check that warning was logged
                 mock_logger.warning.assert_called_once()
