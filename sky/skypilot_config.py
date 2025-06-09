@@ -257,11 +257,6 @@ def _resolve_project_config_path() -> Optional[str]:
     return None
 
 
-def _get_project_config() -> config_utils.Config:
-    """Returns the project config."""
-    return _get_config_from_path(_resolve_project_config_path())
-
-
 def _resolve_server_config_path() -> Optional[str]:
     # find the server config file
     server_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
@@ -502,19 +497,15 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
 
-    final_config = parse_and_validate_config_file(config_path)
     # Overlay the project config
     project_config_path = _resolve_project_config_path()
     project_config = _get_config_from_path(project_config_path)
-    if project_config:
-        final_config = overlay_skypilot_config(original_config=final_config,
-                                               override_configs=project_config)
-        logger.debug(f'Using config path: {config_path} and '
-                     f'project config: {project_config_path}')
-    else:
-        logger.debug(f'Using config path: {config_path}')
+    overlaid_config = overlay_skypilot_config(
+        original_config=parse_and_validate_config_file(config_path),
+        override_configs=project_config)
+    logger.debug(f'Using config path: {config_path}')
 
-    _set_loaded_config(final_config)
+    _set_loaded_config(overlaid_config)
     _set_loaded_config_path(config_path)
 
 
