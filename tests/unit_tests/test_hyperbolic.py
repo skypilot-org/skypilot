@@ -1,12 +1,13 @@
-"""Unit tests for Hyperbolic cloud provider."""
+"""Tests for Hyperbolic cloud provider."""
 import os
+from pathlib import Path
 import tempfile
-from unittest import mock
 
 import pytest
 
 from sky import clouds
 from sky.clouds import hyperbolic
+from sky.resources import Resources
 
 
 def test_hyperbolic_cloud():
@@ -17,16 +18,17 @@ def test_hyperbolic_cloud():
     assert cloud._MAX_CLUSTER_NAME_LEN_LIMIT == 120
 
 
-def test_hyperbolic_credential_file_mounts(tmp_path):
-    cloud = hyperbolic.Hyperbolic()
-    api_key_path = tmp_path / 'api_key'
-    api_key_path.write_text('test-key')
-    with mock.patch('os.path.expanduser', return_value=str(api_key_path)):
-        mounts = cloud.get_credential_file_mounts()
-        assert str(api_key_path) in mounts.values()
-    with mock.patch('os.path.expanduser', return_value='/nonexistent/api_key'):
-        mounts = cloud.get_credential_file_mounts()
-        assert mounts == {}
+def test_hyperbolic_credential_file_mounts():
+    """Test credential file mounts for Hyperbolic."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_key_path = Path(tmpdir) / 'api_key'
+        api_key_path.touch()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(hyperbolic.Hyperbolic, 'API_KEY_PATH', str(api_key_path))
+            cloud = hyperbolic.Hyperbolic()
+            mounts = cloud.get_credential_file_mounts()
+            assert str(api_key_path) in mounts
+            assert mounts[str(api_key_path)] == '~/.hyperbolic/api_key'
 
 
 def test_hyperbolic_unsupported_features():
@@ -48,10 +50,11 @@ def test_hyperbolic_region_zone_validation():
 
 
 def test_hyperbolic_resource_feasibility():
+    """Test resource feasibility for Hyperbolic."""
     cloud = hyperbolic.Hyperbolic()
-    resources = clouds.Resources(cloud=cloud,
-                                 instance_type='1x-T4-4-17',
-                                 accelerators={'T4': 1})
+    resources = Resources(cloud=cloud,
+                          instance_type='1x-T4-4-17',
+                          accelerators={'T4': 1})
     feasible = cloud._get_feasible_launchable_resources(resources)
     assert hasattr(feasible, 'resources_list')
     assert hasattr(feasible, 'fuzzy_candidate_list')

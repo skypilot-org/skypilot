@@ -22,6 +22,7 @@ class Hyperbolic(clouds.Cloud):
     _REPR = 'Hyperbolic'
     name = 'hyperbolic'
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    API_KEY_PATH = os.path.expanduser('~/.hyperbolic/api_key')
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
@@ -116,10 +117,9 @@ class Hyperbolic(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        api_key_path = os.path.expanduser('~/.hyperbolic/api_key')
-        if os.path.exists(api_key_path):
+        if os.path.exists(cls.API_KEY_PATH):
             return True, None
-        return False, f'API key not found at {api_key_path}'
+        return False, f'API key not found at {cls.API_KEY_PATH}'
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -127,9 +127,8 @@ class Hyperbolic(clouds.Cloud):
 
     @classmethod
     def get_credential_file_mounts(cls) -> Dict[str, str]:
-        api_key_path = os.path.expanduser('~/.hyperbolic/api_key')
-        if os.path.exists(api_key_path):
-            return {api_key_path: '~/.hyperbolic/api_key'}
+        if os.path.exists(cls.API_KEY_PATH):
+            return {cls.API_KEY_PATH: '~/.hyperbolic/api_key'}
         return {}
 
     def __repr__(self):
