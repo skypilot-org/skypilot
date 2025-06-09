@@ -22,7 +22,7 @@ cleanup() {
 }
 
 # Set up trap
-# trap cleanup EXIT
+trap cleanup EXIT
 
 echo "Using GCP Project ID: $PROJECT_ID"
 echo "Installing SkyPilot Helm chart version: $HELM_VERSION"
@@ -52,7 +52,8 @@ helm repo update
 NAMESPACE=skypilot
 RELEASE_NAME=skypilot
 WEB_USERNAME=skypilot
-WEB_PASSWORD=skypilot123  # Change this to a secure password
+# Generate a random 16-character password using /dev/urandom (macOS compatible)
+WEB_PASSWORD=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
 
 # Create auth string
 AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
