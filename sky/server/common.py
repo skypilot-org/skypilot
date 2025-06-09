@@ -17,6 +17,7 @@ from typing import Any, Dict, Literal, Optional
 from urllib import parse
 import uuid
 
+import cachetools
 import colorama
 import filelock
 
@@ -217,6 +218,9 @@ def is_api_server_local():
     return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
 
 
+@cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
+                                             ttl=5.0,
+                                             timer=time.time))
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     """Retrieve the status of the API server.
 
@@ -324,6 +328,7 @@ def _start_api_server(deploy: bool = False,
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
+    
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
@@ -388,6 +393,8 @@ def _start_api_server(deploy: bool = False,
                         'SkyPilot API server process exited unexpectedly.\n'
                         f'View logs at: {constants.API_SERVER_LOGS}')
             try:
+                # Clear the cache to ensure fresh checks during startup
+                get_api_server_status.cache_clear()
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
