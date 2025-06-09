@@ -214,7 +214,7 @@ class BurstableExecutor:
 
         Prioritizes submitting to the guaranteed pool. If no idle workers
         are available in the guaranteed pool, it will submit to the burst
-        pool. If the busrt pool is full, it will retry the whole process until
+        pool. If the burst pool is full, it will retry the whole process until
         the task is submitted successfully.
         TODO(aylei): this is coupled with executor.RequestWorker since we
         know the worker is dedicated to request scheduling and it either
