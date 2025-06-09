@@ -920,6 +920,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
+    elif isinstance(cloud, clouds.Primeintellect):
+        config = auth.setup_primeintellect_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(cluster_config_file, config)

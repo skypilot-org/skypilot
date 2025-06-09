@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import clouds
 from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
+from sky.provision.primeintellect import utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -248,16 +249,11 @@ class Primeintellect(clouds.Cloud):
             if not api_key:
                 print("API key is missing or empty")
 
-        url =f"{DEFAULT_BASE_URL}/api/v1/pods"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        # TODO: implement API endpoint for checking key capabilities
+        client = utils.PrimeintellectAPIClient()
 
         try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-
+            client.list_instances()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 return False, (
@@ -265,13 +261,13 @@ class Primeintellect(clouds.Cloud):
                     "generate a new one at https://app.primeintellect.ai/dashboard/tokens, "
                     "or run 'prime login' to configure a new API key."
                 )
-            if e.response.status_code == 402:
-                return False, (
-                    "Payment required. Please check your billing status at "
-                    "https://app.primeintellect.ai/dashboard/billing"
-                )
-
         return True, None
+
+    @classmethod
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
+        """Checks if the user has access credentials to Primeintellect's compute service."""
+        return cls._check_credentials()
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""

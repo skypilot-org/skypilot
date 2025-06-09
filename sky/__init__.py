@@ -139,6 +139,7 @@ Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
+Primeintellect = clouds.Primeintellect
 RunPod = clouds.RunPod
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
