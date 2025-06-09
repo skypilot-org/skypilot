@@ -48,6 +48,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
@@ -59,7 +60,6 @@ from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.workspaces import server as workspaces_rest
-from sky.ssh_node_pools import server as ssh_node_pools_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):

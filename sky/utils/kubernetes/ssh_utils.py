@@ -1,14 +1,18 @@
+"""Utility functions for managing SSH node pools."""
+import os
 import re
 import subprocess
-import os,uuid
+from typing import Any, Callable, Dict, List, Optional
+import uuid
+
 import yaml
-from typing import Dict, Any, Optional, List, Callable
 
 from sky.utils import ux_utils
 
 DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 RED = '\033[0;31m'
 NC = '\033[0m'  # No color
+
 
 def check_host_in_ssh_config(hostname: str) -> bool:
     """Return True iff *hostname* matches at least one `Host`/`Match` stanza
@@ -85,9 +89,10 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
             raise ValueError(f'Error loading SSH Node Pools file: {e}') from e
 
 
-def get_cluster_config(targets: Dict[str, Any],
-                       cluster_name: Optional[str] = None,
-                       file_path: str = DEFAULT_SSH_NODE_POOLS_PATH) -> Dict[str, Any]:
+def get_cluster_config(
+        targets: Dict[str, Any],
+        cluster_name: Optional[str] = None,
+        file_path: str = DEFAULT_SSH_NODE_POOLS_PATH) -> Dict[str, Any]:
     """Get configuration for specific clusters or all clusters."""
     if not targets:
         with ux_utils.print_exception_no_traceback():
@@ -105,10 +110,11 @@ def get_cluster_config(targets: Dict[str, Any],
     return targets
 
 
-def prepare_hosts_info(cluster_name: str,
-                       cluster_config: Dict[str, Any],
-                       upload_ssh_key_func: Optional[Callable[
-                           [str, str], str]] = None) -> List[Dict[str, str]]:
+def prepare_hosts_info(
+    cluster_name: str,
+    cluster_config: Dict[str, Any],
+    upload_ssh_key_func: Optional[Callable[[str, str], str]] = None
+) -> List[Dict[str, str]]:
     """Prepare list of hosts with resolved user, identity_file, and password.
 
     Args:
@@ -136,22 +142,23 @@ def prepare_hosts_info(cluster_name: str,
     cluster_password = cluster_config.get('password', '')
 
     use_cluster_config_msg = (f'Cluster {cluster_name} uses SSH config '
-                                     'for hostname {host}, which is not '
-                                     'supported by the -f flag. Please use a '
-                                     'dict with `ip` field instead.')
+                              'for hostname {host}, which is not '
+                              'supported by the -f flag. Please use a '
+                              'dict with `ip` field instead.')
 
     def _maybe_hardcode_identity_file(i: int, identity_file: str) -> str:
         if upload_ssh_key_func is None:
             return identity_file
         if not os.path.exists(os.path.expanduser(identity_file)):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Identity file {identity_file} does not exist.')
+                raise ValueError(
+                    f'Identity file {identity_file} does not exist.')
         key_name = f'{cluster_name}-{i}-{str(uuid.uuid4())[:4]}'
         key_file_on_api_server = upload_ssh_key_func(key_name, identity_file)
         return key_file_on_api_server
 
     hosts_info = []
-    for i,host in enumerate(cluster_config['hosts']):
+    for i, host in enumerate(cluster_config['hosts']):
         # Host can be a string (IP or SSH config hostname) or a dict
         if isinstance(host, str):
             # Check if this is an SSH config hostname
@@ -164,7 +171,8 @@ def prepare_hosts_info(cluster_name: str,
                 'ip': host,
                 'user': '' if is_ssh_config_host else cluster_user,
                 'identity_file': '' if is_ssh_config_host else
-                                 _maybe_hardcode_identity_file(i, cluster_identity_file),
+                                 _maybe_hardcode_identity_file(
+                                     i, cluster_identity_file),
                 'password': cluster_password,
                 'use_ssh_config': is_ssh_config_host
             })
@@ -172,7 +180,8 @@ def prepare_hosts_info(cluster_name: str,
             # It's a dict with potential overrides
             if 'ip' not in host:
                 print(
-                    f'{RED}Warning: Host missing \'ip\' field, skipping: {host}{NC}'
+                    f'{RED}Warning: Host missing \'ip\' field, '
+                    f'skipping: {host}{NC}'
                 )
                 continue
 
@@ -185,8 +194,8 @@ def prepare_hosts_info(cluster_name: str,
             # Use host-specific values or fall back to cluster defaults
             host_user = '' if is_ssh_config_host else host.get(
                 'user', cluster_user)
-            host_identity_file = '' if is_ssh_config_host else _maybe_hardcode_identity_file(i, host.get(
-                'identity_file', cluster_identity_file))
+            host_identity_file = '' if is_ssh_config_host else _maybe_hardcode_identity_file(
+                i, host.get('identity_file', cluster_identity_file))
             host_password = host.get('password', cluster_password)
 
             hosts_info.append({

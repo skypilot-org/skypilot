@@ -1232,13 +1232,13 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     )
 
 
-@usage_lib.entrypoint 
+@usage_lib.entrypoint
 def ssh_status(context_name: str) -> Tuple[bool, str]:
     """Check the status of an SSH Node Pool context.
-    
+
     Args:
         context_name: The SSH context name (e.g., 'ssh-my-cluster')
-        
+
     Returns:
         Tuple[bool, str]: (is_ready, reason)
             - is_ready: True if the SSH Node Pool is ready, False otherwise
@@ -1247,8 +1247,9 @@ def ssh_status(context_name: str) -> Tuple[bool, str]:
     try:
         is_ready, reason = clouds.SSH.check_single_context(context_name)
         return is_ready, reason
-    except Exception as e:
-        return False, f"Failed to check SSH context: {common_utils.format_exception(e)}"
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('Failed to check SSH context: '
+                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

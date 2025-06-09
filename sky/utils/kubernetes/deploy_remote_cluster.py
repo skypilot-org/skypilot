@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Set
 
 import yaml
 
@@ -514,9 +514,8 @@ def main():
     else:
         # Using YAML configuration
         targets = ssh_utils.load_ssh_targets(args.ssh_node_pools_file)
-        clusters_config = ssh_utils.get_cluster_config(targets,
-                                             args.infra,
-                                             file_path=args.ssh_node_pools_file)
+        clusters_config = ssh_utils.get_cluster_config(
+            targets, args.infra, file_path=args.ssh_node_pools_file)
 
         # Print information about clusters being processed
         num_clusters = len(clusters_config)
@@ -530,7 +529,8 @@ def main():
                 print(f'SKYPILOT_CURRENT_CLUSTER: {cluster_name}')
                 print(
                     f'{YELLOW}==== Deploying cluster: {cluster_name} ====${NC}')
-                hosts_info = ssh_utils.prepare_hosts_info(cluster_name, cluster_config)
+                hosts_info = ssh_utils.prepare_hosts_info(
+                    cluster_name, cluster_config)
 
                 if not hosts_info:
                     print(

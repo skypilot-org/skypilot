@@ -206,7 +206,7 @@ class SSH(kubernetes.Kubernetes):
             ctx2text[context] = text
 
         return success, ctx2text
-    
+
     @classmethod
     def check_single_context(cls, context: str) -> Tuple[bool, str]:
         """Checks if the context is valid and accessible."""
@@ -216,7 +216,7 @@ class SSH(kubernetes.Kubernetes):
                 [reasons[0]] +
                 [f'{cls._INDENT_PREFIX}' + r for r in reasons[1:]])
             return (False, formatted)
-        
+
         # Add ssh- prefix to the context
         if not context.startswith('ssh-'):
             context = f'ssh-{context}'
@@ -231,15 +231,19 @@ class SSH(kubernetes.Kubernetes):
             return (False,
                     'No SSH Node Pools are up. Run `sky ssh up` to set up '
                     f'Node Pools from {SSH_NODE_POOLS_PATH}.')
-        
+
         if context not in existing_allowed_contexts:
-            return (False, f'SSH Node Pool {context} is not set up. Run `sky ssh up --infra {context}` to set up.')
-        
+            return (
+                False,
+                f'SSH Node Pool {context} is not set up. '
+                f'Run `sky ssh up --infra {context}` to set up.'
+            )
+
         # Check if the context is valid
         suc, text = super()._check_single_context(context)
         if not suc:
             return (False, text)
-        
+
         return (True, 'SSH Node Pool is set up.')
 
     @classmethod
