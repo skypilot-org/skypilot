@@ -498,13 +498,50 @@ In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2
 
 Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
+.. _api-server-persistence-db:
+
 Optional: Back the API server with a persistent database
 --------------------------------------------------------
 
-The API server can be backed with a persistent database to persist the user state and config.
+The API server can optionally be configured with a postgresSQL database to persist state.
 
-Refer to :ref:`Using a persistent database with the SkyPilot API Server <api-server-db>` for detailed instructions.
+If a persistent DB is not specified, API server uses a kubernetes persistent volume to persist state.
 
+.. note::
+
+  Database configuration must be set in the helm deployment.
+
+.. dropdown:: Set the config with helm deployment during the first deployment
+
+    To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+
+    .. code-block:: bash
+
+        # Create the config.yaml file
+        cat <<EOF > config.yaml
+        db: postgresql://<username>:<password>@<host>:<port>/<database>
+        EOF
+
+        # Install the API server with the config file
+        # --reuse-values keeps the Helm chart values set in the previous step
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set-file apiService.config=config.yaml
+
+    You can also directly set config values in the ``values.yaml`` file, e.g.:
+
+    .. code-block:: yaml
+
+        apiService:
+        config: |
+            db: postgresql://<username>:<password>@<host>:<port>/<database>
+
+    .. note::
+
+        If ``db`` is specified in the config, no other configuration parameter can be specified in the helm chart.
+
+        See ``Optional: Setting the SkyPilot config`` below for how to set other config values.
 
 Optional: Setting the SkyPilot config
 --------------------------------------
