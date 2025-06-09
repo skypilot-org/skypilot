@@ -46,6 +46,7 @@ available_node_types:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}
       DiskSize: {{disk_size}}
+      network_tier: {{network_tier}}
       filesystems:
         {%- for fs in filesystems %}
         - filesystem_id: {{ fs.filesystem_id }}
@@ -152,6 +153,11 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
+  {%- if env_vars is defined %}
+    {%- for env_var, env_value in env_vars.items() %}
+    echo '{{env_var}}={{env_value}}' | sudo tee -a /etc/environment;
+    {%- endfor %}
+  {%- endif %}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;

@@ -1,0 +1,138 @@
+# This example is used to test the NCCL performance
+# with InfiniBand on Nebius VMs.
+resources:
+  cloud: nebius
+  region: us-central1
+  accelerators: H200:8
+  network_tier: best
+
+num_nodes: 2
+
+setup: |
+  sudo apt-get update
+  sudo apt-get install -y iproute2 wget curl build-essential git
+
+  # Install OpenMPI first (required for NCCL tests)
+  echo "Installing OpenMPI..."
+  sudo apt-get install -y openmpi-bin openmpi-common libopenmpi-dev
+  
+  # Install CUDA toolkit
+  if ! command -v nvcc &> /dev/null; then
+    echo "Installing CUDA toolkit..."
+    wget https://developer.download.nvidia.com/compute/cuda/12.4.0/local_installers/cuda_12.4.0_550.54.14_linux.run
+    sudo sh cuda_12.4.0_550.54.14_linux.run --silent --toolkit
+    
+    # Add CUDA to PATH and LD_LIBRARY_PATH
+    echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
+    echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+    export PATH=/usr/local/cuda/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+  else
+    echo "CUDA already installed, skipping..."
+    export PATH=/usr/local/cuda/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+  fi
+
+  # Install NCCL (use sudo to remove if exists)
+  sudo rm -rf /usr/local/nccl
+  echo "Installing NCCL..."
+  cd /tmp
+  wget https://github.com/NVIDIA/nccl/archive/v2.23.4-1.tar.gz
+  tar -xzf v2.23.4-1.tar.gz
+  cd nccl-2.23.4-1
+  make -j src.build CUDA_HOME=/usr/local/cuda
+  sudo mkdir -p /usr/local/nccl
+  sudo cp -r build/* /usr/local/nccl/
+  echo 'export LD_LIBRARY_PATH=/usr/local/nccl/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+  export LD_LIBRARY_PATH=/usr/local/nccl/lib:$LD_LIBRARY_PATH
+
+  # Build NCCL tests
+  if [ ! -f $HOME/nccl-tests/build/all_reduce_perf ]; then
+    echo "Building NCCL tests..."
+    cd $HOME
+    git clone https://github.com/NVIDIA/nccl-tests.git
+    cd nccl-tests
+    
+    # Ensure environment variables are set for compilation
+    export PATH=/usr/local/cuda/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/nccl/lib:$LD_LIBRARY_PATH
+    
+    # Get MPI compile flags from mpicc
+    MPI_CFLAGS=$(mpicc -showme:compile)
+    MPI_LDFLAGS=$(mpicc -showme:link)
+    MPI_HOME=$(dirname $(dirname $(which mpicc)))
+    
+    # Build with MPI flags from mpicc if not already built
+    make MPI=1 \
+        MPI_HOME="$MPI_HOME" \
+        CUDA_HOME=/usr/local/cuda \
+        NCCL_HOME=/usr/local/nccl \
+        CPPFLAGS="$MPI_CFLAGS" \
+        NVCCFLAGS="$MPI_CFLAGS" \
+        LDFLAGS="$MPI_LDFLAGS" \
+        -j
+  fi
+
+run: | 
+  # Load environment
+  export PATH=/usr/local/cuda/bin:$PATH
+  export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/nccl/lib:$LD_LIBRARY_PATH
+
+  export SSH_PORT=$(ss -tlnp | grep sshd | awk '{print $4}' | cut -d':' -f2)
+  export NCCL_SOCKET_IFNAME=$(ip -o -4 route show to default | awk '{print $5}')
+  export NCCL_IB_HCA=mlx5
+  export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+
+  # Debug SSH port detection
+  echo "=== SSH Port Detection Debug ==="
+  echo "ss -tlnp | grep sshd output:"
+  ss -tlnp | grep sshd
+  echo "awk '{print \$4}' output:"
+  ss -tlnp | grep sshd | awk '{print $4}'
+  echo "Final SSH_PORT: $SSH_PORT"
+  
+  # Fix SSH port detection
+  SSH_PORT_RAW=$(ss -tlnp | grep sshd | awk '{print $4}' | head -1)
+  export SSH_PORT=$(echo "$SSH_PORT_RAW" | sed 's/.*://')
+  if [ -z "$SSH_PORT" ]; then
+    export SSH_PORT=22
+  fi
+  echo "Corrected SSH_PORT: $SSH_PORT"
+  echo "================================="
+
+  # Total number of processes, NP should be the total number of GPUs in the cluster
+  NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+  # Create nodes list with slots for MPI
+  nodes=""
+  for ip in $SKYPILOT_NODE_IPS; do
+    nodes="${nodes}${ip}:${SKYPILOT_NUM_GPUS_PER_NODE},"
+  done
+  nodes=${nodes::-1}
+  echo "Node list: $nodes"
+  echo "Total processes: $NP"
+
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Starting NCCL all-reduce test on ${SKYPILOT_NUM_NODES} nodes with ${NP} total GPUs..."
+    mpirun \
+      --allow-run-as-root \
+      -H $nodes \
+      -np $NP \
+      -N $SKYPILOT_NUM_GPUS_PER_NODE \
+      -bind-to none \
+      -x LD_LIBRARY_PATH \
+      -x NCCL_SOCKET_IFNAME \
+      -x NCCL_IB_HCA \
+      -x NCCL_ALGO=NVLSTree \
+      -x UCX_NET_DEVICES \
+      -x SHARP_COLL_ENABLE_PCI_RELAXED_ORDERING=1 \
+      -x NCCL_COLLNET_ENABLE=0 \
+      --mca plm_rsh_args "-p $SSH_PORT" \
+      $HOME/nccl-tests/build/all_reduce_perf \
+      -b 512M \
+      -e 8G \
+      -f 2 \
+      -g 1
+  else
+    echo "worker node"
+  fi

@@ -18,7 +18,7 @@ import sky
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
-from sky.clouds.service_catalog import vsphere_catalog
+from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -204,9 +204,8 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     monkeypatch.setattr('sky.check.get_cached_enabled_clouds_or_refresh',
                         get_clouds_factory)
     monkeypatch.setattr('sky.check.check_capability', dummy_function)
-    monkeypatch.setattr(
-        'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
-        get_az_mappings)
+    monkeypatch.setattr('sky.catalog.aws_catalog._get_az_mappings',
+                        get_az_mappings)
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
                         dummy_function)
     monkeypatch.setattr(
@@ -358,8 +357,8 @@ def mock_queue(monkeypatch):
             self.queue_map = {}
 
         def put(self, item):
-            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value)
-            request_id, ignore_return_value = item
+            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value, retryable)
+            request_id, ignore_return_value, _ = item
             self.queue_map[request_id] = ignore_return_value
 
         def get(self, request_id):

@@ -8,6 +8,7 @@ import colorama
 
 from sky import admin_policy
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
@@ -21,7 +22,6 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -711,9 +711,10 @@ def queue(cluster_name: str,
         exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
-    user_hash: Optional[str] = common_utils.get_user_hash()
     if all_users:
         user_hash = None
+    else:
+        user_hash = common_utils.get_current_user().id
     code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
@@ -829,7 +830,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_user_hash())
+                        user_hash=common_utils.get_current_user().id)
 
 
 @usage_lib.entrypoint
@@ -1061,7 +1062,7 @@ def realtime_kubernetes_gpu_availability(
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None
     ) -> List[models.RealtimeGpuAvailability]:
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
+        counts, capacity, available = catalog.list_accelerator_realtime(
             gpus_only=True,
             clouds='ssh' if is_ssh else 'kubernetes',
             name_filter=name_filter,

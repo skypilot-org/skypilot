@@ -4,11 +4,12 @@ import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
-from sky.clouds import service_catalog
+from sky.provision.nebius import constants as nebius_constants
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -76,8 +77,20 @@ class Nebius(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+
+        # Check if the accelerators support InfiniBand (H100 or H200) and 8 GPUs
+        if resources.accelerators is not None:
+            for acc_name, acc_count in resources.accelerators.items():
+                if acc_name.lower() in ('h100', 'h200') and acc_count == 8:
+                    # Remove CUSTOM_NETWORK_TIER from unsupported features for
+                    # InfiniBand-capable accelerators
+                    unsupported.pop(
+                        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                        None)
+                    break
+
+        return unsupported
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -92,7 +105,7 @@ class Nebius(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'nebius')
 
         if region is not None:
@@ -104,8 +117,8 @@ class Nebius(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='nebius')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='nebius')
 
     @classmethod
     def zones_provision_loop(
@@ -132,11 +145,11 @@ class Nebius(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='nebius')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='nebius')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -165,18 +178,18 @@ class Nebius(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
         """Returns the default instance type for Nebius."""
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='nebius')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='nebius')
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='nebius')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='nebius')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -227,14 +240,41 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
-            'filesystems': resources_vars_fs
+            'filesystems': resources_vars_fs,
+            'network_tier': resources.network_tier
         }
+
+        docker_run_options = []
 
         if acc_dict is not None:
             # Nebius cloud's docker runtime information does not contain
             # 'nvidia-container-runtime', causing no GPU option to be added to
             # the docker run command. We patch this by adding it here.
-            resources_vars['docker_run_options'] = ['--gpus all']
+            docker_run_options.append('--gpus all')
+
+            # Check for InfiniBand support with network_tier: best
+            is_infiniband_capable = (
+                platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS)
+            if (is_infiniband_capable and
+                    resources.network_tier == resources_utils.NetworkTier.BEST):
+                # For Docker containers, add InfiniBand device access and
+                # IPC_LOCK capability
+                if resources.extract_docker_image() is not None:
+                    docker_run_options.extend(
+                        nebius_constants.INFINIBAND_DOCKER_OPTIONS)
+
+                    # Add InfiniBand environment variables to docker run options
+                    for env_var, env_value in (
+                            nebius_constants.INFINIBAND_ENV_VARS.items()):
+                        docker_run_options.extend(
+                            ['-e', f'{env_var}={env_value}'])
+
+                # For all InfiniBand-capable instances, add env variables
+                resources_vars[
+                    'env_vars'] = nebius_constants.INFINIBAND_ENV_VARS
+
+        if docker_run_options:
+            resources_vars['docker_run_options'] = docker_run_options
 
         return resources_vars
 
@@ -277,15 +317,15 @@ class Nebius(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='nebius')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='nebius')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -368,12 +408,10 @@ class Nebius(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'nebius')
+        return catalog.instance_type_exists(instance_type, 'nebius')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='nebius')
+        return catalog.validate_region_zone(region, zone, clouds='nebius')
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:

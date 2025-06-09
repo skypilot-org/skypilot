@@ -12,7 +12,7 @@ import sky
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
-from sky.clouds.service_catalog import aws_catalog
+from sky.catalog import aws_catalog
 from sky.provision.aws import instance as aws_instance
 from sky.utils import db_utils
 from sky.utils import env_options
@@ -25,7 +25,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
 
     sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
 
-    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+    monkeypatch.setattr(global_user_state, 'SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
     global_user_state.create_table()

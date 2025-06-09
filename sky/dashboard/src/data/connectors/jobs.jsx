@@ -153,7 +153,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           ? new Date(job.submitted_at * 1000)
           : null,
         events: events,
-        dag_yaml: job.dag_yaml,
+        dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
       };
     });
@@ -311,7 +311,18 @@ export async function streamManagedJobLogs({
           onNewLog(chunk);
         }
       } finally {
-        reader.cancel();
+        // Only cancel the reader if the signal hasn't been aborted
+        // If signal is aborted, the reader should already be canceling
+        if (!signal || !signal.aborted) {
+          try {
+            reader.cancel();
+          } catch (cancelError) {
+            // Ignore errors from reader cancellation
+            if (cancelError.name !== 'AbortError') {
+              console.warn('Error canceling reader:', cancelError);
+            }
+          }
+        }
         // Clear the timeout when streaming completes successfully
         if (timeoutId) {
           clearTimeout(timeoutId);

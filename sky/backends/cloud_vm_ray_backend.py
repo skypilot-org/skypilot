@@ -24,6 +24,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
@@ -39,7 +40,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -699,6 +699,10 @@ class RayCodeGen:
                 # 139 is the return code of SIGSEGV, i.e. Segmentation Fault.
                 if any(r == 139 for r in returncodes):
                     reason = '(likely due to Segmentation Fault)'
+                if any(r == 137 for r in returncodes):
+                    # Find the first non-137 return code
+                    non_137 = next(r for r in returncodes if r != 137)
+                    reason = f'(A Worker failed with return code {{non_137}}, SkyPilot cleaned up the processes on other nodes with return code 137)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
@@ -803,7 +807,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('scp'):
+                for r in catalog.regions('scp'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -1088,7 +1092,7 @@ class FailoverCloudErrorHandlerV2:
         output = str(error)
         # Sometimes, lambda cloud error will list available regions.
         if output.find('Regions with capacity available:') != -1:
-            for r in service_catalog.regions('lambda'):
+            for r in catalog.regions('lambda'):
                 if output.find(r.name) == -1:
                     _add_to_blocked_resources(
                         blocked_resources,
@@ -2696,7 +2700,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     NAME = 'cloudvmray'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
+    ResourceHandle = CloudVmRayResourceHandle  # type: ignore
 
     def __init__(self):
         self.run_timestamp = sky_logging.get_run_timestamp()
@@ -2900,14 +2904,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-                # The most frequent reason for the failure of a provision
-                # request is resource unavailability instead of rate
-                # limiting; to make users wait shorter, we do not make
-                # backoffs exponential.
-                backoff = common_utils.Backoff(
-                    initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
-                    max_backoff_factor=1)
-            attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
                 # within the given region first, then optionally retry on all
@@ -2951,19 +2947,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         error_message = str(e)
 
                     if retry_until_up:
-                        logger.error(error_message)
-                        # Sleep and retry.
-                        gap_seconds = backoff.current_backoff()
-                        plural = 's' if attempt_cnt > 1 else ''
+                        gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
                         retry_message = ux_utils.retry_message(
-                            f'Retry after {gap_seconds:.0f}s '
-                            f'({attempt_cnt} attempt{plural}). ')
-                        logger.info(f'\n{retry_message} '
-                                    f'{ux_utils.log_path_hint(log_path)}'
-                                    f'{colorama.Style.RESET_ALL}')
-                        attempt_cnt += 1
-                        time.sleep(gap_seconds)
-                        continue
+                            f'Retry after {gap_seconds:.0f}s ')
+                        hint_message = (f'\n{retry_message} '
+                                        f'{ux_utils.log_path_hint(log_path)}'
+                                        f'{colorama.Style.RESET_ALL}')
+                        raise exceptions.ExecutionRetryableError(
+                            error_message,
+                            hint=hint_message,
+                            retry_wait_seconds=gap_seconds)
                     # Clean up the cluster's entry in `sky status`.
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.

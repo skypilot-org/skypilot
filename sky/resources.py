@@ -7,14 +7,15 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 import colorama
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.provision import docker_utils
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
@@ -44,7 +45,9 @@ class AutostopConfig:
     # to be complete.
     enabled: bool
     # If enabled is False, these values are ignored.
-    idle_minutes: int = 5
+    # Keep the default value to 0 to make the behavior consistent with the CLI
+    # flags.
+    idle_minutes: int = 0
     down: bool = False
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
@@ -378,7 +381,7 @@ class Resources:
     # if it fails to fetch some account specific catalog information (e.g., AWS
     # zone mapping). It is fine to use the default catalog as this function is
     # only for display purposes.
-    @service_catalog.fallback_to_default_catalog
+    @catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 
@@ -882,6 +885,25 @@ class Resources:
             valid_volumes.append(volume)
         self._volumes = valid_volumes
 
+    def override_autostop_config(self,
+                                 down: bool = False,
+                                 idle_minutes: Optional[int] = None) -> None:
+        """Override autostop config to the resource.
+
+        Args:
+            down: If true, override the autostop config to use autodown.
+            idle_minutes: If not None, override the idle minutes to autostop or
+                autodown.
+        """
+        if not down and idle_minutes is None:
+            return
+        if self._autostop_config is None:
+            self._autostop_config = AutostopConfig(enabled=True,)
+        if down:
+            self._autostop_config.down = down
+        if idle_minutes is not None:
+            self._autostop_config.idle_minutes = idle_minutes
+
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""
         return self.cloud is not None and self._instance_type is not None
@@ -1162,6 +1184,36 @@ class Resources:
         Raises:
             ValueError: if the attribute is invalid.
         """
+
+        if (self._network_tier == resources_utils.NetworkTier.BEST and
+                isinstance(self._cloud, clouds.GCP)):
+            # Handle GPU Direct TCPX requirement for docker images
+            if self._image_id is None:
+                # No custom image specified - use the default GPU Direct image
+                self._image_id = {
+                    self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
+                }
+            else:
+                # Custom image specified - validate it's a docker image
+                # Check if any of the specified images are not docker images
+                non_docker_images = []
+                for region, image_id in self._image_id.items():
+                    if not image_id.startswith('docker:'):
+                        non_docker_images.append(
+                            f'{image_id} (region: {region})')
+
+                if non_docker_images:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'When using network_tier=BEST on GCP, image_id '
+                            f'must be a docker image. '
+                            f'Found non-docker images: '
+                            f'{", ".join(non_docker_images)}. '
+                            f'Please either: (1) use a docker image '
+                            f'(prefix with "docker:"), or '
+                            f'(2) leave image_id empty to use the default '
+                            f'GPU Direct TCPX image.')
+
         if self._image_id is None:
             return
 

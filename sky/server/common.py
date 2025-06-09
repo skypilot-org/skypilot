@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 import functools
+from http.cookiejar import CookieJar
 from http.cookiejar import MozillaCookieJar
 import json
 import os
@@ -38,6 +39,7 @@ if typing.TYPE_CHECKING:
     import requests
 
     from sky import dag as dag_lib
+    from sky import models
 else:
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
@@ -128,22 +130,54 @@ class ApiServerInfo:
     commit: Optional[str] = None
 
 
-def get_api_cookie_jar_path() -> str:
-    return os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR,
-                          server_constants.API_COOKIE_FILE_DEFAULT_LOCATION)
+def get_api_cookie_jar_path() -> pathlib.Path:
+    """Returns the Path to the API cookie jar file."""
+    return pathlib.Path(
+        os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR,
+                       server_constants.API_COOKIE_FILE_DEFAULT_LOCATION)
+    ).expanduser().resolve()
 
 
 def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
     """Returns the cookie jar used by the client to access the API server."""
     cookie_jar = requests.cookies.RequestsCookieJar()
-    cookie_file = get_api_cookie_jar_path()
-    if cookie_file:
-        cookie_path = pathlib.Path(cookie_file).expanduser().resolve()
-        if cookie_path.exists():
-            file_cookie_jar = MozillaCookieJar(cookie_path)
-            file_cookie_jar.load()
-            cookie_jar.update(file_cookie_jar)
+    cookie_path = get_api_cookie_jar_path()
+    if cookie_path.exists():
+        file_cookie_jar = MozillaCookieJar(cookie_path)
+        file_cookie_jar.load()
+        cookie_jar.update(file_cookie_jar)
     return cookie_jar
+
+
+def set_api_cookie_jar(cookie_jar: CookieJar,
+                       create_if_not_exists: bool = True) -> None:
+    """Updates the file cookie jar with the given cookie jar."""
+    cookie_path = get_api_cookie_jar_path()
+    if not cookie_path.exists() and not create_if_not_exists:
+        # if the file doesn't exist and we don't want to create it, do nothing
+        return
+    if not cookie_path.parent.exists():
+        cookie_path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_cookie_jar = MozillaCookieJar(cookie_path)
+    if cookie_path.exists():
+        file_cookie_jar.load()
+
+    for cookie in cookie_jar:
+        file_cookie_jar.set_cookie(cookie)
+    file_cookie_jar.save()
+
+
+def get_cookies_from_response(
+        response: 'requests.Response') -> requests.cookies.RequestsCookieJar:
+    """Returns the cookies from the API server response."""
+    server_url = get_server_url()
+    cookies = response.cookies
+    for prev_resp in response.history:
+        for cookie in prev_resp.cookies:
+            if cookie.domain in server_url:
+                cookies.set_cookie(cookie)
+    return cookies
 
 
 @annotations.lru_cache(scope='global')
@@ -207,54 +241,54 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             response = requests.get(f'{server_url}/api/health',
                                     timeout=2.5,
                                     cookies=get_api_cookie_jar())
-            logger.debug(f'Health check status: {response.status_code}')
-            if response.status_code == 200:
-                try:
-                    result = response.json()
-                    api_version = result.get('api_version')
-                    version = result.get('version')
-                    version_on_disk = result.get('version_on_disk')
-                    commit = result.get('commit')
-                    server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
-                                                api_version=api_version,
-                                                version=version,
-                                                version_on_disk=version_on_disk,
-                                                commit=commit)
-                    if api_version is None or version is None or commit is None:
-                        logger.warning(f'API server response missing '
-                                       f'version info. {server_url} may '
-                                       f'not be running SkyPilot API server.')
-                        server_info.status = ApiServerStatus.UNHEALTHY
-                    elif api_version != server_constants.API_VERSION:
-                        server_info.status = ApiServerStatus.VERSION_MISMATCH
-                    return server_info
-                except (json.JSONDecodeError, AttributeError) as e:
-                    # Try to check if we got redirected to a login page.
-                    for prev_response in response.history:
-                        logger.debug(f'Previous response: {prev_response.url}')
-                        # Heuristic: check if the url looks like a login page or
-                        # oauth flow.
-                        if any(key in prev_response.url
-                               for key in ['login', 'oauth2']):
-                            logger.debug(
-                                f'URL {prev_response.url} looks like '
-                                'a login page or oauth flow, so try to '
-                                'get the cookie.')
-                            return ApiServerInfo(
-                                status=ApiServerStatus.NEEDS_AUTH)
-                    logger.warning('Failed to parse API server response: '
-                                   f'{str(e)}')
-                    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
-            elif response.status_code == 401:
-                return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
-            else:
-                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
             time_out_try_count += 1
             continue
         except requests.exceptions.ConnectionError:
+            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+
+        logger.debug(f'Health check status: {response.status_code}')
+        if response.status_code == 401:
+            return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+        elif response.status_code != 200:
+            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+        # The response is 200, so we can parse the response.
+        try:
+            result = response.json()
+            api_version = result.get('api_version')
+            version = result.get('version')
+            version_on_disk = result.get('version_on_disk')
+            commit = result.get('commit')
+            server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
+                                        api_version=api_version,
+                                        version=version,
+                                        version_on_disk=version_on_disk,
+                                        commit=commit)
+            if api_version is None or version is None or commit is None:
+                logger.warning(f'API server response missing '
+                               f'version info. {server_url} may '
+                               f'not be running SkyPilot API server.')
+                server_info.status = ApiServerStatus.UNHEALTHY
+            elif api_version != server_constants.API_VERSION:
+                server_info.status = ApiServerStatus.VERSION_MISMATCH
+            cookies = get_cookies_from_response(response)
+            set_api_cookie_jar(cookies, create_if_not_exists=False)
+            return server_info
+        except (json.JSONDecodeError, AttributeError) as e:
+            # Try to check if we got redirected to a login page.
+            for prev_response in response.history:
+                logger.debug(f'Previous response: {prev_response.url}')
+                # Heuristic: check if the url looks like a login page or
+                # oauth flow.
+                if any(key in prev_response.url for key in ['login', 'oauth2']):
+                    logger.debug(f'URL {prev_response.url} looks like '
+                                 'a login page or oauth flow, so try to '
+                                 'get the cookie.')
+                    return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+            logger.warning('Failed to parse API server response: '
+                           f'{str(e)}')
             return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
@@ -265,7 +299,7 @@ def handle_request_error(response: 'requests.Response') -> None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 'Failed to process response from SkyPilot API server at '
-                f'{get_server_url()}. '
+                f'{response.url}. '
                 f'Response: {response.status_code} '
                 f'{response.text}')
 
@@ -677,7 +711,7 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool):
+                           using_remote_api_server: bool, user: 'models.User'):
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
@@ -686,10 +720,11 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     skypilot_config.safe_reload_config()
 
     # Reset the client entrypoint and command for the usage message.
-    common_utils.set_client_status(
+    common_utils.set_request_context(
         client_entrypoint=client_entrypoint,
         client_command=client_command,
         using_remote_api_server=using_remote_api_server,
+        user=user,
     )
 
     # Clear cache should be called before reload_logger and usage reset,

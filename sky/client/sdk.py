@@ -85,7 +85,8 @@ def stream_response(request_id: Optional[str],
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 print(line, flush=True, end='', file=output_stream)
-        return get(request_id)
+        if request_id is not None:
+            return get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -400,18 +401,22 @@ def launch(
         retry_until_up: whether to retry launching the cluster until it is
           up.
         idle_minutes_to_autostop: automatically stop the cluster after this
-          many minute of idleness, i.e., no running or pending jobs in the
-          cluster's job queue. Idleness gets reset whenever setting-up/
-          running/pending jobs are found in the job queue. Setting this
-          flag is equivalent to running ``sky.launch()`` and then
-          ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
-          will not be autostopped.
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness gets reset whenever setting-up/
+            running/pending jobs are found in the job queue. Setting this
+            flag is equivalent to running
+            ``sky.launch(...)`` and then
+            ``sky.autostop(idle_minutes=<minutes>)``. If set, the autostop
+            config specified in the task' resources will be overridden by
+            this parameter.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
-          abnormally). If --idle-minutes-to-autostop is also set, the
-          cluster will be torn down after the specified idle time.
-          Note that if errors occur during provisioning/data syncing/setting
-          up, the cluster will not be torn down for debugging purposes.
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes. If
+            set, the autostop config specified in the task' resources will be
+            overridden by this parameter.
         backend: backend to use.  If None, use the default backend
           (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
@@ -468,12 +473,28 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    # Override the autostop config from command line flags to task YAML.
+    for task in dag.tasks:
+        for resource in task.resources:
+            resource.override_autostop_config(
+                down=down, idle_minutes=idle_minutes_to_autostop)
+            if resource.autostop_config is not None:
+                # For backward-compatbility, get the final autostop config for
+                # admin policy.
+                # TODO(aylei): remove this after 0.12.0
+                down = resource.autostop_config.down
+                idle_minutes_to_autostop = resource.autostop_config.idle_minutes
+
     request_options = admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
     validate(dag, admin_policy_request_options=request_options)
+    # The flags have been applied to the task YAML and the backward
+    # compatibility of admin policy has been handled. We should no longer use
+    # these flags.
+    del down, idle_minutes_to_autostop
 
     confirm_shown = False
     if _need_confirmation:
@@ -537,9 +558,7 @@ def launch(
         task=dag_str,
         cluster_name=cluster_name,
         retry_until_up=retry_until_up,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
         dryrun=dryrun,
-        down=down,
         backend=backend.NAME if backend else None,
         optimize_target=optimize_target,
         no_setup=no_setup,
@@ -2022,6 +2041,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
             expires = int(time.time()) + 604800
             domain = str(parsed_url.hostname)
             domain_initial_dot = domain.startswith('.')
+            secure = parsed_url.scheme == 'https'
             if not domain_initial_dot:
                 domain = '.' + domain
 
@@ -2037,7 +2057,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                     domain_initial_dot=domain_initial_dot,
                     path='',
                     path_specified=False,
-                    secure=False,
+                    secure=secure,
                     expires=expires,
                     discard=False,
                     comment=None,
@@ -2046,9 +2066,7 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                 ))
 
         # Now that the cookies are parsed, save them to the cookie jar.
-        cookie_jar_path = os.path.expanduser(
-            server_common.get_api_cookie_jar_path())
-        cookie_jar.save(cookie_jar_path)
+        server_common.set_api_cookie_jar(cookie_jar)
 
         # If we have a user_hash, save it to the local file
         if user_hash is not None:
