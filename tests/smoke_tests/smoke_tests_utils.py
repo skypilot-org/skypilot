@@ -373,11 +373,6 @@ def override_sky_config(
         env_dict = os.environ
         env_before_override = os.environ.copy()
 
-    if is_postgres_backend_test():
-        env_dict[
-            constants.
-            SKYPILOT_API_SERVER_DB_URL_ENV_VAR] = 'postgresql://postgres@localhost/skypilot'
-
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),

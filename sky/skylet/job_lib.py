@@ -794,7 +794,8 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = JobStatus(job['status'])
         job['user_hash'] = job['username']
-        job['username'] = global_user_state.get_user(job['user_hash']).name
+        user = global_user_state.get_user(job['user_hash'])
+        job['username'] = user.name if user is not None else None
     return jobs
 
 

@@ -563,14 +563,16 @@ def main():
                 # Do not support changing anything besides hosts for now
                 if history is not None:
                     for key in ['user', 'identity_file', 'password']:
-                        if history.get(key) != cluster_config.get(key):
+                        if not args.cleanup and history.get(
+                                key) != cluster_config.get(key):
                             raise ValueError(
                                 f'Cluster configuration has changed for field {key!r}. '
                                 f'Previous value: {history.get(key)}, '
                                 f'Current value: {cluster_config.get(key)}')
                     history_hosts_info = ssh_utils.prepare_hosts_info(
                         cluster_name, history)
-                    if history_hosts_info[0] != hosts_info[0]:
+                    if not args.cleanup and history_hosts_info[0] != hosts_info[
+                            0]:
                         raise ValueError(
                             f'Cluster configuration has changed for master node. '
                             f'Previous value: {history_hosts_info[0]}, '
@@ -700,7 +702,7 @@ def deploy_cluster(head_node,
         use_ssh_config=head_use_ssh_config,
         # For SkySSHUpLineProcessor
         print_output=True)
-    if result is None:
+    if not cleanup and result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Failed to SSH to head node ({head_node}). '

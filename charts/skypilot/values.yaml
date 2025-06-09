@@ -281,6 +281,9 @@ nebiusCredentials:
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
 
+# Extra init containers to run before the api container
+extraInitContainers:
+
 # Set securityContext for the api pod
 podSecurityContext: {}
 

@@ -327,6 +327,10 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
+      {{- if .Values.extraInitContainers }}
+      {{- toYaml .Values.extraInitContainers | nindent 6 }}
+      {{- end }}
+
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume
