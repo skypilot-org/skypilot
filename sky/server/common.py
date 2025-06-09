@@ -394,7 +394,7 @@ def _start_api_server(deploy: bool = False,
                         f'View logs at: {constants.API_SERVER_LOGS}')
             try:
                 # Clear the cache to ensure fresh checks during startup
-                get_api_server_status.cache_clear()
+                get_api_server_status.cache_clear()  # type: ignore
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
