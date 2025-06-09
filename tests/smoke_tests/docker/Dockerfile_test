@@ -127,6 +127,10 @@ RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     export PATH="$PATH:$HOME/.local/bin" && \
     uv pip install pyOpenSSL==23.1.1
 
+
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
 # Copy the entrypoint script
 COPY tests/smoke_tests/docker/entrypoint.sh /home/${USERNAME}/entrypoint.sh
 COPY tests/smoke_tests/docker/stop_sky_resource.sh /home/${USERNAME}/stop_sky_resource.sh
