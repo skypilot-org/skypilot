@@ -496,9 +496,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does not '
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
-
     logger.debug(f'Using config path: {config_path}')
-
     _set_loaded_config(parse_and_validate_config_file(config_path))
     _set_loaded_config_path(config_path)
 
