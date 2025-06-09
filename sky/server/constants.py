@@ -11,8 +11,6 @@ API_VERSION = '9'
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
-# The user ID of the SkyPilot system.
-SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
 MIN_AVAIL_MEM_GB = 2
 # Default encoder/decoder handler name.

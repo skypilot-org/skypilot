@@ -381,6 +381,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Check for API server changes and validate them
     current_config = skypilot_config.to_dict()
+    # If there is no changes to the config, we can return early
+    if current_config == config:
+        return config
 
     current_endpoint = current_config.get('api_server', {}).get('endpoint')
     new_endpoint = config.get('api_server', {}).get('endpoint')

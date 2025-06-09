@@ -7,8 +7,10 @@ import fastapi
 from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import payloads
+from sky.skylet import constants
 from sky.users import permission
 from sky.users import rbac
+from sky.utils import common
 
 logger = sky_logging.init_logger(__name__)
 
@@ -55,6 +57,11 @@ async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
     if user_info is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
+    # Disallow updating roles for the internal users.
+    if user_info.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Cannot update role for internal '
+                                    f'API server user {user_info.name}')
 
     # Update user role in casbin policy
     permission.permission_service.update_role(user_info.id, role)
