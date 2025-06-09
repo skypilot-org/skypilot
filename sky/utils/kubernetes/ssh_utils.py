@@ -56,23 +56,15 @@ class UniqueKeySafeLoader(yaml.SafeLoader):
     """Custom YAML loader that raises an error if there are duplicate keys."""
 
     def construct_mapping(self, node, deep=False):
-        mapping = {}
-        for key_node, value_node in node.value:
+        mapping = set()
+        for key_node, _ in node.value:
             key = self.construct_object(key_node, deep=deep)
             if key in mapping:
                 raise yaml.constructor.ConstructorError(
-                    note=(f'Duplicate cluster config for cluster {key!r}.\n'
-                          'Please remove one of them from: '
-                          f'{DEFAULT_SSH_NODE_POOLS_PATH}'))
-            value = self.construct_object(value_node, deep=deep)
-            mapping[key] = value
-        return mapping
-
-
-# Register the custom constructor inside the class
-UniqueKeySafeLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    UniqueKeySafeLoader.construct_mapping)
+                    note=(f'Duplicate key found: {key!r}.\n'
+                          'Please remove one of them from the YAML file.'))
+            mapping.add(key)
+        return super().construct_mapping(node, deep)
 
 
 def load_ssh_targets(file_path: str) -> Dict[str, Any]:
