@@ -53,6 +53,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import types
@@ -229,6 +230,9 @@ def override_request_env_and_config(
     original_env = os.environ.copy()
     os.environ.update(request_body.env_vars)
     # Note: may be overridden by AuthProxyMiddleware.
+    # TODO(zhwu): we need to make the entire request a context available to the
+    # entire request execution, so that we can access info like user through
+    # the execution.
     user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                        name=request_body.env_vars[constants.USER_ENV_VAR])
     global_user_state.add_or_update_user(user)
@@ -237,13 +241,17 @@ def override_request_env_and_config(
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
         client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server)
+        using_remote_api_server=request_body.using_remote_api_server,
+        user=user)
     try:
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
+            # Rejecting requests to workspaces that the user does not have
+            # permission to access.
+            workspaces_core.reject_request_for_unauthorized_workspace(user)
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
@@ -433,7 +441,7 @@ def prepare_request(
     """Prepare a request for execution."""
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
-        user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
+        user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
             models.User(id=user_id, name=user_id))
     request = api_requests.Request(request_id=request_id,

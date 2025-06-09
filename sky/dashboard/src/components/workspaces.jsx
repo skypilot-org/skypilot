@@ -122,36 +122,52 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   return null;
 };
 
+// Workspace badge component for private/public status
+const WorkspaceBadge = ({ isPrivate }) => {
+  if (isPrivate) {
+    return (
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+        Private
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+      Public
+    </span>
+  );
+};
+
 // Workspace card component
-const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
-  const handleEdit = async () => {
-    try {
-      // Get current user's role first
-      const response = await fetch(`${ENDPOINT}/users/role`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to get user role');
-      }
-      const data = await response.json();
-      const currentUserRole = data.role;
-
-      if (currentUserRole != 'admin') {
-        alert(`${data.name} is logged in as no admin, cannot edit workspace`);
-        return;
-      }
-
+const WorkspaceCard = ({
+  workspace,
+  onDelete,
+  onEdit,
+  router,
+  rawWorkspacesData,
+  checkPermissionAndAct,
+  roleLoading,
+}) => {
+  const handleEdit = () => {
+    checkPermissionAndAct('cannot edit workspace', () => {
       onEdit(workspace.name);
-    } catch (error) {
-      console.error('Failed to check user role:', error);
-      alert(`Error: ${error.message}`);
-    }
+    });
   };
+
+  // Get the workspace configuration to check if it's private
+  const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
+  const isPrivate = workspaceConfig.private === true;
 
   return (
     <Card key={workspace.name}>
       <CardHeader>
         <CardTitle className="text-base font-normal">
-          <span className="font-semibold">Workspace:</span> {workspace.name}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-semibold">Workspace:</span> {workspace.name}
+            </div>
+            <WorkspaceBadge isPrivate={isPrivate} />
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-sm pb-2">
@@ -210,7 +226,7 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
           variant="outline"
           size="sm"
           onClick={() => onDelete(workspace.name)}
-          disabled={workspace.name === 'default'}
+          disabled={workspace.name === 'default' || roleLoading}
           title={
             workspace.name === 'default'
               ? 'Cannot delete default workspace'
@@ -218,10 +234,29 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
           }
           className="text-red-600 hover:text-red-700 hover:bg-red-50"
         >
-          Delete
+          {roleLoading ? (
+            <div className="flex items-center">
+              <CircularProgress size={12} className="mr-1" />
+              <span>Delete</span>
+            </div>
+          ) : (
+            'Delete'
+          )}
         </Button>
-        <Button variant="outline" size="sm" onClick={handleEdit}>
-          Edit
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleEdit}
+          disabled={roleLoading}
+        >
+          {roleLoading ? (
+            <div className="flex items-center">
+              <CircularProgress size={12} className="mr-1" />
+              <span>Edit</span>
+            </div>
+          ) : (
+            'Edit'
+          )}
         </Button>
       </CardFooter>
     </Card>
@@ -229,28 +264,13 @@ const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => {
 };
 
 // Create new workspace card component
-const CreateWorkspaceCard = ({ onClick }) => {
-  const handleClick = async () => {
-    try {
-      // Get current user's role first
-      const response = await fetch(`${ENDPOINT}/users/role`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to get user role');
-      }
-      const data = await response.json();
-      const currentUserRole = data.role;
-
-      if (currentUserRole != 'admin') {
-        alert(`${data.name} is logged in as no admin, cannot create workspace`);
-        return;
-      }
-
-      onClick();
-    } catch (error) {
-      console.error('Failed to check user role:', error);
-      alert(`Error: ${error.message}`);
-    }
+const CreateWorkspaceCard = ({
+  onClick,
+  checkPermissionAndAct,
+  roleLoading,
+}) => {
+  const handleClick = () => {
+    checkPermissionAndAct('cannot create workspace', onClick);
   };
 
   return (
@@ -349,8 +369,75 @@ export function Workspaces() {
     error: null,
   });
 
+  // Permission denial dialog state
+  const [permissionDenialState, setPermissionDenialState] = useState({
+    open: false,
+    message: '',
+    userName: '',
+  });
+
+  // User role cache
+  const [userRoleCache, setUserRoleCache] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(false);
+
   const router = useRouter();
   const isMobile = useMobile();
+
+  // Function to get user role with caching
+  const getUserRole = async () => {
+    // Return cached result if available and less than 5 minutes old
+    if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
+      return userRoleCache;
+    }
+
+    setRoleLoading(true);
+    try {
+      const response = await fetch(`${ENDPOINT}/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const roleData = {
+        role: data.role,
+        name: data.name,
+        timestamp: Date.now(),
+      };
+      setUserRoleCache(roleData);
+      setRoleLoading(false);
+      return roleData;
+    } catch (error) {
+      setRoleLoading(false);
+      throw error;
+    }
+  };
+
+  // Function to handle permission check with smooth UX
+  const checkPermissionAndAct = async (action, actionCallback) => {
+    try {
+      const roleData = await getUserRole();
+
+      if (roleData.role !== 'admin') {
+        setPermissionDenialState({
+          open: true,
+          message: action,
+          userName: roleData.name.toLowerCase(),
+        });
+        return false;
+      }
+
+      actionCallback();
+      return true;
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      setPermissionDenialState({
+        open: true,
+        message: `Error: ${error.message}`,
+        userName: '',
+      });
+      return false;
+    }
+  };
 
   const fetchData = async (showLoading = false) => {
     if (showLoading) {
@@ -489,32 +576,15 @@ export function Workspaces() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleDeleteWorkspace = async (workspaceName) => {
-    try {
-      // Get current user's role first
-      const response = await fetch(`${ENDPOINT}/users/role`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to get user role');
-      }
-      const data = await response.json();
-      const currentUserRole = data.role;
-
-      if (currentUserRole != 'admin') {
-        alert(`${data.name} is logged in as no admin, cannot delete workspace`);
-        return;
-      }
-
+  const handleDeleteWorkspace = (workspaceName) => {
+    checkPermissionAndAct('cannot delete workspace', () => {
       setDeleteState({
         confirmOpen: true,
         workspaceToDelete: workspaceName,
         deleting: false,
         error: null,
       });
-    } catch (error) {
-      console.error('Failed to check user role:', error);
-      alert(`Error: ${error.message}`);
-    }
+    });
   };
 
   const handleConfirmDelete = async () => {
@@ -529,7 +599,11 @@ export function Workspaces() {
         deleting: false,
         error: null,
       });
-      await fetchData();
+
+      // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
+      dashboardCache.invalidate(getWorkspaces);
+
+      await fetchData(true); // Show loading during refresh
     } catch (error) {
       console.error('Error deleting workspace:', error);
       setDeleteState((prev) => ({
@@ -559,27 +633,10 @@ export function Workspaces() {
     });
   };
 
-  const handleEditAllConfigs = async () => {
-    try {
-      // Get current user's role first
-      const response = await fetch(`${ENDPOINT}/users/role`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to get user role');
-      }
-      const data = await response.json();
-      const currentUserRole = data.role;
-
-      if (currentUserRole != 'admin') {
-        alert(`${data.name} is logged in as no admin, cannot edit config`);
-        return;
-      }
-
+  const handleEditAllConfigs = () => {
+    checkPermissionAndAct('cannot edit config', () => {
       router.push('/config');
-    } catch (error) {
-      console.error('Failed to check user role:', error);
-      alert(`Error: ${error.message}`);
-    }
+    });
   };
 
   const preStyle = {
@@ -613,11 +670,19 @@ export function Workspaces() {
             className="ml-4 px-2 py-1 text-xs"
             disabled={
               loading ||
+              roleLoading ||
               !rawWorkspacesData ||
               Object.keys(rawWorkspacesData).length === 0
             }
           >
-            Edit All Configs
+            {roleLoading ? (
+              <div className="flex items-center">
+                <CircularProgress size={12} className="mr-1" />
+                <span>Edit All Configs</span>
+              </div>
+            ) : (
+              'Edit All Configs'
+            )}
           </Button>
         </div>
         <div className="flex items-center">
@@ -664,9 +729,16 @@ export function Workspaces() {
               onDelete={handleDeleteWorkspace}
               onEdit={(name) => router.push(`/workspaces/${name}`)}
               router={router}
+              rawWorkspacesData={rawWorkspacesData}
+              checkPermissionAndAct={checkPermissionAndAct}
+              roleLoading={roleLoading}
             />
           ))}
-          <CreateWorkspaceCard onClick={() => router.push('/workspace/new')} />
+          <CreateWorkspaceCard
+            onClick={() => router.push('/workspace/new')}
+            checkPermissionAndAct={checkPermissionAndAct}
+            roleLoading={roleLoading}
+          />
         </div>
       )}
 
@@ -690,6 +762,50 @@ export function Workspaces() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Permission Denial Dialog */}
+      <Dialog
+        open={permissionDenialState.open}
+        onOpenChange={(open) =>
+          setPermissionDenialState((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent className="sm:max-w-md transition-all duration-200 ease-in-out">
+          <DialogHeader>
+            <DialogTitle>Permission Denied</DialogTitle>
+            <DialogDescription>
+              {roleLoading ? (
+                <div className="flex items-center py-2">
+                  <CircularProgress size={16} className="mr-2" />
+                  <span>Checking permissions...</span>
+                </div>
+              ) : (
+                <>
+                  {permissionDenialState.userName ? (
+                    <>
+                      {permissionDenialState.userName} is logged in as non-admin
+                      and {permissionDenialState.message}.
+                    </>
+                  ) : (
+                    permissionDenialState.message
+                  )}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setPermissionDenialState((prev) => ({ ...prev, open: false }))
+              }
+              disabled={roleLoading}
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteState.confirmOpen} onOpenChange={handleCancelDelete}>
