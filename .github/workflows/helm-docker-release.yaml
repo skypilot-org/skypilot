@@ -69,7 +69,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "helm-docker-release deploy tests ${{ needs.set-package.outputs.package_name }} ${{ needs.docker-build.outputs.version }}"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--helm-package ${{ needs.set-package.outputs.package_name }} --helm-version ${{ needs.docker-build.outputs.version }} -k test_helm_deploy_gke"}'
+      build_env_vars: '{"ARGS": " --gcp --helm-package ${{ needs.set-package.outputs.package_name }} --helm-version ${{ needs.docker-build.outputs.version }} -k test_helm_deploy_gke"}'
       timeout_minutes: 120
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
