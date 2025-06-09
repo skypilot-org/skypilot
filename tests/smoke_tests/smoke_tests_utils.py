@@ -1,3 +1,4 @@
+import argparse
 import contextlib
 import enum
 import inspect
@@ -29,6 +30,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils.kubernetes import deploy_remote_cluster
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
@@ -121,6 +123,18 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
     'sleep 10; '
     'done')
+
+_LAUNCH_CMDS = ['sky launch', 'sky jobs launch', 'sky serve up']
+_SSH_NODE_NOT_SUPPORT_INFRA = ['runpod', 'kubernetes', 'ssh']
+
+
+def is_launch_cmd(cmd: str, launch_cmds: List[str] = _LAUNCH_CMDS) -> bool:
+    return any(launch_cmd in cmd for launch_cmd in launch_cmds)
+
+
+def yaml_path_in_command(cmd: str) -> Optional[str]:
+    yaml_path_match = re.search(r'([\w./-]+\.yaml)', cmd)
+    return yaml_path_match.group(1) if yaml_path_match else None
 
 
 def get_cloud_specific_resource_config(generic_cloud: str):
@@ -312,6 +326,13 @@ class Test(NamedTuple):
     def echo_without_prefix(cls, message: str):
         print(message, file=sys.stderr, flush=True)
 
+    def copy(self, **override: Dict[str, Any]):
+        return Test(name=override.pop('name', self.name),
+                    commands=override.pop('commands', self.commands),
+                    teardown=override.pop('teardown', self.teardown),
+                    timeout=override.pop('timeout', self.timeout),
+                    env=override.pop('env', self.env))
+
 
 def get_timeout(generic_cloud: str,
                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
@@ -362,12 +383,12 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 
 @contextlib.contextmanager
 def override_sky_config(
-    test: Optional[Test] = None,
-    env_dict: Optional[Dict[str, str]] = None
-) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+        test: Optional[Test] = None,
+        env_dict: Optional[Dict[str,
+                                str]] = None) -> Generator[Test, None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
-    env_before_override: Optional[Dict[str, Any]] = None
     override_sky_config_dict = skypilot_config.config_utils.Config()
+    env_before_override = None
 
     if env_dict is None:
         env_dict = os.environ
@@ -400,24 +421,58 @@ def override_sky_config(
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
 
-    if not override_sky_config_dict:
-        yield None
-        return
+    if override_sky_config_dict:
+        temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
+        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+            # Read the original config
+            original_config = skypilot_config.parse_and_validate_config_file(
+                env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+        else:
+            original_config = skypilot_config.config_utils.Config()
+        overlay_config = skypilot_config.overlay_skypilot_config(
+            original_config, override_sky_config_dict)
+        temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
+        temp_config_file.flush()
+        # Update the environment variable to use the temporary file
+        env_dict[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
 
-    temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
-        # Read the original config
-        original_config = skypilot_config.parse_and_validate_config_file(
-            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
-    else:
-        original_config = skypilot_config.config_utils.Config()
-    overlay_config = skypilot_config.overlay_skypilot_config(
-        original_config, override_sky_config_dict)
-    temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
-    temp_config_file.flush()
-    # Update the environment variable to use the temporary file
-    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
-    yield temp_config_file
+    if is_ssh_test() and test is not None:
+        ssh_node_pool_command, node_pool_size = parse_ssh_command(test.commands)
+        if ssh_node_pool_command:
+            node_pool_hosts = ['ssh-node-pool']
+            for index in range(node_pool_size - 1):
+                node_pool_hosts.append(f'ssh-node-pool-worker{index + 1}')
+            temp_ssh_node_pools_file = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.yaml')
+            with open(temp_ssh_node_pools_file.name, 'w') as f:
+                yaml.safe_dump(
+                    {'test-ssh-node-pools': {
+                        'hosts': node_pool_hosts
+                    }}, f)
+
+            # Launch VMs for ssh node pools
+            new_test_commands = [ssh_node_pool_command]
+            # Setup ssh node pools
+            new_test_commands += ['sky ssh up', 'sky check ssh']
+            new_test_commands += test.commands
+            # Teardown ssh node pools
+            original_teardown = f'{test.teardown};' if test.teardown else ''
+            teardown_command = original_teardown + 'sky ssh down; sky down ssh-node-pool -y'
+            echo(f'{os.linesep}Overriding test commands: {os.linesep}'
+                 f'{os.linesep.join(test.commands)}'
+                 f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
+                 f'{os.linesep.join(new_test_commands)}')
+            echo(f'{os.linesep}Overriding test teardown: {os.linesep}'
+                 f'{test.teardown or ""}'
+                 f'{os.linesep}{os.linesep}With{os.linesep}{os.linesep}'
+                 f'{teardown_command or ""}')
+            test = test.copy(commands=new_test_commands,
+                             teardown=teardown_command)
+            env_dict[
+                deploy_remote_cluster.
+                ENV_VAR_SSH_NODE_POOLS_CONFIG] = temp_ssh_node_pools_file.name
+    yield test
     if env_before_override is not None:
         os.environ.clear()
         os.environ.update(env_before_override)
@@ -446,8 +501,8 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    with override_sky_config(test, env_dict):
-        for command in test.commands:
+    with override_sky_config(test, env_dict) as new_test:
+        for command in new_test.commands:
             write(f'+ {command}\n')
             flush()
             proc = subprocess.Popen(
@@ -459,12 +514,12 @@ def run_one_test(test: Test) -> None:
                 env=env_dict,
             )
             try:
-                proc.wait(timeout=test.timeout)
+                proc.wait(timeout=new_test.timeout)
             except subprocess.TimeoutExpired as e:
                 flush()
-                test.echo(f'Timeout after {test.timeout} seconds.')
-                test.echo(str(e))
-                write(f'Timeout after {test.timeout} seconds.\n')
+                new_test.echo(f'Timeout after {new_test.timeout} seconds.')
+                new_test.echo(str(e))
+                write(f'Timeout after {new_test.timeout} seconds.\n')
                 flush()
                 # Kill the current process.
                 proc.terminate()
@@ -483,16 +538,16 @@ def run_one_test(test: Test) -> None:
         msg = (f'{outcome}.'
                f'{reason}')
         if log_to_stdout:
-            test.echo(msg)
+            new_test.echo(msg)
         else:
             msg += f'\nLog: less -r {log_file.name}\n'
-            test.echo(msg)
+            new_test.echo(msg)
             write(msg)
 
         if (proc.returncode == 0 or
-                pytest.terminate_on_failure) and test.teardown is not None:
+                pytest.terminate_on_failure) and new_test.teardown is not None:
             subprocess_utils.run(
-                test.teardown,
+                new_test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
                 timeout=10 * 60,  # 10 mins
@@ -718,14 +773,141 @@ def pytest_controller_cloud() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
 
 
+def is_ssh_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_SSH', None) is not None
+
+
+def parse_ssh_command(commands: List[str]) -> Tuple[str, int]:
+    """Parse the SSH command to get a list of commands to launch a node pool."""
+    gpus_val = None
+    infra_val = None
+    instance_type_val = None
+    yaml_path_val = None
+    cpus_val = None
+    memory_val = None
+    ssh_node_pool_size = 0
+
+    for original_command_str in commands:
+        if not is_launch_cmd(original_command_str):
+            continue
+
+        # --- Argument extraction for the main/controller SSH node pool VM ---
+        # Search for each argument type independently
+        # TODO: (zeping) Use optimizer to compare the best parameters instead of
+        # using latest parameters.
+        gpus_match = re.search(r'--gpus\s+(\S+)', original_command_str)
+        if gpus_match:
+            gpus_val = gpus_match.group(1)
+
+        infra_match = re.search(r'--infra\s+(\S+)', original_command_str)
+        if infra_match:
+            infra_val = infra_match.group(1)
+            for not_support_infra in _SSH_NODE_NOT_SUPPORT_INFRA:
+                if not_support_infra in infra_val:
+                    infra_val = 'aws'
+
+        cpu_match = re.search(r'--cpus\s+(\d+)', original_command_str)
+        if cpu_match:
+            cpu_int = int(cpu_match.group(1))
+            if cpu_int >= 8:
+                # More buffer
+                cpus_val = f'{cpu_int + 8}+'
+
+        memory_match = re.search(r'--memory\s+(\d+)', original_command_str)
+        if memory_match:
+            memory_int = int(memory_match.group(1))
+            if memory_int >= 16:
+                # More buffer
+                memory_val = f'{memory_int + 8}+'
+
+        # Handle both --instance-type and -t
+        it_match = re.search(r'(?:--instance-type|-t)\s+(\S+)',
+                             original_command_str)
+        if it_match:
+            instance_type_val = it_match.group(1)
+
+        num_nodes_match = re.search(r'--num-nodes\s+(\d+)',
+                                    original_command_str)
+        num_nodes_val = int(num_nodes_match.group(1)) if num_nodes_match else 1
+
+        if ssh_node_pool_size < num_nodes_val:
+            ssh_node_pool_size = num_nodes_val
+
+        # --- Handle job/service specific nodes based on YAML ---
+        if is_launch_cmd(original_command_str, _LAUNCH_CMDS[1:]):
+            if ssh_node_pool_size <= 1:
+                # Need two nodes for the controller node and the job node.
+                ssh_node_pool_size = 2
+
+            # General YAML path from the command for jobs/serve task definition
+            # This can be a positional argument or part of other structures.
+            # Regex looks for a path-like string ending in .yaml
+            yaml_path_val = yaml_path_in_command(original_command_str)
+
+            if yaml_path_val:  # Use the YAML found in the original command
+                with open(yaml_path_val, 'r') as f:
+                    # Handle multiple YAML documents
+                    for task_config in yaml.load_all(f, Loader=yaml.SafeLoader):
+                        # Resources for job nodes from YAML
+                        if 'resources' in task_config:
+                            resources = task_config['resources']
+                            if 'infra' in resources:
+                                infra_val = resources['infra']
+                                for not_support_infra in _SSH_NODE_NOT_SUPPORT_INFRA:
+                                    if not_support_infra in infra_val:
+                                        infra_val = 'aws'
+                            if 'accelerators' in resources:
+                                gpus_val = resources['accelerators']
+                                if isinstance(gpus_val, dict):
+                                    gpus_val = next(iter(gpus_val.keys()), '')
+                                elif isinstance(gpus_val, list):
+                                    gpus_val = gpus_val[0] if gpus_val else ''
+                            if 'instance_type' in resources:
+                                instance_type_val = resources['instance_type']
+                            if 'cpus' in resources:
+                                cpu_int = int(
+                                    re.match(r'(\d+)',
+                                             resources['cpus']).group(1))
+                                if cpu_int >= 8:
+                                    # More buffer
+                                    cpus_val = f'{cpu_int + 8}+'
+                            if 'memory' in resources:
+                                memory_int = int(
+                                    re.match(r'(\d+)',
+                                             resources['memory']).group(1))
+                                if memory_int >= 16:
+                                    # More buffer
+                                    memory_val = f'{memory_int + 8}+'
+
+                        if 'num_nodes' in task_config:
+                            # One extra for controller node
+                            node_size_required = int(
+                                task_config['num_nodes']) + 1
+                            if ssh_node_pool_size < node_size_required:
+                                ssh_node_pool_size = node_size_required
+
+    if ssh_node_pool_size > 0:
+        ssh_node_pool_command = [
+            'sky', 'launch', '-c', f'ssh-node-pool', '-y', '--num-nodes',
+            str(ssh_node_pool_size)
+        ]
+        if infra_val:
+            ssh_node_pool_command.extend(['--infra', infra_val])
+        if instance_type_val:
+            ssh_node_pool_command.extend(['--instance-type', instance_type_val])
+        if gpus_val:
+            ssh_node_pool_command.extend(['--gpus', gpus_val])
+        if cpus_val:
+            ssh_node_pool_command.extend(['--cpus', cpus_val])
+        if memory_val:
+            ssh_node_pool_command.extend(['--memory', memory_val])
+        ssh_node_pool_command = ' '.join(ssh_node_pool_command)
+
+    return ssh_node_pool_command, ssh_node_pool_size
+
+
 def is_postgres_backend_test() -> bool:
     return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
-
-
-def override_env_config(config: Dict[str, str]):
-    """Override the environment variable for the test."""
-    for key, value in config.items():
-        os.environ[key] = value
 
 
 def get_api_server_url() -> str:

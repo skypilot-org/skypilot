@@ -224,7 +224,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             temp_path = f.name
 
         try:
-            with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH', temp_path):
+            with patch(
+                    'sky.utils.kubernetes.deploy_remote_cluster.get_ssh_node_pools_path',
+                    return_value=temp_path):
                 result = ssh.SSH.get_ssh_node_pool_contexts()
 
                 expected = ['ssh-cluster1', 'ssh-cluster2', 'ssh-cluster3']
@@ -234,8 +236,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     def test_get_ssh_node_pool_contexts_with_nonexistent_file(self):
         """Test get_ssh_node_pool_contexts with nonexistent file."""
-        with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH',
-                   '/nonexistent/path/file.yaml'):
+        with patch(
+                'sky.utils.kubernetes.deploy_remote_cluster.get_ssh_node_pools_path',
+                return_value='/nonexistent/path/file.yaml'):
             result = ssh.SSH.get_ssh_node_pool_contexts()
 
             self.assertEqual(result, [])
@@ -248,7 +251,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             temp_path = f.name
 
         try:
-            with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH', temp_path):
+            with patch(
+                    'sky.utils.kubernetes.deploy_remote_cluster.get_ssh_node_pools_path',
+                    return_value=temp_path):
                 result = ssh.SSH.get_ssh_node_pool_contexts()
 
                 self.assertEqual(result, [])
@@ -263,7 +268,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             temp_path = f.name
 
         try:
-            with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH', temp_path):
+            with patch(
+                    'sky.utils.kubernetes.deploy_remote_cluster.get_ssh_node_pools_path',
+                    return_value=temp_path):
                 result = ssh.SSH.get_ssh_node_pool_contexts()
 
                 # Should return empty list on error
