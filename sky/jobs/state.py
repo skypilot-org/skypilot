@@ -984,6 +984,34 @@ def get_failure_reason(job_id: int) -> Optional[str]:
         return reason[0]
 
 
+def _process_managed_jobs(rows: List[Tuple[Any, ...]]) -> List[Dict[str, Any]]:
+    jobs = []
+    for row in rows:
+        job_dict = dict(zip(columns, row))
+        job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        job_dict['schedule_state'] = ManagedJobScheduleState(
+            job_dict['schedule_state'])
+        if job_dict['job_name'] is None:
+            job_dict['job_name'] = job_dict['task_name']
+
+        # Add YAML content and command for managed jobs
+        dag_yaml_path = job_dict.get('dag_yaml_path')
+        if dag_yaml_path:
+            try:
+                with open(dag_yaml_path, 'r', encoding='utf-8') as f:
+                    job_dict['dag_yaml'] = f.read()
+            except (FileNotFoundError, IOError, OSError):
+                job_dict['dag_yaml'] = None
+
+            # Generate a command that could be used to launch this job
+            # Format: sky jobs launch <yaml_path>
+        else:
+            job_dict['dag_yaml'] = None
+
+        jobs.append(job_dict)
+    return jobs
+
+
 def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get managed jobs from the database."""
     job_filter = '' if job_id is None else f'WHERE spot.spot_job_id={job_id}'
@@ -1004,31 +1032,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
             ON spot.spot_job_id=job_info.spot_job_id
             {job_filter}
             ORDER BY spot.spot_job_id DESC, spot.task_id ASC""").fetchall()
-        jobs = []
-        for row in rows:
-            job_dict = dict(zip(columns, row))
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-            if job_dict['job_name'] is None:
-                job_dict['job_name'] = job_dict['task_name']
-
-            # Add YAML content and command for managed jobs
-            dag_yaml_path = job_dict.get('dag_yaml_path')
-            if dag_yaml_path:
-                try:
-                    with open(dag_yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['dag_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError):
-                    job_dict['dag_yaml'] = None
-
-                # Generate a command that could be used to launch this job
-                # Format: sky jobs launch <yaml_path>
-            else:
-                job_dict['dag_yaml'] = None
-
-            jobs.append(job_dict)
-        return jobs
+        return _process_managed_jobs(rows)
 
 
 def get_task_name(job_id: int, task_id: int) -> str:
@@ -1094,31 +1098,7 @@ def get_preemptible_jobs(priority: int) -> List[Dict[str, Any]]:
             'ORDER BY priority DESC, spot_job_id DESC',
             (ManagedJobStatus.RUNNING.value, priority)).fetchall()
         # TODO(cooperc): split out from get_managed_jobs to a separate function.
-        jobs = []
-        for row in rows:
-            job_dict = dict(zip(columns, row))
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-            if job_dict['job_name'] is None:
-                job_dict['job_name'] = job_dict['task_name']
-
-            # Add YAML content and command for managed jobs
-            dag_yaml_path = job_dict.get('dag_yaml_path')
-            if dag_yaml_path:
-                try:
-                    with open(dag_yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['dag_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError):
-                    job_dict['dag_yaml'] = None
-
-                # Generate a command that could be used to launch this job
-                # Format: sky jobs launch <yaml_path>
-            else:
-                job_dict['dag_yaml'] = None
-
-            jobs.append(job_dict)
-        return jobs
+        return _process_managed_jobs(rows)
 
 
 # === Scheduler state functions ===

@@ -55,11 +55,9 @@ class PreemptionStrategyExecutor:
              job_id: int) -> 'PreemptionStrategyExecutor':
         strategy = task.job_preemption_strategy
         if strategy is None or strategy == 'none':
-            logger.info('Using no-op preemption strategy.')
             # Default no-op preemption strategy. (Does not preempt.)
             return PreemptionStrategyExecutor(task, job_id)
         elif strategy == 'simple':
-            logger.info('Using simple preemption strategy.')
             return SimplePreemptionStrategyExecutor(task, job_id)
         else:
             raise ValueError(f'Invalid preemption strategy: {strategy}')
@@ -77,36 +75,27 @@ class SimplePreemptionStrategyExecutor(PreemptionStrategyExecutor):
     """Simple preemption strategy for managed job clusters."""
 
     def preempt(self) -> bool:
+        logger.info('Attempt to preempt another job.')
         # Find a lower priority RUNNING job with resources >= this job's
         # request.
         # Get all the RUNNING jobs that we could preempt.
         self_from_database = state.get_managed_jobs(self.job_id)
-        logger.info(f'Self from database: {self_from_database}')
         if not self_from_database:
-            logger.info('No self from database found.')
             return False
         self_from_database = self_from_database[0]
         self_priority = self_from_database['priority']
-        logger.info(f'Self priority: {self_priority}')
         preemptible_jobs = state.get_preemptible_jobs(self_priority)
-        logger.info(f'Found {len(preemptible_jobs)} preemptible jobs.')
         if not preemptible_jobs:
             logger.info('No preemptible jobs found.')
         for job in preemptible_jobs:
-            logger.info(f'Checking job {job["job_id"]}')
             # Get the job's cluster name.
             cluster_name = managed_job_utils.generate_managed_job_cluster_name(
                 job['task_name'], job['job_id'])
-            logger.info(f'Cluster name: {cluster_name}')
             # Get the job cluster
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if not isinstance(handle, backends.CloudVmRayResourceHandle):
-                logger.info('Not a CVMRH, skipping.')
                 continue
-            logger.info(f'Handle: {handle}')
-            logger.info(
-                f'{len(self.task.resources)} resources: {self.task.resources}')
             for resource in self.task.resources:
                 if resource.less_demanding_than(handle.launched_resources):
                     # Preempt the job.
