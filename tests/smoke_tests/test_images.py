@@ -559,3 +559,13 @@ def test_kubernetes_docker_image_and_ssh():
         # Clean up temporary files
         os.unlink(docker_yaml_path)
         os.unlink(unprefixed_yaml_path)
+
+
+@pytest.mark.gcp
+def test_helm_deploy_gke(request):
+    helm_version = request.config.getoption('--helm-version')
+    package_name = request.config.getoption('--helm-package')
+    test = smoke_tests_utils.Test('helm_deploy_gke', [
+        f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+    ])
+    smoke_tests_utils.run_one_test(test)
