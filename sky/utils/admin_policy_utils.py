@@ -2,7 +2,6 @@
 import contextlib
 import copy
 import importlib
-import os
 from typing import Iterator, Optional, Tuple, Union
 
 import colorama
@@ -13,7 +12,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
-from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
@@ -57,6 +55,7 @@ def _get_policy_cls(
 def apply_and_use_config_in_current_request(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     request_options: Optional[admin_policy.RequestOptions] = None,
+    at_client_side: bool = False,
 ) -> Iterator['dag_lib.Dag']:
     """Applies an admin policy and override SkyPilot config for current request
 
@@ -68,7 +67,7 @@ def apply_and_use_config_in_current_request(
     Refer to `apply()` for more details.
     """
     original_config = skypilot_config.to_dict()
-    dag, mutated_config = apply(entrypoint, request_options)
+    dag, mutated_config = apply(entrypoint, request_options, at_client_side)
     if mutated_config != original_config:
         with skypilot_config.replace_skypilot_config(mutated_config):
             yield dag
@@ -79,6 +78,7 @@ def apply_and_use_config_in_current_request(
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     request_options: Optional[admin_policy.RequestOptions] = None,
+    at_client_side: bool = False,
 ) -> Tuple['dag_lib.Dag', config_utils.Config]:
     """Applies an admin policy (if registered) to a DAG or a task.
 
@@ -107,17 +107,18 @@ def apply(
     if policy_cls is None:
         return dag, skypilot_config.to_dict()
 
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        logger.info(f'Applying server admin policy: {policy}')
-    else:
+    if at_client_side:
         logger.info(f'Applying client admin policy: {policy}')
+    else:
+        logger.info(f'Applying server admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, request_options)
+        user_request = admin_policy.UserRequest(task, config, request_options,
+                                                at_client_side)
         try:
             mutated_user_request = policy_cls.validate_and_mutate(user_request)
         except Exception as e:  # pylint: disable=broad-except

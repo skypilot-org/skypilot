@@ -58,7 +58,8 @@ def up(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(dag) as dag:
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, at_client_side=True) as dag:
         sdk.validate(dag)
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)
@@ -120,7 +121,8 @@ def update(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(dag) as dag:
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, at_client_side=True) as dag:
         sdk.validate(dag)
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)

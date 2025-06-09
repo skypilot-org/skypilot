@@ -494,7 +494,7 @@ def launch(
         down=down,
         dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options) as dag:
+            dag, request_options=request_options, at_client_side=True) as dag:
         return _launch(
             dag,
             cluster_name,

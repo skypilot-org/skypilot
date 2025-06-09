@@ -19,13 +19,18 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
     @classmethod
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        # Only apply the policy at client-side.
+        if not user_request.at_client_side:
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
         task = user_request.task
         if task.file_mounts is None:
             task.file_mounts = {}
         # Use the env var to detect whether an explicit credential path is
         # specified.
         cred_path = os.environ.get(_GOOGLE_APPLICATION_CREDENTIALS_ENV)
-        logger.info(f'get task: {task}')
+
         if cred_path is not None:
             task.file_mounts[_GOOGLE_APPLICATION_CREDENTIALS_PATH] = cred_path
             activate_cmd = (f'gcloud auth activate-service-account --key-file '

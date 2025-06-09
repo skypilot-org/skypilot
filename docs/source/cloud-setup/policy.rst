@@ -253,4 +253,4 @@ Use local GCP credentials for all tasks
 
 .. note::
 
-    This policy only makes sense when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` is a no-op since the task launched by API server inherits the credentials from the API server by default.
+    This policy only take effects when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` will be a no-op.
