@@ -19,7 +19,7 @@ Example usage:
 Overview
 --------
 
-Admin policies are :ref:`implemented in Python packages <implement-admin-policy>` first, then get distributed and applied at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`.
+Admin policies are :ref:`implemented in Python packages <implement-admin-policy>` first, then get distributed and applied at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`. If both are set, the policy at client-side will be applied first, the mutated tasks and SkyPilot config will then be processed by the policy at server-side.
 
 .. _client-side-admin-policy:
 
