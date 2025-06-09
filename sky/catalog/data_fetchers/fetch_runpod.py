@@ -24,23 +24,23 @@ from runpod.api import graphql
 # for backwards compatibility, force rename some gpus.
 # map the generated name to the original name
 GPU_NAME_OVERRIDES = {
-    "A100-PCIe": "A100-80GB",
-    "A100-SXM": "A100-80GB-SXM",
-    "H100-PCIe": "H100",
+    'A100-PCIe': 'A100-80GB',
+    'A100-SXM': 'A100-80GB-SXM',
+    'H100-PCIe': 'H100',
 }
 
 # Constants
 USEFUL_COLUMNS = [
-    "InstanceType",
-    "AcceleratorName",
-    "AcceleratorCount",
-    "vCPUs",
-    "MemoryGiB",
-    "GpuInfo",
-    "Region",
-    "Price",
-    "SpotPrice",
-    "AvailabilityZone",
+    'InstanceType',
+    'AcceleratorName',
+    'AcceleratorCount',
+    'vCPUs',
+    'MemoryGiB',
+    'GpuInfo',
+    'Region',
+    'Price',
+    'SpotPrice',
+    'AvailabilityZone',
 ]
 
 # Default values for instance specifications
@@ -52,28 +52,28 @@ MEMORY_PER_GPU = 80.0  # Base memory per GPU
 
 # Mapping of regions to their availability zones
 REGION_ZONES = {
-    "CA": ["CA-MTL-1", "CA-MTL-2", "CA-MTL-3"],
-    "CZ": ["EU-CZ-1"],
-    "IS": ["EUR-IS-1", "EUR-IS-2", "EUR-IS-3"],
-    "NL": ["EU-NL-1"],
-    "NO": ["EU-SE-1"],
-    "RO": ["EU-RO-1"],
-    "SE": ["EU-SE-1"],
-    "US": [
-        "US-CA-1",
-        "US-CA-2",
-        "US-DE-1",
-        "US-GA-1",
-        "US-GA-2",
-        "US-IL-1",
-        "US-KS-1",
-        "US-KS-2",
-        "US-NC-1",
-        "US-TX-1",
-        "US-TX-2",
-        "US-TX-3",
-        "US-TX-4",
-        "US-WA-1",
+    'CA': ['CA-MTL-1', 'CA-MTL-2', 'CA-MTL-3'],
+    'CZ': ['EU-CZ-1'],
+    'IS': ['EUR-IS-1', 'EUR-IS-2', 'EUR-IS-3'],
+    'NL': ['EU-NL-1'],
+    'NO': ['EU-SE-1'],
+    'RO': ['EU-RO-1'],
+    'SE': ['EU-SE-1'],
+    'US': [
+        'US-CA-1',
+        'US-CA-2',
+        'US-DE-1',
+        'US-GA-1',
+        'US-GA-2',
+        'US-IL-1',
+        'US-KS-1',
+        'US-KS-2',
+        'US-NC-1',
+        'US-TX-1',
+        'US-TX-2',
+        'US-TX-3',
+        'US-TX-4',
+        'US-WA-1',
     ],
 }
 
@@ -117,10 +117,10 @@ def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
     """
 
     result = graphql.run_graphql_query(query)
-    if "errors" in result:
+    if 'errors' in result:
         raise ValueError(f'GraphQL errors: {result["errors"]}')
 
-    return result["data"]["gpuTypes"][0]
+    return result['data']['gpuTypes'][0]
 
 
 def format_price(price: float) -> float:
@@ -158,13 +158,13 @@ def format_gpu_name(gpu_type: Dict) -> str:
     """
     # Extract base name
     base_name = (
-        gpu_type["displayName"]
+        gpu_type['displayName']
         # handle formatting names of RTX GPUs
-        .replace("RTX PRO ", "RTXPRO")
+        .replace('RTX PRO ', 'RTXPRO')
         # skypilot has no hyphen in RTX names. ie. RTX3090, not RTX-3090
-        .replace("RTX ", "RTX")
+        .replace('RTX ', 'RTX')
         # replace spaces with hyphens
-        .replace(" ", "-"))
+        .replace(' ', '-'))
 
     # handle name overrides for backwards compatibility
     if base_name in GPU_NAME_OVERRIDES:
@@ -177,8 +177,8 @@ def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
     """Extract relevant GPU information from RunPod GPU type data."""
     # Use minVcpu and minMemory from lowestPrice if available,
     # otherwise use defaults
-    vcpus = gpu_type.get("lowestPrice", {}).get("minVcpu")
-    memory = gpu_type.get("lowestPrice", {}).get("minMemory")
+    vcpus = gpu_type.get('lowestPrice', {}).get('minVcpu')
+    memory = gpu_type.get('lowestPrice', {}).get('minMemory')
 
     # Fall back to defaults if values are None
     # scale default value by gpu_count
@@ -188,11 +188,11 @@ def get_gpu_info(gpu_type: Dict, gpu_count: int) -> Dict:
     gpu_name = format_gpu_name(gpu_type)
 
     return {
-        "AcceleratorName": gpu_name,
-        "AcceleratorCount": float(gpu_count),
-        "vCPUs": vcpus,
-        "MemoryGiB": memory,
-        "GpuInfo": gpu_name,
+        'AcceleratorName': gpu_name,
+        'AcceleratorCount': float(gpu_count),
+        'vCPUs': vcpus,
+        'MemoryGiB': memory,
+        'GpuInfo': gpu_name,
     }
 
 
@@ -200,31 +200,31 @@ def get_instance_configurations(gpu_type: Dict) -> List[Dict]:
     """Generate instance configurations for a GPU type."""
     instances = []
     base_gpu_name = format_gpu_name(gpu_type)
-    gpu_counts = gpu_type.get("lowestPrice", {}).get("availableGpuCounts", [])
+    gpu_counts = gpu_type.get('lowestPrice', {}).get('availableGpuCounts', [])
 
     for gpu_count in gpu_counts:
         # Get detailed GPU info for this count
-        detailed_gpu = get_gpu_details(gpu_type["id"], gpu_count)
+        detailed_gpu = get_gpu_details(gpu_type['id'], gpu_count)
 
         # only add secure clouds. skipping community cloud instances.
-        if not detailed_gpu["secureCloud"]:
+        if not detailed_gpu['secureCloud']:
             continue
 
         for region, zones in REGION_ZONES.items():
             for zone in zones:
                 spot_price = None
-                if detailed_gpu["secureSpotPrice"] is not None:
-                    spot_price = format_price(detailed_gpu["secureSpotPrice"] *
+                if detailed_gpu['secureSpotPrice'] is not None:
+                    spot_price = format_price(detailed_gpu['secureSpotPrice'] *
                                               gpu_count)
 
                 instances.append({
-                    "InstanceType": f"{gpu_count}x_{base_gpu_name}_SECURE",
+                    'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',
                     **get_gpu_info(detailed_gpu, gpu_count),
-                    "SpotPrice": spot_price,
-                    "Price": format_price(detailed_gpu["securePrice"] *
+                    'SpotPrice': spot_price,
+                    'Price': format_price(detailed_gpu['securePrice'] *
                                           gpu_count),
-                    "Region": region,
-                    "AvailabilityZone": zone,
+                    'Region': region,
+                    'AvailabilityZone': zone,
                 })
 
     return instances
@@ -239,23 +239,23 @@ def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
     """
     try:
         # Initialize RunPod client
-        runpod.api_key = os.getenv("RUNPOD_API_KEY")
+        runpod.api_key = os.getenv('RUNPOD_API_KEY')
         if not runpod.api_key:
-            raise ValueError("RUNPOD_API_KEY environment variable not set")
+            raise ValueError('RUNPOD_API_KEY environment variable not set')
 
         # Get GPU list either from API or provided IDs
         if gpu_ids:
-            gpus = [{"id": gpu_id.strip()} for gpu_id in gpu_ids.split(",")]
+            gpus = [{'id': gpu_id.strip()} for gpu_id in gpu_ids.split(',')]
         else:
             gpus = runpod.get_gpus()
             if not gpus:
-                raise ValueError("No GPU types returned from RunPod API")
+                raise ValueError('No GPU types returned from RunPod API')
 
         # Generate instances from GPU types
         instances = []
         for gpu in gpus:
             # initial gpu details. later, request specific quantity details
-            gpu_type = get_gpu_details(gpu["id"])
+            gpu_type = get_gpu_details(gpu['id'])
             instances.extend(get_instance_configurations(gpu_type))
 
         # Create DataFrame
@@ -264,33 +264,33 @@ def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
         # Validate required columns
         missing_columns = set(USEFUL_COLUMNS) - set(df.columns)
         if missing_columns:
-            raise ValueError(f"Missing required columns: {missing_columns}")
+            raise ValueError(f'Missing required columns: {missing_columns}')
 
         # Ensure all required columns are present and in correct order
         df = df[USEFUL_COLUMNS]
 
         # Sort for consistency
-        df.sort_values(["AcceleratorName", "InstanceType", "AvailabilityZone"],
+        df.sort_values(['AcceleratorName', 'InstanceType', 'AvailabilityZone'],
                        inplace=True)
 
         return df
 
     except Exception as e:
         print(traceback.format_exc())
-        print(f"Failed to fetch RunPod catalog: {e}", file=sys.stderr)
+        print(f'Failed to fetch RunPod catalog: {e}', file=sys.stderr)
         raise
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Update RunPod catalog for SkyPilot")
-    parser.add_argument("--output-dir",
-                        default="runpod",
-                        help="Directory to save the catalog files")
+        description='Update RunPod catalog for SkyPilot')
+    parser.add_argument('--output-dir',
+                        default='runpod',
+                        help='Directory to save the catalog files')
     parser.add_argument(
-        "--gpu-ids",
-        help="Comma-separated list of RunPod GPU IDs to fetch. "
-        "If not provided, fetch all GPUs.",
+        '--gpu-ids',
+        help='Comma-separated list of RunPod GPU IDs to fetch. '
+        'If not provided, fetch all GPUs.',
     )
     args = parser.parse_args()
 
@@ -300,14 +300,14 @@ def main():
 
         # Fetch and save catalog
         df = fetch_runpod_catalog(args.gpu_ids)
-        output_path = os.path.join(args.output_dir, "vms.csv")
+        output_path = os.path.join(args.output_dir, 'vms.csv')
         df.to_csv(output_path, index=False)
-        print(f"RunPod Service Catalog saved to {output_path}")
+        print(f'RunPod Service Catalog saved to {output_path}')
 
-    except Exception as e:
-        print(f"Error updating RunPod catalog: {e}", file=sys.stderr)
+    except ValueError as e:
+        print(f'Error updating RunPod catalog: {e}', file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
