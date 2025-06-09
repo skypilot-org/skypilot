@@ -423,7 +423,7 @@ def test_gcp_force_enable_external_ips():
         test_commands,
         f'sky down -y {name}',
         env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_file,
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: skypilot_config_file,
             constants.SKY_API_SERVER_URL_ENV_VAR:
                 sky.server.common.get_server_url()
         })

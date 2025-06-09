@@ -497,15 +497,9 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
                 'exist. Please double check the path or unset the env var: '
                 f'unset {ENV_VAR_SKYPILOT_CONFIG}')
 
-    # Overlay the project config
-    project_config_path = _resolve_project_config_path()
-    project_config = _get_config_from_path(project_config_path)
-    overlaid_config = overlay_skypilot_config(
-        original_config=parse_and_validate_config_file(config_path),
-        override_configs=project_config)
     logger.debug(f'Using config path: {config_path}')
 
-    _set_loaded_config(overlaid_config)
+    _set_loaded_config(parse_and_validate_config_file(config_path))
     _set_loaded_config_path(config_path)
 
 
