@@ -34,6 +34,13 @@ class SSHNodePoolManager:
         except Exception as e:
             raise RuntimeError(f"Failed to save SSH Node Pool config: {e}")
     
+
+    def update_pools(self, pools_config: Dict[str, Any]) -> None:
+        """Update SSH Node Pool configurations."""
+        all_pools = self.get_all_pools()
+        all_pools.update(pools_config)
+        self.save_all_pools(all_pools)
+    
     def add_or_update_pool(self, pool_name: str, pool_config: Dict[str, Any]) -> None:
         """Add or update a single SSH Node Pool configuration."""
         # Validate pool configuration
@@ -102,7 +109,7 @@ def get_all_pools() -> Dict[str, Any]:
 def update_pools(pools_config: Dict[str, Any]) -> None:
     """Update SSH Node Pool configurations."""
     manager = SSHNodePoolManager()
-    manager.save_all_pools(pools_config)
+    manager.update_pools(pools_config)
 
 
 def delete_pool(pool_name: str) -> bool:
