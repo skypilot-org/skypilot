@@ -83,7 +83,7 @@ kubectl get pods -n $NAMESPACE
 if ! kubectl wait --namespace $NAMESPACE \
     --for=condition=ready pod \
     --selector=app=${RELEASE_NAME}-api \
-    --timeout=1200s; then
+    --timeout=600s; then
     echo "Warning: Pod readiness check timed out. Checking pod status for debugging..."
     kubectl describe pods -n $NAMESPACE -l app=${RELEASE_NAME}-api
     kubectl logs -n $NAMESPACE -l app=${RELEASE_NAME}-api
