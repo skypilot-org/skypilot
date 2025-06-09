@@ -289,3 +289,19 @@ class Primeintellect(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='primeintellect')
+
+    @classmethod
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        """The features not supported based on the resources provided.
+
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        del resources  # unused
+        return cls._CLOUD_UNSUPPORTED_FEATURES

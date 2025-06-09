@@ -5,7 +5,7 @@ query instance types and pricing information for FluffyCloud.
 """
 
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
@@ -54,6 +54,10 @@ def get_default_instance_type(cpus: Optional[str] = None,
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
 
 
+def get_accelerators_from_instance_type(
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
+    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
@@ -87,9 +91,11 @@ def list_accelerators(
         name_filter: Optional[str],
         region_filter: Optional[str],
         quantity_filter: Optional[int],
-        case_sensitive: bool = True
-) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in FluffyCloud offering GPUs."""
-    return common.list_accelerators_impl('Primeintellect', _df, gpus_only,
-                                         name_filter, region_filter,
-                                         quantity_filter, case_sensitive)
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
+    """Returns all instance types in Primeintellect offering GPUs."""
+    del require_price  # Unused.
+    return common.list_accelerators_impl('Primeintellect', _df, gpus_only, name_filter,
+                                         region_filter, quantity_filter,
+                                         case_sensitive, all_regions)
