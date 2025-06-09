@@ -6,7 +6,7 @@ CLUSTER_NAME="skypilot-helm-test-cluster"
 PROJECT_ID=$(gcloud config get-value project)
 ZONE="us-central1-a"  # Replace with your preferred zone
 NODE_COUNT=2
-MACHINE_TYPE="e2-standard-2"  # 2 vCPU, 8GB memory
+MACHINE_TYPE="e2-standard-8"  # 8 vCPU, 32GB memory
 PACKAGE_NAME=${1:-"skypilot-nightly"}  # Accept package name as first argument, default to skypilot-nightly
 HELM_VERSION=${2:-"latest"}  # Accept version as second argument, default to latest
 
