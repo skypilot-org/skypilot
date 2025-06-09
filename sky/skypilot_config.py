@@ -765,6 +765,15 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     Args:
         config: The config to save and sync.
     """
+
+    def is_running_pytest() -> bool:
+        return 'PYTEST_CURRENT_TEST' in os.environ
+
+    # Only allow this function to be called by the API Server in production.
+    if not is_running_pytest() and os.environ.get(
+            constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        raise ValueError('This function can only be called by the API Server.')
+
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
         global_config_path = get_user_config_path()
