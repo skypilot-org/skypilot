@@ -557,3 +557,97 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
         ssh_credentials=ssh_credentials,
         max_workers=subprocess_utils.get_max_workers_for_file_mounts(
             common_file_mounts, cluster_info.provider_name))
+
+
+@common.log_function_start_end
+@timeline.event
+def configure_prometheus_with_ray_cluster(cluster_name: str,
+                                         cluster_info: common.ClusterInfo,
+                                         ssh_credentials: Dict[str, Any]) -> None:
+    """Configure Prometheus using Ray cluster information after Ray is started."""
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
+    assert cluster_info.head_instance_id is not None, cluster_info
+    log_path_abs = str(provision_logging.get_log_path())
+    
+    # Get all cluster node IPs
+    worker_internal_ips = [worker.internal_ip for worker in cluster_info.get_worker_instances()]
+    all_cluster_ips = ['127.0.0.1'] + worker_internal_ips
+    
+    logger.info(f'Configuring Prometheus with cluster IPs: {all_cluster_ips}')
+    
+    # Generate Prometheus configuration targets
+    node_targets = []
+    dcgm_targets = []
+    
+    for ip in all_cluster_ips:
+        node_targets.append(f'        - {ip}:9100')  # node_exporter
+        dcgm_targets.append(f'        - {ip}:9400')  # dcgm_exporter
+    
+    # Generate complete Prometheus configuration
+    prometheus_config = f"""global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets:
+{chr(10).join(node_targets)}
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  - job_name: 'dcgm-exporter'
+    static_configs:
+      - targets:
+{chr(10).join(dcgm_targets)}
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 15s
+"""
+    
+    # Commands to update Prometheus configuration
+    # Use Python to write the config file to avoid heredoc issues
+    escaped_config = prometheus_config.replace("'", "'\"'\"'")  # Escape single quotes for shell
+    
+    update_commands = [
+        # Write config using Python to avoid heredoc issues
+        f"python3 -c \"import os; "
+        f"config = '''{escaped_config}'''; "
+        f"with open('/tmp/prometheus_config.yml', 'w') as f: f.write(config)\"",
+        
+        # Move the config to the final location
+        "sudo mv /tmp/prometheus_config.yml /etc/prometheus/prometheus.yml",
+        "sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml",
+        
+        # Reload Prometheus configuration (uses --web.enable-lifecycle from the installation)
+        "curl -X POST http://localhost:9090/-/reload || sudo systemctl restart prometheus",
+        
+        # Verify Prometheus is running
+        "sudo systemctl status prometheus --no-pager"
+    ]
+    
+    for cmd in update_commands:
+        logger.debug(f'Running Prometheus config update command: {cmd[:100]}...')
+        returncode, stdout, stderr = head_runner.run(
+            cmd,
+            stream_logs=False,
+            log_path=log_path_abs,
+            require_outputs=True,
+            source_bashrc=True)
+        
+        if returncode:
+            # For the reload command, a failure is not critical - restart will work
+            if 'reload' in cmd:
+                logger.warning(f'Prometheus reload failed, but restart should work: {stderr}')
+                continue
+            raise RuntimeError(f'Failed to update Prometheus configuration '
+                             f'(exit code {returncode}). Error: '
+                             f'===== stdout ===== \n{stdout}\n'
+                             f'===== stderr ====={stderr}')
+    

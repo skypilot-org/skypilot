@@ -651,6 +651,10 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
+        # Configure Prometheus on head nodewith Ray cluster information after Ray is up
+        instance_setup.configure_prometheus_with_ray_cluster(
+            cluster_name.name_on_cloud, cluster_info, ssh_credentials)
+
     logger.info(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
                                    provision_logging.config.log_path))

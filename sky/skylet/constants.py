@@ -535,3 +535,58 @@ DCGM_EXPORTER_CLOUD_START_COMMANDS = (
     'echo "DCGM Exporter not available, skipping start"; '
     'fi || '
     'echo "Failed to start DCGM Exporter, continuing...";')
+
+# Prometheus Installation (v2.52.0) - Head Node Only
+PROMETHEUS_INSTALLATION_COMMANDS = (
+    'if [ "${SKYPILOT_NODE_RANK:-0}" = "0" ]; then '
+    'echo "Installing Prometheus on head node" && '
+    # Make apt update more resilient to mirror issues
+    'sudo apt update -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false || '
+    'echo "apt update had issues but continuing..." && '
+    'sudo useradd --no-create-home --shell /bin/false prometheus 2>/dev/null || echo "prometheus user already exists" && '
+    'sudo mkdir -p /etc/prometheus /var/lib/prometheus && '
+    'cd /tmp && '
+    'PROM_VERSION="2.52.0" && '
+    'ARCH=$(uname -m) && '
+    'if [ "$ARCH" = "x86_64" ]; then PROM_ARCH="linux-amd64"; '
+    'else echo "Unsupported architecture for Prometheus Server" && '
+    'exit 1; fi && '
+    'wget "https://github.com/prometheus/prometheus/releases/download/'
+    'v${PROM_VERSION}/prometheus-${PROM_VERSION}.${PROM_ARCH}.tar.gz" && '
+    'tar xvf "prometheus-${PROM_VERSION}.${PROM_ARCH}.tar.gz" && '
+    'cd "prometheus-${PROM_VERSION}.${PROM_ARCH}" && '
+    'sudo mv prometheus promtool /usr/local/bin/ && '
+    'sudo mv consoles console_libraries /etc/prometheus/ && '
+    'sudo chown -R prometheus:prometheus /etc/prometheus && '
+    'sudo chown prometheus:prometheus /usr/local/bin/prometheus /usr/local/bin/promtool && '
+    'sudo mkdir -p /var/lib/prometheus && '
+    'sudo chown prometheus:prometheus /var/lib/prometheus && '
+    'cd /tmp && rm -rf prometheus-${PROM_VERSION}* && '
+    'echo "Prometheus installation completed on head node"; '
+    'else '
+    'echo "Skipping Prometheus installation on worker node (rank: ${SKYPILOT_NODE_RANK})"; '
+    'fi || '
+    'echo "Failed to install Prometheus, continuing...";')
+
+# Prometheus Installation and Basic Setup (without cluster IP configuration)
+# This installs Prometheus and creates systemd service but leaves configuration for Ray-based setup
+PROMETHEUS_BASIC_SETUP_COMMANDS = (
+    'if [ "${SKYPILOT_NODE_RANK:-0}" = "0" ]; then '
+    'echo "Setting up Prometheus service (configuration will be done after Ray starts)" && '
+    # Ensure prometheus directories exist
+    'sudo mkdir -p /etc/prometheus /var/lib/prometheus && '
+    'sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus && '
+    # Create basic systemd service with --web.enable-lifecycle for config reloading
+    'printf "[Unit]\\nDescription=Prometheus\\nWants=network-online.target\\nAfter=network-online.target\\n\\n[Service]\\nUser=prometheus\\nGroup=prometheus\\nType=simple\\nRestart=always\\nExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus/ --web.console.templates=/etc/prometheus/consoles --web.console.libraries=/etc/prometheus/console_libraries --web.enable-lifecycle\\n\\n[Install]\\nWantedBy=multi-user.target\\n" | sudo tee /etc/systemd/system/prometheus.service > /dev/null && '
+    # Create minimal initial config (will be replaced by Ray-based configuration later)
+    'printf "global:\\n  scrape_interval: 15s\\n\\nscrape_configs:\\n  - job_name: prometheus\\n    static_configs:\\n      - targets: [localhost:9090]\\n" | sudo tee /etc/prometheus/prometheus.yml > /dev/null && '
+    'sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml && '
+    'sudo systemctl daemon-reload && '
+    'sudo systemctl enable prometheus && '
+    'sudo systemctl start prometheus && '
+    'sudo systemctl status prometheus --no-pager && '
+    'echo "Prometheus service started with basic config (cluster targets will be configured after Ray starts)"; '
+    'else '
+    'echo "Skipping Prometheus setup on worker node"; '
+    'fi || '
+    'echo "Failed to setup Prometheus service, continuing...";')

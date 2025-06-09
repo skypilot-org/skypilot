@@ -247,7 +247,10 @@ setup_commands:
   # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+  # The | can ensure the lines below are interpreted as plain text,
+  # without yaml specific syntax to be parsed, such as strings that contain : .
+  - |
+    function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
@@ -277,6 +280,8 @@ setup_commands:
     {{ node_exporter_cloud_start_commands }}
     {{ dcgm_exporter_installation_commands }}
     {{ dcgm_exporter_cloud_start_commands }}
+    {{ prometheus_installation_commands }}
+    {{ prometheus_basic_setup_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;

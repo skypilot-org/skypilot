@@ -115,13 +115,21 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
   # Line 'sudo mv /etc/nccl.conf /etc/nccl.conf.bak' removes the default nccl.conf which is wrongly configured on many multi-GPU Azure VM, causing failure for multi-GPU workloads using NCCL.
-  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+  # The | can ensure the lines below are interpreted as plain text,
+  # without yaml specific syntax to be parsed, such as strings that contain : .
+  - |
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ node_exporter_installation_commands }}
     {{ node_exporter_cloud_start_commands }}
     {{ dcgm_exporter_installation_commands }}
     {{ dcgm_exporter_cloud_start_commands }}
+    {{ prometheus_installation_commands }}
+    {{ prometheus_basic_setup_commands }}
     touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}

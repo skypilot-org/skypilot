@@ -798,6 +798,10 @@ def write_cluster_config(
                     constants.DCGM_EXPORTER_INSTALLATION_COMMANDS,
                 'dcgm_exporter_cloud_start_commands':
                     constants.DCGM_EXPORTER_CLOUD_START_COMMANDS,
+                'prometheus_installation_commands':
+                    constants.PROMETHEUS_INSTALLATION_COMMANDS,
+                'prometheus_basic_setup_commands':
+                    constants.PROMETHEUS_BASIC_SETUP_COMMANDS,
 
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
