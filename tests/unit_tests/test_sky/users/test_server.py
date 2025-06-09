@@ -1,17 +1,16 @@
 """Unit tests for the users server endpoints."""
 
-from typing import List
 from unittest import mock
 
-import pytest
 import fastapi
+import pytest
 
 from sky import models
 from sky.server.requests import payloads
+from sky.skylet import constants
 from sky.users import rbac
 from sky.users import server
 from sky.utils import common
-from sky.skylet import constants
 
 
 @pytest.fixture
