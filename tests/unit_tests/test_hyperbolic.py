@@ -73,10 +73,16 @@ def test_hyperbolic_check_credentials_missing(monkeypatch, tmp_path):
 
 
 def test_hyperbolic_check_credentials_present(monkeypatch, tmp_path):
+    """Test credential check when API key is present."""
     cloud = hyperbolic.Hyperbolic()
     api_key_path = tmp_path / 'api_key'
     api_key_path.write_text('test-key')
+
+    # Monkeypatch both the API_KEY_PATH and os.path.expanduser
+    monkeypatch.setattr(hyperbolic.Hyperbolic, 'API_KEY_PATH',
+                        str(api_key_path))
     monkeypatch.setattr(os.path, 'expanduser', lambda x: str(api_key_path))
+
     valid, msg = cloud._check_credentials()
     assert valid
     assert msg is None
