@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-CLUSTER_NAME="skypilot-helm-test-cluster"
+CLUSTER_NAME="skypilot-helm-test-cluster2"
 PROJECT_ID=$(gcloud config get-value project)
 ZONE="us-central1-a"  # Replace with your preferred zone
 NODE_COUNT=2
@@ -22,7 +22,7 @@ cleanup() {
 }
 
 # Set up trap
-trap cleanup EXIT
+# trap cleanup EXIT
 
 echo "Using GCP Project ID: $PROJECT_ID"
 echo "Installing SkyPilot Helm chart version: $HELM_VERSION"
@@ -99,6 +99,13 @@ echo "API server endpoint: $ENDPOINT"
 
 # Test the API server
 echo "Testing API server health endpoint..."
-curl ${ENDPOINT}/health
+HEALTH_RESPONSE=$(curl -s ${ENDPOINT}/api/health)
+echo "Health response: $HEALTH_RESPONSE"
 
-echo "Setup complete! You can now use the API server at: $ENDPOINT"
+# Extract version from response and verify it matches
+RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
+if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
+    echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+    exit 1
+fi
+echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
