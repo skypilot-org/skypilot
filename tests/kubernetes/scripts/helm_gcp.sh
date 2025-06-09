@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-CLUSTER_NAME="skypilot-helm-test-cluster2"
+CLUSTER_NAME="skypilot-helm-test-cluster"
 PROJECT_ID=$(gcloud config get-value project)
 ZONE="us-central1-a"  # Replace with your preferred zone
 NODE_COUNT=2
