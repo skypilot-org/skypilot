@@ -42,11 +42,11 @@ def test_hyperbolic_unsupported_features():
 
 def test_hyperbolic_region_zone_validation():
     cloud = hyperbolic.Hyperbolic()
-    region, zone = cloud.validate_region_zone('us-central1', None)
-    assert region == 'us-central1'
+    region, zone = cloud.validate_region_zone('default', None)
+    assert region == 'default'
     assert zone is None
     with pytest.raises(ValueError, match='does not support zones'):
-        cloud.validate_region_zone('us-central1', 'zone-1')
+        cloud.validate_region_zone('default', 'zone-1')
 
 
 def test_hyperbolic_resource_feasibility():
