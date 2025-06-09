@@ -99,12 +99,6 @@ echo "API server endpoint: $ENDPOINT"
 
 # Test the API server
 echo "Testing API server health endpoint..."
-curl -s ${ENDPOINT}/health
+curl ${ENDPOINT}/health
 
 echo "Setup complete! You can now use the API server at: $ENDPOINT"
-
-# Keep the script running until user interrupts
-echo "Press Ctrl+C to exit and clean up the cluster..."
-while true; do
-    sleep 1
-done
