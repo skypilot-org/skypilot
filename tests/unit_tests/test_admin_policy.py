@@ -235,8 +235,8 @@ def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
 
 
 def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
-    """Test UseLocalGCPCredentialsPolicy for various scenarios."""
-    from example_policy.client_policy import UseLocalGCPCredentialsPolicy
+    """Test UseLocalGcpCredentialsPolicy for various scenarios."""
+    from example_policy.client_policy import UseLocalGcpCredentialsPolicy
 
     # Mock any potential gcloud calls that might happen during testing
     with mock.patch('subprocess.run'), \
@@ -253,7 +253,7 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
             fresh_task.run = None
             user_request = sky.UserRequest(task=fresh_task,
                                            skypilot_config=None)
-            mutated_request = UseLocalGCPCredentialsPolicy.validate_and_mutate(
+            mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
                 user_request)
 
             # Check that the credentials file is mounted
@@ -279,7 +279,7 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
             fresh_task.run = original_run_cmd
             user_request = sky.UserRequest(task=fresh_task,
                                            skypilot_config=None)
-            mutated_request = UseLocalGCPCredentialsPolicy.validate_and_mutate(
+            mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
                 user_request)
 
             # Check that the gcloud auth command is prepended
@@ -300,7 +300,7 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
             original_run_cmd = fresh_task.run
             user_request = sky.UserRequest(task=fresh_task,
                                            skypilot_config=None)
-            mutated_request = UseLocalGCPCredentialsPolicy.validate_and_mutate(
+            mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
                 user_request)
 
             # Check that the entire gcloud directory is mounted
@@ -319,7 +319,7 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
             fresh_task.file_mounts = {'/existing/mount': '/local/path'}
             user_request = sky.UserRequest(task=fresh_task,
                                            skypilot_config=None)
-            mutated_request = UseLocalGCPCredentialsPolicy.validate_and_mutate(
+            mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
                 user_request)
 
             # Check that both existing and new mounts are present
@@ -341,8 +341,8 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
             # Mock the logger to capture the warning
             with mock.patch(
                     'example_policy.client_policy.logger') as mock_logger:
-                mutated_request = (UseLocalGCPCredentialsPolicy.
-                                   validate_and_mutate(user_request))
+                mutated_request = (UseLocalGcpCredentialsPolicy.
+                                  cpalidate_and_mutate(user_request))
 
                 # Check that warning was logged
                 mock_logger.warning.assert_called_once()

@@ -13,7 +13,7 @@ _GOOGLE_APPLICATION_CREDENTIALS_PATH = (
     '~/.config/gcloud/application_default_credentials.json')
 
 
-class UseLocalGCPCredentialsPolicy(sky.AdminPolicy):
+class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
     """Example policy: use local GCP credentials in the task."""
 
     @classmethod
