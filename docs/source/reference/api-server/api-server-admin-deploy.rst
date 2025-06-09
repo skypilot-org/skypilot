@@ -498,6 +498,8 @@ In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2
 
 Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
+.. _sky-api-server-config:
+
 Optional: Setting the SkyPilot config
 --------------------------------------
 
@@ -640,11 +642,7 @@ The steps below are based on the `official documentation <https://docs.aws.amazo
 
 Once the EBS CSI driver is installed, the default ``gp2`` storage class will be backed by EBS volumes.
 
-.. _sky-api-server-config:
-
-
-
-
+.. _sky-api-server-admin-policy:
 
 Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
