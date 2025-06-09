@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import importlib
+import os
 from typing import Iterator, Optional, Tuple, Union
 
 import colorama
@@ -12,6 +13,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
@@ -105,7 +107,10 @@ def apply(
     if policy_cls is None:
         return dag, skypilot_config.to_dict()
 
-    logger.info(f'Applying policy: {policy}')
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        logger.info(f'Applying server admin policy: {policy}')
+    else:
+        logger.info(f'Applying client admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name

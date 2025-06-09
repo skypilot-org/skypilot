@@ -1,4 +1,5 @@
 """Example admin policy module and prebuilt policies."""
+from example_policy.client_policy import UseLocalGCPCredentialsPolicy
 from example_policy.skypilot_policy import AddLabelsPolicy
 from example_policy.skypilot_policy import DisablePublicIpPolicy
 from example_policy.skypilot_policy import DynamicKubernetesContextsUpdatePolicy
