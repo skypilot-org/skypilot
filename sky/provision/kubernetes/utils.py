@@ -460,6 +460,14 @@ class GKELabelFormatter(GPULabelFormatter):
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
 
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        try:
+            _ = cls.get_accelerator_from_label_value(value)
+            return True, ''
+        except ValueError as e:
+            return False, str(e)
+
 
 class GFDLabelFormatter(GPULabelFormatter):
     """GPU Feature Discovery label formatter
@@ -569,10 +577,16 @@ def detect_gpu_label_formatter(
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         for _, label_list in node_labels.items():
-            for label, _ in label_list:
+            for label, value in label_list:
                 if lf.match_label_key(label):
-                    label_formatter = lf()
-                    return label_formatter, node_labels
+                    if lf.validate_label_value(value):
+                        label_formatter = lf()
+                        return label_formatter, node_labels
+                    else:
+                        logger.warning(f'Gpu label {label} matched for label '
+                                       f'formatter {lf.__class__.__name__}, '
+                                       f'but has invalid value {value}. '
+                                       'Skipping...')
 
     return label_formatter, node_labels
 
