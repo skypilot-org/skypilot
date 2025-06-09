@@ -498,6 +498,14 @@ In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2
 
 Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
+Optional: Back the API server with a persistent database
+--------------------------------------------------------
+
+The API server can be backed with a persistent database to persist the user state and config.
+
+Refer to :ref:`Using a persistent database with the SkyPilot API Server <api-server-db>` for detailed instructions.
+
+
 Optional: Setting the SkyPilot config
 --------------------------------------
 
