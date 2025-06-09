@@ -167,7 +167,10 @@ def _get_loaded_config_path() -> List[Optional[str]]:
     serialized = _get_config_context().config_path
     if not serialized:
         return []
-    return json.loads(serialized)
+    config_paths = json.loads(serialized)
+    if config_paths is None:
+        return []
+    return config_paths
 
 
 def _set_loaded_config_path(
@@ -756,13 +759,24 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def update_config_no_lock(config: config_utils.Config) -> None:
+def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
     Args:
         config: The config to save and sync.
     """
-    global_config_path = os.path.expanduser(get_user_config_path())
+
+    def is_running_pytest() -> bool:
+        return 'PYTEST_CURRENT_TEST' in os.environ
+
+    # Only allow this function to be called by the API Server in production.
+    if not is_running_pytest() and os.environ.get(
+            constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        raise ValueError('This function can only be called by the API Server.')
+
+    global_config_path = _resolve_server_config_path()
+    if global_config_path is None:
+        global_config_path = get_user_config_path()
 
     # Always save to the local file (PVC in Kubernetes, local file otherwise)
     common_utils.dump_yaml(global_config_path, dict(config))

@@ -37,6 +37,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import sky
@@ -88,6 +89,9 @@ def launch(
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
+
+    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
@@ -175,12 +179,20 @@ def launch(
                     controller_utils.translate_local_file_mounts_to_two_hop(
                         task_))
 
+    # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as f:
+                                     mode='w') as f, \
+         tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
+                                     mode='w') as original_user_yaml_path:
+        original_user_yaml_path.write(user_dag_str)
+        original_user_yaml_path.flush()
+
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
+        remote_original_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
@@ -189,6 +201,8 @@ def launch(
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         vars_to_fill = {
+            'remote_original_user_yaml_path': remote_original_user_yaml_path,
+            'original_user_dag_path': original_user_yaml_path.name,
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
             'local_to_controller_file_mounts': local_to_controller_file_mounts,
@@ -231,7 +245,7 @@ def launch(
 
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
-        with common.with_server_user_hash():
+        with common.with_server_user():
             # Always launch the controller in the default workspace.
             with skypilot_config.local_active_workspace_ctx(
                     skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
@@ -378,7 +392,8 @@ def _maybe_restart_controller(
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
-          all_users: bool = False) -> List[Dict[str, Any]]:
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -441,6 +456,13 @@ def queue(refresh: bool,
 
         jobs = list(filter(user_hash_matches_or_missing, jobs))
 
+    accessible_workspaces = workspaces_core.get_workspaces()
+    jobs = list(
+        filter(
+            lambda job: job.get('workspace', skylet_constants.
+                                SKYPILOT_DEFAULT_WORKSPACE) in
+            accessible_workspaces, jobs))
+
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -449,6 +471,9 @@ def queue(refresh: bool,
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
+    if job_ids:
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
 
     return jobs
 

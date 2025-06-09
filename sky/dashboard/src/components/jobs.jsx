@@ -26,6 +26,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   relativeTime,
+  formatDateTime,
 } from '@/components/utils';
 import {
   FileSearchIcon,
@@ -90,7 +91,12 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
 
-  let timeString = relativeTime(timestamp);
+  // Convert timestamp to Date object if it's not already
+  const date =
+    timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
+
+  // Get the original timeString from relativeTime
+  let timeString = relativeTime(date);
 
   // If relativeTime returns a React element, extract the string from its props
   if (
@@ -115,32 +121,72 @@ const formatSubmittedTime = (timestamp) => {
     return timeString; // Return as is if not a string after extraction
   }
 
+  // Apply the same shortening logic
+  const shortenedTime = shortenTimeForJobs(timeString);
+
+  // Return with tooltip functionality like relativeTime does
+  const now = new Date();
+  const differenceInDays =
+    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
+
+  if (Math.abs(differenceInDays) < 7) {
+    return (
+      <Tooltip
+        content={formatDateTime(date)}
+        className="capitalize text-sm text-muted-foreground"
+      >
+        {shortenedTime}
+      </Tooltip>
+    );
+  } else {
+    return (
+      <Tooltip
+        content={formatDateTime(date)}
+        className="text-sm text-muted-foreground"
+      >
+        {shortenedTime}
+      </Tooltip>
+    );
+  }
+};
+
+// Helper function to shorten time strings for jobs
+function shortenTimeForJobs(timeString) {
+  if (!timeString || typeof timeString !== 'string') {
+    return timeString;
+  }
+
   // Handle "just now" case
   if (timeString === 'just now') {
     return 'now';
   }
 
-  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "~1 hr ago"
+  // Handle "less than a minute ago" case
+  if (timeString.toLowerCase() === 'less than a minute ago') {
+    return 'Less than a minute ago';
+  }
+
+  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
   const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
   if (aboutMatch) {
     const num = aboutMatch[1];
     const unit = aboutMatch[2];
     const unitMap = {
-      second: 'sec',
-      seconds: 'secs',
-      minute: 'min',
-      minutes: 'mins',
-      hour: 'hr',
-      hours: 'hrs',
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
       day: 'd',
       days: 'd',
       month: 'mo',
-      months: 'mos',
+      months: 'mo',
       year: 'yr',
-      years: 'yrs',
+      years: 'yr',
     };
     if (unitMap[unit]) {
-      return `~ ${num} ${unitMap[unit]} ago`;
+      return `${num}${unitMap[unit]} ago`;
     }
   }
 
@@ -149,15 +195,15 @@ const formatSubmittedTime = (timestamp) => {
   if (singleUnitMatch) {
     const unit = singleUnitMatch[1];
     const unitMap = {
-      second: 'sec',
-      minute: 'min',
-      hour: 'hr',
+      second: 's',
+      minute: 'm',
+      hour: 'h',
       day: 'd',
       month: 'mo',
       year: 'yr',
     };
     if (unitMap[unit]) {
-      return `1 ${unitMap[unit]} ago`;
+      return `1${unitMap[unit]} ago`;
     }
   }
 
@@ -167,21 +213,27 @@ const formatSubmittedTime = (timestamp) => {
     const num = multiUnitMatch[1];
     const unit = multiUnitMatch[2];
     const unitMap = {
-      seconds: 'secs',
-      minutes: 'mins',
-      hours: 'hrs',
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
+      day: 'd',
       days: 'd',
+      month: 'mo',
       months: 'mo',
+      year: 'yr',
       years: 'yr',
     };
     if (unitMap[unit]) {
-      return `${num} ${unitMap[unit]} ago`;
+      return `${num}${unitMap[unit]} ago`;
     }
   }
 
   // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
   return timeString;
-};
+}
 
 export function ManagedJobs() {
   const router = useRouter();
@@ -354,8 +406,7 @@ export function ManagedJobsTable({
     setConfirmationModal({
       isOpen: true,
       title: 'Restart Controller',
-      message:
-        'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
+      message: 'Are you sure you want to restart the controller?',
       onConfirm: async () => {
         try {
           setIsRestarting(true);
@@ -863,8 +914,8 @@ export function ManagedJobsTable({
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller is launching. Please wait
-                          for it to be ready.
+                          The managed job controller is launching. It will be
+                          ready shortly.
                         </p>
                         <div className="flex items-center">
                           <CircularProgress size={12} className="mr-2" />
@@ -878,8 +929,8 @@ export function ManagedJobsTable({
                     {controllerStopped && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller has been stopped. Please
-                          restart it to check the latest job status.
+                          The managed job controller has been stopped. Restart
+                          to check the latest job status.
                         </p>
                         <Button
                           variant="outline"
@@ -1007,6 +1058,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
+        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
       />
     </div>
   );

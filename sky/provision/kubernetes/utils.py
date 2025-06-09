@@ -2343,6 +2343,7 @@ def get_endpoint_debug_message() -> str:
 def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
+    cloud: Optional[clouds.Cloud] = None,
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
@@ -2387,11 +2388,17 @@ def combine_pod_config_fields(
     yaml_obj = yaml.safe_load(yaml_content)
     # We don't use override_configs in `skypilot_config.get_nested`, as merging
     # the pod config requires special handling.
-    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
-                                                   default_value={},
-                                                   override_configs={})
-    override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
-        'pod_config', {}))
+    if isinstance(cloud, clouds.SSH):
+        kubernetes_config = skypilot_config.get_nested(('ssh', 'pod_config'),
+                                                       default_value={},
+                                                       override_configs={})
+        override_pod_config = (cluster_config_overrides.get('ssh', {}).get(
+            'pod_config', {}))
+    else:
+        kubernetes_config = skypilot_config.get_nested(
+            ('kubernetes', 'pod_config'), default_value={}, override_configs={})
+        override_pod_config = (cluster_config_overrides.get(
+            'kubernetes', {}).get('pod_config', {}))
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -3124,12 +3131,9 @@ def get_kubeconfig_paths() -> List[str]:
     """
     # We should always use the latest KUBECONFIG environment variable to
     # make sure env var overrides get respected.
-    paths = os.getenv(
-        'KUBECONFIG',
-        kubernetes.kubernetes.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION)
+    paths = os.getenv('KUBECONFIG', kubernetes.DEFAULT_KUBECONFIG_PATH)
     expanded = []
-    for path in paths.split(kubernetes.kubernetes.config.kube_config.
-                            ENV_KUBECONFIG_PATH_SEPARATOR):
+    for path in paths.split(kubernetes.ENV_KUBECONFIG_PATH_SEPARATOR):
         expanded.append(os.path.expanduser(path))
     return expanded
 

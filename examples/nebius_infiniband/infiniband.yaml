@@ -4,6 +4,7 @@ resources:
   cloud: nebius
   region: eu-north1
   accelerators: H100:8
+  network_tier: best
   
 num_nodes: 2
 

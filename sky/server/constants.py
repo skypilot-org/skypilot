@@ -7,12 +7,10 @@ from sky.skylet import constants
 # API server version, whenever there is a change in API server that requires a
 # restart of the local API server or error out when the client does not match
 # the server version.
-API_VERSION = '8'
+API_VERSION = '9'
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
-# The user ID of the SkyPilot system.
-SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
 MIN_AVAIL_MEM_GB = 2
 # Default encoder/decoder handler name.
@@ -25,8 +23,10 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
 # Environment variable for a file path to the API cookie file.
+# Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'
 # Default file if unset.
+# Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 
 # The path to the dashboard build output

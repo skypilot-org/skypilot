@@ -30,9 +30,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Check if KUBECONFIG is set, and use it if it is.
-DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
-
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
 # E.g., FUSE device manager daemonset is run in this namespace.
@@ -181,8 +178,8 @@ class Kubernetes(clouds.Cloud):
             # Try kubeconfig if present
             current_context = (
                 kubernetes_utils.get_current_kube_config_context_name())
-            if (current_context is None and
-                    kubernetes_utils.is_incluster_config_available()):
+            if ((current_context is None or current_context.startswith('ssh-'))
+                    and kubernetes_utils.is_incluster_config_available()):
                 # If no kubeconfig contexts found, use in-cluster if available
                 current_context = kubernetes.in_cluster_context_name()
             allowed_contexts = []
@@ -859,7 +856,7 @@ class Kubernetes(clouds.Cloud):
 
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: kubeconfig_file}
+            return {kubernetes.DEFAULT_KUBECONFIG_PATH: kubeconfig_file}
         else:
             return {}
 

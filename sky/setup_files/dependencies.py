@@ -58,6 +58,8 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
+    'casbin',
+    'sqlalchemy_adapter',
 ]
 
 local_ray = [
