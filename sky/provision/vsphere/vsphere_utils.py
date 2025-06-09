@@ -10,18 +10,14 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
-from sky.clouds.service_catalog import vsphere_catalog
-from sky.clouds.service_catalog.common import get_catalog_path
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_accelerators_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_hosts_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_images_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
+from sky.catalog import vsphere_catalog
+from sky.catalog.common import get_catalog_path
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_accelerators_csv
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_hosts_csv
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_images_csv
+from sky.catalog.data_fetchers.fetch_vsphere import (
     initialize_instance_image_mapping_csv)
-from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
-    initialize_vms_csv)
+from sky.catalog.data_fetchers.fetch_vsphere import initialize_vms_csv
 from sky.provision.vsphere.common import vim_utils
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
 from sky.provision.vsphere.common.cls_api_helper import ClsApiHelper

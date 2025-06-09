@@ -11,7 +11,7 @@ import signal
 import sqlite3
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -204,7 +204,8 @@ class Request:
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
-        user_name = global_user_state.get_user(self.user_id).name
+        user = global_user_state.get_user(self.user_id)
+        user_name = user.name if user is not None else None
         return RequestPayload(
             request_id=self.request_id,
             name=self.name,
@@ -464,7 +465,7 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
-def update_request(request_id: str):
+def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
     yield request

@@ -18,7 +18,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds.service_catalog import common as service_catalog_common
+from sky.catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -227,7 +227,7 @@ def up(
         # for the first time; otherwise it is a name conflict.
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
-        with common.with_server_user_hash():
+        with common.with_server_user():
             with skypilot_config.local_active_workspace_ctx(
                     constants.SKYPILOT_DEFAULT_WORKSPACE):
                 admin_policy_utils.apply(

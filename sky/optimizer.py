@@ -1313,7 +1313,7 @@ def _fill_in_launchable_resources(
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
-                # the underlying service_catalog filtering
+                # the underlying catalog filtering
                 cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(

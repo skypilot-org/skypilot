@@ -26,8 +26,8 @@ each other.
 import collections
 import copy
 import datetime
+import fnmatch
 import functools
-import getpass
 import os
 import pathlib
 import shlex
@@ -49,6 +49,7 @@ import yaml
 
 import sky
 from sky import backends
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -61,7 +62,6 @@ from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.client import sdk
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -208,14 +208,14 @@ def _get_cluster_records_and_set_ssh_config(
     return cluster_records
 
 
-def _get_glob_storages(storages: List[str]) -> List[str]:
-    """Returns a list of storages that match the glob pattern."""
+def _get_glob_matches(candidate_names: List[str],
+                      glob_patterns: List[str]) -> List[str]:
+    """Returns a list of names that match the glob pattern."""
     glob_storages = []
-    for storage_object in storages:
-        # TODO(zhwu): client side should not rely on global_user_state.
-        glob_storage = global_user_state.get_glob_storage_name(storage_object)
+    for glob_pattern in glob_patterns:
+        glob_storage = fnmatch.filter(candidate_names, glob_pattern)
         if not glob_storage:
-            click.echo(f'Storage {storage_object} not found.')
+            click.echo(f'Storage {glob_pattern} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -3455,7 +3455,7 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
-@service_catalog.fallback_to_default_catalog
+@catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
@@ -3835,7 +3835,7 @@ def show_gpus(
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
-                c for c in service_catalog.ALL_CLOUDS
+                c for c in constants.ALL_CLOUDS
                 if c != 'kubernetes' and c != 'ssh'
             ]
 
@@ -3881,13 +3881,13 @@ def show_gpus(
                        f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
+            for gpu in catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
 
             # Google TPUs
-            for tpu in service_catalog.get_tpus():
+            for tpu in catalog.get_tpus():
                 if tpu in result:
                     tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
             if tpu_table.get_string():
@@ -3958,7 +3958,7 @@ def show_gpus(
                                   all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common as catalog_common
+        from sky.catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud
@@ -4134,7 +4134,9 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
             return
         names = [storage['name'] for storage in storages]
     else:
-        names = _get_glob_storages(names)
+        storages = sdk.get(sdk.storage_ls())
+        existing_storage_names = [storage['name'] for storage in storages]
+        names = _get_glob_matches(existing_storage_names, names)
     if names:
         if not yes:
             storage_names = ', '.join(names)
@@ -6053,7 +6055,6 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
 @click.option('--deploy',
               type=bool,
               is_flag=True,
@@ -6086,7 +6087,6 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool):
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
@@ -6242,18 +6242,18 @@ def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
-    user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
-    user_hash = common_utils.get_user_hash()
     api_server_user = api_server_info.get('user')
     if api_server_user is not None:
-        user_name = api_server_user['name']
-        user_hash = api_server_user['id']
+        user = models.User(id=api_server_user['id'],
+                           name=api_server_user['name'])
+    else:
+        user = models.User.get_current_user()
     dashboard_url = server_common.get_dashboard_url(url)
     click.echo(f'Using SkyPilot API server: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
                f'commit: {api_server_info["commit"]}, '
                f'version: {api_server_info["version"]}\n'
-               f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
+               f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
 
 

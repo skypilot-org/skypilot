@@ -205,3 +205,32 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
     assert skypilot_config.get_nested(
         ('kubernetes', 'allowed_contexts'),
         None) is None, 'Global skypilot config should be restored after request'
+
+
+def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
+    # Test with task that has no specific autostop configuration
+    dag, _ = _load_task_and_apply_policy(
+        task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
+    for resource in dag.tasks[0].resources:
+        assert resource.autostop_config is not None
+        assert resource.autostop_config.enabled is True
+        assert resource.autostop_config.idle_minutes == 10
+
+    # Test with resources having different autostop configurations
+    task.set_resources([
+        # Resource with autostop over limit (should be capped at 10 minutes)
+        sky.Resources(cpus='16+', autostop={
+            'idle_minutes': 20,
+            'down': True
+        }),
+    ])
+
+    dag, _ = _load_task_and_apply_policy(
+        task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
+
+    resources = dag.tasks[0].resources
+
+    assert resources[0].autostop_config is not None
+    assert resources[0].autostop_config.enabled is True
+    assert resources[0].autostop_config.idle_minutes == 10
+    assert resources[0].autostop_config.down is True  # default
