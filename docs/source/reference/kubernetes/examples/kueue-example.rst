@@ -39,7 +39,7 @@ Patch Kueue to support plain pods
 ---------------------------------
 
 Kueue does not support scheduling plain pods out of the box. Since SkyPilot creates and manages workloads as pods,
-the kueue config needs to be patched to support plain pods.
+the Kueue config needs to be patched to support plain pods.
 
 .. code-block:: bash
 
@@ -237,9 +237,9 @@ Here, a cluster queue and a local queue are created.
     spec:
       clusterQueue: "skypilot-cluster-queue"
 
-The team submit their jobs to the local queue ``skypilot-local-queue``.
-The jobs from the team are subject to the same quota defined in the cluster queue,
-and the jobs from the team are ordered by their priority together.
+The team submits jobs to the local queue ``skypilot-local-queue``.
+The jobs from the team are subject to the quota defined in the cluster queue,
+and the jobs from the team are ordered by their priority.
 
 .. image:: ../../../images/examples/k8s-with-kueue/one-queue.svg
    :alt: One Cluster Queue Architecture
@@ -282,7 +282,7 @@ The following config should be set on the API server:
     --set-file apiService.config=skypilot-config.yaml
 
 
-The configs above allows the API server to submit jobs using the local queue.
+The config above allows the API server to submit jobs using the local queue.
 
 .. image:: ../../../images/examples/k8s-with-kueue/final-architecture.svg
    :alt: Final Architecture
