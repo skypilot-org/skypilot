@@ -208,6 +208,8 @@ def pytest_collection_modifyitems(config, items):
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
+    skip_marks['postgres'] = pytest.mark.skip(
+        reason='skipped, because --postgres option is set')
 
     cloud_to_run = _get_cloud_to_run(config)
     generic_cloud = _generic_cloud(config)
@@ -240,6 +242,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
+        if ('no_postgres' in item.keywords) and config.getoption('--postgres'):
+            item.add_marker(skip_marks['postgres'])
 
         # Skip tests marked as resource_heavy if --no-resource-heavy is set
         marks = [mark.name for mark in item.iter_markers()]

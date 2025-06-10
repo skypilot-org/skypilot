@@ -203,6 +203,120 @@ SkyPilot automatically select one with available resources.
     # Let SkyPilot automatically select the cluster with available resources.
     sky launch --infra ssh -- echo "Running on SkyPilot selected cluster"
 
+Attaching NFS and other volumes
+-------------------------------
+
+SkyPilot jobs can access NFS, shared disks, or local high-performance storage like NVMe drives available on your host machines in a SSH Node Pool.
+
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
+
+.. tab-set::
+
+    .. tab-item:: Mounting a path on the host (NFS)
+      :name: ssh-volumes-hostpath-nfs
+
+      Any path available on the host can be directly mounted to SkyPilot jobs. For example, to mount a NFS share available on the hosts:
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+
+           config:
+             ssh:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: my-host-nfs
+                   volumes:
+                     - name: my-host-nfs
+                       hostPath:
+                         path: /path/on/host/nfs
+                         type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           ssh:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nfs
+                         name: my-host-nfs
+                 volumes:
+                   - name: my-host-nfs
+                     hostPath:
+                       path: /path/on/host/nfs
+                       type: Directory
+
+
+    .. tab-item:: Nebius shared filesystem
+      :name: ssh-volumes-nebius-shared-filesystem
+
+      SSH Node Pools running on Nebius VMs can access Nebius shared filesystems.
+
+      When creating a VM on the Nebius console, attach your desired shared file system to the VM (``Create virtual machine`` -> ``Attach shared filesystem``):
+
+      * Ensure ``Auto mount`` is enabled.
+      * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
+
+      .. image:: ../images/screenshots/nebius/nebius-k8s-attach-fs.png
+        :width: 50%
+        :align: center
+
+      Nebius will automatically mount the shared filesystem to all hosts. You can then attach the volume to your SkyPilot jobs:
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+
+           config:
+             ssh:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: nebius-sharedfs
+                   volumes:
+                     - name: nebius-sharedfs
+                       hostPath:
+                         path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                         type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           ssh:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nfs
+                         name: nebius-sharedfs
+                 volumes:
+                   - name: nebius-sharedfs
+                     hostPath:
+                       path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                       type: Directory
+
+
 Cleanup
 -------
 

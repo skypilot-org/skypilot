@@ -367,6 +367,7 @@ RCLONE_CACHE_REFRESH_INTERVAL = 10
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
+    ('ssh', 'pod_config'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
     ('gcp', 'managed_instance_group'),
@@ -418,3 +419,6 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'do', 'nebius', 'ssh')
 # END constants used for service catalog.
+
+# The user ID of the SkyPilot system.
+SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'

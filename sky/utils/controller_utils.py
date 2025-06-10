@@ -24,6 +24,7 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.setup_files import dependencies
 from sky.skylet import constants
@@ -272,6 +273,18 @@ def _get_cloud_dependencies_installation_commands(
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
                             f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+            if clouds.cloud_in_iterable(clouds.Kubernetes(), enabled_clouds):
+                # Install gke-gcloud-auth-plugin used for exec-auth with GKE.
+                # We install the plugin here instead of the next elif branch
+                # because gcloud is required to install the plugin, so the order
+                # of command execution is critical.
+
+                # We install plugin here regardless of whether exec-auth is
+                # actually used as exec-auth may be used in the future.
+                # TODO (kyuds): how to implement conservative installation?
+                commands.append(
+                    '(command -v gke-gcloud-auth-plugin &>/dev/null || '
+                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # pylint: disable=line-too-long
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -295,7 +308,9 @@ def _get_cloud_dependencies_installation_commands(
                 '(curl -s -LO "https://dl.k8s.io/release/v1.31.6'
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
-                'kubectl /usr/local/bin/kubectl))')
+                'kubectl /usr/local/bin/kubectl)) && '
+                f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # pylint: disable=line-too-long
+                f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # pylint: disable=line-too-long
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(

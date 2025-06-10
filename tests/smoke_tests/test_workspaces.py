@@ -20,7 +20,10 @@ from sky import skypilot_config
                   'workspaces:\n'
                   '  ws-1: {}\n'
                   '  ws-2: {}\n'
-                  'and restart the API server.')
+                  'and restart the API server.'
+                  'The reason for not using env var SKYPILOT_CONFIG to '
+                  'override the global config is that the project-level config '
+                  'will be ignored in that case.')
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #

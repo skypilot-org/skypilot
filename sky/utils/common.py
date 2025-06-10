@@ -5,6 +5,7 @@ import enum
 import os
 from typing import Generator
 
+from sky import models
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -25,10 +26,13 @@ JOB_CONTROLLER_NAME: str = f'{JOB_CONTROLLER_PREFIX}{SERVER_ID}'
 
 
 @contextlib.contextmanager
-def with_server_user_hash() -> Generator[None, None, None]:
+def with_server_user() -> Generator[None, None, None]:
     """Temporarily set the user hash to common.SERVER_ID."""
     old_env_user_hash = os.getenv(constants.USER_ID_ENV_VAR)
+    # TODO(zhwu): once we have fully moved our code to use `get_current_user()`
+    # instead of `common_utils.get_user_hash()`, we can remove the env override.
     os.environ[constants.USER_ID_ENV_VAR] = SERVER_ID
+    common_utils.set_current_user(models.User.get_current_user())
     try:
         yield
     finally:
@@ -36,6 +40,7 @@ def with_server_user_hash() -> Generator[None, None, None]:
             os.environ[constants.USER_ID_ENV_VAR] = old_env_user_hash
         else:
             os.environ.pop(constants.USER_ID_ENV_VAR)
+        common_utils.set_current_user(models.User.get_current_user())
 
 
 class StatusRefreshMode(enum.Enum):

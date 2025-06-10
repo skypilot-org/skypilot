@@ -1,4 +1,5 @@
 """Kubernetes."""
+import os
 import re
 import subprocess
 import tempfile
@@ -106,17 +107,6 @@ class Kubernetes(clouds.Cloud):
         context = resources.region
         if context is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
-        # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
-            context)
-        if is_exec_auth:
-            assert isinstance(message, str), message
-            # Controllers cannot spin up new pods with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to down itself with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.AUTODOWN] = message
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
@@ -188,8 +178,8 @@ class Kubernetes(clouds.Cloud):
             # Try kubeconfig if present
             current_context = (
                 kubernetes_utils.get_current_kube_config_context_name())
-            if (current_context is None and
-                    kubernetes_utils.is_incluster_config_available()):
+            if ((current_context is None or current_context.startswith('ssh-'))
+                    and kubernetes_utils.is_incluster_config_available()):
                 # If no kubeconfig contexts found, use in-cluster if available
                 current_context = kubernetes.in_cluster_context_name()
             allowed_contexts = []
@@ -537,20 +527,17 @@ class Kubernetes(clouds.Cloud):
             # If remote_identity is not a dict, use
             k8s_service_account_name = remote_identity
 
-        if (k8s_service_account_name ==
-                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-            # SA name doesn't matter since automounting credentials is disabled
-            k8s_service_account_name = 'default'
-            k8s_automount_sa_token = 'false'
-        elif (k8s_service_account_name ==
-              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
-            # Use the default service account
+        lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+        sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
+
+        if k8s_service_account_name == lc or k8s_service_account_name == sa:
+            # Use the default service account if remote identity is not set.
+            # For LOCAL_CREDENTIALS, this is for in-cluster authentication
+            # which needs a serviceaccount (specifically for SSH node pools
+            # which uses in-cluster authentication internally, and we would
+            # like to support exec-auth when the user is also using SSH infra)
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
-            k8s_automount_sa_token = 'true'
-        else:
-            # User specified a custom service account
-            k8s_automount_sa_token = 'true'
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -624,7 +611,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
-            'k8s_automount_sa_token': k8s_automount_sa_token,
+            'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
@@ -863,6 +850,10 @@ class Kubernetes(clouds.Cloud):
                     f'> {kubeconfig_file}',
                     shell=True,
                     check=True)
+            if os.path.exists(kubeconfig_file):
+                # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
+                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file)  # pylint: disable=line-too-long
+
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
             return {kubernetes.DEFAULT_KUBECONFIG_PATH: kubeconfig_file}

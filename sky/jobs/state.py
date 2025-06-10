@@ -122,7 +122,8 @@ def create_table(cursor, conn):
         user_hash TEXT,
         workspace TEXT DEFAULT NULL,
         priority INTEGER DEFAULT 500,
-        entrypoint TEXT DEFAULT NULL)""")
+        entrypoint TEXT DEFAULT NULL,
+        original_user_yaml_path TEXT DEFAULT NULL)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -153,6 +154,8 @@ def create_table(cursor, conn):
                                  value_to_replace_existing_entries=500)
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'entrypoint', 'TEXT')
+    db_utils.add_column_to_table(cursor, conn, 'job_info',
+                                 'original_user_yaml_path', 'TEXT')
     conn.commit()
 
 
@@ -212,6 +215,7 @@ columns = [
     'workspace',
     'priority',
     'entrypoint',
+    'original_user_yaml_path',
 ]
 
 
@@ -1013,19 +1017,16 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
 
-            # Add YAML content and command for managed jobs
-            dag_yaml_path = job_dict.get('dag_yaml_path')
-            if dag_yaml_path:
+            # Add user YAML content for managed jobs.
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
                 try:
-                    with open(dag_yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['dag_yaml'] = f.read()
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
                 except (FileNotFoundError, IOError, OSError):
-                    job_dict['dag_yaml'] = None
-
-                # Generate a command that could be used to launch this job
-                # Format: sky jobs launch <yaml_path>
+                    job_dict['user_yaml'] = None
             else:
-                job_dict['dag_yaml'] = None
+                job_dict['user_yaml'] = None
 
             jobs.append(job_dict)
         return jobs
@@ -1083,18 +1084,20 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 # scheduler lock to work correctly.
 
 
-def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
+def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
+                          original_user_yaml_path: str, env_file_path: str,
                           user_hash: str, priority: int) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
-            'schedule_state = (?), dag_yaml_path = (?), env_file_path = (?), '
+            'schedule_state = (?), dag_yaml_path = (?), '
+            'original_user_yaml_path = (?), env_file_path = (?), '
             '  user_hash = (?), priority = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
             (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
-             env_file_path, user_hash, priority, job_id,
-             ManagedJobScheduleState.INACTIVE.value)).rowcount
+             original_user_yaml_path, env_file_path, user_hash, priority,
+             job_id, ManagedJobScheduleState.INACTIVE.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
