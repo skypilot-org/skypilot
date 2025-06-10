@@ -1217,6 +1217,18 @@ def get_config_schema():
         },
     }
 
+    dashboard_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'grafana_url': {
+                'type': 'string',
+                'pattern': r'^https?://.*$',
+            },
+        },
+    }
+
     workspace_schema = {'type': 'string'}
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
@@ -1357,6 +1369,7 @@ def get_config_schema():
             'workspaces': workspaces_schema,
             'provision': provision_configs,
             'rbac': rbac_schema,
+            'dashboard': dashboard_schema,
             **cloud_configs,
         },
     }
