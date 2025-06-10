@@ -1935,7 +1935,21 @@ class Resources:
         resources_fields['network_tier'] = config.pop('network_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
-        resources_fields['autostop'] = config.pop('autostop', None)
+        autostop = config.pop('autostop', None)
+        if isinstance(autostop, str):
+            if autostop.endswith('min') or autostop.endswith('m'):
+                autostop = float(''.join(filter(str.isdigit, autostop)))
+            elif autostop.endswith('h') or autostop.endswith('hr'):
+                autostop = float(''.join(filter(str.isdigit, autostop))) * 60
+            elif autostop.endswith('d') or autostop.endswith('day'):
+                autostop = float(''.join(filter(str.isdigit, autostop))) * 60 * 24
+            elif autostop.endswith('w') or autostop.endswith('week'):
+                autostop = float(''.join(filter(str.isdigit, autostop))) * 60 * 24 * 7
+            elif autostop.endswith('s') or autostop.endswith('sec'):
+                autostop = float(''.join(filter(str.isdigit, autostop))) / 60
+            else:
+                autostop = float(autostop)
+        resources_fields['autostop'] = str(autostop)
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
