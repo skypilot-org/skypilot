@@ -152,6 +152,10 @@ class TestAllCloudsEnabled:
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(cli.launch, ['--cloud', 'k8s', '--dryrun'])
+        import sys
+        print('result.exception', result.exception, file=sys.stderr, flush=True)
+        print('result.exit_code', result.exit_code, file=sys.stderr, flush=True)
+        print('result.output', result.output, file=sys.stderr, flush=True)
         assert not result.exit_code
 
         result = cli_runner.invoke(cli.launch,
