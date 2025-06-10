@@ -335,12 +335,12 @@ grafana:
   #   path: "/grafana"
   #   ingressClassName: nginx
   #   hosts: null
-  grafana.ini:
-    server:
-      domain: localhost
-      root_url: "%(protocol)s://%(domain)s/grafana"
-      enforce_domain: false
-      serve_from_sub_path: true
+  # grafana.ini:
+  #   server:
+  #     domain: localhost
+  #     root_url: "%(protocol)s://%(domain)s/grafana"
+  #     enforce_domain: false
+  #     serve_from_sub_path: true
   sidecar:
     # Enable datasources discovery in grafana sidecar.
     datasources:
