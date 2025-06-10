@@ -67,21 +67,6 @@ This should output:
     - pod
 
 
-Create a namespace
-------------------
-
-To simulate a team sharing the same Kubernetes cluster,
-a namespace is created: ``skypilot``.
-
-.. image:: ../../../images/examples/k8s-with-kueue/namespace.svg
-   :alt: K8s cluster with a namespace
-   :width: 80%
-   :align: center
-
-.. code-block:: bash
-
-    kubectl create namespace skypilot
-
 Deploy a SkyPilot API server
 ----------------------------
 
