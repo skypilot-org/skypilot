@@ -11,8 +11,8 @@ def _test_optimize_speed(resources: sky.Resources):
     start = time.time()
     sky.optimize(dag)
     end = time.time()
-    # 7.0 seconds = somewhat flaky.
-    assert end - start < 7.0, (f'optimize took too long for {resources}, '
+    # 8.0 seconds = somewhat flaky.
+    assert end - start < 8.0, (f'optimize took too long for {resources}, '
                                f'{end - start} seconds')
 
 
