@@ -74,7 +74,7 @@ export function Users() {
   };
 
   return (
-    <Layout highlighted="users">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
           <Link
@@ -106,7 +106,7 @@ export function Users() {
         setLoading={setLoading} // Pass setLoading to UsersTable
         refreshDataRef={refreshDataRef}
       />
-    </Layout>
+    </>
   );
 }
 
