@@ -25,8 +25,7 @@ jobs:
           - tests/test_global_user_state.py
           - tests/test_jobs.py
           - tests/test_list_accelerators.py
-          - tests/test_optimizer_dryruns.py -k TestOptimizerDryruns1
-          - tests/test_optimizer_dryruns.py -k TestOptimizerDryruns2
+          - tests/test_optimizer_dryruns.py
           - tests/test_optimizer_random_dag.py
           - tests/test_storage.py
           - tests/test_wheels.py
