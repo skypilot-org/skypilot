@@ -65,6 +65,7 @@ class TestPermissionService:
         with mock.patch.object(permission.PermissionService,
                                '_maybe_initialize_policies'):
             service = permission.PermissionService()
+            service._lazy_initialize()
 
             # Verify SQLAlchemy adapter was created with the correct engine
             mock_adapter_class.assert_called_once_with(mock_engine)
@@ -342,6 +343,7 @@ class TestPermissionService:
                                '__init__',
                                return_value=None):
             service = permission.PermissionService()
+            service._lazy_initialize()
 
             result = service.check_workspace_permission('user1',
                                                         'test-workspace')
@@ -472,9 +474,11 @@ class TestPermissionServiceMultiProcess:
                                '_maybe_initialize_policies'):
             # Create first instance
             service1 = permission.PermissionService()
+            service1._lazy_initialize()
 
             # Create second instance
             service2 = permission.PermissionService()
+            service2._lazy_initialize()
 
             # Both should share the same enforcer
             assert service1.enforcer is service2.enforcer
