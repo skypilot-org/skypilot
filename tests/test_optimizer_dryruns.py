@@ -87,48 +87,48 @@ def _test_resources_launch(*resources_args,
 
 class TestOptimizerDryruns1:
     # We separate to different test classes to allow parallel execution on github CI
-    def test_resources_aws(enable_all_clouds):
+    def test_resources_aws(self, enable_all_clouds):
         _test_resources_launch(infra='aws', instance_type='p3.2xlarge')
 
-    def test_resources_azure(enable_all_clouds):
+    def test_resources_azure(self, enable_all_clouds):
         _test_resources_launch(infra='azure', instance_type='Standard_NC24s_v3')
 
-    def test_resources_gcp(enable_all_clouds):
+    def test_resources_gcp(self, enable_all_clouds):
         _test_resources_launch(infra='gcp', instance_type='n1-standard-16')
         _test_resources_launch(infra='gcp', instance_type='a3-highgpu-8g')
 
-    def test_partial_cpus(enable_all_clouds):
+    def test_partial_cpus(self, enable_all_clouds):
         _test_resources_launch(cpus=4)
         _test_resources_launch(cpus='4')
         _test_resources_launch(cpus='7+')
 
-    def test_partial_memory(enable_all_clouds):
+    def test_partial_memory(self, enable_all_clouds):
         _test_resources_launch(memory=32)
         _test_resources_launch(memory='32')
         _test_resources_launch(memory='32+')
 
-    def test_partial_k80(enable_all_clouds):
+    def test_partial_k80(self, enable_all_clouds):
         _test_resources_launch(accelerators='K80')
 
-    def test_partial_m60(enable_all_clouds):
+    def test_partial_m60(self, enable_all_clouds):
         _test_resources_launch(accelerators='M60')
 
-    def test_partial_p100(enable_all_clouds):
+    def test_partial_p100(self, enable_all_clouds):
         _test_resources_launch(accelerators='P100')
 
-    def test_partial_t4(enable_all_clouds):
+    def test_partial_t4(self, enable_all_clouds):
         _test_resources_launch(accelerators='T4')
         _test_resources_launch(accelerators={'T4': 8}, use_spot=True)
 
-    def test_partial_tpu(enable_all_clouds):
+    def test_partial_tpu(self, enable_all_clouds):
         _test_resources_launch(accelerators='tpu-v3-8')
 
-    def test_partial_v100(enable_all_clouds):
+    def test_partial_v100(self, enable_all_clouds):
         _test_resources_launch(sky.AWS(), accelerators='V100')
         _test_resources_launch(sky.AWS(), accelerators='V100', use_spot=True)
         _test_resources_launch(sky.AWS(), accelerators={'V100': 8})
 
-    def test_invalid_cloud_tpu(enable_all_clouds):
+    def test_invalid_cloud_tpu(self, enable_all_clouds):
         with pytest.raises(AssertionError) as e:
             _test_resources_launch(cloud=sky.AWS(), accelerators='tpu-v3-8')
         assert 'Cloud must be GCP' in str(e.value)
@@ -136,21 +136,21 @@ class TestOptimizerDryruns1:
     @pytest.mark.parametrize('enable_all_clouds',
                              [[sky.Azure(), sky.GCP()]],
                              indirect=True)
-    def test_clouds_not_enabled_aws(enable_all_clouds):
+    def test_clouds_not_enabled_aws(self, enable_all_clouds):
         with pytest.raises(exceptions.ResourcesUnavailableError):
             _test_resources_launch(sky.AWS())
 
     @pytest.mark.parametrize('enable_all_clouds', [[sky.AWS()]], indirect=True)
-    def test_clouds_not_enabled_azure(enable_all_clouds):
+    def test_clouds_not_enabled_azure(self, enable_all_clouds):
         with pytest.raises(exceptions.ResourcesUnavailableError):
             _test_resources_launch(sky.Azure())
 
     @pytest.mark.parametrize('enable_all_clouds', [[sky.AWS()]], indirect=True)
-    def test_clouds_not_enabled_gcp(enable_all_clouds):
+    def test_clouds_not_enabled_gcp(self, enable_all_clouds):
         with pytest.raises(exceptions.ResourcesUnavailableError):
             _test_resources_launch(sky.GCP())
 
-    def test_instance_type_mismatches_cpus(enable_all_clouds):
+    def test_instance_type_mismatches_cpus(self, enable_all_clouds):
         bad_instance_and_cpus = [
             # Actual: 8
             ('m6i.2xlarge', 4),
@@ -164,7 +164,7 @@ class TestOptimizerDryruns1:
                                        cpus=cpus)
             assert 'does not have the requested number of vCPUs' in str(e.value)
 
-    def test_instance_type_mismatches_memory(enable_all_clouds):
+    def test_instance_type_mismatches_memory(self, enable_all_clouds):
         bad_instance_and_memory = [
             # Actual: 32
             ('m6i.2xlarge', 4),
@@ -178,7 +178,7 @@ class TestOptimizerDryruns1:
                                        memory=memory)
             assert 'does not have the requested memory' in str(e.value)
 
-    def test_instance_type_matches_cpus(enable_all_clouds):
+    def test_instance_type_matches_cpus(self, enable_all_clouds):
         _test_resources_launch(sky.AWS(), instance_type='c6i.8xlarge', cpus=32)
         _test_resources_launch(sky.Azure(),
                                instance_type='Standard_E8s_v5',
@@ -190,7 +190,7 @@ class TestOptimizerDryruns1:
                                instance_type='g4dn.2xlarge',
                                cpus=8.0)
 
-    def test_instance_type_matches_memory(enable_all_clouds):
+    def test_instance_type_matches_memory(self, enable_all_clouds):
         _test_resources_launch(sky.AWS(),
                                instance_type='c6i.8xlarge',
                                memory=64)
@@ -204,7 +204,7 @@ class TestOptimizerDryruns1:
                                instance_type='g4dn.2xlarge',
                                memory=32)
 
-    def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
+    def test_instance_type_from_cpu_memory(self, enable_all_clouds, capfd):
         _test_resources_launch(cpus=8)
         stdout, _ = capfd.readouterr()
         # Choose General Purpose instance types
@@ -262,7 +262,7 @@ class TestOptimizerDryruns1:
 
 class TestOptimizerDryruns2:
 
-    def test_instance_type_mistmatches_accelerators(enable_all_clouds):
+    def test_instance_type_mistmatches_accelerators(self, enable_all_clouds):
         bad_instance_and_accs = [
             # Actual: V100
             ('p3.2xlarge', 'K80'),
@@ -295,7 +295,7 @@ class TestOptimizerDryruns2:
                                    accelerators={'V100': 1})
             assert 'Infeasible resource demands found' in str(e.value)
 
-    def test_instance_type_matches_accelerators(enable_all_clouds):
+    def test_instance_type_matches_accelerators(self, enable_all_clouds):
         _test_resources_launch(sky.AWS(),
                                instance_type='p3.2xlarge',
                                accelerators='V100')
@@ -318,13 +318,13 @@ class TestOptimizerDryruns2:
                                instance_type='p3.16xlarge',
                                accelerators={'V100': 8})
 
-    def test_invalid_instance_type(enable_all_clouds):
+    def test_invalid_instance_type(self, enable_all_clouds):
         for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
             with pytest.raises(ValueError) as e:
                 _test_resources(cloud, instance_type='invalid')
             assert 'Invalid instance type' in str(e.value)
 
-    def test_infer_cloud_from_instance_type(enable_all_clouds):
+    def test_infer_cloud_from_instance_type(self, enable_all_clouds):
         # AWS instances
         _test_resources(instance_type='m5.12xlarge', expected_cloud=sky.AWS())
         _test_resources_launch(instance_type='m5.12xlarge')
@@ -341,19 +341,19 @@ class TestOptimizerDryruns2:
                         expected_cloud=sky.Azure())
         _test_resources_launch(instance_type='Standard_NC12s_v3')
 
-    def test_invalid_cpus(enable_all_clouds):
+    def test_invalid_cpus(self, enable_all_clouds):
         for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
             with pytest.raises(ValueError) as e:
                 _test_resources(cloud, cpus='invalid')
             assert '"cpus" field should be' in str(e.value)
 
-    def test_invalid_memory(enable_all_clouds):
+    def test_invalid_memory(self, enable_all_clouds):
         for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
             with pytest.raises(ValueError) as e:
                 _test_resources(cloud, memory='invalid')
             assert '"memory" field should be' in str(e.value)
 
-    def test_invalid_region(enable_all_clouds):
+    def test_invalid_region(self, enable_all_clouds):
         for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
             with pytest.raises(ValueError) as e:
                 _test_resources(cloud, region='invalid')
@@ -365,7 +365,7 @@ class TestOptimizerDryruns2:
                                    accelerators='tpu-v3-8')
             assert 'No launchable resource found' in str(e.value)
 
-    def test_invalid_zone(enable_all_clouds):
+    def test_invalid_zone(self, enable_all_clouds):
         for cloud in [sky.AWS(), sky.GCP()]:
             with pytest.raises(ValueError) as e:
                 _test_resources(cloud, zone='invalid')
@@ -393,7 +393,7 @@ class TestOptimizerDryruns2:
         for cand in expected_candidates:
             assert cand in str(e.value)
 
-    def test_invalid_image(enable_all_clouds):
+    def test_invalid_image(self, enable_all_clouds):
         with pytest.raises(ValueError) as e:
             _test_resources(cloud=sky.AWS(), image_id='ami-0868a20f5a3bf9702')
         assert 'in a specific region' in str(e.value)
@@ -407,7 +407,7 @@ class TestOptimizerDryruns2:
         assert 'only supported for AWS/GCP/Azure/IBM/OCI/Kubernetes' in str(
             e.value)
 
-    def test_valid_image(enable_all_clouds):
+    def test_valid_image(self, enable_all_clouds):
         _test_resources(infra='aws/us-east-1', image_id='ami-0868a20f5a3bf9702')
         _test_resources(
             infra='gcp/us-central1',
@@ -420,7 +420,7 @@ class TestOptimizerDryruns2:
             'projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20240927'
         )
 
-    def test_parse_cpus_from_yaml():
+    def test_parse_cpus_from_yaml(self):
         spec = textwrap.dedent("""\
             resources:
                 cpus: 1""")
@@ -441,7 +441,7 @@ class TestOptimizerDryruns2:
                 cpus: 3+ """)
         _test_parse_cpus(spec, '3+')
 
-    def test_parse_memory_from_yaml():
+    def test_parse_memory_from_yaml(self):
         spec = textwrap.dedent("""\
             resources:
                 memory: 32""")
@@ -462,7 +462,7 @@ class TestOptimizerDryruns2:
                 memory: 3+ """)
         _test_parse_memory(spec, '3+')
 
-    def test_parse_accelerators_from_yaml():
+    def test_parse_accelerators_from_yaml(self):
         spec = textwrap.dedent("""\
         resources:
             accelerators: V100""")
@@ -491,7 +491,7 @@ class TestOptimizerDryruns2:
             _test_parse_accelerators(spec, None)
             assert 'The "accelerators" field as a str ' in str(e.value)
 
-    def test_invalid_num_nodes():
+    def test_invalid_num_nodes(self):
         for invalid_value in (-1, 2.2, 1.0):
             with pytest.raises(ValueError) as e:
                 with sky.Dag():
@@ -499,7 +499,7 @@ class TestOptimizerDryruns2:
                     task.num_nodes = invalid_value
                 assert 'num_nodes should be a positive int' in str(e.value)
 
-    def test_parse_empty_yaml():
+    def test_parse_empty_yaml(self):
         spec = textwrap.dedent("""\
             """)
 
@@ -508,7 +508,7 @@ class TestOptimizerDryruns2:
 
         _test_parse_task_yaml(spec, test_fn)
 
-    def test_parse_name_only_yaml():
+    def test_parse_name_only_yaml(self):
         spec = textwrap.dedent("""\
             name: test_task
             """)
@@ -518,7 +518,7 @@ class TestOptimizerDryruns2:
 
         _test_parse_task_yaml(spec, test_fn)
 
-    def test_parse_invalid_envs_yaml():
+    def test_parse_invalid_envs_yaml(self):
         spec = textwrap.dedent("""\
             envs:
             hello world: 1  # invalid key
@@ -530,7 +530,7 @@ class TestOptimizerDryruns2:
         assert '\'123\', \'hello world\' do not match any of the regexes' in str(
             e.value)
 
-    def test_parse_valid_envs_yaml():
+    def test_parse_valid_envs_yaml(self):
         spec = textwrap.dedent("""\
             envs:
             hello_world: 1
@@ -539,7 +539,7 @@ class TestOptimizerDryruns2:
             """)
         _test_parse_task_yaml(spec)
 
-    def test_invalid_accelerators_regions(enable_all_clouds):
+    def test_invalid_accelerators_regions(self, enable_all_clouds):
         task = sky.Task(run='echo hi')
         task.set_resources(
             sky.Resources(
@@ -552,7 +552,7 @@ class TestOptimizerDryruns2:
             assert 'No launchable resource found for' in str(e.value), str(
                 e.value)
 
-    def test_infer_cloud_from_region_or_zone(enable_all_clouds):
+    def test_infer_cloud_from_region_or_zone(self, enable_all_clouds):
         # Maps to GCP.
         _test_resources_launch(region='us-east1')
         _test_resources_launch(zone='us-west2-a')
@@ -611,7 +611,7 @@ class TestOptimizerDryruns2:
             'Invalid (region \'us-east1\', zone \'us-west2-a\') for any cloud among'
             in str(e))
 
-    def test_ordered_resources(enable_all_clouds):
+    def test_ordered_resources(self, enable_all_clouds):
         captured_output = io.StringIO()
         sys.stdout = captured_output  # Redirect stdout to the StringIO object
 
@@ -634,7 +634,7 @@ class TestOptimizerDryruns2:
         assert any('V100' in line and '✔' in line for line in output.splitlines()), \
             'Expected to find a line with V100 and ✔ indicating V100 was chosen'
 
-    def test_disk_tier_mismatch(enable_all_clouds):
+    def test_disk_tier_mismatch(self, enable_all_clouds):
         for cloud in registry.CLOUD_REGISTRY.values():
             for tier in cloud._SUPPORTED_DISK_TIERS:
                 sky.Resources(cloud=cloud, disk_tier=tier)
@@ -646,7 +646,7 @@ class TestOptimizerDryruns2:
                     resource.validate()
                 assert f'is not supported' in str(e.value), str(e.value)
 
-    def test_optimize_disk_tier(enable_all_clouds):
+    def test_optimize_disk_tier(self, enable_all_clouds):
 
         def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
             task = sky.Task()
@@ -686,7 +686,8 @@ class TestOptimizerDryruns2:
             map(registry.CLOUD_REGISTRY.get,
                 ['aws', 'gcp'])), ultra_tier_candidates
 
-    def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
+    def test_launch_dryrun_with_reservations_and_dummy_sink(
+            self, enable_all_clouds):
         """
         Tests that 'sky launch --dryrun' with reservations configured
         does not raise an AssertionError when Optimizer processes DummySink.
@@ -712,7 +713,8 @@ class TestOptimizerDryruns2:
 
         # If no exception is raised and exit code is 0, the test passes.
 
-    def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
+    def test_resource_hints_for_invalid_resources(self, capfd,
+                                                  enable_all_clouds):
         """Tests that helpful hints are shown when no matching resources are found."""
         # Test when there are no fuzzy candidates
         with pytest.raises(exceptions.ResourcesUnavailableError):
