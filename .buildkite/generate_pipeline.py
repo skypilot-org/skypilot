@@ -109,14 +109,12 @@ def _parse_args(args: Optional[str] = None):
 
     # -k argument for a test selection pattern
     parser.add_argument("-k")
-
     parser.add_argument("--remote-server", action="store_true")
-
     parser.add_argument('--base-branch')
-
     parser.add_argument('--controller-cloud')
-
     parser.add_argument('--postgres', action="store_true")
+    parser.add_argument('--helm-version')
+    parser.add_argument('--helm-package')
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -150,6 +148,10 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
     if parsed_args.postgres:
         extra_args.append('--postgres')
+    if parsed_args.helm_version:
+        extra_args.append(f'--helm-version {parsed_args.helm_version}')
+    if parsed_args.helm_package:
+        extra_args.append(f'--helm-package {parsed_args.helm_package}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 

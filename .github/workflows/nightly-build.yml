@@ -93,7 +93,7 @@ jobs:
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ github.sha }}
-      branch: master
+      branch: ${{ github.ref_name }}
       message: "nightly-build-pypi"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--aws"}'

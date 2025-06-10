@@ -44,7 +44,8 @@ RUN apt update -y && \
     uuid-runtime \
     docker.io \
     rsync \
-    jq
+    jq \
+    apache2-utils
 
 # Install kubectl
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(case "$(uname -m)" in \
@@ -126,6 +127,10 @@ RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     conda activate base && \
     export PATH="$PATH:$HOME/.local/bin" && \
     uv pip install pyOpenSSL==23.1.1
+
+
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Copy the entrypoint script
 COPY tests/smoke_tests/docker/entrypoint.sh /home/${USERNAME}/entrypoint.sh
