@@ -1964,12 +1964,18 @@ class Resources:
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
         if resources_fields['memory'] is not None:
-            resources_fields['memory'] = str(resources_fields['memory'])
+            memory = resources_fields['memory']
+            if len(list(filter(str.isdigit, memory))) != 0:
+                memory = str(_convert_to_gb(memory))
+            resources_fields['memory'] = memory
         if resources_fields['accelerator_args'] is not None:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
-            resources_fields['disk_size'] = int(resources_fields['disk_size'])
+            disk_size = resources_fields['disk_size']
+            if len(list(filter(str.isdigit, disk_size))) != 0:
+                disk_size = _convert_to_gb(disk_size)
+            resources_fields['disk_size'] = int(disk_size)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2233,3 +2239,21 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
+
+
+def _convert_to_gb(memory: str) -> float:
+    memory = memory.upper()
+    if memory.endswith('GB'):
+        return float(memory[:-2])
+    elif memory.endswith('MB'):
+        return float(memory[:-2]) / 1024
+    elif memory.endswith('TB'):
+        return float(memory[:-2]) * 1024
+    elif memory.endswith('KB'):
+        return float(memory[:-2]) / 1024 / 1024
+    elif memory.endswith('B'):
+        return float(memory[:-1]) / 1024 / 1024 / 1024
+    elif memory.endswith('PB'):
+        return float(memory[:-2]) * 1024 * 1024
+    else:
+        raise ValueError(f"Invalid memory format: {memory}")
