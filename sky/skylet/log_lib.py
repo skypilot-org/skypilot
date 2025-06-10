@@ -373,10 +373,12 @@ def run_bash_command_with_log(
                 '\'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\' '
                 f'{docker_image} /bin/bash -i {script_path_in_docker}',
                 do_cd_sky_workdir=False)
+            remove_files_cmd = '\n'.join([f'rm -rf {k}' for k in all_mapping])
             with tempfile.NamedTemporaryFile('w',
                                              prefix='sky_docker_app_',
                                              delete=False) as docker_fp:
-                docker_fp.write(docker_cmd)
+                docker_fp.write(docker_cmd + '\n')
+                docker_fp.write(remove_files_cmd + '\n')
                 docker_fp.flush()
                 docker_script_path = docker_fp.name
             inner_command = f'/bin/bash -i {docker_script_path}'
