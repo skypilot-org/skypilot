@@ -145,6 +145,19 @@ class PermissionService:
             return True
         return False
 
+    def delete_user(self, user_id: str) -> None:
+        """Delete user role relationship."""
+        with _policy_lock():
+            # Get current roles
+            self._load_policy_no_lock()
+            # Avoid calling get_user_roles, as it will require the lock.
+            current_roles = self.enforcer.get_roles_for_user(user_id)
+            if not current_roles:
+                logger.warning(f'User {user_id} has no roles')
+                return
+            self.enforcer.remove_grouping_policy(user_id, current_roles[0])
+            self.enforcer.save_policy()
+
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
         with _policy_lock():

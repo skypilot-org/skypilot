@@ -1,5 +1,6 @@
 """Unit tests for the users server endpoints."""
 
+import hashlib
 from unittest import mock
 
 import fastapi
@@ -148,6 +149,40 @@ class TestUsersEndpoints:
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @pytest.mark.asyncio
+    async def test_user_update_success(self, mock_update_role,
+                                       mock_add_or_update_user, mock_get_user,
+                                       mock_get_supported_roles):
+        """Test successful POST /users/update endpoint."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        test_user = models.User(id='test_user',
+                                name='Test User',
+                                password='old_password')
+        mock_get_user.return_value = test_user
+
+        update_body = payloads.UserUpdateBody(user_id='test_user',
+                                              role='admin',
+                                              password='new_password')
+
+        # Execute
+        result = await server.user_update(update_body)
+
+        # Verify
+        assert result is None  # Function returns None on success
+        mock_get_supported_roles.assert_called_once()
+        mock_get_user.assert_called_once_with('test_user')
+        mock_update_role.assert_called_once_with('test_user', 'admin')
+        mock_add_or_update_user.assert_called_once_with(
+            models.User(id='test_user',
+                        name='Test User',
+                        password=hashlib.sha256(
+                            'new_password'.encode()).hexdigest()))
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @pytest.mark.asyncio
@@ -306,3 +341,134 @@ class TestUsersEndpoints:
         # Verify - should return the first role in the list
         assert result == {'name': 'Test User', 'role': 'admin'}
         mock_get_user_roles.assert_called_once_with('test_user')
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_create_success(self, mock_get_default_role,
+                                       mock_add_or_update_user,
+                                       mock_update_role,
+                                       mock_get_supported_roles,
+                                       mock_get_user_by_name):
+        """Test successful POST /users/create endpoint."""
+        # Setup
+        mock_get_user_by_name.return_value = None
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_default_role.return_value = 'user'
+        create_body = payloads.UserCreateBody(username='alice',
+                                              password='pw123',
+                                              role=None)
+
+        # Execute
+        result = await server.user_create(create_body)
+
+        # Verify
+        assert result is None
+        mock_get_user_by_name.assert_called_once_with('alice')
+        mock_get_default_role.assert_called_once()
+        mock_add_or_update_user.assert_called_once()
+        mock_update_role.assert_called_once()
+        # Check password hash
+        args, kwargs = mock_add_or_update_user.call_args
+        user_obj = args[0]
+        assert user_obj.name == 'alice'
+        assert user_obj.password == hashlib.sha256('pw123'.encode()).hexdigest()
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @pytest.mark.asyncio
+    async def test_user_create_user_already_exists(self, mock_get_user_by_name):
+        """Test POST /users/create endpoint when user already exists."""
+        # Setup
+        mock_get_user_by_name.return_value = object()
+        create_body = payloads.UserCreateBody(username='alice',
+                                              password='pw123',
+                                              role=None)
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_create(create_body)
+        assert exc_info.value.status_code == 400
+        assert 'already exists' in str(exc_info.value.detail)
+        mock_get_user_by_name.assert_called_once_with('alice')
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @pytest.mark.asyncio
+    async def test_user_create_invalid_role(self, mock_get_supported_roles,
+                                            mock_get_user_by_name):
+        """Test POST /users/create endpoint with invalid role."""
+        # Setup
+        mock_get_user_by_name.return_value = None
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        create_body = payloads.UserCreateBody(username='alice',
+                                              password='pw123',
+                                              role='invalid')
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_create(create_body)
+        assert exc_info.value.status_code == 400
+        assert 'Invalid role' in str(exc_info.value.detail)
+        mock_get_supported_roles.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_user_create_missing_username_or_password(self):
+        """Test POST /users/create endpoint with missing username or password."""
+        # Missing username
+        create_body = payloads.UserCreateBody(username='',
+                                              password='pw123',
+                                              role=None)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_create(create_body)
+        assert exc_info.value.status_code == 400
+        assert 'Username and password are required' in str(
+            exc_info.value.detail)
+
+        # Missing password
+        create_body = payloads.UserCreateBody(username='alice',
+                                              password='',
+                                              role=None)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_create(create_body)
+        assert exc_info.value.status_code == 400
+        assert 'Username and password are required' in str(
+            exc_info.value.detail)
+
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.delete_user')
+    @mock.patch('sky.users.permission.permission_service.delete_user')
+    @pytest.mark.asyncio
+    async def test_user_delete_success(self, mock_delete_user_role,
+                                       mock_delete_user, mock_get_user):
+        """Test successful POST /users/delete endpoint."""
+        # Setup
+        test_user = models.User(id='test_user', name='Test User')
+        mock_get_user.return_value = test_user
+        delete_body = payloads.UserDeleteBody(user_id='test_user')
+
+        # Execute
+        result = await server.user_delete(delete_body)
+
+        # Verify
+        assert result is None
+        mock_get_user.assert_called_once_with('test_user')
+        mock_delete_user.assert_called_once_with('test_user')
+        mock_delete_user_role.assert_called_once_with('test_user')
+
+    @mock.patch('sky.global_user_state.get_user')
+    @pytest.mark.asyncio
+    async def test_user_delete_user_not_found(self, mock_get_user):
+        """Test POST /users/delete endpoint with non-existent user."""
+        # Setup
+        mock_get_user.return_value = None
+        delete_body = payloads.UserDeleteBody(user_id='nonexistent_user')
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_delete(delete_body)
+        assert exc_info.value.status_code == 400
+        assert 'does not exist' in str(exc_info.value.detail)
+        mock_get_user.assert_called_once_with('nonexistent_user')

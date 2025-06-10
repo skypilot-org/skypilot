@@ -336,10 +336,23 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserCreateBody(RequestBody):
+    """The request body for the user create endpoint."""
+    username: str
+    password: str
+    role: Optional[str] = None
+
+
+class UserDeleteBody(RequestBody):
+    """The request body for the user delete endpoint."""
+    user_id: str
+
+
 class UserUpdateBody(RequestBody):
     """The request body for the user update endpoint."""
     user_id: str
     role: str
+    password: Optional[str] = None
 
 
 class DownloadBody(RequestBody):
