@@ -279,7 +279,12 @@ export async function streamSSHDeploymentLogs({ requestId, signal, onNewLog }) {
 }
 
 // Reusable function for streaming SSH operation logs (deploy or down)
-export async function streamSSHOperationLogs({ requestId, signal, onNewLog, operationType = 'operation' }) {
+export async function streamSSHOperationLogs({
+  requestId,
+  signal,
+  onNewLog,
+  operationType = 'operation',
+}) {
   // Measure timeout from last received data, not from start of request.
   const inactivityTimeout = 300000; // 5 minutes of no data activity
   let lastActivity = Date.now();

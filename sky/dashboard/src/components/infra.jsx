@@ -616,7 +616,7 @@ function SSHNodePoolDetails({
           const response = await handleDeploySSHPool(poolName);
           const requestId = response.request_id;
 
-          setStreamingDialog(prev => ({ ...prev, requestId }));
+          setStreamingDialog((prev) => ({ ...prev, requestId }));
 
           // Create an AbortController for this streaming session
           const abortController = new AbortController();
@@ -625,7 +625,7 @@ function SSHNodePoolDetails({
             requestId,
             signal: abortController.signal,
             onNewLog: (log) => {
-              setStreamingDialog(prev => ({
+              setStreamingDialog((prev) => ({
                 ...prev,
                 logs: prev.logs + log,
               }));
@@ -633,7 +633,7 @@ function SSHNodePoolDetails({
           });
 
           // Deployment completed successfully
-          setStreamingDialog(prev => ({
+          setStreamingDialog((prev) => ({
             ...prev,
             isStreaming: false,
             deploymentComplete: true,
@@ -647,15 +647,17 @@ function SSHNodePoolDetails({
                 const status = await getSSHNodePoolStatus(poolName);
                 setStatusData(status);
               } catch (error) {
-                console.error('Failed to fetch SSH Node Pool status after deployment:', error);
+                console.error(
+                  'Failed to fetch SSH Node Pool status after deployment:',
+                  error
+                );
               }
             };
             fetchStatus();
           }, 1000);
-
         } catch (error) {
           console.error('Deployment failed:', error);
-          setStreamingDialog(prev => ({
+          setStreamingDialog((prev) => ({
             ...prev,
             isStreaming: false,
             deploymentComplete: true,
@@ -680,7 +682,7 @@ function SSHNodePoolDetails({
           const downResponse = await sshDownNodePool(poolName);
           const requestId = downResponse.request_id;
 
-          setStreamingDialog(prev => ({ ...prev, requestId }));
+          setStreamingDialog((prev) => ({ ...prev, requestId }));
 
           if (requestId) {
             // Stream the down operation logs
@@ -688,12 +690,12 @@ function SSHNodePoolDetails({
               requestId,
               signal: null, // No abort signal for now
               onNewLog: (log) => {
-                setStreamingDialog(prev => ({
+                setStreamingDialog((prev) => ({
                   ...prev,
                   logs: prev.logs + log,
                 }));
               },
-              operationType: 'down'
+              operationType: 'down',
             });
           }
 
@@ -702,17 +704,17 @@ function SSHNodePoolDetails({
           await handleDeleteSSHPool(poolName);
 
           // Down operation completed successfully
-          setStreamingDialog(prev => ({
+          setStreamingDialog((prev) => ({
             ...prev,
             isStreaming: false,
             deploymentComplete: true,
             deploymentSuccess: true,
-            logs: prev.logs + '\nSSH Node Pool teardown completed successfully.',
+            logs:
+              prev.logs + '\nSSH Node Pool teardown completed successfully.',
           }));
-
         } catch (error) {
           console.error('Down operation failed:', error);
-          setStreamingDialog(prev => ({
+          setStreamingDialog((prev) => ({
             ...prev,
             isStreaming: false,
             deploymentComplete: true,
@@ -864,7 +866,9 @@ function SSHNodePoolDetails({
         <DialogContent className="sm:max-w-md">
           <DialogHeader className="">
             <DialogTitle className="">{dialogContent.title}</DialogTitle>
-            <DialogDescription className="">{dialogContent.description}</DialogDescription>
+            <DialogDescription className="">
+              {dialogContent.description}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="py-4">
@@ -922,7 +926,9 @@ function SSHNodePoolDetails({
       >
         <DialogContent className="sm:max-w-4xl max-h-[80vh]">
           <DialogHeader className="">
-            <DialogTitle className="">Deploying SSH Node Pool: {poolName}</DialogTitle>
+            <DialogTitle className="">
+              Deploying SSH Node Pool: {poolName}
+            </DialogTitle>
             <DialogDescription className="">
               {streamingDialog.isStreaming
                 ? 'Deployment in progress. Do not close this dialog.'
