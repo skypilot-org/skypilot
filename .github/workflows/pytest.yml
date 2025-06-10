@@ -21,8 +21,8 @@ jobs:
           # Group them based on running time to save CI time and resources
           - tests/unit_tests
           - tests/test_cli.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_api.py
-          - tests/test_optimizer_dryruns.py -k parse or invalid or valid or partial or resources or cpus or memory or accelerators"
-          - tests/test_optimizer_dryruns.py -k "not (parse or invalid or valid or partial or resources or cpus or memory or accelerators)"
+          - "tests/test_optimizer_dryruns.py -k \"parse or invalid or valid or partial or resources or cpus or memory or accelerators\""
+          - "tests/test_optimizer_dryruns.py -k \"not (parse or invalid or valid or partial or resources or cpus or memory or accelerators)\""
           - tests/test_optimizer_random_dag.py tests/test_storage.py tests/test_wheels.py
           - tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py
           - tests/test_no_parellel.py
