@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
 
 from sky import sky_logging
+from sky.data.storage_utils import get_excluded_files
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -32,8 +33,6 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 # TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
 # consistency between bucket upload and rsync.
-RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
-RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
@@ -267,21 +266,9 @@ class CommandRunner:
         # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / constants.SKY_IGNORE_FILE).exists():
-            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
-        else:
-            rsync_command.append(RSYNC_FILTER_GITIGNORE)
-            if up:
-                # Build --exclude-from argument.
-                if (resolved_source / GIT_EXCLUDE).exists():
-                    # Ensure file exists; otherwise, rsync will error out.
-                    #
-                    # We shlex.quote() because the path may contain spaces:
-                    #   'my dir/.git/info/exclude'
-                    # Without quoting rsync fails.
-                    rsync_command.append(
-                        RSYNC_EXCLUDE_OPTION.format(
-                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+        excluded_files = get_excluded_files(resolved_source)
+        rsync_command.extend(
+            map(lambda x: f'--exclude={shlex.quote(x)}', excluded_files))
 
         rsync_command.append(f'-e {shlex.quote(rsh_option)}')
 

@@ -32,6 +32,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.data.storage_utils import get_excluded_files
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -322,23 +323,14 @@ def path_size_megabytes(path: str) -> int:
         If successful: the size of 'path' in megabytes, rounded down. Otherwise,
         -1.
     """
-    git_exclude_filter = ''
+    rsync_command = [f'rsync {command_runner.RSYNC_DISPLAY_OPTION}']
     resolved_path = pathlib.Path(path).expanduser().resolve()
-    if (resolved_path / constants.SKY_IGNORE_FILE).exists():
-        rsync_filter = command_runner.RSYNC_FILTER_SKYIGNORE
-    else:
-        rsync_filter = command_runner.RSYNC_FILTER_GITIGNORE
-        if (resolved_path / command_runner.GIT_EXCLUDE).exists():
-            # Ensure file exists; otherwise, rsync will error out.
-            #
-            # We shlex.quote() because the path may contain spaces:
-            #   'my dir/.git/info/exclude'
-            # Without quoting rsync fails.
-            git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-                shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
-    rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
-                    f'--exclude-from={shlex.quote(str(resolved_path / constants.GIT_IGNORE_FILE))} '
-                    f'{git_exclude_filter} --dry-run {path!r}')
+    excluded_files = get_excluded_files(str(resolved_path))
+    rsync_command.extend(
+        map(lambda x: f'--exclude={shlex.quote(x)}', excluded_files))
+    rsync_command.append(f'--dry-run {path!r}')
+    rsync_command = ' '.join(rsync_command)
+
     rsync_output = ''
     try:
         rsync_output = str(subprocess.check_output(rsync_command, shell=True))
