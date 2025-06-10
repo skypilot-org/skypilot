@@ -116,7 +116,7 @@ ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
-SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
 Base = declarative.declarative_base()
@@ -131,12 +131,12 @@ config_yaml_table = sqlalchemy.Table(
 
 def create_table():
     # Create tables if they don't exist
-    Base.metadata.create_all(bind=SQLALCHEMY_ENGINE)
+    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
 
 
 def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
-    assert SQLALCHEMY_ENGINE is not None
-    with orm.Session(SQLALCHEMY_ENGINE) as session:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(config_yaml_table).filter_by(key=key).first()
     if row:
         db_config = config_utils.Config(yaml.safe_load(row.value))
@@ -146,14 +146,14 @@ def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
 
 
 def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-    assert SQLALCHEMY_ENGINE is not None
+    assert _SQLALCHEMY_ENGINE is not None
     config.pop_nested(('db',), None)
     config_str = common_utils.dump_yaml_str(dict(config))
-    with orm.Session(SQLALCHEMY_ENGINE) as session:
-        if (SQLALCHEMY_ENGINE.dialect.name ==
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (SQLALCHEMY_ENGINE.dialect.name ==
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             insert_func = postgresql.insert
         else:
@@ -563,7 +563,7 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
 
 
 def _reload_config_as_server() -> None:
-    global SQLALCHEMY_ENGINE
+    global _SQLALCHEMY_ENGINE
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
     _set_loaded_config_path(None)
@@ -581,8 +581,8 @@ def _reload_config_as_server() -> None:
             'if db config is specified, no other config is allowed')
 
     if db_url:
-        if SQLALCHEMY_ENGINE is None:
-            SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url)
+        if _SQLALCHEMY_ENGINE is None:
+            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url)
             create_table()
         db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
         if db_config:
