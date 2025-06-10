@@ -47,11 +47,10 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          TEST_PATH="${{ matrix.test-path }}"
-          if [[ "$TEST_PATH" == "tests/test_no_parellel.py" ]]; then
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no $TEST_PATH
+          if [[ "${{ matrix.test-path }}" == "tests/test_no_parellel.py" ]]; then
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no ${{ matrix.test-path }}"
           else
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal $TEST_PATH
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 4 --dist worksteal ${{ matrix.test-path }}"
           fi
 
   limited-deps-test:
@@ -83,11 +82,10 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          TEST_PATH="${{ matrix.test-path }}"
-          if [[ "$TEST_PATH" == "tests/test_no_parellel.py" ]]; then
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no $TEST_PATH
+          if [[ "${{ matrix.test-path }}" == "tests/test_no_parellel.py" ]]; then
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no ${{ matrix.test-path }}"
           else
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal $TEST_PATH
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 4 --dist worksteal ${{ matrix.test-path }}"
           fi
 
   failover-test:
