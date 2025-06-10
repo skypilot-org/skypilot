@@ -1892,10 +1892,8 @@ def api_start(
         # Explain why current process exited
         logger.info('API server is already running:')
     api_server_url = server_common.get_server_url(host)
-    dashboard_url = server_common.get_dashboard_url(api_server_url)
-    dashboard_msg = f'Dashboard: {dashboard_url}'
-    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{api_server_url} {dashboard_msg}\n'
+    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
+                f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 

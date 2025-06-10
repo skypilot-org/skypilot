@@ -559,7 +559,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="workspaces">
+      <>
         {/* Header with breadcrumb navigation */}
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
@@ -854,7 +854,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </Layout>
+      </>
     </>
   );
 }
