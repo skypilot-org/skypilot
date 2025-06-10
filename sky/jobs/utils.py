@@ -245,6 +245,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         return
 
     for job_id in job_ids:
+        assert job_id is not None
         tasks = managed_job_state.get_managed_jobs(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
