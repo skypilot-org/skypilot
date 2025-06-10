@@ -228,7 +228,8 @@ allowed_clouds:
 ''')
 
     # Set env var to point to the temp config
-    monkeypatch.setenv('SKYPILOT_CONFIG', str(config_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
     common.reload_for_new_request(
         client_entrypoint='test_entry',
         client_command='test_cmd',

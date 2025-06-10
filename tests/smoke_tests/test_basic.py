@@ -185,11 +185,11 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
-            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
+            f'cp ${{{skypilot_config.ENV_VAR_GLOBAL_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
             # Set config override. This should change the cluster yaml, forcing reprovision/setup
             f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
             # Launch and do full output validation. Setup/provisioning should be run.
-            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 3 --status',
             f'sky status -r {name} | grep UP',
         ],
@@ -786,7 +786,7 @@ def test_kubernetes_context_failover(unreachable_context):
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
-                skypilot_config.ENV_VAR_SKYPILOT_CONFIG: f.name,
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
                     sky.server.common.get_server_url()
             },

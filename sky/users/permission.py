@@ -36,7 +36,7 @@ class PermissionService:
             with _lock:
                 if _enforcer_instance is None:
                     _enforcer_instance = self
-                    engine = global_user_state.SQLALCHEMY_ENGINE
+                    engine = global_user_state.initialize_and_get_db()
                     adapter = sqlalchemy_adapter.Adapter(engine)
                     model_path = os.path.join(os.path.dirname(__file__),
                                               'model.conf')
