@@ -60,6 +60,7 @@ class JobInfoLoc(enum.IntEnum):
     END_AT = 7
     RESOURCES = 8
     PID = 9
+    DOCKER_IMAGE_ID = 10
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -103,7 +104,8 @@ def create_table(cursor, conn):
         start_at FLOAT DEFAULT -1,
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
-        pid INTEGER DEFAULT -1)""")
+        pid INTEGER DEFAULT -1,
+        docker_image_id TEXT DEFAULT NULL)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -116,6 +118,8 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'docker_image_id',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -308,15 +312,18 @@ def make_job_command_with_user_switching(username: str,
     return ['sudo', '-H', 'su', '--login', username, '-c', command]
 
 
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            docker_image_id: Optional[str] = None) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _CURSOR.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, ?)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
+         run_timestamp, None, resources_str, docker_image_id))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -492,6 +499,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
+            'docker_image_id': row[JobInfoLoc.DOCKER_IMAGE_ID.value],
         })
     return records
 
@@ -858,7 +866,11 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         # it is being cancelled
         with filelock.FileLock(_get_lock_path(job_id)):
             job = _get_jobs_by_ids([job_id])[0]
-            if _is_job_driver_process_running(job['pid'], job_id):
+            if job['docker_image_id'] is not None:
+                # For docker image jobs, we stop and remove the docker image.
+                subprocess_utils.run(f'docker stop {job["docker_image_id"]} && '
+                                     f'docker rm {job["docker_image_id"]}')
+            elif _is_job_driver_process_running(job['pid'], job_id):
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
@@ -951,8 +963,12 @@ class JobLibCodeGen:
     ]
 
     @classmethod
-    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+    def add_job(cls,
+                job_name: Optional[str],
+                username: str,
+                run_timestamp: str,
+                resources_str: str,
+                docker_image_id: Optional[str] = None) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -967,7 +983,8 @@ class JobLibCodeGen:
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
-            f'{resources_str!r})',
+            f'{resources_str!r},'
+            f'{docker_image_id!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)

@@ -276,6 +276,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  task: 'task_lib.Task',
                  detach_run: bool,
                  docker_image: Optional[str],
+                 docker_image_unique_id: Optional[str],
                  dryrun: bool = False) -> None:
         """ Launches the container."""
         if detach_run:

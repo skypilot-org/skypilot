@@ -467,6 +467,7 @@ def _execute_dag(
                                          task,
                                          detach_run,
                                          docker_image,
+                                         docker_image_unique_id,
                                          dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
