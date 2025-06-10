@@ -52,7 +52,11 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          if [[ "${{ matrix.test-path }}" == "tests/test_optimizer_dryruns.py" ]]; then
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
+          else
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          fi
 
   limited-deps-test:
     # Test with limited dependencies to ensure cloud module imports don't break
