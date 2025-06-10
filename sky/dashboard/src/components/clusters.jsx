@@ -145,26 +145,30 @@ export function Clusters() {
   // Helper function to update URL query parameters
   const updateURLParams = (newWorkspace, newUser) => {
     const query = { ...router.query };
-    
+
     // Update workspace parameter
     if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
       query.workspace = newWorkspace;
     } else {
       delete query.workspace;
     }
-    
+
     // Update user parameter
     if (newUser && newUser !== ALL_USERS_VALUE) {
       query.user = newUser;
     } else {
       delete query.user;
     }
-    
+
     // Use replace to avoid adding to browser history for filter changes
-    router.replace({
-      pathname: router.pathname,
-      query,
-    }, undefined, { shallow: true });
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
   };
 
   // Handle workspace filter change
@@ -286,7 +290,10 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
-          <Select value={workspaceFilter} onValueChange={handleWorkspaceFilterChange}>
+          <Select
+            value={workspaceFilter}
+            onValueChange={handleWorkspaceFilterChange}
+          >
             <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
