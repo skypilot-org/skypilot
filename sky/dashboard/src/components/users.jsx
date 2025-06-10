@@ -30,7 +30,7 @@ import { RotateCwIcon, PenIcon, CheckIcon, XIcon } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
-import { ENDPOINT } from '@/data/connectors/constants';
+import { apiClient } from '@/data/connectors/client';
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -74,7 +74,7 @@ export function Users() {
   };
 
   return (
-    <Layout highlighted="users">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
           <Link
@@ -106,7 +106,7 @@ export function Users() {
         setLoading={setLoading} // Pass setLoading to UsersTable
         refreshDataRef={refreshDataRef}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -230,7 +230,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   const handleEditClick = async (userId, currentRole) => {
     try {
       // Get current user's role first
-      const response = await fetch(`${ENDPOINT}/users/role`);
+      const response = await apiClient.get(`/users/role`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to get user role');
@@ -265,12 +265,9 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     }
     setIsLoading(true); // Or use parent setLoading
     try {
-      const response = await fetch(`${ENDPOINT}/users/update`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ user_id: userId, role: currentEditingRole }),
+      const response = await apiClient.post(`/users/update`, {
+        user_id: userId,
+        role: currentEditingRole,
       });
       if (!response.ok) {
         const errorData = await response.json();

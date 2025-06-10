@@ -1689,7 +1689,7 @@ export function GPUs() {
   const isAllDataLoaded = kubeDataLoaded && cloudDataLoaded && !isInitialLoad;
 
   return (
-    <Layout highlighted="infra">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link
@@ -1763,7 +1763,7 @@ export function GPUs() {
         poolData={editingPool}
         isLoading={sshLoading}
       />
-    </Layout>
+    </>
   );
 }
 

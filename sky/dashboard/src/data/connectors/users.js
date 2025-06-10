@@ -1,6 +1,6 @@
-import { ENDPOINT } from './constants';
-import { getClusters } from './clusters';
-import { getManagedJobs } from './jobs';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
+import { apiClient } from '@/data/connectors/client';
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -25,16 +25,9 @@ const getFullEmail = (username) => {
   return '-';
 };
 
-// Mock data for now - replace with actual API call
-const mockUsers = [
-  { username: 'user1', last_login: '2023-01-15T10:00:00Z' },
-  { username: 'user2', last_login: '2023-01-16T12:30:00Z' },
-  { username: 'user3', last_login: '2023-01-17T15:45:00Z' },
-];
-
 export async function getUsers() {
   try {
-    const response = await fetch(`${ENDPOINT}/users`);
+    const response = await apiClient.get(`/users`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }

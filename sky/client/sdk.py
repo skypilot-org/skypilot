@@ -42,10 +42,12 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import infra_utils
@@ -356,6 +358,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@sky_context.contextual
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -491,6 +494,50 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, request_options=request_options, at_client_side=True) as dag:
+        return _launch(
+            dag,
+            cluster_name,
+            request_options,
+            retry_until_up,
+            idle_minutes_to_autostop,
+            dryrun,
+            down,
+            backend,
+            optimize_target,
+            no_setup,
+            clone_disk_from,
+            fast,
+            _need_confirmation,
+            _is_launched_by_jobs_controller,
+            _is_launched_by_sky_serve_controller,
+            _disable_controller_check,
+        )
+
+
+def _launch(
+    dag: 'sky.Dag',
+    cluster_name: str,
+    request_options: admin_policy.RequestOptions,
+    retry_until_up: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    dryrun: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    backend: Optional[backends.Backend] = None,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
+    no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
+    fast: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
+    _disable_controller_check: bool = False,
+) -> server_common.RequestId:
+    """Auxiliary function for launch(), refer to launch() for details."""
+
     validate(dag, admin_policy_request_options=request_options)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
@@ -1915,10 +1962,8 @@ def api_start(
         # Explain why current process exited
         logger.info('API server is already running:')
     api_server_url = server_common.get_server_url(host)
-    dashboard_url = server_common.get_dashboard_url(api_server_url)
-    dashboard_msg = f'Dashboard: {dashboard_url}'
-    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{api_server_url} {dashboard_msg}\n'
+    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
+                f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 

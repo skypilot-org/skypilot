@@ -40,7 +40,7 @@ import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
-import { ENDPOINT } from '@/data/connectors/constants';
+import { apiClient } from '@/data/connectors/client';
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -392,7 +392,7 @@ export function Workspaces() {
 
     setRoleLoading(true);
     try {
-      const response = await fetch(`${ENDPOINT}/users/role`);
+      const response = await apiClient.get(`/users/role`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to get user role');

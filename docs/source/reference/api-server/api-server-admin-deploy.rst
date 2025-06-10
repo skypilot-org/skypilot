@@ -503,17 +503,19 @@ Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth
 Optional: Back the API server with a persistent database
 --------------------------------------------------------
 
-The API server can optionally be configured with a postgresSQL database to persist state.
+The API server can optionally be configured with a PostgreSQL database to persist state. It can be an externally managed database.
 
-If a persistent DB is not specified, API server uses a kubernetes persistent volume to persist state.
+If a persistent DB is not specified, the API server uses a Kubernetes persistent volume to persist state.
 
 .. note::
 
-  Database configuration must be set in the helm deployment.
+  Database configuration must be set in the Helm deployment.
 
-.. dropdown:: Set the config with helm deployment during the first deployment
+.. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
+    Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
     To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+
 
     .. code-block:: bash
 
@@ -529,24 +531,30 @@ If a persistent DB is not specified, API server uses a kubernetes persistent vol
         --reuse-values \
         --set-file apiService.config=config.yaml
 
-    You can also directly set config values in the ``values.yaml`` file, e.g.:
+    You can also directly set this config value in the ``values.yaml`` file, e.g.:
 
     .. code-block:: yaml
 
         apiService:
-        config: |
+          config: |
             db: postgresql://<username>:<password>@<host>:<port>/<database>
+
+    See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
 
     .. note::
 
-        If ``db`` is specified in the config, no other configuration parameter can be specified in the helm chart.
+        Once ``db`` is specified in the config, no other SkyPilot configuration
+        parameter can be specified in the helm chart.  This is because, with
+        the ``db`` setting, other configurations are now persistently saved in
+        the database instead. To set any other SkyPilot configuration, see
+        :ref:`sky-api-server-config`.
 
-        See ``Optional: Setting the SkyPilot config`` below for how to set other config values.
+.. _sky-api-server-config:
 
 Optional: Setting the SkyPilot config
 --------------------------------------
 
-To modify your SkyPilot config, you can access the SkyPilot dashboard: ``http://<api-server-url>/dashboard/config``.
+To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server-url>/dashboard/config``.
 
 .. image:: ../../images/workspaces/config.png
 
@@ -590,7 +598,7 @@ To modify your SkyPilot config, you can access the SkyPilot dashboard: ``http://
     .. code-block:: yaml
 
         apiService:
-        config: |
+          config: |
             allowed_clouds:
             - aws
             - kubernetes
@@ -685,11 +693,7 @@ The steps below are based on the `official documentation <https://docs.aws.amazo
 
 Once the EBS CSI driver is installed, the default ``gp2`` storage class will be backed by EBS volumes.
 
-.. _sky-api-server-config:
-
-
-
-
+.. _sky-api-server-admin-policy:
 
 Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -703,8 +707,8 @@ To do so, set ``apiService.preDeployHook`` to the commands you want to run. For 
     # values.yaml
     apiService:
       preDeployHook: |
-       echo "Installing admin policy"
-       pip install git+https://github.com/michaelvll/admin-policy-examples
+        echo "Installing admin policy"
+        pip install git+https://github.com/michaelvll/admin-policy-examples
 
       config: |
         admin_policy: admin_policy_examples.AddLabelsPolicy
