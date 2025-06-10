@@ -999,8 +999,7 @@ def dump_managed_job_queue() -> str:
             state_details = 'In backoff, waiting for resources'
         elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
             priority = job.get('priority')
-            if (priority is not None and
-                    priority < highest_blocking_priority):
+            if (priority is not None and priority < highest_blocking_priority):
                 # Job is lower priority than some other blocking job.
                 state_details = 'Waiting for higher priority jobs to launch'
             else:
