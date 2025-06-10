@@ -324,7 +324,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               onClick={() => requestSort('fullEmailID')}
               className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
-              Email (ID){getSortDirection('fullEmailID')}
+              User ID{getSortDirection('fullEmailID')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('role')}
