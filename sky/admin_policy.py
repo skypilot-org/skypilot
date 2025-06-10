@@ -126,7 +126,7 @@ class PolicyInterface:
     @abc.abstractmethod
     def apply(self, user_request: UserRequest) -> MutatedUserRequest:
         """Apply the admin policy to the user request."""
-    
+
     def __str__(self):
         return f'{self.__class__.__name__}'
 

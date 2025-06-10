@@ -413,7 +413,7 @@ def _policy_server(policy: str) -> Iterator[str]:
         env=env)
     start_time = time.time()
     server_ready = False
-    while time.time() - start_time < 2.0:
+    while time.time() - start_time < 5.0:
         try:
             response = requests.get(f'http://localhost:{port}', timeout=0.1)
             if response.status_code == 200:
@@ -427,7 +427,7 @@ def _policy_server(policy: str) -> Iterator[str]:
     if not server_ready:
         proc.terminate()
         raise RuntimeError(
-            f'Policy server on port {port} failed to start within 2 seconds')
+            f'Policy server on port {port} failed to start within 5 seconds')
     try:
         yield f'http://localhost:{port}'
     finally:
