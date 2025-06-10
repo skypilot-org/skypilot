@@ -346,10 +346,7 @@ def run_bash_command_with_log(
         docker_file_mounts_mapping: Optional[Dict[str, str]] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
-        bash_command = make_task_bash_script(
-            bash_command,
-            env_vars=env_vars,
-            do_cd_sky_workdir=docker_image is None)
+        bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
@@ -368,8 +365,9 @@ def run_bash_command_with_log(
                 for k, v in all_mapping.items()
             ])
             docker_cmd = make_task_bash_script(
-                f'docker run {mount_args} --gpus all {docker_image} '
-                f'/bin/bash -i {script_path_in_docker}',
+                f'docker run {mount_args} --gpus '
+                '\'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\' '
+                f'{docker_image} /bin/bash -i {script_path_in_docker}',
                 do_cd_sky_workdir=False)
             with tempfile.NamedTemporaryFile('w',
                                              prefix='sky_docker_app_',
