@@ -118,6 +118,31 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
                                     f'{common_utils.format_exception(e)}')
 
 
+@router.post('/deploy')
+async def deploy_ssh_node_pool_general(request: fastapi.Request,
+                                       ssh_up_body: payloads.SSHUpBody) -> Dict[str, str]:
+    """Deploy SSH Node Pool using existing ssh_up functionality (general endpoint)."""
+    try:
+        executor.schedule_request(
+            request_id=request.state.request_id,
+            request_name='ssh_up',
+            request_body=ssh_up_body,
+            func=sky_core.ssh_up,
+            schedule_type=requests_lib.ScheduleType.LONG,
+        )
+
+        pool_name = ssh_up_body.infra or 'default'
+        return {
+            'status': 'success',
+            'request_id': request.state.request_id,
+            'message': f'SSH Node Pool `{pool_name}` deployment started'
+        }
+    except Exception as e:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=f'Failed to deploy SSH Node Pool: '
+                                    f'{common_utils.format_exception(e)}')
+
+
 @router.post('/{pool_name}/down')
 async def down_ssh_node_pool(request: fastapi.Request,
                              pool_name: str) -> Dict[str, str]:
@@ -132,6 +157,33 @@ async def down_ssh_node_pool(request: fastapi.Request,
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
+        return {
+            'status': 'success',
+            'request_id': request.state.request_id,
+            'message': f'SSH Node Pool `{pool_name}` teardown started'
+        }
+    except Exception as e:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=f'Failed to tear down SSH Node Pool: '
+                                    f'{common_utils.format_exception(e)}')
+
+
+@router.post('/down')
+async def down_ssh_node_pool_general(request: fastapi.Request,
+                                     ssh_up_body: payloads.SSHUpBody) -> Dict[str, str]:
+    """Tear down SSH Node Pool using existing ssh_up functionality (general endpoint)."""
+    try:
+        # Set cleanup=True for down operation
+        ssh_up_body.cleanup = True
+        executor.schedule_request(
+            request_id=request.state.request_id,
+            request_name='ssh_down',
+            request_body=ssh_up_body,
+            func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            schedule_type=requests_lib.ScheduleType.LONG,
+        )
+
+        pool_name = ssh_up_body.infra or 'default'
         return {
             'status': 'success',
             'request_id': request.state.request_id,
