@@ -3,7 +3,6 @@ import textwrap
 from unittest import mock
 
 from click import testing as cli_testing
-import pytest
 import requests
 
 from sky import cli
@@ -149,15 +148,10 @@ class TestAllCloudsEnabled:
             _capture_match_gpus_spec(f.name, 'V100:1')
             _capture_match_gpus_spec(f.name, 'V100')
 
-    @pytest.mark.no_parallel
     def test_k8s_alias(self, enable_all_clouds):
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(cli.launch, ['--cloud', 'k8s', '--dryrun'])
-        import sys
-        print('result.exception', result.exception, file=sys.stderr, flush=True)
-        print('result.exit_code', result.exit_code, file=sys.stderr, flush=True)
-        print('result.output', result.output, file=sys.stderr, flush=True)
         assert not result.exit_code
 
         result = cli_runner.invoke(cli.launch,

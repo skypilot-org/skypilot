@@ -53,7 +53,7 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          if [[ "${{ matrix.test-path }}" == "tests/test_no_parellel.py" ]]; then
+          if [[ "${{ matrix.test-path }}" == "tests/test_no_parellel.py" ]] || [[ "${{ matrix.test-path }}" == "tests/test_cli.py" ]]; then
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
           else
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
@@ -88,7 +88,11 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          if [[ "${{ matrix.test-path }}" == "tests/test_no_parellel.py" ]] || [[ "${{ matrix.test-path }}" == "tests/test_cli.py" ]]; then
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          else
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
+          fi
 
   failover-test:
     # Test failover functionality
