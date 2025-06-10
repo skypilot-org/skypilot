@@ -337,8 +337,8 @@ def path_size_megabytes(path: str) -> int:
             git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
                 shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
-                     f'{rsync_filter} '
-                     f'{git_exclude_filter} --dry-run {path!r}')
+                    f'--exclude-from={shlex.quote(str(resolved_path / constants.GIT_IGNORE_FILE))} '
+                    f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:
         rsync_output = str(subprocess.check_output(rsync_command, shell=True))
