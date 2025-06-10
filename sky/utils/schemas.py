@@ -100,7 +100,7 @@ def _get_single_resources_schema():
     infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
                      f'{wildcard_cloud}{wildcard_with_region}|'
                      f'{kubernetes_pattern})$')
-    
+
     memory_pattern = '^[0-9]+([GgMmTt][Bb])$'
 
     return {
@@ -382,7 +382,7 @@ def get_storage_schema():
     from sky.data import storage
 
     memory_pattern = '^[0-9]+([GgMmTt][Bb])$'
-    
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',

@@ -1940,20 +1940,24 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         autostop = config.pop('autostop', None)
-        if isinstance(autostop, str):
+        if autostop is not None:
             if autostop.endswith('min') or autostop.endswith('m'):
-                autostop = float(''.join(filter(str.isdigit, autostop)))
+                autostop = str(float(''.join(filter(str.isdigit, autostop))))
             elif autostop.endswith('h') or autostop.endswith('hr'):
-                autostop = float(''.join(filter(str.isdigit, autostop))) * 60
+                autostop = str(
+                    float(''.join(filter(str.isdigit, autostop))) * 60)
             elif autostop.endswith('d') or autostop.endswith('day'):
-                autostop = float(''.join(filter(str.isdigit, autostop))) * 60 * 24
+                autostop = str(
+                    float(''.join(filter(str.isdigit, autostop))) * 60 * 24)
             elif autostop.endswith('w') or autostop.endswith('week'):
-                autostop = float(''.join(filter(str.isdigit, autostop))) * 60 * 24 * 7
+                autostop = str(
+                    float(''.join(filter(str.isdigit, autostop))) * 60 * 24 * 7)
             elif autostop.endswith('s') or autostop.endswith('sec'):
-                autostop = float(''.join(filter(str.isdigit, autostop))) / 60
+                autostop = str(
+                    float(''.join(filter(str.isdigit, autostop))) / 60)
             else:
-                autostop = float(autostop)
-        resources_fields['autostop'] = str(autostop)
+                autostop = str(float(autostop))
+        resources_fields['autostop'] = autostop
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
@@ -2246,22 +2250,20 @@ def _convert_to_gb(memory: str) -> str:
 
     memory = memory.upper()
     if memory.endswith('GB'):
-        memory = int(memory[:-2])
+        memory = str(int(memory[:-2]))
     elif memory.endswith('MB'):
-        memory = int(memory[:-2]) // 1024
+        memory = str(int(memory[:-2]) // 1024)
     elif memory.endswith('TB'):
-        memory = int(memory[:-2]) * 1024
+        memory = str(int(memory[:-2]) * 1024)
     elif memory.endswith('KB'):
-        memory = int(memory[:-2]) // 1024 // 1024
+        memory = str(int(memory[:-2]) // 1024 // 1024)
     elif memory.endswith('B'):
-        memory = int(memory[:-1]) // 1024 // 1024 // 1024
+        memory = str(int(memory[:-1]) // 1024 // 1024 // 1024)
     elif memory.endswith('PB'):
-        memory = int(memory[:-2]) * 1024 * 1024
-    elif memory.isdigit():
-        memory = int(memory)
-    else:
-        raise ValueError(f"Invalid memory format: {memory}")
+        memory = str(int(memory[:-2]) * 1024 * 1024)
+    elif not memory.isdigit():
+        raise ValueError(f'Invalid memory format: {memory}')
 
     if plus:
-        memory = f"{memory}+"
-    return str(memory)
+        memory = f'{memory}+'
+    return memory
