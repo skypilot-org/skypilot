@@ -693,6 +693,7 @@ async def launch(launch_body: payloads.LaunchBody,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=launch_body.cluster_name,
+        retryable=launch_body.retry_until_up,
     )
 
 

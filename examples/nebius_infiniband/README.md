@@ -1,10 +1,36 @@
 # Using InfiniBand in Nebius with SkyPilot
 
-To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand, a high-throughput, low-latency networking standard.
+## Setup InfiniBand with a single SkyPilot configuration
 
-## InfiniBand on Managed Nebius Kubernetes clusters with SkyPilot
+SkyPilot provides the `network_tier: best` configuration option that automatically enables InfiniBand support on Nebius Kubernetes clusters and Nebius VMs. This eliminates the need for manual configuration of security contexts and environment variables.
 
-With Nebius Kubernetes cluster, you can use SkyPilot to run your jobs with InfiniBand enabled:
+### InfiniBand on Nebius managed Kubernetes clusters
+
+Simply add ``network_tier: best`` to your resources specification:
+
+```yaml
+resources:
+  infra: k8s
+  accelerators: H100:8
+  network_tier: best
+```
+
+To create a Nebius Kubernetes cluster with InfiniBand enabled, check the [Appendix](#appendix-creating-a-nebius-kubernetes-cluster-with-infiniband-enabled).
+
+### End-to-end Example
+
+Check the [`nccl_network_tier.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl_network_tier.yaml) for a complete example using the simplified configuration:
+
+```bash
+sky launch -c nccl_network_tier nccl_network_tier.yaml
+```
+
+This enables the InfiniBand for inter-GPU communication, and SkyPilot will automatically setup the environment variables for you.
+
+<details>
+<summary>Equivalent way to turn on InfiniBand manually</summary>
+
+With Nebius managed Kubernetes cluster, you can also turn on InfiniBand manually:
 
 1. Set the following config in your SkyPilot task YAML to enable InfiniBand:
 
@@ -31,97 +57,19 @@ run: |
 
 Check more details in [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml)
 
-## Create a Nebius Kubernetes cluster with InfiniBand enabled
-
-To enable infiniband for a Nebius Kubernetes cluster, you need to create a GPU node group with InfiniBand enabled, for more details, refer to the [Nebius documentation](https://docs.nebius.com/kubernetes/gpu/clusters#enable).
-
-
-1. Create a managed service for Kubernetes cluster or bring in your own Kubernetes cluster.
-
-Create a Nebius Kubernetes cluster:
-
-```bash
-export PROJECT_ID=your-project-id
-export NB_SUBNET_ID=$(nebius vpc subnet list \
-  --parent-id $PROJECT_ID \
-  --format json \
-  | jq -r '.items[0].metadata.id')
-
-export NB_K8S_CLUSTER_ID=$(nebius mk8s cluster create \
-  --name infini \
-  --control-plane-version 1.30 \
-  --control-plane-subnet-id $NB_SUBNET_ID \
-  --control-plane-endpoints-public-endpoint=true \
-  --parent-id=$PROJECT_ID \
-  --format json | jq -r '.metadata.id')
-```
-
-<details>
-<summary>Or, Bring in your own Kubernetes cluster</summary>
-
-Find your Kubernetes cluster ID on the console or using the following command:
-
-```bash
-export PROJECT_ID=your-project-id
-# Use the first cluster in the list
-export NB_K8S_CLUSTER_ID=$(nebius mk8s cluster list \
-  --parent-id $PROJECT_ID \
-  --format json \
-  | jq -r '.items[0].metadata.id')
-```
-
 </details>
 
 
-2. To enable InfiniBand for a node group, you need to create a GPU cluster first, then specify the GPU cluster when creating the node group.
+### Running NCCL test using SkyPilot
 
-```bash
-export INFINIBAND_FABRIC=fabric-3
-export NB_GPU_CLUSTER_ID=$(nebius compute gpu-cluster create \
-  --name gpu-cluster-name \
-  --infiniband-fabric $INFINIBAND_FABRIC \
-  --parent-id $PROJECT_ID \
-  --format json \
-  | jq -r ".metadata.id")
-
-nebius mk8s node-group create \
-  --parent-id $NB_K8S_CLUSTER_ID \
-  --name infini-ib-group \
-  --fixed-node-count 2 \
-  --template-resources-platform gpu-h100-sxm \
-  --template-resources-preset 8gpu-128vcpu-1600gb \
-  --template-gpu-cluster-id $NB_GPU_CLUSTER_ID \
-  --template-gpu-settings-drivers-preset cuda12
-```
-
-Refer to the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu#fabrics) for how to select the fabric according to the type of GPUs you are going to use.
-
-3. Setup Kubeconfig and setup Nvidia GPUs 
-
-```bash
-nebius mk8s cluster get-credentials --id $NB_K8S_CLUSTER_ID --external
-sky check k8s
-```
-
-> Note: To create a node group with a GPU cluster, you need to specify a compatible preset (number of GPUs and vCPUs, RAM size). The compatible platforms and presets are as below:
-> 
-| Platform | Presets | Regions |
-|---------------|----------|------|
-|NVIDIA® H100 NVLink with Intel Sapphire Rapids (gpu-h100-sxm) | 8gpu-128vcpu-1600gb | eu-north1
-|NVIDIA® H200 NVLink with Intel Sapphire Rapids (gpu-h200-sxm) | 8gpu-128vcpu-1600gb | eu-north1, eu-west1, us-central1
-
-Now you have a Kubernetes cluster that have the GPUs interconnected using InfiniBand.
-
-## Running NCCL test using SkyPilot
-
-Check the [`nccl.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml) for the complete SkyPilot cluster yaml configurations.
+Check the [`nccl_network_tier.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl_network_tier.yaml) for the complete SkyPilot cluster yaml configurations.
 
 The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library).
 
 To run the NCCL test with InfiniBand support:
 
 ```bash
-sky launch -c infiniband nccl.yaml
+sky launch -c infiniband nccl_network_tier.yaml
 ```
 
 SkyPilot will:
@@ -149,6 +97,7 @@ The example result is as below:
 ```bash
 sky launch -c no_infiniband nccl_no_ib.yaml
 ```
+
 
 ## InfiniBand on Nebius VMs with SkyPilot
 
@@ -248,3 +197,84 @@ Result example:
 ## Additional Resources
 
 The Nebius team maintains a comprehensive collection of example configurations in their [ml-cookbook repository](https://github.com/nebius/ml-cookbook/tree/main/skypilot). These examples cover various use cases and can help you get started with different ML workloads on Nebius using SkyPilot.
+
+## Appendix: creating a Nebius Kubernetes cluster with InfiniBand enabled
+
+To enable infiniband for a Nebius Kubernetes cluster, you need to create a GPU node group with InfiniBand enabled, for more details, refer to the [Nebius documentation](https://docs.nebius.com/kubernetes/gpu/clusters#enable).
+
+
+1. Create a managed service for Kubernetes cluster or bring in your own Kubernetes cluster.
+
+Create a Nebius Kubernetes cluster:
+
+```bash
+export PROJECT_ID=your-project-id
+export NB_SUBNET_ID=$(nebius vpc subnet list \
+  --parent-id $PROJECT_ID \
+  --format json \
+  | jq -r '.items[0].metadata.id')
+
+export NB_K8S_CLUSTER_ID=$(nebius mk8s cluster create \
+  --name infini \
+  --control-plane-version 1.30 \
+  --control-plane-subnet-id $NB_SUBNET_ID \
+  --control-plane-endpoints-public-endpoint=true \
+  --parent-id=$PROJECT_ID \
+  --format json | jq -r '.metadata.id')
+```
+
+<details>
+<summary>Or, Bring in your own Kubernetes cluster</summary>
+
+Find your Kubernetes cluster ID on the console or using the following command:
+
+```bash
+export PROJECT_ID=your-project-id
+# Use the first cluster in the list
+export NB_K8S_CLUSTER_ID=$(nebius mk8s cluster list \
+  --parent-id $PROJECT_ID \
+  --format json \
+  | jq -r '.items[0].metadata.id')
+```
+
+</details>
+
+
+2. To enable InfiniBand for a node group, you need to create a GPU cluster first, then specify the GPU cluster when creating the node group.
+
+```bash
+export INFINIBAND_FABRIC=fabric-3
+export NB_GPU_CLUSTER_ID=$(nebius compute gpu-cluster create \
+  --name gpu-cluster-name \
+  --infiniband-fabric $INFINIBAND_FABRIC \
+  --parent-id $PROJECT_ID \
+  --format json \
+  | jq -r ".metadata.id")
+
+nebius mk8s node-group create \
+  --parent-id $NB_K8S_CLUSTER_ID \
+  --name infini-ib-group \
+  --fixed-node-count 2 \
+  --template-resources-platform gpu-h100-sxm \
+  --template-resources-preset 8gpu-128vcpu-1600gb \
+  --template-gpu-cluster-id $NB_GPU_CLUSTER_ID \
+  --template-gpu-settings-drivers-preset cuda12
+```
+
+Refer to the [Nebius documentation](https://docs.nebius.com/compute/clusters/gpu#fabrics) for how to select the fabric according to the type of GPUs you are going to use.
+
+3. Setup Kubeconfig and setup Nvidia GPUs 
+
+```bash
+nebius mk8s cluster get-credentials --id $NB_K8S_CLUSTER_ID --external
+sky check k8s
+```
+
+> Note: To create a node group with a GPU cluster, you need to specify a compatible preset (number of GPUs and vCPUs, RAM size). The compatible platforms and presets are as below:
+> 
+| Platform                                                      | Presets             | Regions                          |
+| ------------------------------------------------------------- | ------------------- | -------------------------------- |
+| NVIDIA® H100 NVLink with Intel Sapphire Rapids (gpu-h100-sxm) | 8gpu-128vcpu-1600gb | eu-north1                        |
+| NVIDIA® H200 NVLink with Intel Sapphire Rapids (gpu-h200-sxm) | 8gpu-128vcpu-1600gb | eu-north1, eu-west1, us-central1 |
+
+Now you have a Kubernetes cluster that have the GPUs interconnected using InfiniBand.
