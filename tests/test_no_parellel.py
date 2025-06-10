@@ -1,3 +1,7 @@
+# Tests that require higher speed or could cause potential race conditions
+# that cause pytest to fail when parallel enabled are put into this file.
+# All tests in this file will not enable parallel.
+
 import tempfile
 import textwrap
 import time
