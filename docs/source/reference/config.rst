@@ -76,7 +76,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
-  
+
   :ref:`ssh <config-yaml-ssh>`:
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
@@ -1253,11 +1253,22 @@ Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` is 
 ``db``
 ~~~~~~
 
-Database configuration (optional).
+API Server database configuration (optional).
 
-Specify the database connection string to use for SkyPilot. If not specified, SkyPilot will use a SQLite database initialized in ~/.sky directory.
-If a postgres database URL is specified, SkyPilot will use the database to persist API server state.
-Currently, managed job controller state is not persisted in remote database even if `db` is specified.
+Specify the database connection string to use for SkyPilot. If not specified,
+SkyPilot will use a SQLite database initialized in the ``~/.sky`` directory.
+
+If a PostgreSQL database URL is specified, SkyPilot will use the database to
+persist API server state.
+
+Currently, managed job controller state is not persisted in remote databases
+even if ``db`` is specified.
+
+.. note::
+
+  If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
+
+  Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
 
 Example:
 

@@ -1,6 +1,7 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
 import functools
+import hashlib
 import json
 import math
 import os
@@ -1555,11 +1556,11 @@ def is_kubeconfig_exec_auth(
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = context_obj['name']
         exec_msg = ('exec-based authentication is used for '
-                    f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues with autodown or when running '
-                    'Managed Jobs or SkyServe controller on Kubernetes. '
-                    'To fix, configure SkyPilot to create a service account '
-                    'for running pods by setting the following in '
+                    f'Kubernetes context {ctx_name!r}. '
+                    'Make sure that the corresponding cloud provider is '
+                    'also enabled through `sky check` (e.g.: GCP for GKE). '
+                    'Alternatively, configure SkyPilot to create a service '
+                    'account for running pods by setting the following in '
                     '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
@@ -2877,8 +2878,8 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
     if context == kubernetes.in_cluster_context_name():
-        # If the context (also used as the region) is in-cluster, we need to
-        # we need to use in-cluster auth by setting the context to None.
+        # If the context (also used as the region) is in-cluster, we need
+        # to use in-cluster auth by setting the context to None.
         context = None
     return context
 
@@ -3135,3 +3136,101 @@ def get_kubeconfig_paths() -> List[str]:
     for path in paths.split(kubernetes.ENV_KUBECONFIG_PATH_SEPARATOR):
         expanded.append(os.path.expanduser(path))
     return expanded
+
+
+def format_kubeconfig_exec_auth(config: Any,
+                                output_path: str,
+                                inject_wrapper: bool = True) -> bool:
+    """Reformat the kubeconfig so that exec-based authentication can be used
+    with SkyPilot. Will create a new kubeconfig file under <output_path>
+    regardless of whether a change has been made.
+
+    kubectl internally strips all environment variables except for system
+    defaults. If `inject_wrapper` is true, a wrapper executable is applied
+    to inject the relevant PATH information before exec-auth is executed.
+
+    Contents of sky-kube-exec-wrapper:
+
+    #!/bin/bash
+    export PATH="$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk:$PATH"
+    exec "$@"
+
+    refer to `skylet/constants.py` for more information.
+
+    Args:
+        config (dict): kubeconfig parsed by yaml.safe_load
+        output_path (str): Path where the potentially modified kubeconfig file
+          will be saved
+        inject_wrapper (bool): Whether to inject the wrapper script
+    Returns: whether config was updated, for logging purposes
+    """
+    updated = False
+    for user in config.get('users', []):
+        exec_info = user.get('user', {}).get('exec', {})
+        current_command = exec_info.get('command', '')
+
+        if current_command:
+            # Strip the path and keep only the executable name
+            executable = os.path.basename(current_command)
+            if executable == kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER:
+                # we don't want this happening recursively.
+                continue
+
+            if inject_wrapper:
+                exec_info[
+                    'command'] = kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER
+                if exec_info.get('args') is None:
+                    exec_info['args'] = []
+                exec_info['args'].insert(0, executable)
+                updated = True
+            elif executable != current_command:
+                exec_info['command'] = executable
+                updated = True
+
+            # Handle Nebius kubeconfigs: change --profile to 'sky'
+            if executable == 'nebius':
+                args = exec_info.get('args', [])
+                if args and '--profile' in args:
+                    try:
+                        profile_index = args.index('--profile')
+                        if profile_index + 1 < len(args):
+                            old_profile = args[profile_index + 1]
+                            if old_profile != 'sky':
+                                args[profile_index + 1] = 'sky'
+                                updated = True
+                    except ValueError:
+                        pass
+
+    os.makedirs(os.path.dirname(os.path.expanduser(output_path)), exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as file:
+        yaml.safe_dump(config, file)
+
+    return updated
+
+
+def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
+    """Reformat the kubeconfig file or retrieve it from cache if it has already
+    been formatted before. Store it in the cache directory if necessary.
+
+    Having a cache for this is good if users spawn an extreme number of jobs
+    concurrently.
+
+    Args:
+        kubeconfig_path (str): kubeconfig path
+    Returns: updated kubeconfig path
+    """
+    # TODO(kyuds): GC cache files
+    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+    normalized = yaml.dump(config, sort_keys=True)
+    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    path = os.path.expanduser(
+        f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
+    )
+
+    # If we have already converted the same kubeconfig before, just return.
+    if os.path.isfile(path):
+        return path
+
+    format_kubeconfig_exec_auth(config, path)
+    return path
