@@ -600,11 +600,20 @@ def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
         ]
         question_mark_str = ', '.join(['?'] * len(expected_status))
         status_str = f'status IN ({question_mark_str})'
+    # NOTE: if we are resuming from a controller failure and the previous status
+    # is STARTING, the initial value of `last_recovered_at` might not be set
+    # yet (default value -1). In this case, we should not add current timestamp.
+    # Otherwise, the job duration will be incorrect (~55 years from 1970).
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             f"""\
                 UPDATE spot SET
-                status=(?), job_duration=job_duration+(?)-last_recovered_at
+                status=(?),
+                job_duration=CASE
+                    WHEN last_recovered_at > 0
+                    THEN job_duration+(?)-last_recovered_at
+                    ELSE job_duration
+                END
                 WHERE spot_job_id=(?) AND
                 task_id=(?) AND
                 {status_str} AND

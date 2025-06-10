@@ -220,12 +220,7 @@ class JobsController:
             remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
 
-        # NOTE: if we are resuming from a controller failure and the previous
-        # status is STARTING, we need to set the job status to STARTED to set
-        # the initial value of `last_recovered_at`. Otherwise, the job duration
-        # will be incorrect (55 years 5mo 2d 22h 33m 53s).
-        if (not is_resume or last_task_prev_status
-                == managed_job_state.ManagedJobStatus.STARTING):
+        if not is_resume:
             managed_job_state.set_started(job_id=self._job_id,
                                           task_id=task_id,
                                           start_time=remote_job_submitted_at,
