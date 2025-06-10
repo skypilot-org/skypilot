@@ -20,6 +20,8 @@ from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
+from sky.skylet.constants import CATALOG_DIR
+from sky.skylet.constants import CATALOG_SCHEMA_VERSION
 from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -30,7 +32,6 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.skylet.constants import CATALOG_DIR, CATALOG_SCHEMA_VERSION
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1859,19 +1860,21 @@ class Resources:
             manufacturer = None
             memory = None
             count = 1
-            
+
             split = []
             split = str(accelerators).split(':')
             if len(split) == 3:
-                manufacturer, memory, count = split
-                count = int(count)
+                manufacturer, memory, count_str = split
+                count = int(count_str)
                 assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
                     'If specifying a GPU manufacturer, you must also' \
                     'specify the memory size'
-            elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
+                                              split[0]):
                 memory = split[0]
                 count = int(split[1])
-            elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
+                                              split[0]):
                 memory = split[0]
             elif isinstance(accelerators, str):
                 accelerators = {accelerators}
@@ -1881,11 +1884,10 @@ class Resources:
                     for k, v in accelerators.items()
                 ]
                 accelerators = set(accelerators)
-            
-            if manufacturer is not None or memory is not None:
+
+            if memory is not None:
                 # set accelerators to a dictionary of DEVICE NAME: DEVICE COUNT
                 # where each DEVICE NAME has at least memory size
-                memory = memory.lower()
                 mb = 'mb' in memory
                 tb = 'tb' in memory
                 plus = '+' in memory
@@ -1893,12 +1895,12 @@ class Resources:
                                 replace('gb', '').\
                                 replace('mb', '').\
                                 replace('tb', '')
-                memory = int(memory)
+                memory_gb = float(memory)
                 if mb:
-                    memory /= 1024
+                    memory_gb /= 1024
                 elif tb:
-                    memory *= 1024
-                
+                    memory_gb *= 1024
+
                 cloud = None
                 if config.get('infra') is not None:
                     cloud = config.get('infra')
@@ -1906,16 +1908,14 @@ class Resources:
                         cloud = None
 
                 accelerators = [
-                    f'{device}:{count}' for device in
-                    _get_devices(memory, plus, manufacturer=manufacturer, cloud=cloud)
+                    f'{device}:{count}' for device in _get_devices(
+                        memory_gb, plus, manufacturer=manufacturer, cloud=cloud)
                 ]
                 if not accelerators:
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'No GPUs found.'
-                        )
+                        raise ValueError(f'No GPUs found.')
                 accelerators = set(accelerators)
-            
+
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -2278,12 +2278,10 @@ def _maybe_add_docker_prefix_to_image_id(
             image_id_dict[k] = f'docker:{v}'
 
 
-def _get_devices(
-    memory: int,
-    plus: bool = False,
-    manufacturer: Optional[str] = None,
-    cloud: Optional[str] = None
-) -> List[str]:
+def _get_devices(memory: float,
+                 plus: bool = False,
+                 manufacturer: Optional[str] = None,
+                 cloud: Optional[str] = None) -> List[str]:
     """Returns a list of device names that meet the memory and manufacturer requirements.
     
     Args:
@@ -2293,23 +2291,23 @@ def _get_devices(
     """
     ACCELERATORS_PATH = "common/accelerators.csv"
     common = CATALOG_DIR + '/' + CATALOG_SCHEMA_VERSION + '/' + ACCELERATORS_PATH
-    
+
     # Read the accelerators CSV file
     df = pd.read_csv(common)
-    
+
     # Filter by memory requirements
     if plus:
         df = df[df['MemoryGB'] >= memory]
     else:
         df = df[df['MemoryGB'] == memory]
-    
+
     # Filter by manufacturer if specified
     if manufacturer is not None:
         manufacturer = manufacturer.lower()
         df = df[df['Manufacturer'] == manufacturer]
-    
+
     # Filter by cloud if specified
     if cloud is not None:
         df = df[df['Clouds'].str.contains(cloud, case=False, na=False)]
-    
+
     return df['AcceleratorName'].tolist()
