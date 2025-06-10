@@ -132,16 +132,15 @@ export async function deploySSHNodePool(poolName) {
 
 export async function sshDownNodePool(poolName) {
   try {
-    const response = await fetch(`${ENDPOINT}/ssh_down`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        infra: poolName,
-        cleanup: true,
-      }),
-    });
+    const response = await fetch(
+      `${ENDPOINT}/ssh_node_pools/${poolName}/down`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -149,7 +148,7 @@ export async function sshDownNodePool(poolName) {
 
     return await response.json();
   } catch (error) {
-    console.error('Error calling ssh_down for SSH Node Pool:', error);
+    console.error('Error tearing down SSH Node Pool:', error);
     throw error;
   }
 }
@@ -273,6 +272,109 @@ export async function streamSSHDeploymentLogs({ requestId, signal, onNewLog }) {
   if (result.timeout) {
     showToast(
       `SSH deployment log stream timed out after ${inactivityTimeout / 1000}s of inactivity`,
+      'warning'
+    );
+    return;
+  }
+}
+
+// Reusable function for streaming SSH operation logs (deploy or down)
+export async function streamSSHOperationLogs({ requestId, signal, onNewLog, operationType = 'operation' }) {
+  // Measure timeout from last received data, not from start of request.
+  const inactivityTimeout = 300000; // 5 minutes of no data activity
+  let lastActivity = Date.now();
+  let timeoutId;
+
+  // Create an activity-based timeout promise
+  const createTimeoutPromise = () => {
+    return new Promise((resolve) => {
+      const checkActivity = () => {
+        const timeSinceLastActivity = Date.now() - lastActivity;
+
+        if (timeSinceLastActivity >= inactivityTimeout) {
+          resolve({ timeout: true });
+        } else {
+          // Check again after remaining time
+          timeoutId = setTimeout(
+            checkActivity,
+            inactivityTimeout - timeSinceLastActivity
+          );
+        }
+      };
+
+      timeoutId = setTimeout(checkActivity, inactivityTimeout);
+    });
+  };
+
+  const timeoutPromise = createTimeoutPromise();
+
+  // Create the fetch promise
+  const fetchPromise = (async () => {
+    try {
+      const response = await fetch(
+        `${ENDPOINT}/api/stream?request_id=${requestId}&format=plain&tail=${DEFAULT_TAIL_LINES}&follow=true`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          // Only use the signal if it's provided
+          ...(signal ? { signal } : {}),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Stream the logs
+      const reader = response.body.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Update activity timestamp when we receive data
+          lastActivity = Date.now();
+
+          const chunk = new TextDecoder().decode(value);
+          onNewLog(chunk);
+        }
+      } finally {
+        reader.cancel();
+        // Clear the timeout when streaming completes successfully
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      }
+      return { timeout: false };
+    } catch (error) {
+      // Clear timeout on any error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      // If this was an abort, just return silently
+      if (error.name === 'AbortError') {
+        return { timeout: false };
+      }
+      throw error;
+    }
+  })();
+
+  // Race the fetch against the activity-based timeout
+  const result = await Promise.race([fetchPromise, timeoutPromise]);
+
+  // Clear any remaining timeout
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  // If we timed out due to inactivity, show a more informative message
+  if (result.timeout) {
+    showToast(
+      `SSH ${operationType} log stream timed out after ${inactivityTimeout / 1000}s of inactivity`,
       'warning'
     );
     return;

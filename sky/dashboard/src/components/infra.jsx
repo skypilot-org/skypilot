@@ -27,6 +27,7 @@ import {
   sshDownNodePool,
   getSSHNodePoolStatus,
   streamSSHDeploymentLogs,
+  streamSSHOperationLogs,
 } from '@/data/connectors/ssh-node-pools';
 import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
 import { Button } from '@/components/ui/button';
@@ -596,72 +597,133 @@ function SSHNodePoolDetails({
   };
 
   const handleConfirmAction = async () => {
-    setConfirmDialog((prev) => ({ ...prev, loading: true }));
+    setConfirmDialog({ ...confirmDialog, loading: true });
 
     try {
-      console.log(`${confirmDialog.action} button clicked for pool:`, poolName);
-
-      if (confirmDialog.action === 'delete') {
-        if (handleDeleteSSHPool) {
-          await handleDeleteSSHPool(poolName);
-        }
-        // Close dialog on success
+      if (confirmDialog.action === 'deploy') {
+        // Hide confirmation dialog and show streaming dialog
         setConfirmDialog({ isOpen: false, action: null, loading: false });
-      } else {
-        // Deploy - start streaming
-        const response = await deploySSHNodePool(poolName);
-
-        // Close confirmation dialog
-        setConfirmDialog({ isOpen: false, action: null, loading: false });
-
-        // Open streaming dialog
         setStreamingDialog({
           isOpen: true,
-          logs: 'Starting deployment...\n',
+          logs: '',
           isStreaming: true,
           deploymentComplete: false,
           deploymentSuccess: false,
-          requestId: response.request_id,
+          requestId: null,
         });
 
-        // Start streaming logs
-        const abortController = new AbortController();
-
         try {
+          const response = await handleDeploySSHPool(poolName);
+          const requestId = response.request_id;
+
+          setStreamingDialog(prev => ({ ...prev, requestId }));
+
+          // Create an AbortController for this streaming session
+          const abortController = new AbortController();
+
           await streamSSHDeploymentLogs({
-            requestId: response.request_id,
+            requestId,
             signal: abortController.signal,
-            onNewLog: (chunk) => {
-              setStreamingDialog((prev) => ({
+            onNewLog: (log) => {
+              setStreamingDialog(prev => ({
                 ...prev,
-                logs: prev.logs + chunk,
+                logs: prev.logs + log,
               }));
             },
           });
 
           // Deployment completed successfully
-          setStreamingDialog((prev) => ({
+          setStreamingDialog(prev => ({
             ...prev,
             isStreaming: false,
             deploymentComplete: true,
             deploymentSuccess: true,
-            logs: prev.logs + '\n✅ Deployment completed successfully!\n',
           }));
+
+          // Refresh status after successful deployment
+          setTimeout(async () => {
+            const fetchStatus = async () => {
+              try {
+                const status = await getSSHNodePoolStatus(poolName);
+                setStatusData(status);
+              } catch (error) {
+                console.error('Failed to fetch SSH Node Pool status after deployment:', error);
+              }
+            };
+            fetchStatus();
+          }, 1000);
+
         } catch (error) {
-          console.error('Deployment streaming error:', error);
-          setStreamingDialog((prev) => ({
+          console.error('Deployment failed:', error);
+          setStreamingDialog(prev => ({
             ...prev,
             isStreaming: false,
             deploymentComplete: true,
             deploymentSuccess: false,
-            logs: prev.logs + `\n❌ Deployment failed: ${error.message}\n`,
+            logs: prev.logs + `\nDeployment failed: ${error.message}`,
+          }));
+        }
+      } else if (confirmDialog.action === 'delete') {
+        // Hide confirmation dialog and show streaming dialog
+        setConfirmDialog({ isOpen: false, action: null, loading: false });
+        setStreamingDialog({
+          isOpen: true,
+          logs: '',
+          isStreaming: true,
+          deploymentComplete: false,
+          deploymentSuccess: false,
+          requestId: null,
+        });
+
+        try {
+          // Step 1: Call sshDownNodePool to get request_id for streaming
+          const downResponse = await sshDownNodePool(poolName);
+          const requestId = downResponse.request_id;
+
+          setStreamingDialog(prev => ({ ...prev, requestId }));
+
+          if (requestId) {
+            // Stream the down operation logs
+            await streamSSHOperationLogs({
+              requestId,
+              signal: null, // No abort signal for now
+              onNewLog: (log) => {
+                setStreamingDialog(prev => ({
+                  ...prev,
+                  logs: prev.logs + log,
+                }));
+              },
+              operationType: 'down'
+            });
+          }
+
+          // Step 2: After streaming completes, call the parent's delete handler
+          // which will handle the actual deletion and navigation
+          await handleDeleteSSHPool(poolName);
+
+          // Down operation completed successfully
+          setStreamingDialog(prev => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: true,
+            logs: prev.logs + '\nSSH Node Pool teardown completed successfully.',
+          }));
+
+        } catch (error) {
+          console.error('Down operation failed:', error);
+          setStreamingDialog(prev => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: false,
+            logs: prev.logs + `\nTeardown failed: ${error.message}`,
           }));
         }
       }
     } catch (error) {
-      console.error(`Failed to ${confirmDialog.action} SSH Node Pool:`, error);
-      // Keep dialog open on error so user can retry
-      setConfirmDialog((prev) => ({ ...prev, loading: false }));
+      console.error('Action failed:', error);
+      setConfirmDialog({ ...confirmDialog, loading: false });
     }
   };
 
@@ -800,9 +862,9 @@ function SSHNodePoolDetails({
       {/* Confirmation Dialog */}
       <Dialog open={confirmDialog.isOpen} onOpenChange={handleCancelAction}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{dialogContent.title}</DialogTitle>
-            <DialogDescription>{dialogContent.description}</DialogDescription>
+          <DialogHeader className="">
+            <DialogTitle className="">{dialogContent.title}</DialogTitle>
+            <DialogDescription className="">{dialogContent.description}</DialogDescription>
           </DialogHeader>
 
           <div className="py-4">
@@ -816,11 +878,12 @@ function SSHNodePoolDetails({
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="">
             <Button
               variant="outline"
               onClick={handleCancelAction}
               disabled={confirmDialog.loading}
+              className=""
             >
               Cancel
             </Button>
@@ -858,9 +921,9 @@ function SSHNodePoolDetails({
         }
       >
         <DialogContent className="sm:max-w-4xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle>Deploying SSH Node Pool: {poolName}</DialogTitle>
-            <DialogDescription>
+          <DialogHeader className="">
+            <DialogTitle className="">Deploying SSH Node Pool: {poolName}</DialogTitle>
+            <DialogDescription className="">
               {streamingDialog.isStreaming
                 ? 'Deployment in progress. Do not close this dialog.'
                 : streamingDialog.deploymentSuccess
@@ -883,7 +946,7 @@ function SSHNodePoolDetails({
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="">
             <Button
               onClick={handleCloseStreamingDialog}
               disabled={streamingDialog.isStreaming}
@@ -1209,7 +1272,8 @@ export function GPUs() {
 
   const handleDeleteSSHPool = async (poolName) => {
     try {
-      await sshDownNodePool(poolName);
+      // Just handle the actual deletion and navigation
+      // The streaming is now handled in the SSHNodePoolDetails component
       await deleteSSHNodePool(poolName);
       await fetchSSHNodePools(); // Refresh the list
 
