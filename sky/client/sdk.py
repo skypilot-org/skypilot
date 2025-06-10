@@ -1559,18 +1559,20 @@ def ssh_up(infra: Optional[str] = None,
     """
     if file is not None:
         _update_remote_ssh_node_pools(file, infra)
-    
+
     # Use SSH node pools router endpoint
     body = payloads.SSHUpBody(infra=infra, cleanup=False)
     if infra is not None:
         # Call the specific pool deployment endpoint
-        response = requests.post(f'{server_common.get_server_url()}/ssh_node_pools/{infra}/deploy',
-                                 cookies=server_common.get_api_cookie_jar())
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/{infra}/deploy',
+            cookies=server_common.get_api_cookie_jar())
     else:
         # Call the general deployment endpoint
-        response = requests.post(f'{server_common.get_server_url()}/ssh_node_pools/deploy',
-                                 json=json.loads(body.model_dump_json()),
-                                 cookies=server_common.get_api_cookie_jar())
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/deploy',
+            json=json.loads(body.model_dump_json()),
+            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1591,13 +1593,15 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     body = payloads.SSHUpBody(infra=infra, cleanup=True)
     if infra is not None:
         # Call the specific pool down endpoint
-        response = requests.post(f'{server_common.get_server_url()}/ssh_node_pools/{infra}/down',
-                                 cookies=server_common.get_api_cookie_jar())
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/{infra}/down',
+            cookies=server_common.get_api_cookie_jar())
     else:
         # Call the general down endpoint
-        response = requests.post(f'{server_common.get_server_url()}/ssh_node_pools/down',
-                                 json=json.loads(body.model_dump_json()),
-                                 cookies=server_common.get_api_cookie_jar())
+        response = requests.post(
+            f'{server_common.get_server_url()}/ssh_node_pools/down',
+            json=json.loads(body.model_dump_json()),
+            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
