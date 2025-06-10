@@ -37,22 +37,15 @@ const parseUsername = (username, userId) => {
   if (username && username.includes('@')) {
     return username.split('@')[0];
   }
-  // If no email, show username with userId in parentheses only if they're different
-  const usernameBase = username || 'N/A';
-
-  // Skip showing userId if it's the same as username
-  if (userId && userId !== usernameBase) {
-    return `${usernameBase} (${userId})`;
-  }
-
-  return usernameBase;
+  // If no email, show username only
+  return username || 'N/A';
 };
 
-const getFullEmail = (username) => {
+const getFullEmailID = (username, userId) => {
   if (username && username.includes('@')) {
     return username;
   }
-  return '-';
+  return userId || '-';
 };
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -133,7 +126,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
         const initialProcessedUsers = (usersData || []).map((user) => ({
           ...user,
           usernameDisplay: parseUsername(user.username, user.userId),
-          fullEmail: getFullEmail(user.username),
+          fullEmailID: getFullEmailID(user.username, user.userId),
           clusterCount: -1, // Use -1 as loading indicator
           jobCount: -1, // Use -1 as loading indicator
         }));
@@ -164,7 +157,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
           return {
             ...user,
             usernameDisplay: parseUsername(user.username, user.userId),
-            fullEmail: getFullEmail(user.username),
+            fullEmailID: getFullEmailID(user.username, user.userId),
             clusterCount: userClusters.length,
             jobCount: userJobs.length,
           };
@@ -328,10 +321,10 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               Name{getSortDirection('usernameDisplay')}
             </TableHead>
             <TableHead
-              onClick={() => requestSort('fullEmail')}
+              onClick={() => requestSort('fullEmailID')}
               className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
-              Email{getSortDirection('fullEmail')}
+              Email (ID){getSortDirection('fullEmailID')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('role')}
@@ -359,8 +352,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableCell className="truncate" title={user.username}>
                 {user.usernameDisplay}
               </TableCell>
-              <TableCell className="truncate" title={user.fullEmail}>
-                {user.fullEmail}
+              <TableCell className="truncate" title={user.fullEmailID}>
+                {user.fullEmailID}
               </TableCell>
               <TableCell className="truncate" title={user.role}>
                 <div className="flex items-center gap-2">
