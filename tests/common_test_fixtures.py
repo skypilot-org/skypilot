@@ -495,6 +495,7 @@ def mock_aws_backend(monkeypatch):
                      task,
                      detach_run,
                      docker_image,
+                     docker_image_unique_id,
                      dryrun=False):
         # Return a fake job ID without attempting to SSH
         return 1234
