@@ -310,6 +310,29 @@ prometheus:
     persistentVolume:
       enabled: true
       size: 10Gi
+    # HTTP Service Discovery configuration for external Kubernetes clusters
+    extraScrapeConfigs: |
+      - job_name: 'dcgm-exporter-http-sd'
+        http_sd_configs:
+        - url: http://{{ include "skypilot.fullname" . }}:46580/api/service-discovery
+          refresh_interval: 60s
+        relabel_configs:
+        # Keep all labels from service discovery
+        - source_labels: [__meta_sd_tags]
+          regex: (.*)
+          target_label: __tmp_tags
+          replacement: $1
+        # Set metrics path from service discovery metadata
+        - source_labels: [__meta_sd_label___metrics_path__]
+          target_label: __metrics_path__
+          regex: (.+)
+        # Set scheme from service discovery metadata  
+        - source_labels: [__meta_sd_label___scheme__]
+          target_label: __scheme__
+          regex: (.+)
+        # Add service discovery metadata as labels
+        - regex: __meta_sd_label_(.+)
+          action: labelmap
   kube-state-metrics:
     enabled: false
   prometheus-node-exporter:
