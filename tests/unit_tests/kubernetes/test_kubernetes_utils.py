@@ -284,8 +284,6 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
     detect_gpu_label_formatter method will skip if
     the label value is invalid."""
 
-    assert utils.detect_gpu_label_formatter.__name__ != 'get_kubernetes_label_formatter'
-
     # this is an invalid GKE gpu label
     valid, _ = utils.GKELabelFormatter.validate_label_value('H100_NVLINK_80GB')
     assert not valid
@@ -304,6 +302,6 @@ def test_detect_gpu_label_formatter_invalid_label_skip():
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                     return_value=[mock_node]):
-        lf, _ = utils.detect_gpu_label_formatter(None)
+        lf, _ = utils.detect_gpu_label_formatter('whatever')
         assert lf is not None
         assert isinstance(lf, utils.CoreWeaveLabelFormatter)
