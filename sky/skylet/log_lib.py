@@ -339,6 +339,7 @@ def add_ray_env_vars(
 def run_bash_command_with_log(
         bash_command: str,
         log_path: str,
+        remote_setup_file_name: Optional[str] = None,
         env_vars: Optional[Dict[str, str]] = None,
         stream_logs: bool = False,
         with_ray: bool = False,
@@ -346,6 +347,9 @@ def run_bash_command_with_log(
         docker_file_mounts_mapping: Optional[Dict[str, str]] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
+        if docker_image is not None and remote_setup_file_name is not None:
+            with open(remote_setup_file_name, 'r', encoding='utf-8') as f:
+                bash_command = f'{f.read()}\n{bash_command}'
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()

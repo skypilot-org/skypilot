@@ -555,6 +555,7 @@ class RayCodeGen:
 
     def add_ray_task(self,
                      bash_script: Optional[str],
+                     remote_setup_file_name: Optional[str],
                      task_name: Optional[str],
                      ray_resources_dict: Dict[str, float],
                      log_dir: str,
@@ -676,6 +677,7 @@ class RayCodeGen:
                     .remote(
                         script,
                         log_path,
+                        remote_setup_file_name={remote_setup_file_name!r},
                         docker_image={docker_image!r},
                         docker_file_mounts_mapping={docker_file_mounts_mapping!r},
                         env_vars=sky_env_vars_dict,
@@ -2735,6 +2737,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # setup needs to be run outside the self._setup() and as part of
         # a job (detach_setup, default).
         self._setup_cmd = None
+        self._remote_setup_file_name = None
 
     # --- Implementation of Backend APIs ---
 
@@ -3308,7 +3311,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool, docker_image: Optional[str],
                docker_file_mounts_mapping: Optional[Dict[str, str]]) -> None:
-        # TODO(tian): Support setup.
+        del docker_file_mounts_mapping  # Unused.
         start = time.time()
 
         if task.setup is None:
@@ -3319,6 +3322,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_setup_file_name = f'/tmp/sky_setup_{self.run_timestamp}'
         # Need this `-i` option to make sure `source ~/.bashrc` work
         setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
+        if docker_image is not None:
+            self._remote_setup_file_name = remote_setup_file_name
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
@@ -3327,8 +3332,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
             runner = runners[node_id]
-            setup_script = log_lib.make_task_bash_script(setup,
-                                                         env_vars=setup_envs)
+            # For docker image, we skip the task bash script prefix as we will
+            # directly use the one from run command in
+            # sky.skylet.log_lib::run_bash_command_with_log
+            if docker_image is not None:
+                setup_script = setup
+            else:
+                setup_script = log_lib.make_task_bash_script(
+                    setup, env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
 
             def _dump_final_script(
@@ -3686,7 +3697,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
             # TODO(tian): Support multi-node tasks for docker mapping
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
+            self._execute_task_n_nodes(handle, task_copy, job_id, docker_image,
+                                       detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, docker_image,
@@ -5246,7 +5258,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
-            setup_cmd=self._setup_cmd,
+            # When docker on existing VM is used, we merge the setup command
+            # and the run command into one command.
+            setup_cmd=self._setup_cmd if docker_image is None else None,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
@@ -5258,6 +5272,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
             bash_script=command_for_node,
+            remote_setup_file_name=self._remote_setup_file_name,
             env_vars=task_env_vars,
             task_name=task.name,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
@@ -5275,6 +5290,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
+                              docker_image: Optional[str],
                               detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
@@ -5315,11 +5331,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the corresponding node, represented by private IPs.
             codegen.add_ray_task(
                 bash_script=command_for_node,
+                remote_setup_file_name=self._remote_setup_file_name,
                 env_vars=task_env_vars,
                 task_name=task.name,
                 ray_resources_dict=backend_utils.get_task_demands_dict(task),
                 log_dir=log_dir,
-                gang_scheduling_id=i)
+                gang_scheduling_id=i,
+                docker_image=docker_image,
+                docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.
