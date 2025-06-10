@@ -313,11 +313,6 @@ def _resolve_project_config_path() -> Optional[str]:
     return None
 
 
-def _get_project_config() -> config_utils.Config:
-    """Returns the project config."""
-    return _get_config_from_path(_resolve_project_config_path())
-
-
 def _resolve_server_config_path() -> Optional[str]:
     # find the server config file
     server_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
