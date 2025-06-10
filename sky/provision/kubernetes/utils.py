@@ -582,7 +582,7 @@ def detect_gpu_label_formatter(
                     if valid:
                         return lf(), node_labels
                     else:
-                        logger.warning(f'Gpu label {label} matched for label '
+                        logger.warning(f'GPU label {label} matched for label '
                                        f'formatter {lf.__class__.__name__}, '
                                        f'but has invalid value {value}. '
                                        f'Reason: {reason}. '
