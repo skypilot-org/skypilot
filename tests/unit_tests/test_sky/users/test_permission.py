@@ -49,7 +49,7 @@ class TestPermissionService:
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
     @mock.patch('sky.users.permission.casbin.Enforcer')
-    @mock.patch('sky.global_user_state.SQLALCHEMY_ENGINE')
+    @mock.patch('sky.global_user_state._SQLALCHEMY_ENGINE')
     def test_permission_service_initialization(self, mock_engine,
                                                mock_enforcer_class,
                                                mock_adapter_class,
@@ -455,7 +455,7 @@ class TestPermissionServiceMultiProcess:
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
     @mock.patch('sky.users.permission.casbin.Enforcer')
-    @mock.patch('sky.global_user_state.SQLALCHEMY_ENGINE')
+    @mock.patch('sky.global_user_state._SQLALCHEMY_ENGINE')
     def test_singleton_behavior_same_process(self, mock_engine,
                                              mock_enforcer_class,
                                              mock_adapter_class,
