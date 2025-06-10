@@ -429,7 +429,7 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 
 def get_user_by_name(username: str) -> List[models.User]:
-    with orm.Session(SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
     if len(rows) == 0:
         return []
@@ -440,7 +440,7 @@ def get_user_by_name(username: str) -> List[models.User]:
 
 
 def delete_user(user_id: str) -> None:
-    with orm.Session(SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(user_table).filter_by(id=user_id).delete()
         session.commit()
 
