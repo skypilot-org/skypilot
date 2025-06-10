@@ -2459,17 +2459,50 @@ def cancel(
       \b
       # Cancel the latest running job on a cluster.
       sky cancel cluster_name
+      \b
+      # Cancel the latest running job on all matching clusters.
+      sky cancel cluster-glob*
+      \b
+      # Cancel all your jobs on all matching clusters.
+      sky cancel cluster-glob* -a
 
     Job IDs can be looked up by ``sky queue cluster_name``.
+    Cluster names support glob patterns (e.g., cluster* matches cluster1, cluster2).
     """
+    # Handle glob patterns in cluster names
+    matching_clusters = []
+    if '*' in cluster or '?' in cluster or '[' in cluster:
+        # This is a glob pattern, expand it
+        try:
+            # Get list of all available clusters
+            all_clusters = sdk.get_cluster_names()
+            matching_clusters = [c for c in all_clusters if fnmatch.fnmatch(c, cluster)]
+        except Exception:
+            raise click.UsageError(f'No clusters match pattern: {cluster!r}')
+    else:
+        # Literal cluster name
+        matching_clusters = [cluster]
+    
+    if not matching_clusters:
+        raise click.UsageError(f'No clusters match pattern: {cluster!r}')
+    
+    # Don't allow job IDs when using glob patterns that match multiple clusters
+    if len(matching_clusters) > 1 and jobs:
+        raise click.UsageError(
+            'Cannot specify job IDs when cluster pattern matches multiple clusters. '
+            f'Pattern {cluster!r} matches: {", ".join(matching_clusters)}')
+      
     job_identity_str = ''
     job_ids_to_cancel = None
     if not jobs and not all and not all_users:
-        click.echo(
-            f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
-            'cancelling the latest running job.'
-            f'{colorama.Style.RESET_ALL}')
-        job_identity_str = 'the latest running job'
+        if len(matching_clusters) == 1:
+            click.echo(
+                f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
+                'cancelling the latest running job.'
+                f'{colorama.Style.RESET_ALL}')
+            job_identity_str = 'the latest running job'
+        else:
+            job_identity_str = 'the latest running job on each cluster'
     elif all_users:
         job_identity_str = 'all users\' jobs'
     else:
@@ -2481,7 +2514,12 @@ def cancel(
             connector = ' and ' if job_identity_str else ''
             job_identity_str += f'{connector}job{plural} {jobs_str}'
             job_ids_to_cancel = jobs
-    job_identity_str += f' on cluster {cluster!r}'
+
+    if len(matching_clusters) == 1:
+        job_identity_str += f' on cluster {matching_clusters[0]!r}'
+    else:
+        cluster_list = ', '.join(f"'{c}'" for c in matching_clusters)
+        job_identity_str += f' on clusters: {cluster_list}'
 
     if not yes:
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
@@ -2489,22 +2527,24 @@ def cancel(
                       abort=True,
                       show_default=True)
 
-    try:
-        request_id = sdk.cancel(cluster,
-                                all=all,
-                                all_users=all_users,
-                                job_ids=job_ids_to_cancel)
-        _async_call_or_wait(request_id, async_call, 'sky.cancel')
-    except exceptions.NotSupportedError as e:
-        controller = controller_utils.Controllers.from_name(cluster)
-        assert controller is not None, cluster
-        with ux_utils.print_exception_no_traceback():
-            raise click.UsageError(controller.value.decline_cancel_hint) from e
-    except ValueError as e:
-        raise click.UsageError(str(e))
-    except exceptions.ClusterNotUpError:
-        with ux_utils.print_exception_no_traceback():
-            raise
+
+    for cluster_name in matching_clusters:
+        try:
+            request_id = sdk.cancel(cluster,
+                                    all=all,
+                                    all_users=all_users,
+                                    job_ids=job_ids_to_cancel)
+            _async_call_or_wait(request_id, async_call, 'sky.cancel')
+        except exceptions.NotSupportedError as e:
+            controller = controller_utils.Controllers.from_name(cluster)
+            assert controller is not None, cluster
+            with ux_utils.print_exception_no_traceback():
+                raise click.UsageError(controller.value.decline_cancel_hint) from e
+        except ValueError as e:
+            raise click.UsageError(str(e))
+        except exceptions.ClusterNotUpError:
+            with ux_utils.print_exception_no_traceback():
+                raise
 
 
 @cli.command(cls=_DocumentedCodeCommand)
