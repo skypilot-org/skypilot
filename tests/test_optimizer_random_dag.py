@@ -5,13 +5,11 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
-import pytest
 
 import sky
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import skypilot_config
 
 ALL_INSTANCE_TYPE_INFOS = sum(
     sky.list_accelerators(gpus_only=True).values(), [])

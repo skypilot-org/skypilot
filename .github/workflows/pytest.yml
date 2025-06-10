@@ -31,6 +31,7 @@ jobs:
           - tests/test_wheels.py
           - tests/test_jobs_and_serve.py
           - tests/test_yaml_parser.py
+          - tests/test_no_parellel.py
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -52,10 +53,10 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          if [[ "${{ matrix.test-path }}" == "tests/test_optimizer_dryruns.py" ]]; then
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
-          else
+          if [[ "${{ matrix.test-path }}" == "tests/test_no_parellel.py" ]]; then
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          else
+            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
           fi
 
   limited-deps-test:
@@ -87,7 +88,7 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
 
   failover-test:
     # Test failover functionality
@@ -118,4 +119,4 @@ jobs:
       - name: Run tests with pytest
         run: |
           source ~/test-env/bin/activate
-          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
