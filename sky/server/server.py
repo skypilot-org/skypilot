@@ -1227,10 +1227,6 @@ async def service_discovery(request: fastapi.Request) -> List[Dict[str, Any]]:
         
         # Generate targets for each allowed context
         for context_name in allowed_contexts:
-            # Skip in-cluster context as it's the API server's own cluster
-            if context_name == 'in-cluster':
-                continue
-                
             # Common DCGM exporter configurations
             common_ports = [9400]  # Default DCGM exporter port
             common_namespaces = ['nvidia-gpu-operator', 'gpu-operator']
