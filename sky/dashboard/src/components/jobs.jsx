@@ -117,7 +117,7 @@ const formatUserDisplay = (username, userId) => {
   }
   // If no email, show username with userId in parentheses only if they're different
   const usernameBase = username || userId || 'N/A';
-  
+
   // Skip showing userId if it's the same as username
   if (userId && userId !== usernameBase) {
     return `${usernameBase} (${userId})`;
@@ -343,21 +343,21 @@ export function ManagedJobs() {
             allJobs
               .map((job) => ({
                 userId: job.user_hash || job.user,
-                username: job.user
+                username: job.user,
               }))
               .filter((user) => user.userId)
-          ).values()
+          ).values(),
         ];
 
         // Combine fetched users with unique job users
         const finalUsers = new Map();
-        
+
         // Add fetched users first
         fetchedUsers.forEach((user) => {
           finalUsers.set(user.userId, {
             userId: user.userId,
             username: user.username,
-            display: formatUserDisplay(user.username, user.userId)
+            display: formatUserDisplay(user.username, user.userId),
           });
         });
 
@@ -367,12 +367,16 @@ export function ManagedJobs() {
             finalUsers.set(user.userId, {
               userId: user.userId,
               username: user.username,
-              display: formatUserDisplay(user.username, user.userId)
+              display: formatUserDisplay(user.username, user.userId),
             });
           }
         });
 
-        setUsers(Array.from(finalUsers.values()).sort((a, b) => a.display.localeCompare(b.display)));
+        setUsers(
+          Array.from(finalUsers.values()).sort((a, b) =>
+            a.display.localeCompare(b.display)
+          )
+        );
       } catch (error) {
         console.error('Error fetching data for filters:', error);
         setWorkspaces(['default']); // Fallback or error state
@@ -427,13 +431,12 @@ export function ManagedJobs() {
               <SelectValue placeholder="Filter by user...">
                 {userFilter === ALL_USERS_VALUE
                   ? 'All Users'
-                  : users.find(u => u.userId === userFilter)?.display || userFilter}
+                  : users.find((u) => u.userId === userFilter)?.display ||
+                    userFilter}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>
-                All Users
-              </SelectItem>
+              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
               {users.map((user) => (
                 <SelectItem key={user.userId} value={user.userId}>
                   {user.display}
@@ -659,7 +662,7 @@ export function ManagedJobsTable({
   const filteredData = React.useMemo(() => {
     // First apply workspace filter
     let filtered = filterJobsByWorkspace(data, workspaceFilter);
-    
+
     // Then apply user filter
     filtered = filterJobsByUser(filtered, userFilter);
 
@@ -677,7 +680,14 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter, userFilter]);
+  }, [
+    data,
+    activeTab,
+    selectedStatuses,
+    showAllMode,
+    workspaceFilter,
+    userFilter,
+  ]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -1268,12 +1278,12 @@ export function ClusterJobs({
 
   const jobData = React.useMemo(() => {
     let filtered = clusterJobData || [];
-    
+
     // Apply user filter if provided
     if (userFilter && userFilter !== ALL_USERS_VALUE) {
       filtered = filterJobsByUser(filtered, userFilter);
     }
-    
+
     return filtered;
   }, [clusterJobData, userFilter]);
 

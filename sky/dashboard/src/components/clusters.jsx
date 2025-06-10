@@ -102,7 +102,7 @@ const formatUserDisplay = (username, userId) => {
   }
   // If no email, show username with userId in parentheses only if they're different
   const usernameBase = username || userId || 'N/A';
-  
+
   // Skip showing userId if it's the same as username
   if (userId && userId !== usernameBase) {
     return `${usernameBase} (${userId})`;
@@ -185,21 +185,21 @@ export function Clusters() {
             allClusters
               .map((cluster) => ({
                 userId: cluster.user_hash || cluster.user,
-                username: cluster.user
+                username: cluster.user,
               }))
               .filter((user) => user.userId)
-          ).values()
+          ).values(),
         ];
 
         // Combine fetched users with unique cluster users
         const finalUsers = new Map();
-        
+
         // Add fetched users first
         fetchedUsers.forEach((user) => {
           finalUsers.set(user.userId, {
             userId: user.userId,
             username: user.username,
-            display: formatUserDisplay(user.username, user.userId)
+            display: formatUserDisplay(user.username, user.userId),
           });
         });
 
@@ -209,12 +209,16 @@ export function Clusters() {
             finalUsers.set(user.userId, {
               userId: user.userId,
               username: user.username,
-              display: formatUserDisplay(user.username, user.userId)
+              display: formatUserDisplay(user.username, user.userId),
             });
           }
         });
 
-        setUsers(Array.from(finalUsers.values()).sort((a, b) => a.display.localeCompare(b.display)));
+        setUsers(
+          Array.from(finalUsers.values()).sort((a, b) =>
+            a.display.localeCompare(b.display)
+          )
+        );
       } catch (error) {
         console.error('Error fetching data for filters:', error);
         setWorkspaces(['default']); // Fallback or error state
@@ -269,13 +273,12 @@ export function Clusters() {
               <SelectValue placeholder="Filter by user...">
                 {userFilter === ALL_USERS_VALUE
                   ? 'All Users'
-                  : users.find(u => u.userId === userFilter)?.display || userFilter}
+                  : users.find((u) => u.userId === userFilter)?.display ||
+                    userFilter}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>
-                All Users
-              </SelectItem>
+              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
               {users.map((user) => (
                 <SelectItem key={user.userId} value={user.userId}>
                   {user.display}
