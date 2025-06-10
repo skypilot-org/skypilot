@@ -240,11 +240,21 @@ class JobsController:
             if is_resume:
                 prev_status = managed_job_state.get_job_status_with_task_id(
                     job_id=self._job_id, task_id=task_id)
-                if prev_status is not None and prev_status.is_terminal():
-                    return (prev_status ==
-                            managed_job_state.ManagedJobStatus.SUCCEEDED)
+                if prev_status is not None:
+                    if prev_status.is_terminal():
+                        return (prev_status ==
+                                managed_job_state.ManagedJobStatus.SUCCEEDED)
+                    if (prev_status ==
+                            managed_job_state.ManagedJobStatus.CANCELLING):
+                        # If the controller is down when cancelling the job,
+                        # we re-raise the error to run the `_cleanup` function
+                        # again to clean up any remaining resources.
+                        raise exceptions.ManagedJobUserCancelledError(
+                            'Recovering cancel signal.')
                 if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                     force_transit_to_recovering = True
+                # This resume logic should only be triggered once.
+                is_resume = False
 
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -449,9 +459,11 @@ class JobsController:
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
-            managed_job_state.set_recovering(job_id=self._job_id,
-                                             task_id=task_id,
-                                             callback_func=callback_func)
+            managed_job_state.set_recovering(
+                job_id=self._job_id,
+                task_id=task_id,
+                force_transit_to_recovering=force_transit_to_recovering,
+                callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,

@@ -332,6 +332,16 @@ class ManagedJobStatus(enum.Enum):
             cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
         ]
 
+    @classmethod
+    def processing_statuses(cls) -> List['ManagedJobStatus']:
+        # Any status that is not terminal and is not CANCELLING.
+        return [
+            cls.PENDING,
+            cls.STARTING,
+            cls.RUNNING,
+            cls.RECOVERING,
+        ]
+
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
@@ -574,21 +584,33 @@ def set_started(job_id: int, task_id: int, start_time: float,
     callback_func('STARTED')
 
 
-def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
+def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
+                   callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
-    # Originally, we force the status to be RUNNING before setting to RECOVERING
-    # After adding the HA job controller, it is possible that the jobs came from
-    # any status to recovering. So we skip the status check here.
+    expected_status: List[str] = [ManagedJobStatus.RUNNING.value]
+    status_str = 'status=(?)'
+    if force_transit_to_recovering:
+        # For the HA job controller, it is possible that the jobs came from any
+        # processing status to recovering. But it should not be any terminal
+        # status as such jobs will not be recovered; and it should not be
+        # CANCELLING as we will directly trigger a cleanup.
+        expected_status = [
+            s.value for s in ManagedJobStatus.processing_statuses()
+        ]
+        question_mark_str = ', '.join(['?'] * len(expected_status))
+        status_str = f'status IN ({question_mark_str})'
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
-            """\
+            f"""\
                 UPDATE spot SET
                 status=(?), job_duration=job_duration+(?)-last_recovered_at
                 WHERE spot_job_id=(?) AND
                 task_id=(?) AND
+                {status_str} AND
                 end_at IS null""",
-            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id))
+            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id,
+             *expected_status))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
