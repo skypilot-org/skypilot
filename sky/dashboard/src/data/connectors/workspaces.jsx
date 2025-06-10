@@ -1,9 +1,9 @@
-import { ENDPOINT } from './constants';
+import { apiClient } from '@/data/connectors/client';
 
 export async function getWorkspaces() {
   try {
     // Step 1: Call the /workspaces endpoint to schedule the task
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces`);
+    const scheduleResponse = await apiClient.get(`/workspaces`);
     if (!scheduleResponse.ok) {
       throw new Error(
         `Error scheduling getWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
@@ -58,8 +58,8 @@ export async function getWorkspaces() {
 
     // Step 3: Poll the /api/get endpoint with the request_id.
     console.log(`Fetching workspace data with request_id: ${requestId}`);
-    const resultResponse = await fetch(
-      `${ENDPOINT}/api/get?request_id=${requestId}`
+    const resultResponse = await apiClient.get(
+      `/api/get?request_id=${requestId}`
     );
     if (!resultResponse.ok) {
       let errorDetail = `Error fetching workspace data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
@@ -193,7 +193,7 @@ export async function getWorkspaces() {
 export async function getEnabledClouds(workspaceName = null, expand = false) {
   try {
     // Step 1: Call the /enabled_clouds endpoint to schedule the task
-    let url = `${ENDPOINT}/enabled_clouds`;
+    let url = `/enabled_clouds`;
     const params = new URLSearchParams();
     if (workspaceName) {
       params.append('workspace', workspaceName);
@@ -205,12 +205,7 @@ export async function getEnabledClouds(workspaceName = null, expand = false) {
       url += `?${params.toString()}`;
     }
 
-    const scheduleResponse = await fetch(url, {
-      method: 'GET', // Changed back to GET
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const scheduleResponse = await apiClient.get(url);
 
     if (!scheduleResponse.ok) {
       throw new Error(
@@ -260,8 +255,8 @@ export async function getEnabledClouds(workspaceName = null, expand = false) {
 
     // Step 3: Poll the /api/get endpoint with the request_id.
     console.log(`Fetching enabled_clouds data with request_id: ${requestId}`);
-    const resultResponse = await fetch(
-      `${ENDPOINT}/api/get?request_id=${requestId}`
+    const resultResponse = await apiClient.get(
+      `/api/get?request_id=${requestId}`
     );
     if (!resultResponse.ok) {
       let errorDetail = `Error fetching enabled_clouds data for request ID ${requestId}: ${resultResponse.statusText} (status ${resultResponse.status})`;
@@ -356,8 +351,8 @@ async function pollForTaskCompletion(requestId, taskName) {
     `Polling for ${taskName} task completion with request_id: ${requestId}`
   );
 
-  const resultResponse = await fetch(
-    `${ENDPOINT}/api/get?request_id=${requestId}`
+  const resultResponse = await apiClient.get(
+    `/api/get?request_id=${requestId}`
   );
 
   if (!resultResponse.ok) {
@@ -551,15 +546,9 @@ export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
 
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/update`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        workspace_name: workspaceName,
-        config: config,
-      }),
+    const scheduleResponse = await apiClient.post(`/workspaces/update`, {
+      workspace_name: workspaceName,
+      config: config,
     });
 
     if (!scheduleResponse.ok) {
@@ -583,15 +572,9 @@ export async function updateWorkspace(workspaceName, config) {
 // Create new workspace
 export const createWorkspace = async (workspaceName, config) => {
   try {
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/create`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        workspace_name: workspaceName,
-        config: config,
-      }),
+    const scheduleResponse = await apiClient.post(`/workspaces/create`, {
+      workspace_name: workspaceName,
+      config: config,
     });
 
     if (!scheduleResponse.ok) {
@@ -618,14 +601,8 @@ export async function deleteWorkspace(workspaceName) {
   try {
     console.log(`Deleting workspace ${workspaceName}`);
 
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/delete`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        workspace_name: workspaceName,
-      }),
+    const scheduleResponse = await apiClient.post(`/workspaces/delete`, {
+      workspace_name: workspaceName,
     });
 
     if (!scheduleResponse.ok) {
@@ -669,7 +646,7 @@ export async function getConfig() {
   try {
     console.log('Getting entire SkyPilot configuration');
 
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/config`);
+    const scheduleResponse = await apiClient.get(`/workspaces/config`);
     if (!scheduleResponse.ok) {
       throw new Error(
         `Error scheduling getConfig: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
@@ -693,14 +670,8 @@ export async function updateConfig(config) {
   try {
     console.log('Updating entire SkyPilot configuration with config:', config);
 
-    const scheduleResponse = await fetch(`${ENDPOINT}/workspaces/config`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        config: config,
-      }),
+    const scheduleResponse = await apiClient.post(`/workspaces/config`, {
+      config: config,
     });
 
     if (!scheduleResponse.ok) {
