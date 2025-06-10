@@ -21,6 +21,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import filelock
+import yaml
 
 import sky
 from sky import backends
@@ -2301,16 +2302,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
-            try:
-                # It is possible that the cluster yaml is not available when
-                # the handle is unpickled for service replicas from the
-                # controller with older version.
-                config = global_user_state.get_cluster_yaml_dict(
-                    self.cluster_yaml)
-            except ValueError:
+            # It is possible that the cluster yaml is not available when
+            # the handle is unpickled for service replicas from the
+            # controller with older version.
+            yaml_str = global_user_state.get_cluster_yaml_str(self.cluster_yaml)
+            if yaml_str is None:
                 # If the cluster yaml is not available,
                 # we skip updating the cluster info.
                 return
+            config = yaml.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
