@@ -308,6 +308,43 @@ export function ManagedJobs() {
     }
   }, [router.isReady, router.query.workspace, router.query.user]);
 
+  // Helper function to update URL query parameters
+  const updateURLParams = (newWorkspace, newUser) => {
+    const query = { ...router.query };
+    
+    // Update workspace parameter
+    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
+      query.workspace = newWorkspace;
+    } else {
+      delete query.workspace;
+    }
+    
+    // Update user parameter
+    if (newUser && newUser !== ALL_USERS_VALUE) {
+      query.user = newUser;
+    } else {
+      delete query.user;
+    }
+    
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace({
+      pathname: router.pathname,
+      query,
+    }, undefined, { shallow: true });
+  };
+
+  // Handle workspace filter change
+  const handleWorkspaceFilterChange = (newWorkspace) => {
+    setWorkspaceFilter(newWorkspace);
+    updateURLParams(newWorkspace, userFilter);
+  };
+
+  // Handle user filter change
+  const handleUserFilterChange = (newUser) => {
+    setUserFilter(newUser);
+    updateURLParams(workspaceFilter, newUser);
+  };
+
   // Fetch workspaces and users for filter dropdown
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -407,7 +444,7 @@ export function ManagedJobs() {
           >
             Managed Jobs
           </Link>
-          <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
+          <Select value={workspaceFilter} onValueChange={handleWorkspaceFilterChange}>
             <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
@@ -426,7 +463,7 @@ export function ManagedJobs() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={userFilter} onValueChange={setUserFilter}>
+          <Select value={userFilter} onValueChange={handleUserFilterChange}>
             <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by user...">
                 {userFilter === ALL_USERS_VALUE
