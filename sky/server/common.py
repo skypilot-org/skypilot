@@ -320,7 +320,8 @@ def get_request_id(response: 'requests.Response') -> RequestId:
 
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
-                      foreground: bool = False):
+                      foreground: bool = False,
+                      enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
@@ -365,6 +366,8 @@ def _start_api_server(deploy: bool = False,
         # the API server.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        if enable_basic_auth:
+            server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
         with open(log_path, 'w', encoding='utf-8') as log_file:
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
@@ -559,7 +562,8 @@ def get_skypilot_version_on_disk() -> str:
 
 def check_server_healthy_or_start_fn(deploy: bool = False,
                                      host: str = '127.0.0.1',
-                                     foreground: bool = False):
+                                     foreground: bool = False,
+                                     enable_basic_auth: bool = False):
     api_server_status = None
     try:
         api_server_status = check_server_healthy()
@@ -580,7 +584,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             # have started the server while we were waiting for the lock.
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host, foreground)
+                _start_api_server(deploy, host, foreground, enable_basic_auth)
 
 
 def check_server_healthy_or_start(func):

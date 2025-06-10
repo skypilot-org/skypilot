@@ -102,6 +102,14 @@ logger = sky_logging.init_logger(__name__)
 # response will block other requests from being processed.
 
 
+def _basic_auth_401_response(content: str):
+    """Return a 401 response with basic auth realm."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        content=content)
+
+
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -112,7 +120,7 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 request.url.path.startswith('/api/')):
             return await call_next(request)
 
-        auth_user = _get_auth_user_header(request)
+        auth_user = request.state.auth_user
         if auth_user is None:
             return await call_next(request)
 
@@ -147,6 +155,49 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
+
+
+class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle HTTP Basic Auth."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                           'false')
+        if str(enable_basic_auth).lower() != 'true':
+            return await call_next(request)
+
+        auth_header = request.headers.get('authorization')
+        if not auth_header or not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid basic auth')
+
+        # Check username and password
+        encoded = auth_header.split(' ', 1)[1]
+        try:
+            decoded = base64.b64decode(encoded).decode()
+            username, password = decoded.split(':', 1)
+        except Exception:  # pylint: disable=broad-except
+            return _basic_auth_401_response('Invalid basic auth')
+
+        users = global_user_state.get_user_by_name(username)
+        if not users:
+            return _basic_auth_401_response('Invalid credentials')
+
+        valid_user = False
+        for user in users:
+            if not user.name or not user.password:
+                continue
+            username_encoded = username.encode('utf8')
+            db_username_encoded = user.name.encode('utf8')
+            if (username_encoded == db_username_encoded and user.password
+                    == hashlib.sha256(password.encode()).hexdigest()):
+                valid_user = True
+                if request.state.auth_user is None:
+                    request.state.auth_user = user
+                break
+        if not valid_user:
+            return _basic_auth_401_response('Invalid credentials')
+
+        return await call_next(request)
 
 
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -306,6 +357,7 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+app.add_middleware(BasicAuthMiddleware)
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])

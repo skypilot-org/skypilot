@@ -403,7 +403,10 @@ def get_user_by_name(username: str) -> List[models.User]:
         rows = session.query(user_table).filter_by(name=username).all()
     if len(rows) == 0:
         return []
-    return [models.User(id=row.id, name=row.name) for row in rows]
+    return [
+        models.User(id=row.id, name=row.name, password=row.password)
+        for row in rows
+    ]
 
 
 def delete_user(user_id: str) -> None:
