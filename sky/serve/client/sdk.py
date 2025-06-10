@@ -5,11 +5,14 @@ from typing import List, Optional, Union
 
 import click
 
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
+from sky.utils import context
 from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
@@ -23,6 +26,7 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 
+@context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def up(
@@ -55,8 +59,12 @@ def up(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    # Apply the client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag, at_client_side=True)
     dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
-    dag_id = sdk.validate(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = sdk.validate(dag)
     if dag_id is not None:
         request_id = sdk.optimize(dag_id=dag_id)
     else:
@@ -78,13 +86,14 @@ def up(
         body.task = dag_str
     response = requests.post(
         f'{server_common.get_server_url()}/serve/up',
-        json=json.loads(body.model_dump_json()),
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
         timeout=(5, None),
         cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
 
+@context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def update(
@@ -118,8 +127,12 @@ def update(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    # Apply client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag, at_client_side=True)
     dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
-    dag_id = sdk.validate(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = sdk.validate(dag)
     if dag_id is not None:
         request_id = sdk.optimize(dag_id=dag_id)
     else:
@@ -144,7 +157,7 @@ def update(
 
     response = requests.post(
         f'{server_common.get_server_url()}/serve/update',
-        json=json.loads(body.model_dump_json()),
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
         timeout=(5, None),
         cookies=server_common.get_api_cookie_jar(),
     )

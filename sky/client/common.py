@@ -249,6 +249,11 @@ def prepare_upload_mounts_to_api_server(
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))
 
+    # Expand relative workdir and file mounts.
+    for task in dag.tasks:
+        task.expand_and_validate_workdir()
+        if not workdir_only:
+            task.expand_and_validate_file_mounts()
     upload_list = []
     for task_ in dag.tasks:
         task_.file_mounts_mapping = {}

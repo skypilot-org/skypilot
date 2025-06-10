@@ -360,8 +360,8 @@ def mock_queue(monkeypatch):
             self.queue_map = {}
 
         def put(self, item):
-            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value)
-            request_id, ignore_return_value = item
+            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value, retryable)
+            request_id, ignore_return_value, _ = item
             self.queue_map[request_id] = ignore_return_value
 
         def get(self, request_id):

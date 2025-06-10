@@ -42,10 +42,12 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import infra_utils
@@ -298,8 +300,10 @@ def optimize(
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
         body.dag = dag_str
 
+    # For backward compatibility, we exclude unset values.
     response = requests.post(f'{server_common.get_server_url()}/optimize',
-                             json=json.loads(body.model_dump_json()),
+                             json=json.loads(
+                                 body.model_dump_json(exclude_unset=True)),
                              cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
@@ -373,6 +377,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@sky_context.contextual
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -491,7 +496,6 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
     # Override the autostop config from command line flags to task YAML.
     for task in dag.tasks:
         for resource in task.resources:
@@ -509,7 +513,17 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
-    dag_id = validate(dag, admin_policy_request_options=request_options)
+    # Apply the client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag,
+                                           request_options=request_options,
+                                           at_client_side=True)
+    # Prepare upload mounts, replace the local path to the path on the API
+    # server. This must be called after client-side admin policy since the
+    # admin policy may mutate the file mounts.
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = validate(dag, admin_policy_request_options=request_options)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
     # these flags.
@@ -605,7 +619,7 @@ def launch(
 
     response = requests.post(
         f'{server_common.get_server_url()}/launch',
-        json=json.loads(body.model_dump_json()),
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
         timeout=5,
         cookies=server_common.get_api_cookie_jar(),
     )

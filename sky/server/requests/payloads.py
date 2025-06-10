@@ -81,6 +81,9 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     # server endpoint on the server side. This avoids the warning at
     # server-side.
     config.pop_nested(('api_server',), default_value=None)
+    # Remove the admin policy, as the policy has been applied on the client
+    # side.
+    config.pop_nested(('admin_policy',), default_value=None)
     return config
 
 

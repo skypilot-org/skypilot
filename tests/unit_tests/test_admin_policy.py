@@ -234,3 +234,101 @@ def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
     assert resources[0].autostop_config.enabled is True
     assert resources[0].autostop_config.idle_minutes == 10
     assert resources[0].autostop_config.down is True  # default
+
+
+def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
+    """Test UseLocalGcpCredentialsPolicy for various scenarios."""
+    from example_policy.client_policy import UseLocalGcpCredentialsPolicy
+
+    test_creds_path = '/path/to/service-account.json'
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        fresh_task.run = None
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
+            user_request)
+
+        # Check that the credentials file is mounted
+        expected_mount_path = ('~/.config/gcloud/'
+                               'application_default_credentials.json')
+        assert expected_mount_path in mutated_request.task.file_mounts
+        assert (mutated_request.task.file_mounts[expected_mount_path] ==
+                test_creds_path)
+
+        # Check that the gcloud auth command is set as the run command
+        expected_auth_cmd = ('gcloud auth activate-service-account '
+                             '--key-file ~/.config/gcloud/'
+                             'application_default_credentials.json')
+        assert mutated_request.task.run == expected_auth_cmd
+
+    # task.run has existing command
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        original_run_cmd = 'echo "hello world"'
+        fresh_task.run = original_run_cmd
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
+            user_request)
+
+        # Check that the gcloud auth command is prepended
+        expected_auth_cmd = ('gcloud auth activate-service-account '
+                             '--key-file ~/.config/gcloud/'
+                             'application_default_credentials.json')
+        expected_full_cmd = f'{expected_auth_cmd} && {original_run_cmd}'
+        assert mutated_request.task.run == expected_full_cmd
+
+    env_without_creds = {
+        k: v
+        for k, v in os.environ.items()
+        if k != 'GOOGLE_APPLICATION_CREDENTIALS'
+    }
+    with mock.patch.dict(os.environ, env_without_creds, clear=True):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        original_run_cmd = fresh_task.run
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
+            user_request)
+
+        # Check that the entire gcloud directory is mounted
+        assert '~/.config/gcloud' in mutated_request.task.file_mounts
+        assert (mutated_request.task.file_mounts['~/.config/gcloud'] ==
+                '~/.config/gcloud')
+
+        # Check that the run command is unchanged
+        assert mutated_request.task.run == original_run_cmd
+
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        fresh_task.file_mounts = {'/existing/mount': '/local/path'}
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
+            user_request)
+
+        # Check that both existing and new mounts are present
+        assert '/existing/mount' in mutated_request.task.file_mounts
+        expected_mount_path = ('~/.config/gcloud/'
+                               'application_default_credentials.json')
+        assert expected_mount_path in mutated_request.task.file_mounts
+        assert len(mutated_request.task.file_mounts) == 2
+
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=False)
+        mutated_request = UseLocalGcpCredentialsPolicy.validate_and_mutate(
+            user_request)
+        # Should skip the policy at client-side
+        assert mutated_request.task.file_mounts is None
