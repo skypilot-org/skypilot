@@ -6,18 +6,7 @@ Using SkyPilot with Kueue
 Kueue is an open source Kubernetes job scheduler.
 This example shows how SkyPilot can be used with Kueue to schedule jobs on Kubernetes.
 
-In this example, we explore a use case where two teams share one Kubernetes cluster:
-
-- Each team would like to host their own SkyPilot API server to submit jobs to.
-- Each team would like to have their own job queue with independent quota and priority.
-
-By setting up Kueue with multiple SkyPilot servers, you will be able to:
-
-- Give each team access to their own SkyPilot API server.
-- Give each team their own job queue with independent quota, priority and preemption.
-- Give teams ability to borrow quotas from other teams, if desired.
-
-The example below walks through the steps to set up SkyPilot API servers and Kueue in the following architecture:
+The example below walks through the steps to set up a SkyPilot API server and Kueue in the following architecture:
 
 .. image:: ../../../images/examples/k8s-with-kueue/final-architecture.svg
    :alt: Kueue Example Architecture
@@ -78,74 +67,43 @@ This should output:
     - pod
 
 
-Create team namespaces
-----------------------
+Create a namespace
+------------------
 
-To simulate multiple teams sharing the same Kubernetes cluster,
-two namespaces are created: ``team1`` and ``team2``.
+To simulate a team sharing the same Kubernetes cluster,
+a namespace is created: ``skypilot``.
 
-.. image:: ../../../images/examples/k8s-with-kueue/namespaces.svg
-   :alt: Team Namespaces
+.. image:: ../../../images/examples/k8s-with-kueue/namespace.svg
+   :alt: K8s cluster with a namespace
    :width: 80%
    :align: center
 
 .. code-block:: bash
 
-    kubectl create namespace team1
-    kubectl create namespace team2
+    kubectl create namespace skypilot
 
-Deploy SkyPilot API servers
----------------------------
+Deploy a SkyPilot API server
+----------------------------
 
-In this example, two SkyPilot API servers are deployed to the cluster so that each team interacts with their own SkyPilot API server.
-
-You can deploy a SkyPilot API on kubernetes following the steps in :ref:`Kubernetes Deployment Guide <sky-api-server-deploy>`.
-
-However, since we are deploying two API servers on the same cluster, we need to modify the deployment to share the same ingress.
-
-If the following command is used to deploy the SkyPilot API server on ``team1`` namespace:
+You can deploy a SkyPilot API server on kubernetes following the steps in :ref:`Kubernetes Deployment Guide <sky-api-server-deploy>`.
 
 .. code-block:: bash
 
-  NAMESPACE=team1
-  RELEASE_NAME=skypilot-team1
-  WEB_USERNAME=team1-user
+  NAMESPACE=skypilot
+  RELEASE_NAME=skypilot
+  WEB_USERNAME=skypilot
   # Replace with your password to configure the password for the API server
-  WEB_PASSWORD=team1-password
+  WEB_PASSWORD=yourpassword
   AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
   helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
     --create-namespace \
     --set ingress.authCredentials=$AUTH_STRING
 
-The command to deploy ``team2`` namespace is similar, except the last two lines are added to share the same ingress as ``team1``:
+Use :ref:`this command <sky-get-api-server-url>` to get the API server URL.
 
-.. code-block:: bash
-
-  NAMESPACE=team2
-  RELEASE_NAME=skypilot-team2
-  WEB_USERNAME=team2-user
-  # Replace with your password to configure the password for the API server
-  WEB_PASSWORD=team2-password
-  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING \
-    --set ingress-nginx.enabled=false \
-    --set ingress.path=/team2
-
-| In this setup, if ``team1``'s API server endpoint as determined by :ref:`this command <sky-get-api-server-url>` is
-| ``http://team1-user:team1-password@1.1.1.1``
-
-| Then ``team2``'s API server endpoint is
-| ``http://team2-user:team2-password@1.1.1.1/team2``
-
-By default, each SkyPilot API server is granted permissions to use its hosting Kubernetes cluster
-and will launch tasks in the same namespace as the API server.
-
-.. image:: ../../../images/examples/k8s-with-kueue/api-servers.svg
-   :alt: API servers deployment
+.. image:: ../../../images/examples/k8s-with-kueue/api-server.svg
+   :alt: API server deployment
    :width: 80%
    :align: center
 
@@ -231,8 +189,8 @@ To create the admission check and provisioning request config above, save the sn
 
     kubectl apply -f kueue-admission-check.yaml
 
-Create cluster queues and local queues
---------------------------------------
+Create a cluster queue and a local queue
+----------------------------------------
 
 Kueue has a two level hierarchy: cluster queues and local queues.
 
@@ -243,9 +201,9 @@ A local queue is a Kueue resource that defines the resource quota for a namespac
 A local queue is created in a namespace and is only applicable to that namespace.
 A local queue points to a cluster queue. Multiple local queues can point to the same cluster queue.
 
-Here, we create a cluster queue and two local queues, one for each team.
+Here, a cluster queue and a local queue are created.
 
-``kueue-one-cluster-queue.yaml``:
+``kueue.yaml``:
 
 .. code-block:: yaml
 
@@ -274,134 +232,25 @@ Here, we create a cluster queue and two local queues, one for each team.
     kind: LocalQueue
     metadata:
       # A local queue is in a namespace
-      namespace: "team1"
-      name: "skypilot-local-queue-team1"
-    spec:
-      clusterQueue: "skypilot-cluster-queue"
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: LocalQueue
-    metadata:
-      # A local queue is in a namespace
-      namespace: "team2"
-      name: "skypilot-local-queue-team2"
+      namespace: "skypilot"
+      name: "skypilot-local-queue"
     spec:
       clusterQueue: "skypilot-cluster-queue"
 
-In this setup, the two namespaces ``team1`` and ``team2`` share the same cluster queue ``skypilot-cluster-queue``.
-The two teams (each using their respective namespaces) submit their jobs to their respective local queues
-``skypilot-local-queue-team1`` and ``skypilot-local-queue-team2``.
-The jobs from two teams are subject to the same quota defined in the cluster queue,
-and the jobs from the two teams are ordered by their priority together.
+The team submit their jobs to the local queue ``skypilot-local-queue``.
+The jobs from the team are subject to the same quota defined in the cluster queue,
+and the jobs from the team are ordered by their priority together.
 
 .. image:: ../../../images/examples/k8s-with-kueue/one-queue.svg
    :alt: One Cluster Queue Architecture
    :width: 80%
    :align: center
 
-To create the cluster and local queues above, save the snippet to ``kueue-one-cluster-queue.yaml`` and run the following command:
+To create the cluster and local queues above, save the snippet to ``kueue.yaml`` and run the following command:
 
 .. code-block:: bash
 
-    kubectl apply -f kueue-one-cluster-queue.yaml
-
-Alternatively, the two teams can have their own cluster queues as follows:
-
-``kueue-two-cluster-queues.yaml``:
-
-.. code-block:: yaml
-
-    apiVersion: kueue.x-k8s.io/v1alpha1
-    kind: Cohort
-    metadata:
-      name: "skypilot-cohort"
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: ClusterQueue
-    metadata:
-      name: "skypilot-cluster-queue-team1"
-    spec:
-      cohort: "skypilot-cohort"
-      namespaceSelector: {} # match all namespaces
-      resourceGroups:
-      - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
-        flavors:
-        - name: "default-flavor"
-          # A quota must be set for each resource specified in CoveredResources.
-          # Adjust this value based on actual resource needs instead of "Infinite"
-          resources:
-          - name: "cpu"
-            nominalQuota: 1000000000    # "Infinite" quota
-          - name: "memory"
-            nominalQuota: 1000000000Gi  # "Infinite" quota
-          - name: "nvidia.com/gpu"
-            nominalQuota: 1000000000    # "Infinite" quota
-      admissionChecks:
-      - skypilot-kueue-prov
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: ClusterQueue
-    metadata:
-      name: "skypilot-cluster-queue-team2"
-    spec:
-      cohort: "skypilot-cohort"
-      namespaceSelector: {} # match all namespaces
-      resourceGroups:
-      # If you do not want to specify a quota for a resource, you can
-      # leave the resource out of coveredResources.
-      # This clusterQueue does not specify a quota for "nvidia.com/gpu".
-      - coveredResources: ["cpu", "memory"]
-        flavors:
-        - name: "default-flavor"
-          # Adjust this value based on actual resource needs instead of "Infinite"
-          resources:
-          - name: "cpu"
-            nominalQuota: 1000000000    # "Infinite" quota
-          - name: "memory"
-            nominalQuota: 1000000000Gi  # "Infinite" quota
-      admissionChecks:
-      - skypilot-kueue-prov
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: LocalQueue
-    metadata:
-      # A local queue is in a namespace
-      namespace: "team1"
-      name: "skypilot-local-queue-team1"
-    spec:
-      clusterQueue: "skypilot-cluster-queue-team1"
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: LocalQueue
-    metadata:
-      # A local queue is in a namespace
-      namespace: "team2"
-      name: "skypilot-local-queue-team2"
-    spec:
-      clusterQueue: "skypilot-cluster-queue-team2"
-
-In this setup, the two namespaces ``team1`` and ``team2`` have their own separate cluster queues.
-Now, each team has their own quotas, and jobs from each team are ordered by their priority independently.
-
-.. image:: ../../../images/examples/k8s-with-kueue/two-queues.svg
-   :alt: Two Cluster Queues Architecture
-   :width: 80%
-   :align: center
-
-To create the cluster and local queues above, save the snippet to ``kueue-two-cluster-queues.yaml`` and run the following command:
-
-.. code-block:: bash
-
-    kubectl apply -f kueue-two-cluster-queues.yaml
-
-
-.. tip::
-
-    To configure the interaction between multiple cluster queues - for example, to implement fair sharing
-    between cluster queues, refer to following documentation:
-
-    - `cohorts <https://kueue.sigs.k8s.io/docs/concepts/cohort/>`_
-    - `fair sharing <https://kueue.sigs.k8s.io/docs/concepts/preemption/#fair-sharing>`_
+    kubectl apply -f kueue.yaml
 
 
 Configure SkyPilot API server to use Kueue
@@ -411,31 +260,9 @@ The helm deployment of each SkyPilot API server can be configured to use Kueue b
 Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` section of the Kubernetes Deployment Guide
 for instructions on how to set the config file on a helm-deployed SkyPilot API server.
 
-For API server deployed in ``team1`` namespace, the following config should be set:
+The following config should be set on the API server:
 
-``skypilot-team1-config.yaml``:
-
-.. code-block:: yaml
-
-    kubernetes:
-      pod_config:
-        metadata:
-          labels:
-            kueue.x-k8s.io/queue-name: skypilot-local-queue-team1
-
-.. code-block:: bash
-
-  NAMESPACE=team1
-  RELEASE_NAME=skypilot-team1
-  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --reuse-values \
-    --set-file apiService.config=skypilot-team1-config.yaml
-
-
-For API server deployed in ``team2`` namespace, the following config should be set:
-
-``skypilot-team2-config.yaml``:
+``skypilot-config.yaml``:
 
 .. code-block:: yaml
 
@@ -443,19 +270,19 @@ For API server deployed in ``team2`` namespace, the following config should be s
       pod_config:
         metadata:
           labels:
-            kueue.x-k8s.io/queue-name: skypilot-local-queue-team2
+            kueue.x-k8s.io/queue-name: skypilot-local-queue
 
 .. code-block:: bash
 
-  NAMESPACE=team2
-  RELEASE_NAME=skypilot-team2
+  NAMESPACE=skypilot
+  RELEASE_NAME=skypilot
   helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
     --reuse-values \
-    --set-file apiService.config=skypilot-team2-config.yaml
+    --set-file apiService.config=skypilot-config.yaml
 
 
-The configs above allows each API server to submit jobs to the respective local queue.
+The configs above allows the API server to submit jobs using the local queue.
 
 .. image:: ../../../images/examples/k8s-with-kueue/final-architecture.svg
    :alt: Final Architecture
