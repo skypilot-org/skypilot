@@ -3,6 +3,7 @@ import textwrap
 from unittest import mock
 
 from click import testing as cli_testing
+import pytest
 import requests
 
 from sky import cli
