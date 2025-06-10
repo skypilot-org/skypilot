@@ -7,23 +7,18 @@ import {
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import { apiClient } from './client';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 1000;
 
 export async function getManagedJobs({ allUsers = true } = {}) {
   try {
-    const response = await fetch(`${ENDPOINT}/jobs/queue`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        all_users: allUsers,
-      }),
+    const response = await apiClient.post(`/jobs/queue`, {
+      all_users: allUsers,
     });
     const id = response.headers.get('X-Skypilot-Request-ID');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -153,7 +148,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           ? new Date(job.submitted_at * 1000)
           : null,
         events: events,
-        dag_yaml: job.dag_yaml,
+        dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
       };
     });
@@ -275,6 +270,8 @@ export async function streamManagedJobLogs({
   };
 
   const timeoutPromise = createTimeoutPromise();
+  const baseUrl = window.location.origin;
+  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
 
   // Create the fetch promise
   const fetchPromise = (async () => {
@@ -286,7 +283,7 @@ export async function streamManagedJobLogs({
         tail: DEFAULT_TAIL_LINES,
       };
 
-      const response = await fetch(`${ENDPOINT}/jobs/logs`, {
+      const response = await fetch(`${fullEndpoint}/jobs/logs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -311,7 +308,18 @@ export async function streamManagedJobLogs({
           onNewLog(chunk);
         }
       } finally {
-        reader.cancel();
+        // Only cancel the reader if the signal hasn't been aborted
+        // If signal is aborted, the reader should already be canceling
+        if (!signal || !signal.aborted) {
+          try {
+            reader.cancel();
+          } catch (cancelError) {
+            // Ignore errors from reader cancellation
+            if (cancelError.name !== 'AbortError') {
+              console.warn('Error canceling reader:', cancelError);
+            }
+          }
+        }
         // Clear the timeout when streaming completes successfully
         if (timeoutId) {
           clearTimeout(timeoutId);
@@ -370,9 +378,12 @@ export async function handleJobAction(action, jobId, cluster) {
   // Show initial notification
   showToast(`${logStarter} job ${jobId}...`, 'info');
 
+  const baseUrl = window.location.origin;
+  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
+
   try {
     try {
-      const response = await fetch(`${ENDPOINT}/${apiPath}`, {
+      const response = await fetch(`${fullEndpoint}/${apiPath}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -381,7 +392,9 @@ export async function handleJobAction(action, jobId, cluster) {
       });
 
       const id = response.headers.get('X-Skypilot-Request-ID');
-      const finalResponse = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+      const finalResponse = await fetch(
+        `${fullEndpoint}/api/get?request_id=${id}`
+      );
 
       // Check the status code of the final response
       if (finalResponse.status === 200) {

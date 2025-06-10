@@ -21,9 +21,15 @@ class RequestOptions:
         dryrun: Is the request a dryrun?
     """
     cluster_name: Optional[str]
+    # Keep these two fields for backward compatibility. The values are copied
+    # from task.resources.autostop_config, so that legacy admin policy plugins
+    # can still read the correct autostop config from request options before
+    # we drop the compatibility.
+    # TODO(aylei): remove these fields after 0.12.0
     idle_minutes_to_autostop: Optional[int]
     down: bool
     dryrun: bool
+    is_client_side: bool = False
 
 
 @dataclasses.dataclass
@@ -45,10 +51,12 @@ class UserRequest:
         task: User specified task.
         skypilot_config: Global skypilot config to be used in this request.
         request_options: Request options. It is None for jobs and services.
+        at_client_side: Is the request intercepted by the policy at client-side?
     """
     task: 'sky.Task'
     skypilot_config: 'sky.Config'
     request_options: Optional['RequestOptions'] = None
+    at_client_side: bool = False
 
 
 @dataclasses.dataclass

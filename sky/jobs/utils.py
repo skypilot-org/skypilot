@@ -1036,7 +1036,8 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            job['user_name'] = global_user_state.get_user(job['user_hash']).name
+            user = global_user_state.get_user(job['user_hash'])
+            job['user_name'] = user.name if user is not None else None
     return jobs
 
 

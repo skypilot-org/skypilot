@@ -33,6 +33,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 from sky import serve
+from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -1122,7 +1123,9 @@ def test_skyserve_ha_kill_after_ready():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -1159,7 +1162,9 @@ def test_skyserve_ha_kill_during_provision():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -1193,7 +1198,9 @@ def test_skyserve_ha_kill_during_pending():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -1241,5 +1248,7 @@ def test_skyserve_ha_kill_during_shutdown():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)

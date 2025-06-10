@@ -28,6 +28,7 @@ from sky.server.requests import executor
 from sky.server.requests import requests as api_requests
 from sky.server.server import app
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import controller_utils
 from sky.utils import message_utils
 from sky.utils import registry
@@ -357,8 +358,8 @@ def mock_queue(monkeypatch):
             self.queue_map = {}
 
         def put(self, item):
-            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value)
-            request_id, ignore_return_value = item
+            # Add to the map; item is assumed to be a tuple (request_id, ignore_return_value, retryable)
+            request_id, ignore_return_value, _ = item
             self.queue_map[request_id] = ignore_return_value
 
         def get(self, request_id):
@@ -569,3 +570,10 @@ def skyignore_dir():
             f.write(skyignore_content)
 
         yield temp_dir
+
+
+@pytest.fixture(autouse=True)
+def reset_global_state():
+    """Reset global state before each test."""
+    annotations.is_on_api_server = True
+    yield

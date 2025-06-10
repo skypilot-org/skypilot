@@ -18,7 +18,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { CircularProgress } from '@mui/material';
-import { SaveIcon, TrashIcon, CheckIcon, RotateCwIcon } from 'lucide-react';
+import {
+  SaveIcon,
+  TrashIcon,
+  CheckIcon,
+  RotateCwIcon,
+  User,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -32,11 +38,13 @@ import {
   ServerIcon,
   BriefcaseIcon,
   TickIcon,
+  StarIcon,
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
 import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
+import { getUsers } from '@/data/connectors/users';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -79,7 +87,13 @@ const WorkspaceConfigDescription = ({
   );
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
-    const cloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()];
+    // Skip non-cloud configuration keys
+    if (cloud === 'private' || cloud === 'allowed_users') {
+      return;
+    }
+
+    const cloudName =
+      CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
     const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
 
     if (cloudConfig?.disabled === true) {
@@ -162,6 +176,84 @@ const WorkspaceConfigDescription = ({
   return null;
 };
 
+// Workspace badge component for private/public status
+const WorkspaceBadge = ({ isPrivate }) => {
+  if (isPrivate) {
+    return (
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+        Private
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+      Public
+    </span>
+  );
+};
+
+// Detailed allowed users component for workspace editor
+const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
+  if (!workspaceConfig.private) return null;
+
+  // Get allowed users from config
+  const allowedUsersFromConfig = workspaceConfig.allowed_users || [];
+
+  // Get all admin users
+  const adminUsers = (allUsers || []).filter((user) => user.role === 'admin');
+  const adminUsernames = adminUsers.map((user) => user.username);
+
+  // Combine allowed users and admin users, remove duplicates
+  const allAllowedUsers = [
+    ...new Set([...allowedUsersFromConfig, ...adminUsernames]),
+  ];
+
+  if (allAllowedUsers.length === 0) {
+    return (
+      <div className="mt-4">
+        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+          Allowed Users (0)
+        </h4>
+        <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
+          No users configured (workspace may be inaccessible)
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+        Allowed Users ({allAllowedUsers.length})
+      </h4>
+      <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
+        {allAllowedUsers.map((username) => {
+          const isAdmin = adminUsernames.includes(username);
+          return (
+            <div
+              key={username}
+              className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+            >
+              <span className="font-medium text-gray-700">{username}</span>
+              {isAdmin ? (
+                <span className="inline-flex items-center text-blue-600">
+                  <StarIcon className="w-3 h-3 mr-1" />
+                  Admin
+                </span>
+              ) : (
+                <span className="inline-flex items-center text-gray-600">
+                  <User className="w-3 h-3 mr-1" />
+                  User
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
   const [workspaceConfig, setWorkspaceConfig] = useState({});
@@ -173,6 +265,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [yamlError, setYamlError] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
 
   // Delete state
   const [deleteState, setDeleteState] = useState({
@@ -194,10 +287,15 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setLoading(true);
     setError(null);
     try {
-      const allWorkspaces = await getWorkspaces();
+      const [allWorkspaces, usersResponse] = await Promise.all([
+        getWorkspaces(),
+        getUsers(),
+      ]);
+
       const config = allWorkspaces[workspaceName] || {};
       setWorkspaceConfig(config);
       setOriginalConfig(config);
+      setAllUsers(usersResponse || []);
 
       // Format as YAML with workspace name as top-level key
       const fullConfig = { [workspaceName]: config };
@@ -461,7 +559,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="workspaces">
+      <>
         {/* Header with breadcrumb navigation */}
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
@@ -550,8 +648,15 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                   <Card className="h-full">
                     <CardHeader>
                       <CardTitle className="text-base font-normal">
-                        <span className="font-semibold">Workspace:</span>{' '}
-                        {workspaceName}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold">Workspace:</span>{' '}
+                            {workspaceName}
+                          </div>
+                          <WorkspaceBadge
+                            isPrivate={originalConfig.private === true}
+                          />
+                        </div>
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm pb-2 flex-1">
@@ -611,6 +716,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           enabledClouds={workspaceStats.clouds}
                         />
                       </div>
+
+                      {/* Detailed allowed users for private workspaces */}
+                      <DetailedAllowedUsers
+                        workspaceConfig={originalConfig}
+                        allUsers={allUsers}
+                      />
                     </div>
                   </Card>
                 </div>
@@ -660,12 +771,16 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           <div className="p-3 bg-gray-50 border rounded-lg">
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
+  private: true
+  allowed_users:
+  - user1@mydomain.com
+  - user2@mydomain.com
   gcp:
     project_id: xxx
     disabled: false
   kubernetes:
     allowed_contexts:
-      - context-1`}
+    - context-1`}
                             </pre>
                           </div>
                         </div>
@@ -739,7 +854,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </Layout>
+      </>
     </>
   );
 }

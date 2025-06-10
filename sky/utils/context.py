@@ -4,11 +4,13 @@ import asyncio
 from collections.abc import Mapping
 from collections.abc import MutableMapping
 import contextvars
+import functools
 import os
 import pathlib
 import subprocess
 import sys
-from typing import Dict, Optional, TextIO
+import typing
+from typing import Any, Callable, Dict, Optional, TextIO, TypeVar
 
 
 class Context(object):
@@ -254,6 +256,24 @@ class Popen(subprocess.Popen):
         if env is None:
             env = os.environ
         super().__init__(*args, env=env, **kwargs)
+
+
+F = TypeVar('F', bound=Callable[..., Any])
+
+
+def contextual(func: F) -> F:
+    """Decorator to intiailize a context before executing the function.
+
+    If a context is already initialized, this decorator will reset the context,
+    i.e. all contextual variables set previously will be cleared.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        initialize()
+        return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)
 
 
 def initialize():

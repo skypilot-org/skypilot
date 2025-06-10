@@ -42,10 +42,12 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import infra_utils
@@ -85,7 +87,8 @@ def stream_response(request_id: Optional[str],
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 print(line, flush=True, end='', file=output_stream)
-        return get(request_id)
+        if request_id is not None:
+            return get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -354,6 +357,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@sky_context.contextual
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -400,18 +404,22 @@ def launch(
         retry_until_up: whether to retry launching the cluster until it is
           up.
         idle_minutes_to_autostop: automatically stop the cluster after this
-          many minute of idleness, i.e., no running or pending jobs in the
-          cluster's job queue. Idleness gets reset whenever setting-up/
-          running/pending jobs are found in the job queue. Setting this
-          flag is equivalent to running ``sky.launch()`` and then
-          ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
-          will not be autostopped.
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness gets reset whenever setting-up/
+            running/pending jobs are found in the job queue. Setting this
+            flag is equivalent to running
+            ``sky.launch(...)`` and then
+            ``sky.autostop(idle_minutes=<minutes>)``. If set, the autostop
+            config specified in the task' resources will be overridden by
+            this parameter.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
-          abnormally). If --idle-minutes-to-autostop is also set, the
-          cluster will be torn down after the specified idle time.
-          Note that if errors occur during provisioning/data syncing/setting
-          up, the cluster will not be torn down for debugging purposes.
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes. If
+            set, the autostop config specified in the task' resources will be
+            overridden by this parameter.
         backend: backend to use.  If None, use the default backend
           (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
@@ -468,12 +476,72 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    # Override the autostop config from command line flags to task YAML.
+    for task in dag.tasks:
+        for resource in task.resources:
+            resource.override_autostop_config(
+                down=down, idle_minutes=idle_minutes_to_autostop)
+            if resource.autostop_config is not None:
+                # For backward-compatbility, get the final autostop config for
+                # admin policy.
+                # TODO(aylei): remove this after 0.12.0
+                down = resource.autostop_config.down
+                idle_minutes_to_autostop = resource.autostop_config.idle_minutes
+
     request_options = admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, request_options=request_options, at_client_side=True) as dag:
+        return _launch(
+            dag,
+            cluster_name,
+            request_options,
+            retry_until_up,
+            idle_minutes_to_autostop,
+            dryrun,
+            down,
+            backend,
+            optimize_target,
+            no_setup,
+            clone_disk_from,
+            fast,
+            _need_confirmation,
+            _is_launched_by_jobs_controller,
+            _is_launched_by_sky_serve_controller,
+            _disable_controller_check,
+        )
+
+
+def _launch(
+    dag: 'sky.Dag',
+    cluster_name: str,
+    request_options: admin_policy.RequestOptions,
+    retry_until_up: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    dryrun: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    backend: Optional[backends.Backend] = None,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
+    no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
+    fast: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
+    _disable_controller_check: bool = False,
+) -> server_common.RequestId:
+    """Auxiliary function for launch(), refer to launch() for details."""
+
     validate(dag, admin_policy_request_options=request_options)
+    # The flags have been applied to the task YAML and the backward
+    # compatibility of admin policy has been handled. We should no longer use
+    # these flags.
+    del down, idle_minutes_to_autostop
 
     confirm_shown = False
     if _need_confirmation:
@@ -537,9 +605,7 @@ def launch(
         task=dag_str,
         cluster_name=cluster_name,
         retry_until_up=retry_until_up,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
         dryrun=dryrun,
-        down=down,
         backend=backend.NAME if backend else None,
         optimize_target=optimize_target,
         no_setup=no_setup,
@@ -1826,10 +1892,8 @@ def api_start(
         # Explain why current process exited
         logger.info('API server is already running:')
     api_server_url = server_common.get_server_url(host)
-    dashboard_url = server_common.get_dashboard_url(api_server_url)
-    dashboard_msg = f'Dashboard: {dashboard_url}'
-    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{api_server_url} {dashboard_msg}\n'
+    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
+                f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 
