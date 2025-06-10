@@ -158,6 +158,18 @@ def pytest_addoption(parser):
         default=False,
         help='Skip tests marked as resource_heavy',
     )
+    parser.addoption(
+        '--helm-version',
+        type=str,
+        default='',
+        help='Version of Helm to use for tests',
+    )
+    parser.addoption(
+        '--helm-package',
+        type=str,
+        default='skypilot-nightly',
+        help='Package name to use for Helm tests',
+    )
 
 
 def pytest_configure(config):

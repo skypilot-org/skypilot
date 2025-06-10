@@ -14,31 +14,37 @@ Example usage:
 - :ref:`use-spot-for-gpu-policy`
 - :ref:`enforce-autostop-policy`
 - :ref:`dynamic-kubernetes-contexts-update-policy`
-
-
-To implement and use an admin policy:
-
-- Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface;
-- Admins distributes this package to users;
-- Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
-
+- :ref:`use-local-gcp-credentials-policy`
 
 Overview
 --------
 
+Admin policies are :ref:`implemented in Python packages <implement-admin-policy>` first, then get distributed and applied at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`. If both are set, the policy at client-side will be applied first, the mutated tasks and SkyPilot config will then be processed by the policy at server-side.
 
+.. _client-side-admin-policy:
 
-User-Side
-~~~~~~~~~~
+Client-side
+~~~~~~~~~~~
 
-To apply the policy, a user needs to set the ``admin_policy`` field in the SkyPilot config
-``~/.sky/config.yaml`` to the path of the Python package that implements the policy.
-For example:
+If you want the policy get applied only on your local machine or you don't have a :ref:`centralized API server <sky-api-server>` deployed, you can apply the policy at the client-side.
+
+First, install the Python package that implements the policy:
+
+.. code-block:: bash
+
+    pip install mypackage.subpackage
+
+Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to the path of the Python package that implements the policy.
 
 .. code-block:: yaml
 
     admin_policy: mypackage.subpackage.MyPolicy
 
+Optionally, you can also apply different policies in different projects by leveraging the :ref:`layered config <config-sources-and-overrides>`, e.g. set a different policy in ``$pwd/.sky.yaml`` for the current project:
+
+.. code-block:: yaml
+
+    admin_policy: mypackage.subpackage.AnotherPolicy
 
 .. hint::
 
@@ -49,12 +55,33 @@ For example:
 
         python -c "from mypackage.subpackage import MyPolicy"
 
+.. _server-side-admin-policy:
 
-Admin-Side
-~~~~~~~~~~
+Server-side
+~~~~~~~~~~~
 
-An admin can distribute the Python package to users with a pre-defined policy. The
-policy should implement the ``sky.AdminPolicy`` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
+If you have a :ref:`centralized API server <sky-api-server>` deployed, you can enforce a policy for all users by setting it at the server-side.
+
+First, install the Python package that implements the policy on the API server host:
+
+.. code-block:: bash
+
+    pip install mypackage.subpackage
+
+For helm deployment, refer to :ref:`sky-api-server-admin-policy` to install the policy package.
+
+Then, open the server's dashboard, go to :ref:`the server's SkyPilot config <sky-api-server-config>` and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the path of the Python package that implements the policy.
+
+.. code-block:: yaml
+
+    admin_policy: mypackage.subpackage.MyPolicy
+
+.. _implement-admin-policy:
+
+Implement an admin policy
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Admin policies are implemented by extending the ``sky.AdminPolicy`` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
 
 
 .. literalinclude:: ../../../sky/admin_policy.py
@@ -93,7 +120,7 @@ Your custom admin policy should look like this:
 
 
 In other words, an ``AdminPolicy`` can mutate any fields of a user request, including
-the :ref:`task <yaml-spec>` and the :ref:`global skypilot config <config-yaml>`,
+the :ref:`task <yaml-spec>` and the :ref:`skypilot config <config-yaml>` for that specific user request,
 giving admins a lot of flexibility to control user's SkyPilot usage.
 
 An ``AdminPolicy`` can be used to both validate and mutate user requests. If
@@ -113,9 +140,6 @@ The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
     :pyobject: RequestOptions
     :caption: `RequestOptions Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
-.. note::
-
-    The ``sky.AdminPolicy`` should be idempotent. In other words, it should be safe to apply the policy multiple times to the same user request.
 
 Example policies
 ----------------
@@ -212,3 +236,21 @@ Dynamically update Kubernetes contexts to use
 .. literalinclude:: ../../../examples/admin_policy/dynamic_kubernetes_contexts_update.yaml
     :language: yaml
     :caption: `Config YAML for using DynamicKubernetesContextsUpdatePolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/dynamic_kubernetes_contexts_update.yaml>`_
+
+.. _use-local-gcp-credentials-policy:
+
+Use local GCP credentials for all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/client_policy.py
+    :language: python
+    :pyobject: UseLocalGcpCredentialsPolicy
+    :caption: `UseLocalGcpCredentialsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/client_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/use_local_gcp_credentials.yaml
+    :language: yaml
+    :caption: `Config YAML for using UseLocalGcpCredentialsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/use_local_gcp_credentials.yaml>`_
+
+.. note::
+
+    This policy only take effects when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` will be a no-op.

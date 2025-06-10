@@ -543,6 +543,8 @@ If a persistent DB is not specified, API server uses a kubernetes persistent vol
 
         See ``Optional: Setting the SkyPilot config`` below for how to set other config values.
 
+.. _sky-api-server-config:
+
 Optional: Setting the SkyPilot config
 --------------------------------------
 
@@ -685,11 +687,7 @@ The steps below are based on the `official documentation <https://docs.aws.amazo
 
 Once the EBS CSI driver is installed, the default ``gp2`` storage class will be backed by EBS volumes.
 
-.. _sky-api-server-config:
-
-
-
-
+.. _sky-api-server-admin-policy:
 
 Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
