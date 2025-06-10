@@ -393,7 +393,7 @@ export function ManagedJobsTable({
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [activeTab, setActiveTab] = useState('active');
+  const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
@@ -541,7 +541,12 @@ export function ManagedJobsTable({
       return selectedStatuses.includes(status);
     }
 
-    // If no statuses are selected, highlight all statuses in the active tab
+    // If no statuses are selected, highlight all statuses based on active tab
+    if (activeTab === 'all') {
+      // Highlight all statuses when showing all jobs
+      return true;
+    }
+    
     return statusGroups[activeTab].includes(status);
   };
 
@@ -555,8 +560,12 @@ export function ManagedJobsTable({
       return filtered.filter((item) => selectedStatuses.includes(item.status));
     }
 
-    // If no statuses are selected but we're in "show all" mode, show all jobs of the active tab
+    // If no statuses are selected but we're in "show all" mode
     if (showAllMode) {
+      // Show all jobs if activeTab is 'all', otherwise filter by active/finished
+      if (activeTab === 'all') {
+        return filtered; // Show all jobs regardless of status
+      }
       return filtered.filter((item) =>
         statusGroups[activeTab].includes(item.status)
       );
@@ -669,6 +678,22 @@ export function ManagedJobsTable({
             {data && data.length > 0 && (
               <div className="flex items-center ml-2 gap-2">
                 <span className="text-gray-500">(</span>
+                <button
+                  onClick={() => {
+                    // When showing all jobs, clear all selected statuses
+                    setActiveTab('all');
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                  }}
+                  className={`text-sm font-medium ${
+                    activeTab === 'all' && showAllMode
+                      ? 'text-purple-700 underline'
+                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  }`}
+                >
+                  show all jobs
+                </button>
+                <span className="text-gray-500 mx-1">|</span>
                 <button
                   onClick={() => {
                     // When showing all active jobs, clear all selected statuses
