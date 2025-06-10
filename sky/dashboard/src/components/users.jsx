@@ -410,9 +410,13 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                     Loading...
                   </span>
                 ) : user.clusterCount > 0 ? (
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                  <Link
+                    href={`/clusters?user=${encodeURIComponent(user.userId)}`}
+                    className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium hover:bg-blue-200 hover:text-blue-900 transition-colors duration-200 cursor-pointer inline-block"
+                    title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                  >
                     {user.clusterCount}
-                  </span>
+                  </Link>
                 ) : (
                   <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                     0
@@ -426,9 +430,13 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                     Loading...
                   </span>
                 ) : user.jobCount > 0 ? (
-                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                  <Link
+                    href={`/jobs?user=${encodeURIComponent(user.userId)}`}
+                    className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium hover:bg-green-200 hover:text-green-900 transition-colors duration-200 cursor-pointer inline-block"
+                    title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                  >
                     {user.jobCount}
-                  </span>
+                  </Link>
                 ) : (
                   <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                     0

@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/table';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -65,6 +66,9 @@ import yaml from 'js-yaml';
 
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
 
+// Define constant for "All Users" similar to workspaces
+const ALL_USERS_VALUE = '__ALL_USERS__';
+
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
   let autostopStr = '';
@@ -86,6 +90,27 @@ const formatAutostop = (autostop, toDown) => {
   return autostopStr;
 };
 
+// Helper function to format username for display (reuse from users.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+  
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
+
 export function Clusters() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -94,18 +119,28 @@ export function Clusters() {
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
+  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
   const [workspaces, setWorkspaces] = useState([]);
+  const [users, setUsers] = useState([]);
   const isMobile = useMobile();
 
-  // Handle URL query parameters for workspace filtering
+  // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
-    if (router.isReady && router.query.workspace) {
-      const workspaceParam = Array.isArray(router.query.workspace)
-        ? router.query.workspace[0]
-        : router.query.workspace;
-      setWorkspaceFilter(workspaceParam);
+    if (router.isReady) {
+      if (router.query.workspace) {
+        const workspaceParam = Array.isArray(router.query.workspace)
+          ? router.query.workspace[0]
+          : router.query.workspace;
+        setWorkspaceFilter(workspaceParam);
+      }
+      if (router.query.user) {
+        const userParam = Array.isArray(router.query.user)
+          ? router.query.user[0]
+          : router.query.user;
+        setUserFilter(userParam);
+      }
     }
-  }, [router.isReady, router.query.workspace]);
+  }, [router.isReady, router.query.workspace, router.query.user]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -142,9 +177,48 @@ export function Clusters() {
         );
 
         setWorkspaces(Array.from(finalWorkspaces).sort());
+
+        // Fetch users for the filter dropdown
+        const fetchedUsers = await dashboardCache.get(getUsers);
+        const uniqueClusterUsers = [
+          ...new Set(
+            allClusters
+              .map((cluster) => ({
+                userId: cluster.user_hash || cluster.user,
+                username: cluster.user
+              }))
+              .filter((user) => user.userId)
+          ).values()
+        ];
+
+        // Combine fetched users with unique cluster users
+        const finalUsers = new Map();
+        
+        // Add fetched users first
+        fetchedUsers.forEach((user) => {
+          finalUsers.set(user.userId, {
+            userId: user.userId,
+            username: user.username,
+            display: formatUserDisplay(user.username, user.userId)
+          });
+        });
+
+        // Add any cluster users not in the fetched list
+        uniqueClusterUsers.forEach((user) => {
+          if (!finalUsers.has(user.userId)) {
+            finalUsers.set(user.userId, {
+              userId: user.userId,
+              username: user.username,
+              display: formatUserDisplay(user.username, user.userId)
+            });
+          }
+        });
+
+        setUsers(Array.from(finalUsers.values()).sort((a, b) => a.display.localeCompare(b.display)));
       } catch (error) {
-        console.error('Error fetching data for workspace filter:', error);
+        console.error('Error fetching data for filters:', error);
         setWorkspaces(['default']); // Fallback or error state
+        setUsers([]); // Fallback or error state
       }
     };
     fetchFilterData();
@@ -154,6 +228,7 @@ export function Clusters() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -189,6 +264,25 @@ export function Clusters() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={userFilter} onValueChange={setUserFilter}>
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by user...">
+                {userFilter === ALL_USERS_VALUE
+                  ? 'All Users'
+                  : users.find(u => u.userId === userFilter)?.display || userFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_USERS_VALUE}>
+                All Users
+              </SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.userId} value={user.userId}>
+                  {user.display}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center">
           {loading && (
@@ -212,6 +306,7 @@ export function Clusters() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         workspaceFilter={workspaceFilter}
+        userFilter={userFilter}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -243,6 +338,7 @@ export function ClusterTable({
   setLoading,
   refreshDataRef,
   workspaceFilter,
+  userFilter,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -269,15 +365,22 @@ export function ClusterTable({
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
     let filteredData = data;
-    // Filter if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
+    // Filter by workspace if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
     if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
-      filteredData = data.filter((item) => {
+      filteredData = filteredData.filter((item) => {
         const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
         return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
       });
     }
+    // Filter by user if userFilter is set and not 'ALL_USERS_VALUE'
+    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+      filteredData = filteredData.filter((item) => {
+        const itemUserId = item.user_hash || item.user;
+        return itemUserId === userFilter;
+      });
+    }
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, workspaceFilter]);
+  }, [data, sortConfig, workspaceFilter, userFilter]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
