@@ -62,6 +62,7 @@ state "All States" as AllStates {
     }
 
     InnerLoop -\-> CANCELLING : user cancel request
+    InnerLoop -[dotted]> RECOVERING : HA controller recovery
     CANCELLING -> CANCELLED : cluster\ncleaned up
     CANCELLING -[dotted]-> Terminal: job could complete\nbefore we can cancel
 }

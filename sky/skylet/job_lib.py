@@ -711,6 +711,14 @@ def fail_all_jobs_in_progress() -> None:
 
 
 def update_status() -> None:
+    # This signal file suggests that the controller is recovering from a
+    # failure. See sky/jobs/utils.py::update_managed_jobs_statuses for more
+    # details. When recovering, we should not update the job status to failed
+    # driver as they will be recovered later.
+    if os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        return
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     nonterminal_jobs = _get_jobs(user_hash=None,
