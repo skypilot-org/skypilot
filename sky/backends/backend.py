@@ -2,6 +2,7 @@
 import typing
 from typing import Dict, Generic, Optional, Tuple
 
+from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import rich_utils
@@ -54,7 +55,7 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: Optional[str] = None,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[_ResourceHandleType], bool]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str]]:
         """Provisions resources for the given task.
 
         Args:
@@ -78,6 +79,7 @@ class Backend(Generic[_ResourceHandleType]):
               dryrun is True.
             - A boolean that is True if the provisioning was skipped, and False
               if provisioning actually happened. Dryrun always gives False.
+            - An optional string that is the docker image on a no image cluster.
         """
         if cluster_name is None:
             cluster_name = cluster_utils.generate_cluster_name()
@@ -90,8 +92,12 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
-    def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        return self._sync_workdir(handle, workdir)
+    def sync_workdir(
+            self,
+            handle: _ResourceHandleType,
+            workdir: Path,
+            target_workdir: Path = constants.SKY_REMOTE_WORKDIR) -> None:
+        return self._sync_workdir(handle, workdir, target_workdir)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
@@ -106,9 +112,11 @@ class Backend(Generic[_ResourceHandleType]):
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-              detach_setup: bool) -> None:
+              detach_setup: bool, docker_image: Optional[str],
+              docker_file_mounts_mapping: Optional[Dict[str, str]]) -> None:
         with rich_utils.safe_status(ux_utils.spinner_message('Running setup')):
-            return self._setup(handle, task, detach_setup)
+            return self._setup(handle, task, detach_setup, docker_image,
+                               docker_file_mounts_mapping)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
@@ -119,6 +127,7 @@ class Backend(Generic[_ResourceHandleType]):
                 handle: _ResourceHandleType,
                 task: 'task_lib.Task',
                 detach_run: bool,
+                docker_image: Optional[str],
                 dryrun: bool = False) -> Optional[int]:
         """Execute the task on the cluster.
 
@@ -129,7 +138,7 @@ class Backend(Generic[_ResourceHandleType]):
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
         with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
-            return self._execute(handle, task, detach_run, dryrun)
+            return self._execute(handle, task, detach_run, docker_image, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -162,10 +171,11 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[_ResourceHandleType], bool]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str]]:
         raise NotImplementedError
 
-    def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
+    def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path,
+                      target_workdir: Path) -> None:
         raise NotImplementedError
 
     def _sync_file_mounts(
@@ -177,13 +187,15 @@ class Backend(Generic[_ResourceHandleType]):
         raise NotImplementedError
 
     def _setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-               detach_setup: bool) -> None:
+               detach_setup: bool, docker_image: Optional[str],
+               docker_file_mounts_mapping: Optional[Dict[str, str]]) -> None:
         raise NotImplementedError
 
     def _execute(self,
                  handle: _ResourceHandleType,
                  task: 'task_lib.Task',
                  detach_run: bool,
+                 docker_image: Optional[str],
                  dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 

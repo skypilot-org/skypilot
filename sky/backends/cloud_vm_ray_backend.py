@@ -558,6 +558,9 @@ class RayCodeGen:
                      task_name: Optional[str],
                      ray_resources_dict: Dict[str, float],
                      log_dir: str,
+                     docker_image: Optional[str] = None,
+                     docker_file_mounts_mapping: Optional[Dict[str,
+                                                               str]] = None,
                      env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command."""
@@ -673,6 +676,8 @@ class RayCodeGen:
                     .remote(
                         script,
                         log_path,
+                        docker_image={docker_image!r},
+                        docker_file_mounts_mapping={docker_file_mounts_mapping!r},
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -1165,6 +1170,7 @@ class RetryingVmProvisioner(object):
             prev_handle: Optional['CloudVmRayResourceHandle'],
             prev_cluster_ever_up: bool,
             prev_config_hash: Optional[str],
+            docker_image_on_no_image_cluster: Optional[str] = None,
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
@@ -1174,6 +1180,8 @@ class RetryingVmProvisioner(object):
             self.prev_handle = prev_handle
             self.prev_cluster_ever_up = prev_cluster_ever_up
             self.prev_config_hash = prev_config_hash
+            self.docker_image_on_no_image_cluster = (
+                docker_image_on_no_image_cluster)
 
     def __init__(self,
                  log_dir: str,
@@ -1337,6 +1345,7 @@ class RetryingVmProvisioner(object):
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
+        docker_image_on_no_image_cluster: Optional[str],
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1472,8 +1481,10 @@ class RetryingVmProvisioner(object):
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
 
-            if ('config_hash' in config_dict and
-                    skip_if_config_hash_matches == config_dict['config_hash']):
+            # Don't skip if we try to use a docker image on a no image cluster.
+            if ('config_hash' in config_dict and skip_if_config_hash_matches
+                    == config_dict['config_hash'] and
+                    docker_image_on_no_image_cluster is None):
                 logger.debug('Skipping provisioning of cluster with matching '
                              'config hash.')
                 config_dict['provisioning_skipped'] = True
@@ -2031,6 +2042,8 @@ class RetryingVmProvisioner(object):
                                        self._optimize_target is None)
         skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
                                        skip_unnecessary_provisioning else None)
+        docker_image_on_no_image_cluster = (
+            to_provision_config.docker_image_on_no_image_cluster)
 
         failover_history: List[Exception] = list()
         resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
@@ -2091,7 +2104,9 @@ class RetryingVmProvisioner(object):
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
                     prev_cluster_ever_up=prev_cluster_ever_up,
-                    skip_if_config_hash_matches=skip_if_config_hash_matches)
+                    skip_if_config_hash_matches=skip_if_config_hash_matches,
+                    docker_image_on_no_image_cluster=
+                    docker_image_on_no_image_cluster)
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2772,7 +2787,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     resource.less_demanding_than(
                         launched_resources,
                         requested_num_nodes=task.num_nodes,
-                        check_ports=check_ports)):
+                        check_ports=check_ports,
+                        enable_docker_image_on_no_image_cluster=True)):
                 valid_resource = resource
                 break
             else:
@@ -2849,7 +2865,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool, Optional[str]]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
         Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
@@ -2978,7 +2994,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
-                return record['handle'] if record is not None else None, False
+                return record[
+                    'handle'] if record is not None else None, False, None
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -2989,7 +3006,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 assert record is not None and record['handle'] is not None, (
                     cluster_name, record)
-                return record['handle'], True
+                return record['handle'], True, None
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -3031,7 +3048,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, lock_path, config_hash)
-                return handle, False
+                return (handle, False,
+                        to_provision_config.docker_image_on_no_image_cluster)
 
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
@@ -3103,7 +3121,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, lock_path, config_hash)
-            return handle, False
+            return (handle, False,
+                    to_provision_config.docker_image_on_no_image_cluster)
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
@@ -3204,8 +3223,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             common_utils.remove_file_if_exists(lock_path)
 
-    def _sync_workdir(self, handle: CloudVmRayResourceHandle,
-                      workdir: Path) -> None:
+    def _sync_workdir(self, handle: CloudVmRayResourceHandle, workdir: Path,
+                      target_workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
@@ -3242,7 +3261,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         def _sync_workdir_node(runner: command_runner.CommandRunner) -> None:
             runner.rsync(
                 source=workdir,
-                target=SKY_REMOTE_WORKDIR,
+                target=target_workdir,
                 up=True,
                 log_path=log_path,
                 stream_logs=False,
@@ -3287,7 +3306,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
-               detach_setup: bool) -> None:
+               detach_setup: bool, docker_image: Optional[str],
+               docker_file_mounts_mapping: Optional[Dict[str, str]]) -> None:
+        # TODO(tian): Support setup.
         start = time.time()
 
         if task.setup is None:
@@ -3613,6 +3634,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         detach_run: bool,
+        docker_image: Optional[str],
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -3663,10 +3685,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
+            # TODO(tian): Support multi-node tasks for docker mapping
             self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
+            self._execute_task_one_node(handle, task_copy, job_id, docker_image,
+                                        detach_run)
 
         return job_id
 
@@ -4747,8 +4771,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
-            self.check_resources_fit_cluster(handle, task)
+            selected_resources = self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
+            docker_image_on_no_image_cluster = (
+                selected_resources.docker_image_on_no_image_cluster(
+                    handle.launched_resources))
             assert handle.launched_resources is not None, (cluster_name, handle)
             # Take a random resource in order to get resource info that applies
             # to all resources.
@@ -4800,7 +4827,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
                 prev_cluster_ever_up=cluster_ever_up,
-                prev_config_hash=prev_config_hash)
+                prev_config_hash=prev_config_hash,
+                docker_image_on_no_image_cluster=
+                docker_image_on_no_image_cluster,
+            )
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
@@ -5198,6 +5228,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
+                               docker_image: Optional[str],
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
@@ -5230,7 +5261,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             env_vars=task_env_vars,
             task_name=task.name,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+            log_dir=log_dir,
+            docker_image=docker_image,
+            docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
         codegen.add_epilogue()
 

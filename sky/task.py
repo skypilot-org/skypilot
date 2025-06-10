@@ -212,6 +212,7 @@ class Task:
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
+        docker_file_mounts_mapping: Optional[Dict[str, str]] = None,
     ):
         """Initializes a Task.
 
@@ -276,6 +277,7 @@ class Task:
         self.setup = setup
         self._envs = envs or {}
         self.workdir = workdir
+        self.target_workdir = constants.SKY_REMOTE_WORKDIR
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.event_callback = event_callback
@@ -313,6 +315,9 @@ class Task:
 
         # For internal use only.
         self.file_mounts_mapping = file_mounts_mapping
+
+        # Internal use only.
+        self.docker_file_mounts_mapping = docker_file_mounts_mapping
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -507,6 +512,8 @@ class Task:
             envs=config.pop('envs', None),
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            docker_file_mounts_mapping=config.pop('docker_file_mounts_mapping',
+                                                  None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -1080,6 +1087,40 @@ class Task:
         store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
+    def maybe_add_suffix_for_file_mounts(
+            self, possible_suffix: Optional[str]) -> None:
+        """(INTERNAL) Adds a suffix to all file mounts and workdirs.
+
+        This is useful for running docker on no image clusters. In each docker
+        run we will upload file mounts to a path with suffix, and then mount to
+        the docker container. This function will set the
+        `docker_file_mounts_mapping` variable to map the new file mounts to the
+        original file mounts, which is useful for generating docker mount args.
+        """
+        if possible_suffix is None:
+            return
+        if self.docker_file_mounts_mapping is None:
+            self.docker_file_mounts_mapping = {}
+        if self.workdir is not None:
+            self.target_workdir = (
+                f'{constants.SKY_REMOTE_WORKDIR}_{possible_suffix}')
+            self.docker_file_mounts_mapping[
+                self.target_workdir] = constants.SKY_REMOTE_WORKDIR
+        if self.file_mounts is not None:
+            new_mounts = {}
+            for target, src in self.file_mounts.items():
+                new_target = f'{target}_{possible_suffix}'
+                new_mounts[new_target] = src
+                self.docker_file_mounts_mapping[new_target] = target
+            self.file_mounts = new_mounts
+        if self.storage_mounts is not None:
+            new_storage_mounts = {}
+            for target, storage in self.storage_mounts.items():
+                new_target = f'{target}_{possible_suffix}'
+                new_storage_mounts[new_target] = storage
+                self.docker_file_mounts_mapping[new_target] = target
+            self.storage_mounts = new_storage_mounts
+
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
@@ -1328,6 +1369,8 @@ class Task:
             })
 
         add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
+        add_if_not_none('docker_file_mounts_mapping',
+                        self.docker_file_mounts_mapping)
         return config
 
     def get_required_cloud_features(

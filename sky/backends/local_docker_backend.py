@@ -139,7 +139,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[LocalDockerResourceHandle], bool]:
+    ) -> Tuple[Optional[LocalDockerResourceHandle], bool, Optional[str]]:
         """Builds docker image for the task and returns cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
@@ -149,7 +149,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
         if dryrun:
-            return None, False
+            return None, False, None
         if retry_until_up:
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
@@ -175,15 +175,15 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                                                 requested_resources=set(
                                                     task.resources),
                                                 ready=False)
-        return handle, False
+        return handle, False, None
 
-    def _sync_workdir(self, handle: LocalDockerResourceHandle,
-                      workdir: Path) -> None:
+    def _sync_workdir(self, handle: LocalDockerResourceHandle, workdir: Path,
+                      target_workdir: Path) -> None:
         """Workdir is sync'd by adding to the docker image.
 
         This happens in the execute step.
         """
-        del handle, workdir  # Unused
+        del handle, workdir, target_workdir  # Unused
         logger.info('Since the workdir is synced at build time, sync_workdir is'
                     ' a NoOp. If you are running sky exec, your workdir has not'
                     ' been updated.')
@@ -212,14 +212,15 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         self.volume_mounts[handle] = docker_mounts
 
     def _setup(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
-               detach_setup: bool) -> None:
+               detach_setup: bool, docker_image: Optional[str],
+               docker_file_mounts_mapping: Optional[Dict[str, str]]) -> None:
         """Launches a container and runs a sleep command on it.
 
         setup() in LocalDockerBackend runs the container with a sleep job
         so that the container is kept alive and we can issue docker exec cmds
         to it to handle sky exec commands.
         """
-        del detach_setup  # unused
+        del detach_setup, docker_image, docker_file_mounts_mapping
         style = colorama.Style
         assert handle in self.images, \
             f'No image found for {handle}, have you run Backend.provision()?'
@@ -274,6 +275,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  handle: LocalDockerResourceHandle,
                  task: 'task_lib.Task',
                  detach_run: bool,
+                 docker_image: Optional[str],
                  dryrun: bool = False) -> None:
         """ Launches the container."""
         if detach_run:

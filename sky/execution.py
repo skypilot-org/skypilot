@@ -5,6 +5,7 @@ See `Stage` for a Task's life cycle.
 import enum
 import typing
 from typing import List, Optional, Tuple, Union
+import uuid
 
 import colorama
 
@@ -396,19 +397,28 @@ def _execute_dag(
 
     try:
         provisioning_skipped = False
+        docker_image_on_no_image_cluster = None
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            (handle, provisioning_skipped) = backend.provision(
-                task,
-                task.best_resources,
-                dryrun=dryrun,
-                stream_logs=stream_logs,
-                cluster_name=cluster_name,
-                retry_until_up=retry_until_up,
-                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+            (handle, provisioning_skipped,
+             docker_image_on_no_image_cluster) = backend.provision(
+                 task,
+                 task.best_resources,
+                 dryrun=dryrun,
+                 stream_logs=stream_logs,
+                 cluster_name=cluster_name,
+                 retry_until_up=retry_until_up,
+                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+
+        docker_image = None
+        docker_image_unique_id = None
+        if docker_image_on_no_image_cluster is not None:
+            docker_image = docker_image_on_no_image_cluster
+            docker_image_unique_id = docker_image_on_no_image_cluster.replace(
+                '/', '-').replace(':', '-') + '-' + str(uuid.uuid4())[:4]
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -423,9 +433,10 @@ def _execute_dag(
                            task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
             logger.info(ux_utils.starting_message('Syncing files.'))
+            task.maybe_add_suffix_for_file_mounts(docker_image_unique_id)
 
         if do_workdir:
-            backend.sync_workdir(handle, task.workdir)
+            backend.sync_workdir(handle, task.workdir, task.target_workdir)
 
         if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,
@@ -438,7 +449,8 @@ def _execute_dag(
                 logger.debug('Unnecessary provisioning was skipped, so '
                              'skipping setup as well.')
             else:
-                backend.setup(handle, task, detach_setup=detach_setup)
+                backend.setup(handle, task, detach_setup, docker_image,
+                              task.docker_file_mounts_mapping)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -454,6 +466,7 @@ def _execute_dag(
                 job_id = backend.execute(handle,
                                          task,
                                          detach_run,
+                                         docker_image,
                                          dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
