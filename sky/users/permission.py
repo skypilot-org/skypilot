@@ -58,7 +58,6 @@ class PermissionService:
 
     def _maybe_initialize_policies(self) -> None:
         """Initialize policies if they don't already exist."""
-        # TODO(zhwu): we should avoid running this on client side.
         logger.debug(f'Initializing policies in process: {os.getpid()}')
         self._load_policy_no_lock()
 
