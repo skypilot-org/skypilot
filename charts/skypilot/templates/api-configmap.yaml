@@ -5,6 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   config.yaml: |-
+    {{- end }}
     {{- if .Values.apiService.config }}
     {{- .Values.apiService.config | nindent 4 }}
     {{- else }}
