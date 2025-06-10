@@ -546,7 +546,7 @@ export function ManagedJobsTable({
       // Highlight all statuses when showing all jobs
       return true;
     }
-    
+
     return statusGroups[activeTab].includes(status);
   };
 
