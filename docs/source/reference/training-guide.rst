@@ -42,6 +42,35 @@ Use high-performance networking
 
 .. tab-set::
 
+    .. tab-item:: Nebius with InfiniBand
+        :sync: nebius-infiniband-tab
+
+        InfiniBand is a high-throughput, low-latency networking standard. To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters or Nebius VMs, you can interconnect the GPUs using InfiniBand.
+
+        On Nebius managed Kubernetes clusters:
+
+        .. code-block:: yaml
+        
+          resources:
+            infra: k8s
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+
+        On Nebius VMs:
+
+        .. code-block:: yaml
+
+          resources:
+            infra: nebius
+            accelerators: H100:8
+            network_tier: best
+
+          num_nodes: 2
+   
+        See more details in `Nebius example <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_.
+    
     .. tab-item:: AWS EFA
         :sync: aws-efa-tab
 
@@ -79,12 +108,6 @@ Use high-performance networking
 
         See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
 
-    .. tab-item:: Nebius with InfiniBand
-        :sync: nebius-infiniband-tab
-
-        InfiniBand is a high-throughput, low-latency networking standard. To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters with GPUs in Nebius, you can interconnect the GPUs using InfiniBand.
-
-        See `Nebius example <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_ for more details.
 
 Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~

@@ -161,7 +161,7 @@ export function Clusters() {
   };
 
   return (
-    <Layout highlighted="clusters">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link
@@ -234,7 +234,7 @@ export function Clusters() {
         onClose={() => setIsVSCodeModalOpen(false)}
         cluster={selectedCluster}
       />
-    </Layout>
+    </>
   );
 }
 

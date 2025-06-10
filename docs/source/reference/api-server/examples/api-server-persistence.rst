@@ -17,6 +17,10 @@ to persistently back the SkyPilot state.
     While this document uses a GKE cluster with a GCP persistent disk as a backing volume,
     this guide is applicable to other managed k8s offerings that provide a CSI provider to a persistent storage device.
 
+.. note::
+
+    See :ref:`api-server-persistence-db` for an alternative way to persist the API server state using a postgresSQL database.
+
 TL;DR: Recover API server on another GKE cluster
 ------------------------------------------------
 
