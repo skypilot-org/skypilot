@@ -406,7 +406,13 @@ def test_restful_policy(add_example_policy_paths, task):
 def _policy_server(policy: str) -> Iterator[str]:
     port = common_utils.find_free_port(start_port=8080)
     env = os.environ.copy()
+    # Clear the SKYPILOT_CONFIG to avoid conflicts with the test environment
     env.pop('SKYPILOT_CONFIG', None)
+    # Add the example_policy to the PYTHONPATH
+    pypath = os.path.join(POLICY_PATH, 'example_policy')
+    if env.get('PYTHONPATH'):
+        pypath = pypath + ':' + env['PYTHONPATH']
+    env['PYTHONPATH'] = pypath
     proc = subprocess.Popen(
         f'python {POLICY_PATH}/example_server/policy_server.py --port {port} --policy {policy}',
         shell=True,
