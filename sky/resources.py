@@ -1930,6 +1930,10 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
+        if resources_fields['disk_size'] is not None:
+            disk_size = resources_fields['disk_size']
+            disk_size = _convert_to_gb(str(disk_size))
+            resources_fields['disk_size'] = int(disk_size)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
@@ -1965,17 +1969,11 @@ class Resources:
             resources_fields['cpus'] = str(resources_fields['cpus'])
         if resources_fields['memory'] is not None:
             memory = resources_fields['memory']
-            if len(list(filter(str.isdigit, memory))) != 0:
-                memory = str(_convert_to_gb(memory))
+            memory = str(_convert_to_gb(memory))
             resources_fields['memory'] = memory
         if resources_fields['accelerator_args'] is not None:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
-        if resources_fields['disk_size'] is not None:
-            disk_size = resources_fields['disk_size']
-            if len(list(filter(str.isdigit, disk_size))) != 0:
-                disk_size = _convert_to_gb(disk_size)
-            resources_fields['disk_size'] = int(disk_size)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2241,19 +2239,29 @@ def _maybe_add_docker_prefix_to_image_id(
             image_id_dict[k] = f'docker:{v}'
 
 
-def _convert_to_gb(memory: str) -> float:
+def _convert_to_gb(memory: str) -> str:
+    plus = memory.endswith('+')
+    if plus:
+        memory = memory[:-1]
+
     memory = memory.upper()
     if memory.endswith('GB'):
-        return float(memory[:-2])
+        memory = int(memory[:-2])
     elif memory.endswith('MB'):
-        return float(memory[:-2]) / 1024
+        memory = int(memory[:-2]) // 1024
     elif memory.endswith('TB'):
-        return float(memory[:-2]) * 1024
+        memory = int(memory[:-2]) * 1024
     elif memory.endswith('KB'):
-        return float(memory[:-2]) / 1024 / 1024
+        memory = int(memory[:-2]) // 1024 // 1024
     elif memory.endswith('B'):
-        return float(memory[:-1]) / 1024 / 1024 / 1024
+        memory = int(memory[:-1]) // 1024 // 1024 // 1024
     elif memory.endswith('PB'):
-        return float(memory[:-2]) * 1024 * 1024
+        memory = int(memory[:-2]) * 1024 * 1024
+    elif memory.isdigit():
+        memory = int(memory)
     else:
         raise ValueError(f"Invalid memory format: {memory}")
+
+    if plus:
+        memory = f"{memory}+"
+    return str(memory)

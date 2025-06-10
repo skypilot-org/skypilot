@@ -33,6 +33,8 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
+time_pattern = '^[0-9]+([m]|[h]|[d]|[w]|[s]|[min]|[hr]|[day]|[week]|[sec])?$'
+
 _AUTOSTOP_SCHEMA = {
     'anyOf': [
         {
@@ -43,7 +45,8 @@ _AUTOSTOP_SCHEMA = {
         {
             # Shorthand to set idle_minutes by directly specifying, e.g.
             #   autostop: 5
-            'type': 'integer',
+            'type': 'string',
+            'pattern': time_pattern,
             'minimum': 0,
         },
         {
@@ -97,6 +100,8 @@ def _get_single_resources_schema():
     infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
                      f'{wildcard_cloud}{wildcard_with_region}|'
                      f'{kubernetes_pattern})$')
+    
+    memory_pattern = '^[0-9]+([GgMmTt][Bb])$'
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -190,7 +195,12 @@ def _get_single_resources_schema():
                     'type': 'object',
                     'properties': {
                         'disk_size': {
-                            'type': 'integer',
+                            'anyOf': [{
+                                'type': 'string',
+                                'pattern': memory_pattern,
+                            }, {
+                                'type': 'integer',
+                            }],
                         },
                         'disk_tier': {
                             'type': 'string',
@@ -214,7 +224,12 @@ def _get_single_resources_schema():
                 },
             },
             'disk_size': {
-                'type': 'integer',
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': memory_pattern,
+                }, {
+                    'type': 'integer',
+                }],
             },
             'disk_tier': {
                 'type': 'string',
@@ -365,6 +380,9 @@ def get_resources_schema():
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
+
+    memory_pattern = '^[0-9]+([GgMmTt][Bb])$'
+    
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -404,7 +422,12 @@ def get_storage_schema():
                 'type': 'object',
                 'properties': {
                     'disk_size': {
-                        'type': 'integer',
+                        'anyOf': [{
+                            'type': 'string',
+                            'pattern': memory_pattern,
+                        }, {
+                            'type': 'integer',
+                        }],
                     },
                     'disk_tier': {
                         'type': 'string',
