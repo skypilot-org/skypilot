@@ -136,6 +136,7 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
+        _force_quiet: bool = False,
     ):
         """Initialize a Resources object.
 
@@ -360,6 +361,7 @@ class Resources:
 
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
+        self._force_quiet = _force_quiet
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -630,6 +632,11 @@ class Resources:
         if self._requires_fuse is None:
             return False
         return self._requires_fuse
+
+    @property
+    def force_quiet(self) -> bool:
+        """Returns whether to force quiet mode for this resource."""
+        return self._force_quiet
 
     def set_requires_fuse(self, value: bool) -> None:
         """Sets whether this resource requires FUSE mounting support.
@@ -1733,6 +1740,7 @@ class Resources:
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override_configs,
+            _force_quiet=override.pop('force_quiet', self._force_quiet),
         )
         assert not override
         return resources
@@ -1802,6 +1810,16 @@ class Resources:
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
+        """Creates a Resources object from a YAML config.
+
+        Args:
+            config: A dict of resource config.
+
+        Returns:
+            A set of Resources objects if any_of is specified, otherwise a list
+            of Resources objects if ordered is specified, otherwise a set with
+            a single Resources object.
+        """
         if config is None:
             return {Resources()}
 
@@ -1915,6 +1933,7 @@ class Resources:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'No GPUs found.')
                 accelerators = set(accelerators)
+                config['_force_quiet'] = True
 
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
@@ -2013,6 +2032,7 @@ class Resources:
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
             resources_fields['disk_size'] = int(resources_fields['disk_size'])
+        resources_fields['_force_quiet'] = config.pop('_force_quiet', False)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2063,6 +2083,8 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        if self._force_quiet is not None:
+            config['_force_quiet'] = self._force_quiet
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)

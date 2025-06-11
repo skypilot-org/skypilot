@@ -262,6 +262,9 @@ def _get_single_resources_schema():
                     }
                 }
             },
+            '_force_quiet': {
+                'type': 'boolean'
+            },
             'image_id': {
                 'anyOf': [{
                     'type': 'string',
