@@ -2254,7 +2254,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     if show_services:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                    f'Services{colorama.Style.RESET_ALL}')
+                   f'Services{colorama.Style.RESET_ALL}')
         click.echo(services_msg)
         if num_services is not None:
             hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
