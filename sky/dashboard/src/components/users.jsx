@@ -50,6 +50,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -108,8 +109,11 @@ export function Users() {
   const [resetPasswordUser, setResetPasswordUser] = useState(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState(null);
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const getUserRole = async () => {
     if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
@@ -265,10 +269,11 @@ export function Users() {
 
   const handleResetPasswordSubmit = async () => {
     if (!resetPassword) {
-      alert('Please enter a new password.');
+      setResetError(new Error('Please enter a new password.'));
       return;
     }
     setResetLoading(true);
+    setResetError(null);
     try {
       const response = await apiClient.post('/users/update', {
         user_id: resetPasswordUser.userId,
@@ -283,7 +288,7 @@ export function Users() {
       setResetPasswordUser(null);
       setResetPassword('');
     } catch (error) {
-      alert(`Error resetting password: ${error.message}`);
+      setResetError(error);
     } finally {
       setResetLoading(false);
     }
@@ -298,7 +303,8 @@ export function Users() {
 
   const handleDeleteUserConfirm = async () => {
     if (!userToDelete) return;
-    setResetLoading(true); // Reuse loading state
+    setDeleteLoading(true);
+    setDeleteError(null);
     try {
       const response = await apiClient.post('/users/delete', {
         user_id: userToDelete.userId,
@@ -312,10 +318,23 @@ export function Users() {
       setUserToDelete(null);
       handleRefresh();
     } catch (error) {
-      alert(`Error deleting user: ${error.message}`);
+      setDeleteError(error);
     } finally {
-      setResetLoading(false);
+      setDeleteLoading(false);
     }
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteConfirmDialog(false);
+    setUserToDelete(null);
+    setDeleteError(null);
+  };
+
+  const handleCancelResetPassword = () => {
+    setShowResetPasswordDialog(false);
+    setResetPasswordUser(null);
+    setResetPassword('');
+    setResetError(null);
   };
 
   return (
@@ -634,7 +653,7 @@ export function Users() {
       </Dialog>
 
       {/* Reset Password Dialog */}
-      <Dialog open={showResetPasswordDialog} onOpenChange={setShowResetPasswordDialog}>
+      <Dialog open={showResetPasswordDialog} onOpenChange={handleCancelResetPassword}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Reset Password</DialogTitle>
@@ -642,6 +661,7 @@ export function Users() {
               Enter a new password for {resetPasswordUser?.usernameDisplay || 'this user'}.
             </DialogDescription>
           </DialogHeader>
+
           <div className="flex flex-col gap-4 py-4">
             <div className="grid gap-2">
               <label className="text-sm font-medium text-gray-700">
@@ -657,27 +677,35 @@ export function Users() {
               />
             </div>
           </div>
+
+          <ErrorDisplay
+            error={resetError}
+            title="Reset Failed"
+            onDismiss={() => setResetError(null)}
+          />
+
           <DialogFooter>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-              onClick={() => setShowResetPasswordDialog(false)}
+            <Button
+              variant="outline"
+              onClick={handleCancelResetPassword}
               disabled={resetLoading}
             >
               Cancel
-            </button>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+            </Button>
+            <Button
+              variant="default"
               onClick={handleResetPasswordSubmit}
               disabled={resetLoading || !resetPassword}
+              className="bg-sky-600 text-white hover:bg-sky-700"
             >
               {resetLoading ? 'Resetting...' : 'Reset Password'}
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Delete User Confirmation Dialog */}
-      <Dialog open={showDeleteConfirmDialog} onOpenChange={setShowDeleteConfirmDialog}>
+      <Dialog open={showDeleteConfirmDialog} onOpenChange={handleCancelDelete}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete User</DialogTitle>
@@ -685,21 +713,28 @@ export function Users() {
               Are you sure you want to delete user "{userToDelete?.usernameDisplay || 'this user'}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
+
+          <ErrorDisplay
+            error={deleteError}
+            title="Deletion Failed"
+            onDismiss={() => setDeleteError(null)}
+          />
+
           <DialogFooter>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-              onClick={() => setShowDeleteConfirmDialog(false)}
-              disabled={resetLoading}
+            <Button
+              variant="outline"
+              onClick={handleCancelDelete}
+              disabled={deleteLoading}
             >
               Cancel
-            </button>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2"
+            </Button>
+            <Button
+              variant="destructive"
               onClick={handleDeleteUserConfirm}
-              disabled={resetLoading}
+              disabled={deleteLoading}
             >
-              {resetLoading ? 'Deleting...' : 'Delete'}
-            </button>
+              {deleteLoading ? 'Deleting...' : 'Delete'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -713,6 +748,8 @@ function UsersTable({
   refreshDataRef,
   checkPermissionAndAct,
   roleLoading,
+  onResetPassword,
+  onDeleteUser,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -723,9 +760,6 @@ function UsersTable({
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
-  const [resetUserId, setResetUserId] = useState(null);
-  const [resetPassword, setResetPassword] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [currentUserRole, setCurrentUserRole] = useState(null);
 
@@ -892,44 +926,6 @@ function UsersTable({
     }
   };
 
-  const handleResetPassword = async (userId) => {
-    const password = prompt('Enter new password for this user:');
-    if (!password) return;
-    try {
-      const response = await apiClient.post('/users/update', {
-        user_id: userId,
-        password,
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to reset password');
-      }
-      alert('Password reset successfully.');
-    } catch (error) {
-      alert(`Error resetting password: ${error.message}`);
-    }
-  };
-
-  const handleDeleteUser = async (userId) => {
-    await checkPermissionAndAct('cannot delete users', async () => {
-      if (!window.confirm('Are you sure you want to delete this user?')) return;
-      try {
-        const response = await apiClient.post('/users/delete', {
-          user_id: userId,
-        });
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Failed to delete user');
-        }
-        alert('User deleted successfully.');
-        dashboardCache.invalidate(getUsers);
-        await fetchDataAndProcess(true);
-      } catch (error) {
-        alert(`Error deleting user: ${error.message}`);
-      }
-    });
-  };
-
   if (isLoading && usersWithCounts.length === 0 && !hasInitiallyLoaded) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -1037,7 +1033,7 @@ function UsersTable({
                       <span className="capitalize">{user.role}</span>
                       <button
                         onClick={() => handleEditClick(user.userId, user.role)}
-                        className="text-gray-400 hover:text-sky-blue p-1"
+                        className="text-sky-blue hover:text-sky-blue-bright p-1"
                         title="Edit role"
                       >
                         <PenIcon className="h-3 w-3" />
@@ -1090,82 +1086,26 @@ function UsersTable({
                         await checkPermissionAndAct(
                           'cannot reset password for other users',
                           () => {
-                            setResetUserId(user.userId);
-                            setResetPassword('');
+                            onResetPassword(user);
                           }
                         );
                         return;
                       }
-                      setResetUserId(user.userId);
-                      setResetPassword('');
+                      onResetPassword(user);
                     }}
-                    className="text-gray-400 hover:text-sky-blue p-1"
+                    className="text-sky-blue hover:text-sky-blue-bright p-1"
                     title="Reset Password"
                   >
                     <KeyRoundIcon className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handleDeleteUser(user.userId)}
-                    className="text-gray-400 hover:text-red-500 p-1"
+                    onClick={() => onDeleteUser(user)}
+                    className="text-sky-blue hover:text-red-500 p-1"
                     title="Delete User"
                   >
                     <Trash2Icon className="h-4 w-4" />
                   </button>
                 </div>
-                {resetUserId === user.userId && (
-                  <div
-                    className="absolute z-50 bg-white border rounded shadow-lg p-3 flex flex-col gap-2"
-                    style={{ top: '2.5rem', left: 0, minWidth: 220 }}
-                  >
-                    <input
-                      type="password"
-                      className="border rounded px-2 py-1 w-full"
-                      placeholder="New password"
-                      value={resetPassword}
-                      onChange={(e) => setResetPassword(e.target.value)}
-                      autoFocus
-                    />
-                    <div className="flex gap-2 justify-end">
-                      <button
-                        className="text-sky-blue hover:underline"
-                        disabled={resetLoading}
-                        onClick={async () => {
-                          setResetLoading(true);
-                          try {
-                            const response = await apiClient.post(
-                              '/users/update',
-                              {
-                                user_id: user.userId,
-                                password: resetPassword,
-                              }
-                            );
-                            if (!response.ok) {
-                              const errorData = await response.json();
-                              throw new Error(
-                                errorData.detail || 'Failed to reset password'
-                              );
-                            }
-                            alert('Password reset successfully.');
-                            setResetUserId(null);
-                          } catch (error) {
-                            alert(`Error resetting password: ${error.message}`);
-                          } finally {
-                            setResetLoading(false);
-                          }
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="text-gray-400 hover:text-gray-700"
-                        disabled={resetLoading}
-                        onClick={() => setResetUserId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
               </TableCell>
             </TableRow>
           ))}
@@ -1183,4 +1123,6 @@ UsersTable.propTypes = {
   }).isRequired,
   checkPermissionAndAct: PropTypes.func.isRequired,
   roleLoading: PropTypes.bool.isRequired,
+  onResetPassword: PropTypes.func.isRequired,
+  onDeleteUser: PropTypes.func.isRequired,
 };
