@@ -67,31 +67,6 @@ This should output:
     - pod
 
 
-Deploy a SkyPilot API server
-----------------------------
-
-You can deploy a SkyPilot API server on kubernetes following the steps in :ref:`Kubernetes Deployment Guide <sky-api-server-deploy>`.
-
-.. code-block:: bash
-
-  NAMESPACE=skypilot
-  RELEASE_NAME=skypilot
-  WEB_USERNAME=skypilot
-  # Replace with your password to configure the password for the API server
-  WEB_PASSWORD=yourpassword
-  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING
-
-Use :ref:`this command <sky-get-api-server-url>` to get the API server URL.
-
-.. image:: ../../../images/examples/k8s-with-kueue/api-server.svg
-   :alt: API server deployment
-   :width: 80%
-   :align: center
-
 Create a Kueue resource flavor
 ------------------------------
 
@@ -222,6 +197,16 @@ Here, a cluster queue and a local queue are created.
     spec:
       clusterQueue: "skypilot-cluster-queue"
 
+To create the cluster and local queues above, save the snippet to ``kueue.yaml`` and run the following command:
+
+.. code-block:: bash
+
+    # if 'skypilot' namespace does not exist, create it
+    kubectl create namespace skypilot
+    # create the cluster and local queue
+    kubectl apply -f kueue.yaml
+
+
 The team submits jobs to the local queue ``skypilot-local-queue``.
 The jobs from the team are subject to the quota defined in the cluster queue,
 and the jobs from the team are ordered by their priority.
@@ -231,23 +216,16 @@ and the jobs from the team are ordered by their priority.
    :width: 80%
    :align: center
 
-To create the cluster and local queues above, save the snippet to ``kueue.yaml`` and run the following command:
+At this point, the cluster and local queue are created. However, the SkyPilot API server is not yet configured to interact with the queues.
 
-.. code-block:: bash
-
-    kubectl apply -f kueue.yaml
-
+In the next section, the SkyPilot API server is configured to submit jobs to the local queue.
 
 Configure SkyPilot API server to use Kueue
 ------------------------------------------
 
-The helm deployment of each SkyPilot API server can be configured to use Kueue by default.
-Refer to :ref:`Setting the SkyPilot config <sky-api-server-config>` section of the Kubernetes Deployment Guide
-for instructions on how to set the config file on a helm-deployed SkyPilot API server.
+For the SkyPilot API server to submit jobs to a kueue, the following config should be set on the API server:
 
-The following config should be set on the API server:
-
-``skypilot-config.yaml``:
+``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
@@ -256,16 +234,6 @@ The following config should be set on the API server:
         metadata:
           labels:
             kueue.x-k8s.io/queue-name: skypilot-local-queue
-
-.. code-block:: bash
-
-  NAMESPACE=skypilot
-  RELEASE_NAME=skypilot
-  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --reuse-values \
-    --set-file apiService.config=skypilot-config.yaml
-
 
 The config above allows the API server to submit jobs using the local queue.
 
