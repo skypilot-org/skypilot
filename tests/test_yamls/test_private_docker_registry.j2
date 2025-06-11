@@ -2,9 +2,9 @@ resources:
   image_id: docker:{{full_image_name}}
 
 envs:
-  SKYPILOT_DOCKER_USERNAME: {{docker_username}}
-  SKYPILOT_DOCKER_PASSWORD: {{docker_password}}
-  SKYPILOT_DOCKER_SERVER: {{docker_server}}
+  SKYPILOT_DOCKER_USERNAME: "{{docker_username}}"
+  SKYPILOT_DOCKER_PASSWORD: "{{docker_password}}"
+  SKYPILOT_DOCKER_SERVER: "{{docker_server}}"
 
 run: |
   set -e
