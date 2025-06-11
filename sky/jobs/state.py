@@ -604,22 +604,28 @@ def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
     # is STARTING, the initial value of `last_recovered_at` might not be set
     # yet (default value -1). In this case, we should not add current timestamp.
     # Otherwise, the job duration will be incorrect (~55 years from 1970).
+    current_time = time.time()
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             f"""\
                 UPDATE spot SET
                 status=(?),
                 job_duration=CASE
-                    WHEN last_recovered_at > 0
+                    WHEN last_recovered_at >= 0
                     THEN job_duration+(?)-last_recovered_at
                     ELSE job_duration
+                END,
+                last_recovered_at=CASE
+                    WHEN last_recovered_at < 0
+                    THEN (?)
+                    ELSE last_recovered_at
                 END
                 WHERE spot_job_id=(?) AND
                 task_id=(?) AND
                 {status_str} AND
                 end_at IS null""",
-            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id,
-             *expected_status))
+            (ManagedJobStatus.RECOVERING.value, current_time, current_time,
+             job_id, task_id, *expected_status))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
