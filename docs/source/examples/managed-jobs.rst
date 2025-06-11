@@ -211,7 +211,7 @@ Specify job priority by setting the ``job.priority`` field in the :ref:`SkyPilot
   job:
     # Priority of the job, between 0 and 1000 (default: 500).
     #
-    # A lower value means that the job is higher priority. High priority jobs
+    # A higher value means that the job is higher priority. High priority jobs
     # are scheduled sooner and will block lower priority jobs from starting
     # until the high priority jobs have started.
     priority: 500
