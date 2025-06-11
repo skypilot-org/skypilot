@@ -495,7 +495,6 @@ def get_ray_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    assert _DB is not None
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
