@@ -24,7 +24,7 @@ jobs:
           - "tests/test_optimizer_dryruns.py -k \"partial\""
           - "tests/test_optimizer_dryruns.py -k \"not partial\""
           - tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py
-          - tests/test_no_parellel.py tests/test_optimizer_random_dag.py
+          - tests/test_no_parellel.py tests/test_optimizer_random_dag.py tests/test_storage.py
         include:
           - test-path: tests/unit_tests
             test-name: "PYTEST - Unit Tests"
