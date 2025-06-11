@@ -832,6 +832,15 @@ def write_cluster_config(
             raise exceptions.InvalidCloudConfigs(
                 f'Invalid pod_config. Details: {message}')
 
+    def pre_return_file_cleanup():
+        # Remove the tmp file.
+        # If debug logging is enabled, we keep a debug yaml file.
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            debug_yaml_path = yaml_path + '.debug'
+            os.rename(tmp_yaml_path, debug_yaml_path)
+        else:
+            os.remove(tmp_yaml_path)
+
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
         config_dict['ray'] = tmp_yaml_path
@@ -841,6 +850,7 @@ def write_cluster_config(
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to calculate config_hash: {e}')
             logger.debug('Full exception:', exc_info=e)
+        pre_return_file_cleanup()
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
@@ -890,13 +900,7 @@ def write_cluster_config(
 
     usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
 
-    # Remove the tmp file.
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        debug_yaml_path = yaml_path + '.debug'
-        os.rename(tmp_yaml_path, debug_yaml_path)
-    else:
-        os.remove(tmp_yaml_path)
-
+    pre_return_file_cleanup()
     return config_dict
 
 
