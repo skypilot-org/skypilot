@@ -74,7 +74,7 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
     # Check if user already exists
     if global_user_state.get_user_by_name(username):
         raise fastapi.HTTPException(status_code=400,
-                                    detail=f'User {username} already exists')
+                                    detail=f'User {username!r} already exists')
 
     if not role:
         role = rbac.get_default_role()
@@ -154,106 +154,115 @@ async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
 
 
 @router.post('/import')
-async def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
+async def user_import(
+        user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
     """Import users from CSV content."""
     csv_content = user_import_body.csv_content
-    
+
     if not csv_content:
         raise fastapi.HTTPException(status_code=400,
                                     detail='CSV content is required')
-    
+
     # Parse CSV content
     lines = csv_content.strip().split('\n')
     if len(lines) < 2:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='CSV must have at least a header row and one data row')
-    
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='CSV must have at least a header row and one data row')
+
     # Parse headers
     headers = [h.strip().lower() for h in lines[0].split(',')]
     required_headers = ['username', 'password', 'role']
-    
+
     # Check if all required headers are present
-    missing_headers = [header for header in required_headers if header not in headers]
+    missing_headers = [
+        header for header in required_headers if header not in headers
+    ]
     if missing_headers:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=f'Missing required columns: {", ".join(missing_headers)}')
-    
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Missing required columns: {", ".join(missing_headers)}')
+
     # Parse user data
     users_to_create = []
     parse_errors = []
-    
+
     for i, line in enumerate(lines[1:], start=2):
         if not line.strip():
             continue  # Skip empty lines
-            
+
         values = [v.strip() for v in line.split(',')]
         if len(values) != len(headers):
             parse_errors.append(f'Line {i}: Invalid number of columns')
             continue
-        
+
         user_data = dict(zip(headers, values))
-        
+
         # Validate required fields
         if not user_data.get('username') or not user_data.get('password'):
             parse_errors.append(f'Line {i}: Username and password are required')
             continue
-        
+
         # Validate role
         role = user_data.get('role', '').lower()
         if role and role not in rbac.get_supported_roles():
             role = rbac.get_default_role()  # Default to default role if invalid
         elif not role:
             role = rbac.get_default_role()
-        
+
         users_to_create.append({
             'username': user_data['username'],
             'password': user_data['password'],
             'role': role
         })
-    
+
     if not users_to_create and parse_errors:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=f'No valid users found. Errors: {"; ".join(parse_errors)}')
-    
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'No valid users found. Errors: {"; ".join(parse_errors)}')
+
     # Create users
     success_count = 0
     error_count = 0
     creation_errors = []
-    
+
     for user_data in users_to_create:
         try:
             username = user_data['username']
             password = user_data['password']
             role = user_data['role']
-            
+
             # Check if user already exists
             if global_user_state.get_user_by_name(username):
                 error_count += 1
                 creation_errors.append(f'{username}: User already exists')
                 continue
-            
+
             # Check if password is already hashed (SHA-256 hash is 64 chars hex)
-            if len(password) == 64 and all(c in '0123456789abcdef' for c in password.lower()):
+            if len(password) == 64 and all(
+                    c in '0123456789abcdef' for c in password.lower()):
                 # Password is already hashed, use it directly
                 password_hash = password.lower()
             else:
                 # Password is plain text, hash it
                 password_hash = hashlib.sha256(password.encode()).hexdigest()
-            
+
             user_hash = hashlib.md5(
                 username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-            
+
             with _user_lock(user_hash):
                 global_user_state.add_or_update_user(
-                    models.User(id=user_hash, name=username, password=password_hash))
+                    models.User(id=user_hash,
+                                name=username,
+                                password=password_hash))
                 permission.permission_service.update_role(user_hash, role)
-            
+
             success_count += 1
-            
-        except Exception as e:
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
             error_count += 1
             creation_errors.append(f'{user_data["username"]}: {str(e)}')
-    
+
     return {
         'success_count': success_count,
         'error_count': error_count,
@@ -269,25 +278,22 @@ async def user_export() -> Dict[str, Any]:
     try:
         # Get all users
         user_list = global_user_state.get_all_users()
-        
+
         # Create CSV content
         csv_lines = ['username,password,role']  # Header
-        
+
         for user in user_list:
             # Get user role
             user_roles = permission.permission_service.get_user_roles(user.id)
             role = user_roles[0] if user_roles else rbac.get_default_role()
-            
+
             # Add user data with password hash
             csv_lines.append(f'{user.name},{user.password},{role}')
-        
+
         csv_content = '\n'.join(csv_lines)
-        
-        return {
-            'csv_content': csv_content,
-            'user_count': len(user_list)
-        }
-        
+
+        return {'csv_content': csv_content, 'user_count': len(user_list)}
+
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Failed to export users: {str(e)}')
