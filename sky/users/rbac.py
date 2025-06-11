@@ -25,9 +25,6 @@ _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/delete',
     'method': 'POST'
 }, {
-    'path': '/users/update',
-    'method': 'POST'
-}, {
     'path': '/users/delete',
     'method': 'POST'
 }, {

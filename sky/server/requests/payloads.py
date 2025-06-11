@@ -351,7 +351,7 @@ class UserDeleteBody(RequestBody):
 class UserUpdateBody(RequestBody):
     """The request body for the user update endpoint."""
     user_id: str
-    role: str
+    role: Optional[str] = None
     password: Optional[str] = None
 
 

@@ -95,7 +95,11 @@ class TestUsersEndpoints:
         result = await server.get_current_user_role(mock_request)
 
         # Verify
-        assert result == {'name': 'Test User', 'role': 'admin'}
+        assert result == {
+            'id': 'test_user',
+            'name': 'Test User',
+            'role': 'admin'
+        }
         mock_get_user_roles.assert_called_once_with('test_user')
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -112,7 +116,7 @@ class TestUsersEndpoints:
         result = await server.get_current_user_role(mock_request)
 
         # Verify
-        assert result == {'name': 'Test User', 'role': ''}
+        assert result == {'id': 'test_user', 'name': 'Test User', 'role': ''}
         mock_get_user_roles.assert_called_once_with('test_user')
 
     @pytest.mark.asyncio
@@ -125,24 +129,31 @@ class TestUsersEndpoints:
         result = await server.get_current_user_role(mock_request)
 
         # Verify - should return admin role when no auth user
-        assert result == {'name': '', 'role': rbac.RoleName.ADMIN.value}
+        assert result == {
+            'id': '',
+            'name': '',
+            'role': rbac.RoleName.ADMIN.value
+        }
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @pytest.mark.asyncio
-    async def test_user_update_success(self, mock_update_role, mock_get_user,
-                                       mock_get_supported_roles):
+    async def test_user_update_success_update_role(self, mock_update_role,
+                                                   mock_get_user,
+                                                   mock_get_supported_roles,
+                                                   mock_request):
         """Test successful POST /users/update endpoint."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
         test_user = models.User(id='test_user', name='Test User')
         mock_get_user.return_value = test_user
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(user_id='test_user', role='admin')
 
         # Execute
-        result = await server.user_update(update_body)
+        result = await server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None  # Function returns None on success
@@ -157,7 +168,7 @@ class TestUsersEndpoints:
     @pytest.mark.asyncio
     async def test_user_update_success(self, mock_update_role,
                                        mock_add_or_update_user, mock_get_user,
-                                       mock_get_supported_roles):
+                                       mock_get_supported_roles, mock_request):
         """Test successful POST /users/update endpoint."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
@@ -165,13 +176,14 @@ class TestUsersEndpoints:
                                 name='Test User',
                                 password='old_password')
         mock_get_user.return_value = test_user
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
                                               role='admin',
                                               password='new_password')
 
         # Execute
-        result = await server.user_update(update_body)
+        result = await server.user_update(mock_request, update_body)
 
         # Verify
         assert result is None  # Function returns None on success
@@ -186,17 +198,19 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @pytest.mark.asyncio
-    async def test_user_update_invalid_role(self, mock_get_supported_roles):
+    async def test_user_update_invalid_role(self, mock_get_supported_roles,
+                                            mock_request):
         """Test POST /users/update endpoint with invalid role."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(user_id='test_user',
                                               role='invalid_role')
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(update_body)
+            await server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 400
         assert 'Invalid role: invalid_role' in str(exc_info.value.detail)
@@ -206,18 +220,20 @@ class TestUsersEndpoints:
     @mock.patch('sky.global_user_state.get_user')
     @pytest.mark.asyncio
     async def test_user_update_user_not_found(self, mock_get_user,
-                                              mock_get_supported_roles):
+                                              mock_get_supported_roles,
+                                              mock_request):
         """Test POST /users/update endpoint with non-existent user."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
         mock_get_user.return_value = None
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(user_id='nonexistent_user',
                                               role='admin')
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(update_body)
+            await server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 400
         assert 'User nonexistent_user does not exist' in str(
@@ -229,19 +245,21 @@ class TestUsersEndpoints:
     @mock.patch('sky.global_user_state.get_user')
     @pytest.mark.asyncio
     async def test_user_update_server_user_forbidden(self, mock_get_user,
-                                                     mock_get_supported_roles):
+                                                     mock_get_supported_roles,
+                                                     mock_request):
         """Test POST /users/update endpoint with server internal user."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
         server_user = models.User(id=common.SERVER_ID, name='Server User')
         mock_get_user.return_value = server_user
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(user_id=common.SERVER_ID,
                                               role='user')
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(update_body)
+            await server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 400
         assert 'Cannot update role for internal API server user' in str(
@@ -253,20 +271,22 @@ class TestUsersEndpoints:
     @mock.patch('sky.global_user_state.get_user')
     @pytest.mark.asyncio
     async def test_user_update_system_user_forbidden(self, mock_get_user,
-                                                     mock_get_supported_roles):
+                                                     mock_get_supported_roles,
+                                                     mock_request):
         """Test POST /users/update endpoint with system user."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
         system_user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
                                   name='System User')
         mock_get_user.return_value = system_user
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(
             user_id=constants.SKYPILOT_SYSTEM_USER_ID, role='user')
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(update_body)
+            await server.user_update(mock_request, update_body)
 
         assert exc_info.value.status_code == 400
         assert 'Cannot update role for internal API server user' in str(
@@ -280,19 +300,21 @@ class TestUsersEndpoints:
     @pytest.mark.asyncio
     async def test_user_update_update_role_exception(self, mock_update_role,
                                                      mock_get_user,
-                                                     mock_get_supported_roles):
+                                                     mock_get_supported_roles,
+                                                     mock_request):
         """Test POST /users/update endpoint when update_role raises exception."""
         # Setup
         mock_get_supported_roles.return_value = ['admin', 'user']
         test_user = models.User(id='test_user', name='Test User')
         mock_get_user.return_value = test_user
         mock_update_role.side_effect = Exception('Database error')
+        mock_request.state.auth_user = None
 
         update_body = payloads.UserUpdateBody(user_id='test_user', role='admin')
 
         # Execute & Verify
         with pytest.raises(Exception) as exc_info:
-            await server.user_update(update_body)
+            await server.user_update(mock_request, update_body)
 
         assert 'Database error' in str(exc_info.value)
         mock_get_supported_roles.assert_called_once()
@@ -339,7 +361,11 @@ class TestUsersEndpoints:
         result = await server.get_current_user_role(mock_request)
 
         # Verify - should return the first role in the list
-        assert result == {'name': 'Test User', 'role': 'admin'}
+        assert result == {
+            'id': 'test_user',
+            'name': 'Test User',
+            'role': 'admin'
+        }
         mock_get_user_roles.assert_called_once_with('test_user')
 
     @mock.patch('sky.global_user_state.get_user_by_name')
@@ -472,3 +498,202 @@ class TestUsersEndpoints:
         assert exc_info.value.status_code == 400
         assert 'does not exist' in str(exc_info.value.detail)
         mock_get_user.assert_called_once_with('nonexistent_user')
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @pytest.mark.asyncio
+    async def test_user_update_password_admin_success(self, mock_get_user_roles,
+                                                      mock_add_or_update_user,
+                                                      mock_get_user,
+                                                      mock_get_supported_roles,
+                                                      mock_request):
+        """Test successful password update by admin for any user."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        test_user = models.User(id='test_user', name='Test User')
+        mock_get_user.return_value = test_user
+        # Mock current user as admin
+        mock_request.state.auth_user = models.User(id='admin_user',
+                                                   name='Admin')
+        mock_get_user_roles.return_value = ['admin']
+
+        update_body = payloads.UserUpdateBody(user_id='test_user',
+                                              password='new_password')
+
+        # Execute
+        result = await server.user_update(mock_request, update_body)
+
+        # Verify
+        assert result is None
+        mock_get_user.assert_called_once_with('test_user')
+        mock_add_or_update_user.assert_called_once()
+        # Check password hash
+        args, kwargs = mock_add_or_update_user.call_args
+        user_obj = args[0]
+        assert user_obj.id == 'test_user'
+        assert user_obj.name == 'Test User'
+        assert user_obj.password == hashlib.sha256(
+            'new_password'.encode()).hexdigest()
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @pytest.mark.asyncio
+    async def test_user_update_password_self_success(self, mock_get_user_roles,
+                                                     mock_add_or_update_user,
+                                                     mock_get_user,
+                                                     mock_get_supported_roles,
+                                                     mock_request):
+        """Test successful password update by user for themselves."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        test_user = models.User(id='test_user', name='Test User')
+        mock_get_user.return_value = test_user
+        # Mock current user as the same user
+        mock_request.state.auth_user = test_user
+        mock_get_user_roles.return_value = ['user']
+
+        update_body = payloads.UserUpdateBody(user_id='test_user',
+                                              password='new_password')
+
+        # Execute
+        result = await server.user_update(mock_request, update_body)
+
+        # Verify
+        assert result is None
+        mock_get_user.assert_called_once_with('test_user')
+        mock_add_or_update_user.assert_called_once()
+        # Check password hash
+        args, kwargs = mock_add_or_update_user.call_args
+        user_obj = args[0]
+        assert user_obj.id == 'test_user'
+        assert user_obj.name == 'Test User'
+        assert user_obj.password == hashlib.sha256(
+            'new_password'.encode()).hexdigest()
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @pytest.mark.asyncio
+    async def test_user_update_password_other_user_forbidden(
+            self, mock_get_user_roles, mock_get_user, mock_get_supported_roles,
+            mock_request):
+        """Test password update by non-admin for other user (should fail)."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        target_user = models.User(id='target_user', name='Target User')
+        mock_get_user.return_value = target_user
+        # Mock current user as different non-admin user
+        mock_request.state.auth_user = models.User(id='other_user',
+                                                   name='Other User')
+        mock_get_user_roles.return_value = ['user']
+
+        update_body = payloads.UserUpdateBody(user_id='target_user',
+                                              password='new_password')
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_update(mock_request, update_body)
+
+        assert exc_info.value.status_code == 403
+        assert 'Only admin can update password for other users' in str(
+            exc_info.value.detail)
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @pytest.mark.asyncio
+    async def test_user_update_no_role_forbidden(self, mock_get_user_roles,
+                                                 mock_get_user,
+                                                 mock_get_supported_roles,
+                                                 mock_request):
+        """Test role update by non-admin user (should fail)."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        target_user = models.User(id='target_user', name='Target User')
+        mock_get_user.return_value = target_user
+        # Mock current user as different non-admin user
+        mock_request.state.auth_user = models.User(id='target_user',
+                                                   name='Target User')
+        mock_get_user_roles.return_value = []
+
+        update_body = payloads.UserUpdateBody(user_id='target_user',
+                                              role='admin')
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_update(mock_request, update_body)
+
+        assert exc_info.value.status_code == 403
+        assert 'Invalid user' in str(exc_info.value.detail)
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @pytest.mark.asyncio
+    async def test_user_update_role_forbidden(self, mock_get_user_roles,
+                                              mock_get_user,
+                                              mock_get_supported_roles,
+                                              mock_request):
+        """Test role update by non-admin user (should fail)."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        target_user = models.User(id='target_user', name='Target User')
+        mock_get_user.return_value = target_user
+        # Mock current user as different non-admin user
+        mock_request.state.auth_user = models.User(id='target_user',
+                                                   name='Target User')
+        mock_get_user_roles.return_value = ['user']
+
+        update_body = payloads.UserUpdateBody(user_id='target_user',
+                                              role='admin')
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_update(mock_request, update_body)
+
+        assert exc_info.value.status_code == 403
+        assert 'Only admin can update user role' in str(exc_info.value.detail)
+
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @pytest.mark.asyncio
+    async def test_user_update_role_and_password_admin_success(
+            self, mock_update_role, mock_get_user_roles,
+            mock_add_or_update_user, mock_get_user, mock_get_supported_roles,
+            mock_request):
+        """Test successful combined role and password update by admin."""
+        # Setup
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        test_user = models.User(id='test_user', name='Test User')
+        mock_get_user.return_value = test_user
+        # Mock current user as admin
+        mock_request.state.auth_user = models.User(id='admin_user',
+                                                   name='Admin')
+        mock_get_user_roles.return_value = ['admin']
+
+        update_body = payloads.UserUpdateBody(user_id='test_user',
+                                              role='user',
+                                              password='new_password')
+
+        # Execute
+        result = await server.user_update(mock_request, update_body)
+
+        # Verify
+        assert result is None
+        mock_get_user.assert_called_once_with('test_user')
+        mock_add_or_update_user.assert_called_once()
+        mock_update_role.assert_called_once_with('test_user', 'user')
+        # Check password hash
+        args, kwargs = mock_add_or_update_user.call_args
+        user_obj = args[0]
+        assert user_obj.id == 'test_user'
+        assert user_obj.name == 'Test User'
+        assert user_obj.password == hashlib.sha256(
+            'new_password'.encode()).hexdigest()

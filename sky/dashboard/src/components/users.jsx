@@ -26,7 +26,14 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { RotateCwIcon, PenIcon, CheckIcon, XIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  PenIcon,
+  CheckIcon,
+  XIcon,
+  KeyRoundIcon,
+  Trash2Icon,
+} from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
@@ -57,10 +64,28 @@ const getFullEmail = (username) => {
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
+async function checkIsAdmin() {
+  try {
+    const response = await apiClient.get('/users/role');
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.role === 'admin';
+  } catch {
+    return false;
+  }
+}
+
 export function Users() {
   const [loading, setLoading] = useState(false);
   const refreshDataRef = useRef(null);
   const isMobile = useMobile();
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [newUser, setNewUser] = useState({
+    username: '',
+    password: '',
+    role: 'user',
+  });
+  const [creating, setCreating] = useState(false);
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
@@ -70,6 +95,29 @@ export function Users() {
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUser.username || !newUser.password) {
+      alert('Username and password are required.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const response = await apiClient.post('/users/create', newUser);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to create user');
+      }
+      alert('User created successfully.');
+      setShowCreateUser(false);
+      setNewUser({ username: '', password: '', role: 'user' });
+      handleRefresh();
+    } catch (error) {
+      alert(`Error creating user: ${error.message}`);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -94,10 +142,24 @@ export function Users() {
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center mr-2"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
+          </button>
+          <button
+            onClick={async () => {
+              const isAdmin = await checkIsAdmin();
+              if (!isAdmin) {
+                alert('Only admin can create users.');
+                return;
+              }
+              setShowCreateUser(true);
+            }}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1"
+            title="Create User"
+          >
+            + Create User
           </button>
         </div>
       </div>
@@ -106,6 +168,73 @@ export function Users() {
         setLoading={setLoading} // Pass setLoading to UsersTable
         refreshDataRef={refreshDataRef}
       />
+      {showCreateUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+          <div className="bg-white rounded shadow-lg p-6 min-w-[320px]">
+            <h2 className="text-lg font-semibold mb-4">Create User</h2>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Username
+                </label>
+                <input
+                  className="border rounded px-2 py-1 w-full"
+                  placeholder="Username"
+                  value={newUser.username}
+                  onChange={(e) =>
+                    setNewUser({ ...newUser, username: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Password
+                </label>
+                <input
+                  className="border rounded px-2 py-1 w-full"
+                  placeholder="Password"
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) =>
+                    setNewUser({ ...newUser, password: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Role
+                </label>
+                <select
+                  className="border rounded px-2 py-1 w-full"
+                  value={newUser.role}
+                  onChange={(e) =>
+                    setNewUser({ ...newUser, role: e.target.value })
+                  }
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                className="text-sky-blue hover:underline"
+                disabled={creating}
+                onClick={handleCreateUser}
+              >
+                Create
+              </button>
+              <button
+                className="text-gray-400 hover:text-gray-700"
+                disabled={creating}
+                onClick={() => setShowCreateUser(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -120,6 +249,11 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
+  const [resetUserId, setResetUserId] = useState(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [currentUserRole, setCurrentUserRole] = useState(null);
 
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
@@ -208,6 +342,23 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
 
+  useEffect(() => {
+    // Get current user info
+    async function fetchCurrentUser() {
+      try {
+        const response = await apiClient.get('/users/role');
+        if (response.ok) {
+          const data = await response.json();
+          setCurrentUserId(data.id);
+          setCurrentUserRole(data.role);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    fetchCurrentUser();
+  }, []);
+
   const sortedUsers = useMemo(() => {
     return sortData(usersWithCounts, sortConfig.key, sortConfig.direction);
   }, [usersWithCounts, sortConfig]);
@@ -230,17 +381,9 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   const handleEditClick = async (userId, currentRole) => {
     try {
       // Get current user's role first
-      const response = await apiClient.get(`/users/role`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to get user role');
-      }
-      const data = await response.json();
-      console.log('data', data);
-      const currentUserRole = data.role;
-
-      if (currentUserRole != 'admin') {
-        alert(`${data.name} is logged in as no admin, cannot edit user role.`);
+      const isAdmin = await checkIsAdmin();
+      if (!isAdmin) {
+        alert('Only admin can edit user role.');
         return;
       }
 
@@ -282,6 +425,48 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
       alert(`Error updating role: ${error.message}`);
     } finally {
       setIsLoading(false); // Or use parent setLoading
+    }
+  };
+
+  const handleResetPassword = async (userId) => {
+    const password = prompt('Enter new password for this user:');
+    if (!password) return;
+    try {
+      const response = await apiClient.post('/users/update', {
+        user_id: userId,
+        password,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to reset password');
+      }
+      alert('Password reset successfully.');
+    } catch (error) {
+      alert(`Error resetting password: ${error.message}`);
+    }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    // Check the user role
+    const isAdmin = await checkIsAdmin();
+    if (!isAdmin) {
+      alert('Only admin can delete users.');
+      return;
+    }
+    if (!window.confirm('Are you sure you want to delete this user?')) return;
+    try {
+      const response = await apiClient.post('/users/delete', {
+        user_id: userId,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete user');
+      }
+      alert('User deleted successfully.');
+      dashboardCache.invalidate(getUsers);
+      await fetchDataAndProcess(true);
+    } catch (error) {
+      alert(`Error deleting user: ${error.message}`);
     }
   };
 
@@ -348,6 +533,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
             >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
+            <TableHead className="whitespace-nowrap w-1/6">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -430,6 +616,89 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                     0
                   </span>
+                )}
+              </TableCell>
+              <TableCell className="relative">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      // Check permissions
+                      if (
+                        currentUserRole !== 'admin' &&
+                        user.userId !== currentUserId
+                      ) {
+                        alert('Only admin can reset password for other users.');
+                        return;
+                      }
+                      setResetUserId(user.userId);
+                      setResetPassword('');
+                    }}
+                    className="text-gray-400 hover:text-sky-blue p-1"
+                    title="Reset Password"
+                  >
+                    <KeyRoundIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteUser(user.userId)}
+                    className="text-gray-400 hover:text-red-500 p-1"
+                    title="Delete User"
+                  >
+                    <Trash2Icon className="h-4 w-4" />
+                  </button>
+                </div>
+                {resetUserId === user.userId && (
+                  <div
+                    className="absolute z-50 bg-white border rounded shadow-lg p-3 flex flex-col gap-2"
+                    style={{ top: '2.5rem', left: 0, minWidth: 220 }}
+                  >
+                    <input
+                      type="password"
+                      className="border rounded px-2 py-1 w-full"
+                      placeholder="New password"
+                      value={resetPassword}
+                      onChange={(e) => setResetPassword(e.target.value)}
+                      autoFocus
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        className="text-sky-blue hover:underline"
+                        disabled={resetLoading}
+                        onClick={async () => {
+                          setResetLoading(true);
+                          try {
+                            const response = await apiClient.post(
+                              '/users/update',
+                              {
+                                user_id: user.userId,
+                                password: resetPassword,
+                              }
+                            );
+                            if (!response.ok) {
+                              const errorData = await response.json();
+                              throw new Error(
+                                errorData.detail || 'Failed to reset password'
+                              );
+                            }
+                            alert('Password reset successfully.');
+                            setResetUserId(null);
+                          } catch (error) {
+                            alert(`Error resetting password: ${error.message}`);
+                          } finally {
+                            setResetLoading(false);
+                          }
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="text-gray-400 hover:text-gray-700"
+                        disabled={resetLoading}
+                        onClick={() => setResetUserId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 )}
               </TableCell>
             </TableRow>

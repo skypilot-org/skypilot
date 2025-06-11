@@ -49,9 +49,13 @@ async def get_current_user_role(request: fastapi.Request):
     # hash for the request without 'X-Auth-Request-Email' header?
     auth_user = request.state.auth_user
     if auth_user is None:
-        return {'name': '', 'role': rbac.RoleName.ADMIN.value}
+        return {'id': '', 'name': '', 'role': rbac.RoleName.ADMIN.value}
     user_roles = permission.permission_service.get_user_roles(auth_user.id)
-    return {'name': auth_user.name, 'role': user_roles[0] if user_roles else ''}
+    return {
+        'id': auth_user.id,
+        'name': auth_user.name,
+        'role': user_roles[0] if user_roles else ''
+    }
 
 
 @router.post('/create')
@@ -86,14 +90,33 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
 
 
 @router.post('/update')
-async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
+async def user_update(request: fastapi.Request,
+                      user_update_body: payloads.UserUpdateBody) -> None:
     """Updates the user role."""
     user_id = user_update_body.user_id
     role = user_update_body.role
+    password = user_update_body.password
     supported_roles = rbac.get_supported_roles()
-    if role not in supported_roles:
+    if role and role not in supported_roles:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
+    target_user_roles = permission.permission_service.get_user_roles(user_id)
+    need_update_role = role and (not target_user_roles or
+                                 (role != target_user_roles[0]))
+    current_user = request.state.auth_user
+    if current_user is not None:
+        current_user_roles = permission.permission_service.get_user_roles(
+            current_user.id)
+        if not current_user_roles:
+            raise fastapi.HTTPException(status_code=403, detail='Invalid user')
+        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+            if need_update_role:
+                raise fastapi.HTTPException(
+                    status_code=403, detail='Only admin can update user role')
+            if password and user_id != current_user.id:
+                raise fastapi.HTTPException(
+                    status_code=403,
+                    detail='Only admin can update password for other users')
     user_info = global_user_state.get_user(user_id)
     if user_info is None:
         raise fastapi.HTTPException(status_code=400,
@@ -105,15 +128,15 @@ async def user_update(user_update_body: payloads.UserUpdateBody) -> None:
                                     f'API server user {user_info.name}')
 
     with _user_lock(user_info.id):
-        if user_update_body.password:
-            password_hash = hashlib.sha256(
-                user_update_body.password.encode()).hexdigest()
+        if password:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
             global_user_state.add_or_update_user(
                 models.User(id=user_info.id,
                             name=user_info.name,
                             password=password_hash))
-        # Update user role in casbin policy
-        permission.permission_service.update_role(user_info.id, role)
+        if role and need_update_role:
+            # Update user role in casbin policy
+            permission.permission_service.update_role(user_info.id, role)
 
 
 @router.post('/delete')
