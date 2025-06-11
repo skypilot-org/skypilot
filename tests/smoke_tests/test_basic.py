@@ -845,6 +845,7 @@ def test_launch_and_exec_async(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_hyperbolic  # Hyperbolic fails to provision resources
 def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()

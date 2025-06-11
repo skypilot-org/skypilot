@@ -452,7 +452,7 @@ def test_image_no_conda():
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
-@pytest.mark.no_hyperbolic  # Hyperbolic does not supprt autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
