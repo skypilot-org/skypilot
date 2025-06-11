@@ -646,12 +646,15 @@ def private_docker_registry_setup(request):
         }, 'aws'),
     ],
     indirect=['private_docker_registry_setup'])
-@pytest.mark.skipif(
-    not os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME'),
-    reason='Skipping test as docker registry environment variables are not set')
 def test_private_docker_registry(generic_cloud,
                                  private_docker_registry_setup: str,
                                  cloud_provider: str):
+    # Skip test if environment variables are not set
+    if not os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME'):
+        pytest.skip(
+            'Skipping test as docker registry environment variables are not set'
+        )
+
     # Skip test if the required cloud provider is not available
     if cloud_provider != generic_cloud:
         pytest.skip(
