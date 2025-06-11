@@ -1891,6 +1891,9 @@ class Resources:
                                               split[0]):
                 memory = split[0]
                 count = int(split[1])
+            elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
+                                              split[1]):
+                manufacturer, memory = split
             elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
                                               split[0]):
                 memory = split[0]
@@ -1906,6 +1909,8 @@ class Resources:
             if memory is not None:
                 # set accelerators to a dictionary of DEVICE NAME: DEVICE COUNT
                 # where each DEVICE NAME has at least memory size
+                memory = memory.lower()
+                
                 mb = 'mb' in memory
                 tb = 'tb' in memory
                 plus = '+' in memory
