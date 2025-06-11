@@ -1,5 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
+import math
 import re
 import textwrap
 import typing
@@ -41,6 +42,19 @@ RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
 
+MEMORY_SIZE_UNITS = {
+    'b': 1,
+    'k': 2**10,
+    'kb': 2**10,
+    'm': 2**20,
+    'mb': 2**20,
+    'g': 2**30,
+    'gb': 2**30,
+    't': 2**40,
+    'tb': 2**40,
+    'p': 2**50,
+    'pb': 2**50,
+}
 
 @dataclasses.dataclass
 class AutostopConfig:
@@ -1909,20 +1923,13 @@ class Resources:
             if memory is not None:
                 # set accelerators to a dictionary of DEVICE NAME: DEVICE COUNT
                 # where each DEVICE NAME has at least memory size
-                memory = memory.lower()
-                
-                mb = 'mb' in memory
-                tb = 'tb' in memory
-                plus = '+' in memory
-                memory = memory.replace('+', '').\
-                                replace('gb', '').\
-                                replace('mb', '').\
-                                replace('tb', '')
-                memory_gb = float(memory)
-                if mb:
-                    memory_gb /= 1024
-                elif tb:
-                    memory_gb *= 1024
+                memory_parsed = parse_memory_resource(
+                    memory, 'accelerators', allow_plus=True
+                )
+                plus = '+' in memory_parsed
+                if plus:
+                    memory_parsed = memory_parsed[:-1]
+                memory_gb = int(memory_parsed)
 
                 cloud = None
                 if config.get('infra') is not None:
@@ -2338,3 +2345,64 @@ def _get_devices(memory: float,
         df = df[df['Clouds'].str.contains(cloud, case=False, na=False)]
 
     return df['AcceleratorName'].tolist()
+
+
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
+                          unit: str = 'g',
+                          allow_plus: bool = False,
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+
+    error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
+                f' got {resource_qty_str}'
+
+    resource_str = str(resource_qty_str)
+
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(error_msg)
+
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(error_msg)
+
+    if resource_str.isdecimal():
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        return f'{resource_str}{plus}{x}'
+
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = int(resource_str[:-len(mem_unit)])
+                converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
+                if not allow_rounding and int(converted) != converted:
+                    raise ValueError(error_msg)
+                # math.ceil should equal int() if allowed_rounding is False
+                # otherwise, we ceil so we don't under provision
+                converted = math.ceil(converted)
+                return f'{converted}{plus}{x}'
+            except ValueError:
+                continue
+
+    raise ValueError(error_msg)
