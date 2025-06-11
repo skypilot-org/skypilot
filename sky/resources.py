@@ -1,7 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import math
-import re
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -40,8 +39,8 @@ RESOURCE_CONFIG_ALIASES = {
 }
 
 TIME_UNITS = {
-    's': 1/60,
-    'sec': 1/60,
+    's': 1 / 60,
+    'sec': 1 / 60,
     'm': 1,
     'min': 1,
     'h': 60,
@@ -99,7 +98,9 @@ class AutostopConfig:
             return cls(idle_minutes=config, down=False, enabled=True)
 
         if isinstance(config, str):
-            return cls(idle_minutes=_time_to_minutes(config), down=False, enabled=True)
+            return cls(idle_minutes=parse_time_minutes(config),
+                       down=False,
+                       enabled=True)
 
         if isinstance(config, dict):
             # If we have a dict, autostop is enabled. (Only way to disable is
@@ -715,9 +716,9 @@ class Resources:
             self._memory = None
             return
 
-        memory = parse_memory_resource(
-            str(memory), allow_plus=True, allow_x=True
-        )
+        memory = parse_memory_resource(str(memory),
+                                       allow_plus=True,
+                                       allow_x=True)
         self._memory = memory
         if isinstance(memory, str):
             if memory.endswith(('+', 'x')):
@@ -1989,7 +1990,7 @@ class Resources:
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
-    
+
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:
         """Returns a yaml-style dict of config for this resource bundle."""
         config = {}
@@ -2251,32 +2252,33 @@ def _maybe_add_docker_prefix_to_image_id(
             image_id_dict[k] = f'docker:{v}'
 
 
-def _time_to_minutes(time: str, allow_plus: bool = False) -> int:
+def parse_time_minutes(time: str) -> int:
     """Convert a time string to minutes.
-    
+
     Args:
         time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
-    
+
     Returns:
         Time in minutes as an integer
     """
     time_str = str(time)
-    
+
     if time_str.isdecimal():
         # We assume it is already in minutes to maintain backwards
         # compatibility
         return int(time_str)
-    
+
     time_str = time_str.lower()
     for unit, multiplier in TIME_UNITS.items():
         if time_str.endswith(unit):
             try:
-                value = float(time_str[:-len(unit)])
+                value = int(time_str[:-len(unit)])
                 return math.ceil(value * multiplier)
             except ValueError:
-                raise ValueError(f'Invalid time format: {time}')
-    
+                continue
+
     raise ValueError(f'Invalid time format: {time}')
+
 
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
                           unit: str = 'g',
@@ -2284,7 +2286,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
                           allow_x: bool = False,
                           allow_rounding: bool = False) -> str:
     """Returns memory size in chosen units given a resource quantity string.
-    
+
     Args:
         resource_qty_str: Resource quantity string
         unit: Unit to convert to
@@ -2294,7 +2296,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
     assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
 
     resource_str = str(resource_qty_str)
-    
+
     # Handle plus and x suffixes, x is only used internally for jobs controller
     plus = ''
     if resource_str.endswith('+'):
@@ -2302,21 +2304,23 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             resource_str = resource_str[:-1]
             plus = '+'
         else:
-            raise ValueError(f'Invalid resource quantity string: {resource_str}')
-    
+            raise ValueError(
+                f'Invalid resource quantity string: {resource_str}')
+
     x = ''
     if resource_str.endswith('x'):
         if allow_x:
             resource_str = resource_str[:-1]
             x = 'x'
         else:
-            raise ValueError(f'Invalid resource quantity string: {resource_str}')
-    
+            raise ValueError(
+                f'Invalid resource quantity string: {resource_str}')
+
     if resource_str.isdecimal():
         # We assume it is already in the wanted units to maintain backwards
         # compatibility
         return f'{resource_str}{plus}{x}'
-    
+
     resource_str = resource_str.lower()
     for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
         if resource_str.endswith(mem_unit):
@@ -2331,5 +2335,5 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
                 return f'{converted}{plus}{x}'
             except ValueError:
                 continue
-    
+
     raise ValueError(f'Invalid memory format: {resource_str}')

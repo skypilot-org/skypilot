@@ -45,16 +45,13 @@ _AUTOSTOP_SCHEMA = {
         {
             # Shorthand to set idle_minutes by directly specifying, e.g.
             #   autostop: 5
-            'anyOf': [
-                {
-                    'type': 'string',
-                    'pattern': time_pattern,
-                    'minimum': 0,
-                },
-                {
-                    'type': 'integer',
-                }
-            ]
+            'anyOf': [{
+                'type': 'string',
+                'pattern': time_pattern,
+                'minimum': 0,
+            }, {
+                'type': 'integer',
+            }]
         },
         {
             'type': 'object',
