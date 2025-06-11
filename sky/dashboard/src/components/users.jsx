@@ -115,7 +115,11 @@ const SuccessDisplay = ({ message, onDismiss }) => {
                 className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
               >
                 <span className="sr-only">Dismiss</span>
-                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <svg
+                  className="h-5 w-5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
                   <path
                     fillRule="evenodd"
                     d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
@@ -245,7 +249,9 @@ export function Users() {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create user');
       }
-      setCreateSuccess(`User &quot;${newUser.username}&quot; created successfully!`);
+      setCreateSuccess(
+        `User &quot;${newUser.username}&quot; created successfully!`
+      );
       setShowCreateUser(false);
       setNewUser({ username: '', password: '', role: 'user' });
       handleRefresh();
@@ -278,17 +284,17 @@ export function Users() {
       reader.onload = async (e) => {
         try {
           const csvContent = e.target.result;
-          const response = await apiClient.post('/users/import', { 
-            csv_content: csvContent 
+          const response = await apiClient.post('/users/import', {
+            csv_content: csvContent,
           });
-          
+
           if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.detail || 'Failed to import users');
           }
-          
+
           const results = await response.json();
-          
+
           // Create user-friendly message
           let message = `Import completed. ${results.success_count} users created successfully.`;
           if (results.error_count > 0) {
@@ -300,7 +306,7 @@ export function Users() {
               }
             }
           }
-          
+
           setImportResults({ message });
           if (results.success_count > 0) {
             handleRefresh();
@@ -340,7 +346,9 @@ export function Users() {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to reset password');
       }
-      setCreateSuccess(`Password reset successfully for user "${resetPasswordUser.usernameDisplay}"!`);
+      setCreateSuccess(
+        `Password reset successfully for user &quot;${resetPasswordUser.usernameDisplay}&quot;!`
+      );
       setShowResetPasswordDialog(false);
       setResetPasswordUser(null);
       setResetPassword('');
@@ -370,7 +378,9 @@ export function Users() {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to delete user');
       }
-      setCreateSuccess(`User "${userToDelete.usernameDisplay}" deleted successfully!`);
+      setCreateSuccess(
+        `User &quot;${userToDelete.usernameDisplay}&quot; deleted successfully!`
+      );
       setShowDeleteConfirmDialog(false);
       setUserToDelete(null);
       handleRefresh();
@@ -447,9 +457,9 @@ export function Users() {
       </div>
 
       {/* Success and Error Messages */}
-      <SuccessDisplay 
-        message={createSuccess} 
-        onDismiss={() => setCreateSuccess(null)} 
+      <SuccessDisplay
+        message={createSuccess}
+        onDismiss={() => setCreateSuccess(null)}
       />
       <ErrorDisplay
         error={createError}
@@ -591,12 +601,15 @@ export function Users() {
       </Dialog>
 
       {/* Import/Export Users Dialog */}
-      <Dialog open={showImportExportDialog} onOpenChange={setShowImportExportDialog}>
+      <Dialog
+        open={showImportExportDialog}
+        onOpenChange={setShowImportExportDialog}
+      >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Import/Export Users</DialogTitle>
           </DialogHeader>
-          
+
           {/* Tabs */}
           <div className="flex border-b border-gray-200 mb-4">
             <button
@@ -635,11 +648,13 @@ export function Users() {
                     className="border rounded px-3 py-2 w-full"
                   />
                   <p className="text-xs text-gray-500">
-                    CSV should have columns: username, password, role<br/>
-                    Supports both plain text passwords and exported password hashes.
+                    CSV should have columns: username, password, role
+                    <br />
+                    Supports both plain text passwords and exported password
+                    hashes.
                   </p>
                 </div>
-                
+
                 {importResults && (
                   <div className="p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
                     {importResults.message}
@@ -657,17 +672,19 @@ export function Users() {
                   </p>
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded">
                     <p className="text-sm text-amber-700">
-                      ⚠️ This will export all users with columns: username, password (hashed), role
+                      ⚠️ This will export all users with columns: username,
+                      password (hashed), role
                     </p>
                     <p className="text-xs text-amber-600 mt-1">
-                      Password hashes can be imported directly for system backups.
+                      Password hashes can be imported directly for system
+                      backups.
                     </p>
                   </div>
                 </div>
               </>
             )}
           </div>
-          
+
           <DialogFooter>
             <button
               className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
@@ -692,23 +709,29 @@ export function Users() {
                     const response = await apiClient.get('/users/export');
                     if (!response.ok) {
                       const errorData = await response.json();
-                      throw new Error(errorData.detail || 'Failed to export users');
+                      throw new Error(
+                        errorData.detail || 'Failed to export users'
+                      );
                     }
-                    
+
                     const data = await response.json();
                     const csvContent = data.csv_content;
-                    
+
                     // Download the CSV file
-                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const blob = new Blob([csvContent], {
+                      type: 'text/csv;charset=utf-8;',
+                    });
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = url;
                     link.download = `users_export_${new Date().toISOString().split('T')[0]}.csv`;
                     link.click();
                     URL.revokeObjectURL(url);
-                    
+
                     // Show success message
-                    alert(`Successfully exported ${data.user_count} users to CSV file.`);
+                    alert(
+                      `Successfully exported ${data.user_count} users to CSV file.`
+                    );
                   } catch (error) {
                     alert(`Error exporting users: ${error.message}`);
                   }
@@ -723,12 +746,16 @@ export function Users() {
       </Dialog>
 
       {/* Reset Password Dialog */}
-      <Dialog open={showResetPasswordDialog} onOpenChange={handleCancelResetPassword}>
+      <Dialog
+        open={showResetPasswordDialog}
+        onOpenChange={handleCancelResetPassword}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Reset Password</DialogTitle>
             <DialogDescription>
-              Enter a new password for {resetPasswordUser?.usernameDisplay || 'this user'}.
+              Enter a new password for{' '}
+              {resetPasswordUser?.usernameDisplay || 'this user'}.
             </DialogDescription>
           </DialogHeader>
 
@@ -780,7 +807,9 @@ export function Users() {
           <DialogHeader>
             <DialogTitle>Delete User</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete user "{userToDelete?.usernameDisplay || 'this user'}"? This action cannot be undone.
+              Are you sure you want to delete user &quot;
+              {userToDelete?.usernameDisplay || 'this user'}&quot;? This action
+              cannot be undone.
             </DialogDescription>
           </DialogHeader>
 
