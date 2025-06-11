@@ -27,6 +27,32 @@ Configuration
 Step 1: Set up credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+There are two broad ways to use multiple Kubernetes clusters with SkyPilot. You can either provide credentials that SkyPilot will use to access the individual Kubernetes clusters or you can use "exec"-based authentication that is typically provided by managed-Kubernetes cloud providers. 
+
+Using "Exec"-based Auth
+^^^^^^^^^^^^^^^^^^^^^^^
+For managed-Kubernetes like GKE and EKS, a typical local ``~/.kube/config`` file will already contain exec-based auth information under ``users``:
+.. code-block:: yaml
+  contexts:
+  - name: <some context>
+    context:
+      cluster: <some cluster>
+      user: <some user>
+  ...
+  users:
+  - name: <some user>
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1beta1
+        command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
+  ...
+
+SkyPilot will use the binary (currently we support exec-auth for GKE and EKS) and your cloud local credentials to authenticate to the cluster. For SkyPilot to take advantage of exec-based auth, there are two requirements:
+* **Cloud also activated**: e.g., if using GKE with exec-based auth, GCP must also be allowed for SkyPilot.
+* **Use LOCAL_CREDENTIALS**: refer in Step 2
+
+Setting up Credentials Manually
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 To work with multiple Kubernetes clusters, their credentials must be set up as individual `contexts <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/>`_ in your local ``~/.kube/config`` file.
 
 For deploying new clusters and getting  credentials, see :ref:`kubernetes-deployment`.
@@ -77,9 +103,12 @@ current-context``.
 To allow SkyPilot to access multiple Kubernetes clusters, you can set the
 ``kubernetes.allowed_contexts`` in the SkyPilot :ref:`global config <config-yaml>`, ``~/.sky/config.yaml``.
 
+**IMPORTANT**: to use exec-based authentication, you have to set ``kubernetes.remote_identity`` to ``LOCAL_CREDENTIALS`` in the config yaml file as well.
+
 .. code-block:: yaml
 
     kubernetes:
+      remote_identity: LOCAL_CREDENTIALS # only required when using exec-auth. Omit otherwise.
       allowed_contexts:
         - my-h100-cluster
         - my-tpu-cluster
