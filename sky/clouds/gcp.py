@@ -1162,10 +1162,10 @@ class GCP(clouds.Cloud):
             _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling
-        if series == 'n2':
+        if series in ['n2', 'n4']:
             num_cpus = int(instance_type.split('-')[2])  # type: ignore
             if num_cpus < 64:
-                # n2 series with less than 64 vCPUs doesn't support pd-extreme, use pd-ssd for ULTRA.
+                # n2/n4 series with less than 64 vCPUs doesn't support pd-extreme, use pd-ssd for ULTRA.
                 _propagate_disk_type(
                     highest=tier2name[resources_utils.DiskTier.HIGH])
         elif series == 'a3':
