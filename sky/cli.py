@@ -2066,11 +2066,12 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         workspace_request_id = futures['workspace'].result()
         cluster_status_request_id = futures['cluster_status'].result()
 
-    # Phase 3: Get cluster records and process them in parallel with SSH config
-    # updates
-    def get_cluster_records():
-        return sdk.stream_and_get(cluster_status_request_id)
+    # Phase 3: Get cluster records and update SSH configs
+    # Note: stream_and_get must be called from main thread due to signal
+    # handling.
+    cluster_records = sdk.stream_and_get(cluster_status_request_id)
 
+    # Update SSH configs in background while we process other data
     def update_ssh_configs(cluster_records):
         # Update the SSH config for all clusters
         for record in cluster_records:
@@ -2124,7 +2125,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
         # Clean up SSH configs for clusters that do not exist.
         clusters_exists = set(record['name'] for record in cluster_records)
-        clusters_to_remove: Set[str] = set()
+        clusters_to_remove = set()
         if clusters is not None:
             clusters_to_remove = set(clusters) - clusters_exists
         elif all_users:
@@ -2134,10 +2135,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         for cluster_name in clusters_to_remove:
             cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
 
-    # Get cluster records
-    cluster_records = get_cluster_records()
-
-    # Update SSH configs in background while we process other data
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         ssh_future = executor.submit(update_ssh_configs, cluster_records)
 
@@ -2182,11 +2179,17 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         normal_clusters + controllers, verbose, all_users, query_clusters,
         show_workspace)
 
-    # Phase 5: Handle managed jobs and services results in parallel
-    def handle_managed_jobs() -> Tuple[Optional[int], str]:
+    # Phase 5: Handle managed jobs and services results
+    # Note: These stream_and_get calls must also be in main thread
+    def handle_managed_jobs() -> Tuple[bool, Optional[int], str]:
+        """Handles the managed jobs request.
+
+        Returns:
+            - Whether the request was interrupted by the user.
+            - The number of in-progress jobs.
+            - The message to display.
+        """
         if show_managed_jobs:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed Jobs{colorama.Style.RESET_ALL}')
             try:
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
@@ -2195,16 +2198,22 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False,
                 )
-                return num_in_progress_jobs, msg
+                return False, num_in_progress_jobs, msg
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 # Set to -1, so that the controller is not considered
                 # down, and the hint for showing sky jobs queue
                 # will still be shown.
-                return -1, 'KeyboardInterrupt'
-        return None, ''
+                return True, -1, 'KeyboardInterrupt'
+        return False, None, ''
 
     def handle_services() -> Tuple[Optional[int], str]:
+        """Handles the services request.
+
+        Returns:
+            - The number of services.
+            - The message to display.
+        """
         if show_services:
             try:
                 num_services, msg = _handle_services_request(
@@ -2219,19 +2228,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 return -1, 'KeyboardInterrupt'
         return None, ''
 
-    # Process managed jobs and services results in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        jobs_future = executor.submit(handle_managed_jobs)
-        services_future = executor.submit(handle_services)
-
-        # Get results
-        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
-            num_in_progress_jobs, jobs_msg = jobs_future.result()
-        with rich_utils.client_status('[cyan]Checking services[/]'):
-            num_services, services_msg = services_future.result()
-
     # Display results and add hints
+    keyboard_interrupted = False
     if show_managed_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed Jobs{colorama.Style.RESET_ALL}')
+        # Execute these sequentially in main thread to avoid signal handling
+        # issues
+        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
+            keyboard_interrupted, num_in_progress_jobs, jobs_msg = (
+                handle_managed_jobs())
         click.echo(jobs_msg)
         if num_in_progress_jobs is not None:
             # jobs controller is UP.
@@ -2252,7 +2258,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
                 in_progress_hint.format(job_info=job_info))
 
-    if show_services:
+    if show_services and not keyboard_interrupted:
+        with rich_utils.client_status('[cyan]Checking services[/]'):
+            num_services, services_msg = handle_services()
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
         click.echo(services_msg)
