@@ -80,7 +80,12 @@ and allows you to associate them with cluster nodes through labels, taints and t
     - `Kueue Resource Flavor <https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/>`_
     - `Cluster Queue Flavors and Resources <https://kueue.sigs.k8s.io/docs/concepts/cluster_queue/#flavors-and-resources>`_
 
-Here a default resource flavor is created to be used with Kueue.
+Every queue needs to be associated with at least one resource flavor.
+In case different types of resources do not need to be managed separately,
+an empty ResourceFlavor without any labels or taints can be created.
+
+Here a default, empty resource flavor is created to be used with Kueue.
+This flavor is used to create a cluster queue and a local queue.
 
 ``kueue-resource-flavor.yaml``:
 
