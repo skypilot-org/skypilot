@@ -803,26 +803,20 @@ def test_memory_conversion():
 
     # Test string input with different units
     r = Resources(memory='8GB')
-    assert r.memory == '8'
+    assert r.memory == '8.0'
 
     r = Resources(memory='8192MB')
-    assert r.memory == '8'
+    assert r.memory == '8.0'
 
     r = Resources(memory='1TB+')
-    assert r.memory == '1024+'
-
-    with pytest.raises(ValueError):
-        Resources(memory='8192KB')
-
-    with pytest.raises(ValueError):
-        Resources(memory='8192B')
+    assert r.memory == '1024.0+'
 
     r = Resources(memory='1PB')
-    assert r.memory == '1048576'
+    assert r.memory == '1048576.0'
 
     # Test with plus suffix
     r = Resources(memory='8GB+')
-    assert r.memory == '8+'
+    assert r.memory == '8.0+'
 
     # Test invalid format
     with pytest.raises(ValueError):

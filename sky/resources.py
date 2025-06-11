@@ -718,6 +718,7 @@ class Resources:
 
         memory = parse_memory_resource(str(memory),
                                        'memory',
+                                       ret_type=float,
                                        allow_plus=True,
                                        allow_x=True)
         self._memory = memory
@@ -2283,6 +2284,7 @@ def parse_time_minutes(time: str) -> int:
 
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
                           field_name: str,
+                          ret_type: type = int,
                           unit: str = 'g',
                           allow_plus: bool = False,
                           allow_x: bool = False,
@@ -2319,22 +2321,23 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
         else:
             raise ValueError(error_msg)
 
-    if resource_str.isdecimal():
+    try:
         # We assume it is already in the wanted units to maintain backwards
         # compatibility
+        ret_type(resource_str)
         return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
 
     resource_str = resource_str.lower()
     for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
         if resource_str.endswith(mem_unit):
             try:
-                value = int(resource_str[:-len(mem_unit)])
+                value = ret_type(resource_str[:-len(mem_unit)])
                 converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
-                if not allow_rounding and int(converted) != converted:
+                if not allow_rounding and ret_type(converted) != converted:
                     raise ValueError(error_msg)
-                # math.ceil should equal int() if allowed_rounding is False
-                # otherwise, we ceil so we don't under provision
-                converted = math.ceil(converted)
+                converted = ret_type(converted)
                 return f'{converted}{plus}{x}'
             except ValueError:
                 continue
