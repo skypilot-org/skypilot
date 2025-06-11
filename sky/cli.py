@@ -2183,7 +2183,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         show_workspace)
 
     # Phase 5: Handle managed jobs and services results in parallel
-    def handle_managed_jobs():
+    def handle_managed_jobs() -> Tuple[Optional[int], str]:
         if show_managed_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed Jobs{colorama.Style.RESET_ALL}')
@@ -2195,19 +2195,17 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False,
                 )
-                return False, num_in_progress_jobs, msg
+                return num_in_progress_jobs, msg
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 # Set to -1, so that the controller is not considered
                 # down, and the hint for showing sky jobs queue
                 # will still be shown.
-                return True, -1, 'KeyboardInterrupt'
-        return False, None, ''
+                return -1, 'KeyboardInterrupt'
+        return None, ''
 
-    def handle_services():
+    def handle_services() -> Tuple[Optional[int], str]:
         if show_services:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Services{colorama.Style.RESET_ALL}')
             try:
                 num_services, msg = _handle_services_request(
                     service_status_request_id,
@@ -2215,11 +2213,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     show_all=False,
                     show_endpoint=False,
                     is_called_by_user=False)
-                return False, num_services, msg
+                return num_services, msg
             except KeyboardInterrupt:
                 sdk.api_cancel(service_status_request_id, silent=True)
-                return True, -1, 'KeyboardInterrupt'
-        return False, None, ''
+                return -1, 'KeyboardInterrupt'
+        return None, ''
 
     # Process managed jobs and services results in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -2227,10 +2225,10 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         services_future = executor.submit(handle_services)
 
         # Get results
-        managed_jobs_query_interrupted, num_in_progress_jobs, jobs_msg = jobs_future.result(
-        )
-        services_interrupted, num_services, services_msg = services_future.result(
-        )
+        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
+            num_in_progress_jobs, jobs_msg = jobs_future.result()
+        with rich_utils.client_status('[cyan]Checking services[/]'):
+            num_services, services_msg = services_future.result()
 
     # Display results and add hints
     if show_managed_jobs:
