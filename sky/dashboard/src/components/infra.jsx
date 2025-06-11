@@ -321,11 +321,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     setIsLoadingHosts(true);
     try {
       const grafanaUrl = window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
-      
-      // Try multiple approaches to get host values
+
       const endpoints = [
-        '/api/datasources/proxy/1/api/v1/label/host/values',
-        '/api/datasources/proxy/1/api/v1/label/instance/values',
         '/api/datasources/proxy/1/api/v1/label/node/values'
       ];
       
