@@ -12,6 +12,7 @@ from smoke_tests.docker import docker_utils
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy import text as sqlalchemy_text
+import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import sky_logging
@@ -527,20 +528,9 @@ def patch_db_create_for_parallel_tests(monkeypatch):
                 # Acquire exclusive lock - blocks other processes until we're done
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
-                # Check if tables already exist before trying to create them
-                tables_exist = False
-                try:
-                    with orm.Session(bind) as session:
-                        session.execute(
-                            sqlalchemy_text('SELECT 1 FROM config LIMIT 1'))
-                    tables_exist = True
-                except sqlalchemy_exc.OperationalError:
-                    # Tables don't exist, proceed with creation
-                    pass
-
-                # Create all tables only if they don't exist
-                if not tables_exist:
-                    original_create_all(bind=bind, **kwargs)
+                # Create all tables - the lock prevents race conditions during table creation
+                # SQLAlchemy's create_all() handles existing tables gracefully with checkfirst=True
+                original_create_all(bind=bind, **kwargs)
 
             finally:
                 # Lock is automatically released when file is closed
@@ -549,5 +539,37 @@ def patch_db_create_for_parallel_tests(monkeypatch):
     # Patch the method
     monkeypatch.setattr(global_user_state.Base.metadata, 'create_all',
                         create_all_with_lock)
+
+    yield
+
+
+@pytest.fixture(autouse=True)
+def patch_casbin_adapter_for_parallel_tests(monkeypatch):
+    """Mock Casbin SQLAlchemy Adapter initialization with file lock to prevent race conditions in parallel execution."""
+
+    # Store the original Adapter class
+    original_adapter_init = sqlalchemy_adapter.Adapter.__init__
+
+    def adapter_init_with_lock(self, engine, *args, **kwargs):
+        """Wrapper for sqlalchemy_adapter.Adapter.__init__ with file lock to prevent race conditions."""
+        # Use file lock to ensure only one process creates casbin tables at a time
+        # Use a constant path in ~/.sky so all test processes can see the same lock file
+        lock_file_path = os.path.expanduser('~/.sky/test_casbin_adapter.lock')
+
+        with open(lock_file_path, 'w') as lock_file:
+            try:
+                # Acquire exclusive lock - blocks other processes until we're done
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                # Initialize the adapter - the lock prevents race conditions during table creation
+                original_adapter_init(self, engine, *args, **kwargs)
+
+            finally:
+                # Lock is automatically released when file is closed
+                pass
+
+    # Patch the method
+    monkeypatch.setattr(sqlalchemy_adapter.Adapter, '__init__',
+                        adapter_init_with_lock)
 
     yield
