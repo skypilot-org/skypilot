@@ -24,7 +24,6 @@ listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
 import collections
-import concurrent.futures
 import copy
 import datetime
 import fnmatch
@@ -1958,44 +1957,19 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
+    if show_managed_jobs:
+        managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
+                                                           skip_finished=True,
+                                                           all_users=all_users)
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
+    if show_services:
+        # Run the sky serve service query in parallel to speed up the
+        # status query.
+        service_status_request_id = serve_lib.status(service_names=None)
 
-    # Phase 1: Submit API requests in parallel (fast, no signal handling)
-    def submit_managed_jobs():
-        if show_managed_jobs:
-            return managed_jobs.queue(refresh=False,
-                                      skip_finished=True,
-                                      all_users=all_users)
-        return None
-
-    def submit_services():
-        if show_services:
-            return serve_lib.status(service_names=None)
-        return None
-
-    def submit_workspace():
-        if not (ip or show_endpoints):
-            try:
-                return sdk.workspaces()
-            except RuntimeError:
-                # Backward compatibility for API server before #5660.
-                # TODO(zhwu): remove this after 0.10.0.
-                return None
-        return None
-
-    # Submit all requests in parallel (only returns request IDs quickly)
-    # This can reduce the request submission by 0.33 seconds.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        managed_jobs_future = executor.submit(submit_managed_jobs)
-        services_future = executor.submit(submit_services)
-        workspace_future = executor.submit(submit_workspace)
-
-        # Get request IDs from all submissions
-        managed_jobs_queue_request_id = managed_jobs_future.result()
-        service_status_request_id = services_future.result()
-        workspace_request_id = workspace_future.result()
+    workspace_request_id = None
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -2029,7 +2003,18 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         flag='ip' if ip else
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
-    # workspace_request_id is already set from parallel submission above
+    else:
+        try:
+            workspace_request_id = sdk.workspaces()
+        except RuntimeError:
+            # Backward compatibility for API server before #5660.
+            # TODO(zhwu): remove this after 0.10.0.
+            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
+                           'in an old version, and may miss feature: '
+                           'workspaces. Update with: sky api stop; '
+                           'sky api start'
+                           f'{colorama.Style.RESET_ALL}')
+            workspace_request_id = None
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
