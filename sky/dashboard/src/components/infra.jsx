@@ -308,7 +308,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   // Function to open Grafana
   const openGrafana = () => {
     // Use the configured Grafana URL if available, otherwise construct default
-    const grafanaUrl = window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
+    const grafanaUrl =
+      window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
     window.open(grafanaUrl, '_blank');
   };
 
@@ -400,6 +401,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         Node
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
+                        IP Address
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
                         GPU
                       </th>
                       <th className="p-3 text-right font-medium text-gray-600">
@@ -415,6 +419,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                       >
                         <td className="p-3 whitespace-nowrap text-gray-700">
                           {node.node_name}
+                        </td>
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.ip_address || '-'}
                         </td>
                         <td className="p-3 whitespace-nowrap text-gray-700">
                           {node.gpu_name}

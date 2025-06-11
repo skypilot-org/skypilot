@@ -29,6 +29,8 @@ class KubernetesNodeInfo:
     # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
     total: Dict[str, int]
     free: Dict[str, int]
+    # IP address of the node (external IP preferred, fallback to internal IP)
+    ip_address: Optional[str] = None
 
 
 @dataclasses.dataclass
