@@ -666,7 +666,7 @@ class Kubernetes(clouds.Cloud):
             assert resources.is_launchable(), resources
             regions = self.regions_with_offering(
                 resources.instance_type,
-                accelerators=resources.accelerators,
+                accelerators=resources.accelerators,  # type: ignore
                 use_spot=resources.use_spot,
                 region=resources.region,
                 zone=resources.zone)

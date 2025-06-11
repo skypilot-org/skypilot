@@ -56,6 +56,9 @@ MEMORY_SIZE_UNITS = {
     'pb': 2**50,
 }
 
+ACCELERATORS_PATH = 'common/accelerators.csv'
+
+
 @dataclasses.dataclass
 class AutostopConfig:
     """Configuration for autostop."""
@@ -756,7 +759,7 @@ class Resources:
                     accelerators = {accelerators: 1}
                 else:
                     assert isinstance(accelerators, str), \
-                        "Accelerators should be a string"
+                        'Accelerators should be a string'
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
@@ -1923,9 +1926,9 @@ class Resources:
             if memory is not None:
                 # set accelerators to a dictionary of DEVICE NAME: DEVICE COUNT
                 # where each DEVICE NAME has at least memory size
-                memory_parsed = parse_memory_resource(
-                    memory, 'accelerators', allow_plus=True
-                )
+                memory_parsed = parse_memory_resource(memory,
+                                                      'accelerators',
+                                                      allow_plus=True)
                 plus = '+' in memory_parsed
                 if plus:
                     memory_parsed = memory_parsed[:-1]
@@ -1943,7 +1946,7 @@ class Resources:
                 ]
                 if not accelerators:
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'No GPUs found.')
+                        raise ValueError('No GPUs found.')
                 accelerators = set(accelerators)
                 config['_force_quiet'] = True
 
@@ -2316,15 +2319,17 @@ def _get_devices(memory: float,
                  plus: bool = False,
                  manufacturer: Optional[str] = None,
                  cloud: Optional[str] = None) -> List[str]:
-    """Returns a list of device names that meet the memory and manufacturer requirements.
-    
+    """Returns a list of device names that meet the memory and manufacturer
+       requirements.
+
     Args:
         memory: The minimum memory size in GB.
         manufacturer: The manufacturer of the GPU.
         cloud: The cloud provider to filter by.
     """
-    ACCELERATORS_PATH = "common/accelerators.csv"
-    common = CATALOG_DIR + '/' + CATALOG_SCHEMA_VERSION + '/' + ACCELERATORS_PATH
+    common = CATALOG_DIR + '/' +\
+             CATALOG_SCHEMA_VERSION + '/' +\
+             ACCELERATORS_PATH
 
     # Read the accelerators CSV file
     df = pd.read_csv(common)
