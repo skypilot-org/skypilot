@@ -510,7 +510,7 @@ def setup_postgres_backend_env(request):
 
 
 @pytest.fixture(autouse=True)
-def patch_db_create_for_parallel_tests(request, monkeypatch):
+def patch_db_create_for_parallel_tests(monkeypatch):
     """Mock Base.metadata.create_all with file lock to prevent race conditions in parallel execution."""
 
     # Store the original create_all method
