@@ -463,5 +463,8 @@ def test_restful_policy_server(add_example_policy_paths, task):
         temp_file.write(f'admin_policy: {url}/set_autostop'.encode('utf-8'))
         temp_file.flush()
 
-        task, _ = _load_task_and_apply_policy(task, temp_file.name)
-        assert task.resources[0].autostop_config.idle_minutes == 10
+        dag, _ = _load_task_and_apply_policy(task, temp_file.name)
+        for r in dag.tasks[0].resources:
+            assert r.autostop_config is not None
+            assert r.autostop_config.enabled is True
+            assert r.autostop_config.idle_minutes == 10
