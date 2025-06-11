@@ -181,6 +181,19 @@ class TestServerVersion:
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(cli.status, [])
+        
+        # Debug: Print the full exception and traceback
+        print(f"Exit code: {result.exit_code}")
+        print(f"Exception type: {type(result.exception)}")
+        print(f"Exception: {result.exception}")
+        print(f"Output: {result.output}")
+        if result.exception:
+            import traceback
+            print("Full traceback:")
+            print(''.join(traceback.format_exception(type(result.exception), 
+                                                    result.exception, 
+                                                    result.exception.__traceback__)))
+        
         assert "Client and local API server version mismatch" in str(
             result.exception)
         assert result.exit_code == 1
@@ -193,7 +206,20 @@ class TestServerVersion:
 
         result = cli_runner.invoke(cli.status, [])
 
+        # Debug: Print the full exception and traceback
+        print(f"Exit code: {result.exit_code}")
+        print(f"Exception type: {type(result.exception)}")
+        print(f"Exception: {result.exception}")
+        print(f"Output: {result.output}")
+        if result.exception:
+            import traceback
+            print("Full traceback:")
+            print(''.join(traceback.format_exception(type(result.exception), 
+                                                    result.exception, 
+                                                    result.exception.__traceback__)))
+
         # Verify the error message contains correct versions
+        
         assert "Client and local API server version mismatch" in str(
             result.exception)
         assert result.exit_code == 1
