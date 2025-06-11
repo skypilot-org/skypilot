@@ -102,7 +102,7 @@ function ClusterDetails() {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="clusters">
+      <>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
             <Link href="/clusters" className="text-sky-blue hover:underline">
@@ -180,7 +180,7 @@ function ClusterDetails() {
           onClose={() => setIsVSCodeModalOpen(false)}
           cluster={cluster}
         />
-      </Layout>
+      </>
     </>
   );
 }

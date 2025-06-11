@@ -5,6 +5,8 @@ from typing import Dict, List
 
 from sky import sky_logging
 from sky import skypilot_config
+from sky.skylet import constants
+from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -84,3 +86,27 @@ def get_role_permissions(
             }
         }
     return config_permissions
+
+
+def get_workspace_policy_permissions() -> Dict[str, List[str]]:
+    """Get workspace policy permissions from config.
+
+    Returns:
+        A dictionary of workspace policy permissions.
+        Example:
+        {
+            'workspace1': ['user1-id', 'user2-id'],
+            'workspace2': ['user3-id', 'user4-id']
+            'default': ['*']
+        }
+    """
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in current_workspaces:
+        current_workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    workspaces_to_policy = {}
+    for workspace_name, workspace_config in current_workspaces.items():
+        users = workspaces_utils.get_workspace_users(workspace_config)
+        workspaces_to_policy[workspace_name] = users
+    logger.debug(f'Workspace policy permissions: {workspaces_to_policy}')
+    return workspaces_to_policy

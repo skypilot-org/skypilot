@@ -1,29 +1,19 @@
-import {
-  ENDPOINT,
-  CLOUDS_LIST,
-  COMMON_GPUS,
-} from '@/data/connectors/constants';
+import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 
 // Importing from the same directory
-import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import { apiClient } from '@/data/connectors/client';
 
 export async function getCloudInfrastructure(clusters, jobs) {
   try {
     // Get enabled clouds
     let enabledCloudsList = [];
     try {
-      const enabledCloudsResponse = await fetch(`${ENDPOINT}/enabled_clouds`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const enabledCloudsResponse = await apiClient.get(`/enabled_clouds`);
 
       const id =
         enabledCloudsResponse.headers.get('X-Skypilot-Request-ID') ||
         enabledCloudsResponse.headers.get('X-Request-ID');
-      const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+      const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
       const data = await fetchedData.json();
       enabledCloudsList = data.return_value
         ? JSON.parse(data.return_value)
@@ -143,18 +133,12 @@ export async function getGPUs(clusters, jobs) {
 
 async function getKubernetesContextGPUs() {
   try {
-    const response = await fetch(
-      `${ENDPOINT}/realtime_kubernetes_gpu_availability`,
+    const response = await apiClient.post(
+      `/realtime_kubernetes_gpu_availability`,
       {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          context: null,
-          name_filter: null,
-          quantity_filter: null,
-        }),
+        context: null,
+        name_filter: null,
+        quantity_filter: null,
       }
     );
 
@@ -176,7 +160,7 @@ async function getKubernetesContextGPUs() {
       return [];
     }
 
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     const rawText = await fetchedData.text();
 
     if (fetchedData.status === 500) {
@@ -222,12 +206,7 @@ async function getKubernetesContextGPUs() {
 
 async function getAllContexts() {
   try {
-    const response = await fetch(`${ENDPOINT}/all_contexts`, {
-      method: 'GET', // Assuming GET for a simple list endpoint
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await apiClient.get(`/all_contexts`);
     if (!response.ok) {
       console.error(
         `Error fetching all contexts: ${response.status} ${response.statusText}`
@@ -241,7 +220,7 @@ async function getAllContexts() {
       console.error('No request ID returned for /all_contexts');
       return [];
     }
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     const data = await fetchedData.json();
     return data.return_value ? JSON.parse(data.return_value) : [];
   } catch (error) {
@@ -252,19 +231,13 @@ async function getAllContexts() {
 
 async function getKubernetesPerNodeGPUs(context) {
   try {
-    const response = await fetch(`${ENDPOINT}/kubernetes_node_info`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        context: context,
-      }),
+    const response = await apiClient.post(`/kubernetes_node_info`, {
+      context: context,
     });
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
       response.headers.get('x-request-id');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -550,20 +523,14 @@ async function getKubernetesGPUs(clustersAndJobsData) {
 
 export async function getCloudGPUs() {
   try {
-    const response = await fetch(`${ENDPOINT}/list_accelerator_counts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        clouds: CLOUDS_LIST,
-        gpus_only: true,
-      }),
+    const response = await apiClient.post(`/list_accelerator_counts`, {
+      clouds: CLOUDS_LIST,
+      gpus_only: true,
     });
     const id =
       response.headers.get('X-Skypilot-Request-ID') ||
       response.headers.get('x-request-id');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -640,22 +607,16 @@ export async function getDetailedGpuInfo(filter) {
       `Searching for GPU: ${gpuName}${gpuCount !== null ? ', effective count: ${gpuCount}' : ''}`
     );
 
-    const response = await fetch(`${ENDPOINT}/list_accelerators`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        gpus_only: true,
-        name_filter: gpuName,
-        quantity_filter: gpuCount,
-        clouds: CLOUDS_LIST,
-        case_sensitive: false,
-        all_regions: true,
-      }),
+    const response = await apiClient.post(`/list_accelerators`, {
+      gpus_only: true,
+      name_filter: gpuName,
+      quantity_filter: gpuCount,
+      clouds: CLOUDS_LIST,
+      case_sensitive: false,
+      all_regions: true,
     });
     const id = response.headers.get('x-request-id');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
 
     if (fetchedData.status === 500) {
       console.error('Error fetching detailed GPU info: Server error');

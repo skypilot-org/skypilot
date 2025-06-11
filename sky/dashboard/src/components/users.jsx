@@ -30,21 +30,22 @@ import { RotateCwIcon, PenIcon, CheckIcon, XIcon } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
-import { ENDPOINT } from '@/data/connectors/constants';
+import { apiClient } from '@/data/connectors/client';
 
 // Helper functions for username parsing
-const parseUsername = (username) => {
+const parseUsername = (username, userId) => {
   if (username && username.includes('@')) {
     return username.split('@')[0];
   }
+  // If no email, show username only
   return username || 'N/A';
 };
 
-const getFullEmail = (username) => {
+const getFullEmailID = (username, userId) => {
   if (username && username.includes('@')) {
     return username;
   }
-  return '-';
+  return userId || '-';
 };
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -66,7 +67,7 @@ export function Users() {
   };
 
   return (
-    <Layout highlighted="users">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
           <Link
@@ -98,7 +99,7 @@ export function Users() {
         setLoading={setLoading} // Pass setLoading to UsersTable
         refreshDataRef={refreshDataRef}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -124,8 +125,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
         // Show users immediately with placeholder counts
         const initialProcessedUsers = (usersData || []).map((user) => ({
           ...user,
-          usernameDisplay: parseUsername(user.username),
-          fullEmail: getFullEmail(user.username),
+          usernameDisplay: parseUsername(user.username, user.userId),
+          fullEmailID: getFullEmailID(user.username, user.userId),
           clusterCount: -1, // Use -1 as loading indicator
           jobCount: -1, // Use -1 as loading indicator
         }));
@@ -155,8 +156,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
           );
           return {
             ...user,
-            usernameDisplay: parseUsername(user.username),
-            fullEmail: getFullEmail(user.username),
+            usernameDisplay: parseUsername(user.username, user.userId),
+            fullEmailID: getFullEmailID(user.username, user.userId),
             clusterCount: userClusters.length,
             jobCount: userJobs.length,
           };
@@ -222,7 +223,7 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   const handleEditClick = async (userId, currentRole) => {
     try {
       // Get current user's role first
-      const response = await fetch(`${ENDPOINT}/users/role`);
+      const response = await apiClient.get(`/users/role`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to get user role');
@@ -257,12 +258,9 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
     }
     setIsLoading(true); // Or use parent setLoading
     try {
-      const response = await fetch(`${ENDPOINT}/users/update`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ user_id: userId, role: currentEditingRole }),
+      const response = await apiClient.post(`/users/update`, {
+        user_id: userId,
+        role: currentEditingRole,
       });
       if (!response.ok) {
         const errorData = await response.json();
@@ -320,10 +318,10 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               Name{getSortDirection('usernameDisplay')}
             </TableHead>
             <TableHead
-              onClick={() => requestSort('fullEmail')}
+              onClick={() => requestSort('fullEmailID')}
               className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
             >
-              Email{getSortDirection('fullEmail')}
+              User ID{getSortDirection('fullEmailID')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('role')}
@@ -351,8 +349,8 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableCell className="truncate" title={user.username}>
                 {user.usernameDisplay}
               </TableCell>
-              <TableCell className="truncate" title={user.fullEmail}>
-                {user.fullEmail}
+              <TableCell className="truncate" title={user.fullEmailID}>
+                {user.fullEmailID}
               </TableCell>
               <TableCell className="truncate" title={user.role}>
                 <div className="flex items-center gap-2">

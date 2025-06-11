@@ -51,6 +51,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import requests
@@ -2570,18 +2571,33 @@ def get_clusters(
             public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
+        all_users: If True, return clusters from all users. If False, only
+            return clusters from the current user.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
+    current_user = common_utils.get_current_user()
+
+    # Filter by user if requested
     if not all_users:
-        current_user_hash = common_utils.get_user_hash()
         records = [
             record for record in records
-            if record['user_hash'] == current_user_hash
+            if record['user_hash'] == current_user.id
         ]
+
+    accessible_workspaces = workspaces_core.get_workspaces()
+
+    workspace_filtered_records = []
+    for record in records:
+        cluster_workspace = record.get('workspace',
+                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if cluster_workspace in accessible_workspaces:
+            workspace_filtered_records.append(record)
+
+    records = workspace_filtered_records
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT

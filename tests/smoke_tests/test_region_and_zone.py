@@ -72,10 +72,10 @@ def test_aws_with_ssh_proxy_command():
             [
                 f'sky launch -y -c jump-{name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG}',
                 # Use jump config
-                f'export {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={f.name}; '
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; '
                 f'sky launch -y -c {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
                 f'sky logs {name} 1 --status',
-                f'export {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={f.name}; sky exec {name} echo hi',
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; sky exec {name} echo hi',
                 f'sky logs {name} 2 --status',
                 # Start a small job to make sure the controller is created.
                 f'sky jobs launch -n {name}-0 --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot -y echo hi',
@@ -86,7 +86,7 @@ def test_aws_with_ssh_proxy_command():
                     cluster_name_wildcard='sky-jobs-controller-*',
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=300),
-                f'export {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={f.name}; sky jobs launch -n {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} -yd echo hi',
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; sky jobs launch -n {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} -yd echo hi',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,

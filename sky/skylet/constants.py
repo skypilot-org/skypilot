@@ -377,8 +377,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.
-SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
-                                                       ('api_server',),
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
                                                        ('allowed_clouds',),
                                                        ('workspaces',), ('db',)]
 
@@ -419,3 +418,6 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'do', 'nebius', 'ssh')
 # END constants used for service catalog.
+
+# The user ID of the SkyPilot system.
+SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
