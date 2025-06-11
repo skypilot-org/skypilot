@@ -11,19 +11,6 @@ from sky import skypilot_config
 
 
 # ---------- Test workspace switching ----------
-@pytest.mark.skip(reason='Skip this until the our test infra supports change '
-                  'the config path for the running API server with the config '
-                  'that contains the workspace information; or, allowing hot '
-                  'reloading of the workspace config.\n'
-                  'To run this test locally, add the following '
-                  'to your ~/.sky/config.yaml:\n'
-                  'workspaces:\n'
-                  '  ws-1: {}\n'
-                  '  ws-2: {}\n'
-                  'and restart the API server.'
-                  'The reason for not using env var SKYPILOT_CONFIG to '
-                  'override the global config is that the project-level config '
-                  'will be ignored in that case.')
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #
