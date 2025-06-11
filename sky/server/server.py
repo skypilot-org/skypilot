@@ -1207,60 +1207,6 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/service-discovery')
-async def service_discovery(request: fastapi.Request) -> List[Dict[str, Any]]:
-    """HTTP Service Discovery endpoint for Prometheus.
-    
-    This endpoint provides HTTP-based service discovery for Prometheus to find
-    DCGM exporters in external Kubernetes clusters enabled in SkyPilot.
-
-    todo(rohan): add service discovery for clusters created with --infra {cloud}
-    
-    Returns:
-        List of target groups in Prometheus HTTP service discovery format.
-        Each target group contains targets and labels for DCGM exporters.
-    """
-    try:
-        allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
-        
-        targets = []
-        
-        # Generate targets for each allowed context
-        for context_name in allowed_contexts:
-            # Common DCGM exporter configurations
-            common_ports = [9400]  # Default DCGM exporter port
-            common_namespaces = ['nvidia-gpu-operator', 'gpu-operator']
-            common_service_names = ['dcgm-exporter', 'nvidia-dcgm-exporter']
-            
-            # Generate targets for potential DCGM exporters in this context
-            for namespace in common_namespaces:
-                for port in common_ports:
-                    for service_name in common_service_names:
-                        # Create target in Prometheus HTTP service discovery format
-                        target = {
-                            'targets': [f'{service_name}.{namespace}.svc.cluster.local:{port}'],
-                            'labels': {
-                                'cluster': context_name,
-                                'kubernetes_namespace': namespace,
-                                'job': 'dcgm-exporter',
-                                '__meta_kubernetes_pod_label_app_kubernetes_io_name': 'dcgm-exporter',
-                                '__meta_kubernetes_service_name': service_name,
-                                '__scheme__': 'http',
-                                '__metrics_path__': '/metrics'
-                            }
-                        }
-                        targets.append(target)
-        
-        logger.info(f'Service discovery: returning {len(targets)} target groups for {len(allowed_contexts)} clusters')
-        
-        return targets
-        
-    except Exception as e:
-        logger.error(f'Error in service discovery: {e}')
-        # Return empty list on error rather than failing
-        return []
-
-
 @app.get('/api/health')
 async def health(request: fastapi.Request) -> Dict[str, Any]:
     """Checks the health of the API server.
@@ -1398,9 +1344,7 @@ async def serve_dashboard(full_path: str):
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
-    grafana_url = skypilot_config.get_nested(
-        ('dashboard', 'grafana_url'),
-        None)
+    grafana_url = skypilot_config.get_nested(('dashboard', 'grafana_url'), None)
 
     # Try to serve the staticfile directly e.g. /skypilot.svg,
     # /favicon.ico, and /_next/, etc.
@@ -1414,12 +1358,12 @@ async def serve_dashboard(full_path: str):
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         if grafana_url is not None:
-            grafana_script = f'''
+            grafana_script = f"""
 <script>
 window.SKYPILOT_GRAFANA_URL = {json.dumps(grafana_url)};
-</script>'''
+</script>"""
             content = content.replace('</head>', f'{grafana_script}\n</head>')
         return fastapi.responses.HTMLResponse(content=content)
     except Exception as e:
