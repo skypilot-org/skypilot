@@ -193,14 +193,19 @@ class RunPodFetcher:
         for gpu in gpu_types:
             if gpu['id'] == 'unknown':
                 continue
-            cloud_type = None
-            price = 0
+
+            pod_instances = []
             if gpu.get('secureCloud'):
-                cloud_type = 'SECURE'
-                price = gpu['securePrice']
-            elif gpu.get('communityCloud'):
-                cloud_type = 'COMMUNITY'
-                price = gpu['communityPrice']
+                pod_instances.append({
+                    'cloud_type': 'SECURE',
+                    'price': gpu['securePrice']
+                })
+
+            if gpu.get('communityCloud'):
+                pod_instances.append({
+                    'cloud_type': 'COMMUNITY',
+                    'price': gpu['communityPrice']
+                })
 
             zones = ['CA', 'CZ', 'IS', 'NL', 'NO', 'RO', 'SE', 'US']
             spot_price = gpu['secureSpotPrice'] if gpu[
@@ -208,37 +213,43 @@ class RunPodFetcher:
             display_name = ''.join(gpu['displayName'].split())
             # Create entry for each zone
             for zone in zones:
-                entry = {
-                    'InstanceType': f'1x_{display_name}_{cloud_type}',
-                    'AcceleratorName': str(display_name),
-                    'AcceleratorCount': '1',
-                    'vCPUs': VCPU_MAP[display_name]
-                             if display_name in VCPU_MAP else 1,
-                    'MemoryGiB': float(gpu.get('memoryInGb', 0)),
-                    'GpuInfo': display_name,
-                    'Region': zone,
-                    'SpotPrice': spot_price,
-                    'Price': str(price),  # Default to on-demand price
-                    'Name': gpu['id'],
-                }
-                catalog_entries.append(entry)
+                for pod_instance in pod_instances:
+                    entry = {
+                        'InstanceType': f'1x_{display_name}_'
+                                        f'{pod_instance["cloud_type"]}',
+                        'AcceleratorName': str(display_name),
+                        'AcceleratorCount': '1',  # Default to 1
+                        'vCPUs': VCPU_MAP[display_name]
+                                 if display_name in VCPU_MAP else 2,
+                        'MemoryGiB': float(gpu.get('memoryInGb', 0)),
+                        'GpuInfo': display_name,
+                        'Region': zone,
+                        'SpotPrice': spot_price,
+                        'Price': str(pod_instance['price']
+                                    ),  # Default to on-demand price
+                        'Name': gpu['id'],
+                    }
+                    catalog_entries.append(entry)
 
-                # Add entries for multi-GPU configurations if supported
-                max_gpus = gpu.get('maxGpuCount', 1)
-                if max_gpus > 1:
-                    for gpu_count in [2, 4, 8]:
-                        if gpu_count <= max_gpus:
-                            multi_gpu_entry = entry.copy()
-                            multi_gpu_entry['InstanceType'] = (
-                                f'{gpu_count}x_{display_name}_{cloud_type}')
-                            multi_gpu_entry['AcceleratorCount'] = float(
-                                gpu_count)
-                            multi_gpu_entry['MemoryGiB'] = float(
-                                gpu_count * float(gpu.get('memoryInGb', 0)))
-                            multi_gpu_entry['SpotPrice'] = (str(
-                                spot_price * gpu_count) if spot_price else None)
-                            multi_gpu_entry['Price'] = str(price * gpu_count)
-                            catalog_entries.append(multi_gpu_entry)
+                    # Add entries for multi-GPU configurations if supported
+                    max_gpus = gpu.get('maxGpuCount', 1)
+                    if max_gpus > 1:
+                        for gpu_count in [2, 4, 8]:
+                            if gpu_count <= max_gpus:
+                                multi_gpu_entry = entry.copy()
+                                multi_gpu_entry['InstanceType'] = (
+                                    f'{gpu_count}x_{display_name}_'
+                                    f'{pod_instance["cloud_type"]}')
+                                multi_gpu_entry['AcceleratorCount'] = float(
+                                    gpu_count)
+                                multi_gpu_entry['MemoryGiB'] = float(
+                                    gpu_count * float(gpu.get('memoryInGb', 0)))
+                                multi_gpu_entry['SpotPrice'] = (str(
+                                    spot_price *
+                                    gpu_count) if spot_price else None)
+                                multi_gpu_entry['Price'] = str(
+                                    pod_instance['price'] * gpu_count)
+                                catalog_entries.append(multi_gpu_entry)
 
         return catalog_entries
 
