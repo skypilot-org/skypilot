@@ -578,14 +578,7 @@ def private_docker_registry_setup(request):
     full_image_name = request.param['full_image_name']
 
     # Dynamically get passwords for cloud providers
-    if docker_server == 'us-docker.pkg.dev':
-        # Get GCP access token
-        result = subprocess.run(['gcloud', 'auth', 'print-access-token'],
-                                capture_output=True,
-                                text=True,
-                                check=True)
-        docker_password = result.stdout.strip()
-    elif 'ecr' in docker_server:
+    if 'ecr' in docker_server:
         # Get ECR login password
         # Extract region from ECR server URL
         region = docker_server.split(
@@ -630,8 +623,8 @@ def private_docker_registry_setup(request):
         # GCP with Artifact Registry
         (
             {
-                'docker_username': '_json_key',
-                'docker_password': '',  # This should be the GCP service account key
+                'docker_username': '',  # Empty string for automatic IAM authentication
+                'docker_password': '',  # Empty string for automatic IAM authentication
                 'docker_server': 'us-docker.pkg.dev',
                 'full_image_name': 'sky-dev-465/sky-test-private-image/skypilot-private-test:latest'
             },
