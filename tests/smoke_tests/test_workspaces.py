@@ -77,10 +77,11 @@ def test_workspace_switching(generic_cloud: str):
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 && exit 1 || true',
         ],
-        teardown=
-        (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws1_config_path}; sky down -y {name}-1; '
-         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws2_config_path}; sky down -y {name}-2'
-        ),
+        teardown=(
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws1_config_path}; sky down -y {name}-1; '
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws2_config_path}; sky down -y {name}-2; '
+            # restore the original config
+            f'{smoke_tests_utils.get_cmd_restart_api_server()}'),
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
