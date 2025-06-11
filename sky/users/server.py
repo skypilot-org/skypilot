@@ -259,7 +259,7 @@ async def user_import(
 
             success_count += 1
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-except
             error_count += 1
             creation_errors.append(f'{user_data["username"]}: {str(e)}')
 

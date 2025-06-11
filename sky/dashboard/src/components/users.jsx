@@ -245,7 +245,7 @@ export function Users() {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create user');
       }
-      setCreateSuccess(`User "${newUser.username}" created successfully!`);
+      setCreateSuccess(`User &quot;${newUser.username}&quot; created successfully!`);
       setShowCreateUser(false);
       setNewUser({ username: '', password: '', role: 'user' });
       handleRefresh();
