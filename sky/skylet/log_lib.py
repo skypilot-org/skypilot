@@ -310,7 +310,8 @@ def make_task_bash_script(codegen: str,
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
-            export PYTHONUNBUFFERED=1"""),
+            export PYTHONUNBUFFERED=1
+            mkdir -p {constants.SKY_REMOTE_WORKDIR}"""),
     ]
     script += [sky_workdir_cmd]
     if env_vars is not None:
@@ -356,7 +357,11 @@ def run_bash_command_with_log(
         if docker_image is not None:
             if remote_setup_file_name is not None:
                 with open(remote_setup_file_name, 'r', encoding='utf-8') as f:
-                    bash_command = f'{f.read()}\n{bash_command}'
+                    # Re-cd to the workdir to keep the same abstraction (both
+                    # setup and run starts from the workdir).
+                    bash_command = (f'{f.read()}\n'
+                                    f'cd {constants.SKY_REMOTE_WORKDIR}\n'
+                                    f'{bash_command}')
             if docker_file_mounts_mapping is not None:
                 if (constants.SKY_REMOTE_WORKDIR_ABS
                         in docker_file_mounts_mapping.values()):
@@ -390,9 +395,12 @@ def run_bash_command_with_log(
             docker_cmd = make_task_bash_script(
                 f'docker run {maybe_specify_name} {mount_args} --gpus '
                 '\'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\' '
+                '--network=host --cap-add=IPC_LOCK --ipc=host --shm-size=1g '
                 f'{docker_image} /bin/bash -i {script_path_in_docker}',
                 do_cd_sky_workdir=False)
-            clean_up_cmd = [f'rm -rf {k}' for k in all_mapping]
+            clean_up_cmd = [
+                f'rm -rf {k}' for k in all_mapping if not k.startswith('/tmp')
+            ]
             # It is possible that the docker container is not created, or being
             # removed by the job cancellation.
             clean_up_cmd.append(f'docker rm {docker_image_unique_id} '

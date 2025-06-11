@@ -3318,6 +3318,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if task.setup is None:
             return
+        detach_setup = detach_setup or docker_image is not None
         setup = task.setup
         # Sync the setup script up and run it.
         internal_ips = handle.internal_ips()
@@ -5325,7 +5326,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
-            setup_cmd=self._setup_cmd,
+            setup_cmd=self._setup_cmd if docker_image is None else None,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
