@@ -38,7 +38,6 @@ class RequestOptions(pydantic.BaseModel):
     idle_minutes_to_autostop: Optional[int]
     down: bool
     dryrun: bool
-    is_client_side: bool = False
 
 
 class _UserRequestBody(pydantic.BaseModel):

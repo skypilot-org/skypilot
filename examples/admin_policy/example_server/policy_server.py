@@ -19,11 +19,13 @@ async def apply_policy(request: Request) -> JSONResponse:
     """Apply admin policy to a user request"""
     # Decode from request body
     json_data = await request.json()
+    print(json_data)
     user_request = sky.UserRequest.decode(json_data)
 
     # Apply validation and mutation
     mutated_request = request.app.state.policy_impl.apply(user_request)
 
+    print(mutated_request.encode())
     return JSONResponse(content=mutated_request.encode())
 
 
