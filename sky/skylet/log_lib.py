@@ -395,13 +395,20 @@ def run_bash_command_with_log(
             docker_cmd = make_task_bash_script(
                 'id -nG $USER | grep -qw docker || '
                 'sudo usermod -aG docker $USER > /dev/null 2>&1\n'
-                f'newgrp docker << EOF\n'
-                f'docker run {maybe_specify_name} {mount_args} --gpus '
-                '\'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\' '
-                '--network=host --device=/dev/infiniband '
-                '--cap-add=IPC_LOCK --ipc=host --shm-size=1g '
-                f'{docker_image} /bin/bash -i {script_path_in_docker}\n'
-                f'EOF',
+                'GPU_OPTIONS=""\n'
+                'if [ ! -z "${CUDA_VISIBLE_DEVICES}" ] && command -v nvidia-smi > /dev/null 2>&1; then\n'  # pylint: disable=line-too-long
+                '  echo "Enabling GPU Options: ${CUDA_VISIBLE_DEVICES}"\n'
+                '  GPU_OPTIONS=$(echo --gpus \'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\')\n'
+                'fi\n'
+                'IB_OPTIONS=""\n'
+                'if [ -d "/dev/infiniband" ]; then\n'
+                '  echo "Enabling IB Options"\n'
+                '  IB_OPTIONS="--device=/dev/infiniband --cap-add=IPC_LOCK --ipc=host --shm-size=1g"\n'  # pylint: disable=line-too-long
+                'fi\n'
+                'echo "GPU_OPTIONS: $GPU_OPTIONS"\n'
+                'echo "IB_OPTIONS: $IB_OPTIONS"\n'
+                f'sudo docker run {maybe_specify_name} {mount_args} --network=host '
+                f'$GPU_OPTIONS $IB_OPTIONS {docker_image} /bin/bash -i {script_path_in_docker}\n',  # pylint: disable=line-too-long
                 do_cd_sky_workdir=False)
             clean_up_cmd = [
                 f'rm -rf {k}' for k in all_mapping if not k.startswith('/tmp')
