@@ -11,9 +11,6 @@ from sky import catalog
 from sky import clouds
 from sky import exceptions
 
-ALL_INSTANCE_TYPE_INFOS = sum(
-    sky.list_accelerators(gpus_only=True).values(), [])
-
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
     sky.optimizer._DUMMY_SINK_NAME,
@@ -33,6 +30,11 @@ def generate_random_dag(
     random.seed(seed)
     single_node_task_ids = random.choices(list(range(num_tasks)),
                                           k=num_tasks // 2)
+
+    # Get instance type infos inside the function
+    all_instance_type_infos = sum(
+        sky.list_accelerators(gpus_only=True).values(), [])
+
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
@@ -65,7 +67,7 @@ def generate_random_dag(
 
             num_candidates = random.randint(1, max_num_candidate_resources)
             candidate_instance_types = random.choices(
-                ALL_INSTANCE_TYPE_INFOS, k=len(ALL_INSTANCE_TYPE_INFOS))
+                all_instance_type_infos, k=len(all_instance_type_infos))
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
