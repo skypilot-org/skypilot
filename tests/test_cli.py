@@ -179,7 +179,7 @@ class TestServerVersion:
         # Clear cache to ensure mock is used
         from sky.server import common
         common.get_api_server_status.cache_clear()  # type: ignore
-        
+
         mock_server_api_version(monkeypatch, '2')
         monkeypatch.setattr(server.constants, 'API_VERSION', 3)
         cli_runner = cli_testing.CliRunner()
@@ -194,7 +194,7 @@ class TestServerVersion:
         # Clear cache to ensure mock is used
         from sky.server import common
         common.get_api_server_status.cache_clear()  # type: ignore
-        
+
         mock_server_api_version(monkeypatch, '3')
         monkeypatch.setattr(server.constants, 'API_VERSION', 2)
         cli_runner = cli_testing.CliRunner()

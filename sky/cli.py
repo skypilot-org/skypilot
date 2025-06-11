@@ -2050,16 +2050,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Submit all requests in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        managed_jobs_future = executor.submit(submit_managed_jobs)
-        services_future = executor.submit(submit_services)
-        workspace_future = executor.submit(submit_workspace)
-        cluster_status_future = executor.submit(submit_cluster_status)
-        
+        managed_jobs_request_future = executor.submit(submit_managed_jobs)
+        services_request_future = executor.submit(submit_services)
+        workspace_request_future = executor.submit(submit_workspace)
+        cluster_status_request_future = executor.submit(submit_cluster_status)
+
         # Get the request IDs
-        managed_jobs_queue_request_id = managed_jobs_future.result()
-        service_status_request_id = services_future.result()
-        workspace_request_id = workspace_future.result()
-        cluster_status_request_id = cluster_status_future.result()
+        managed_jobs_queue_request_id = managed_jobs_request_future.result()
+        service_status_request_id = services_request_future.result()
+        workspace_request_id = workspace_request_future.result()
+        cluster_status_request_id = cluster_status_request_future.result()
 
     # Phase 3: Get cluster records and process them in parallel with SSH config
     # updates
@@ -2119,7 +2119,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
         # Clean up SSH configs for clusters that do not exist.
         clusters_exists = set(record['name'] for record in cluster_records)
-        clusters_to_remove: Set[str] = set()
+        clusters_to_remove = set()
         if clusters is not None:
             clusters_to_remove = set(clusters) - clusters_exists
         elif all_users:
@@ -2180,8 +2180,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Phase 5: Handle managed jobs and services results in parallel
     def handle_managed_jobs() -> Tuple[Optional[int], str]:
         if show_managed_jobs:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed Jobs{colorama.Style.RESET_ALL}')
+            assert managed_jobs_queue_request_id is not None
             try:
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
@@ -2201,6 +2200,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     def handle_services() -> Tuple[Optional[int], str]:
         if show_services:
+            assert service_status_request_id is not None
             try:
                 num_services, msg = _handle_services_request(
                     service_status_request_id,
@@ -2220,40 +2220,43 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         services_future = executor.submit(handle_services)
 
         # Get results
-        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
-            num_in_progress_jobs, jobs_msg = jobs_future.result()
-        with rich_utils.client_status('[cyan]Checking services[/]'):
-            num_services, services_msg = services_future.result()
+        keyboard_interrupted = False
+        if show_managed_jobs:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Managed Jobs{colorama.Style.RESET_ALL}')
+            with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
+                num_in_progress_jobs, jobs_msg = jobs_future.result()
+                keyboard_interrupted = num_in_progress_jobs == -1
+            click.echo(jobs_msg)
+            if num_in_progress_jobs is not None:
+                # jobs controller is UP.
+                job_info = ''
+                if num_in_progress_jobs > 0:
+                    plural_and_verb = ' is'
+                    if num_in_progress_jobs > 1:
+                        plural_and_verb = 's are'
+                    job_info = (
+                        f'{num_in_progress_jobs} managed job{plural_and_verb} '
+                        'in progress')
+                    if (num_in_progress_jobs >
+                            _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
+                        job_info += (
+                            f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
+                            'ones shown)')
+                    job_info += '. '
+                hints.append(
+                    controller_utils.Controllers.JOBS_CONTROLLER.value.
+                    in_progress_hint.format(job_info=job_info))
 
-    # Display results and add hints
-    if show_managed_jobs:
-        click.echo(jobs_msg)
-        if num_in_progress_jobs is not None:
-            # jobs controller is UP.
-            job_info = ''
-            if num_in_progress_jobs > 0:
-                plural_and_verb = ' is'
-                if num_in_progress_jobs > 1:
-                    plural_and_verb = 's are'
-                job_info = (
-                    f'{num_in_progress_jobs} managed job{plural_and_verb} '
-                    'in progress')
-                if num_in_progress_jobs > _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS:
-                    job_info += (
-                        f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
-                        'ones shown)')
-                job_info += '. '
-            hints.append(
-                controller_utils.Controllers.JOBS_CONTROLLER.value.
-                in_progress_hint.format(job_info=job_info))
-
-    if show_services:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Services{colorama.Style.RESET_ALL}')
-        click.echo(services_msg)
-        if num_services is not None:
-            hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                         value.in_progress_hint)
+        if show_services and not keyboard_interrupted:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Services{colorama.Style.RESET_ALL}')
+            with rich_utils.client_status('[cyan]Checking services[/]'):
+                num_services, services_msg = services_future.result()
+            click.echo(services_msg)
+            if num_services is not None:
+                hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                             value.in_progress_hint)
 
     # Phase 6: Final output
     if num_pending_autostop > 0 and not refresh:
