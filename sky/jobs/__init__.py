@@ -10,7 +10,6 @@ from sky.jobs.client.sdk import tail_logs
 from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH
 from sky.jobs.constants import JOBS_CONTROLLER_LOGS_DIR
 from sky.jobs.constants import JOBS_CONTROLLER_TEMPLATE
-from sky.jobs.constants import JOBS_CONTROLLER_YAML_PREFIX
 from sky.jobs.constants import JOBS_TASK_YAML_PREFIX
 from sky.jobs.recovery_strategy import StrategyExecutor
 from sky.jobs.state import ManagedJobStatus
@@ -24,7 +23,6 @@ pathlib.Path(JOBS_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
 __all__ = [
     # Constants
     'JOBS_CONTROLLER_TEMPLATE',
-    'JOBS_CONTROLLER_YAML_PREFIX',
     'JOBS_TASK_YAML_PREFIX',
     'JOBS_CONTROLLER_LOGS_DIR',
     # Enums

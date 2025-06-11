@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
+import yaml
 
 from sky import backends
 from sky import core
@@ -142,6 +143,7 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
+    del name  # Unused.
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
@@ -295,14 +297,10 @@ def launch(
             ),
         }
 
-        yaml_path = os.path.join(
-            managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-            f'{name}-{dag_uuid}.yaml')
-        common_utils.fill_template(
-            managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
-            vars_to_fill,
-            output_path=yaml_path)
-        controller_task = task_lib.Task.from_yaml(yaml_path)
+        content = common_utils.fill_template_str(
+            managed_job_constants.JOBS_CONTROLLER_TEMPLATE, vars_to_fill)
+        controller_task = task_lib.Task.from_yaml_config(
+            yaml.safe_load(content))
         controller_task.set_resources(controller_resources)
 
         controller_task.managed_job_dag = dag
