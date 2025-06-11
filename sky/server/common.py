@@ -39,6 +39,7 @@ if typing.TYPE_CHECKING:
     import requests
 
     from sky import dag as dag_lib
+    from sky import models
 else:
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
@@ -419,11 +420,7 @@ def _start_api_server(deploy: bool = False,
                 dashboard_msg += (
                     'Dashboard may be stale when installed from source, '
                     'to rebuild: npm --prefix sky/dashboard install '
-                    '&& npm --prefix sky/dashboard run build\n')
-            dashboard_msg += (
-                f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
-                f'Dashboard: {get_dashboard_url(server_url)}')
-            dashboard_msg += f'{colorama.Style.RESET_ALL}'
+                    '&& npm --prefix sky/dashboard run build')
         logger.info(
             ux_utils.finishing_message(
                 f'SkyPilot API server started. {dashboard_msg}'))
@@ -710,7 +707,7 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
 
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
-                           using_remote_api_server: bool):
+                           using_remote_api_server: bool, user: 'models.User'):
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
@@ -719,10 +716,11 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     skypilot_config.safe_reload_config()
 
     # Reset the client entrypoint and command for the usage message.
-    common_utils.set_client_status(
+    common_utils.set_request_context(
         client_entrypoint=client_entrypoint,
         client_command=client_command,
         using_remote_api_server=using_remote_api_server,
+        user=user,
     )
 
     # Clear cache should be called before reload_logger and usage reset,

@@ -426,7 +426,7 @@ def test_gcp_force_enable_external_ips():
         test_commands,
         f'sky down -y {name}',
         env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_file,
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: skypilot_config_file,
             constants.SKY_API_SERVER_URL_ENV_VAR:
                 sky.server.common.get_server_url()
         })
@@ -650,4 +650,13 @@ def test_private_docker_registry_aws(private_docker_registry_setup: str):
         ],
         f'sky down -y {name}',
     )
+
+
+@pytest.mark.gcp
+def test_helm_deploy_gke(request):
+    helm_version = request.config.getoption('--helm-version')
+    package_name = request.config.getoption('--helm-package')
+    test = smoke_tests_utils.Test('helm_deploy_gke', [
+        f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+    ])
     smoke_tests_utils.run_one_test(test)

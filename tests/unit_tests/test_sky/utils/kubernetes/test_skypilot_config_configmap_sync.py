@@ -147,9 +147,9 @@ class TestConfigMapSync(unittest.TestCase):
                 'patch_configmap_with_config')
     @mock.patch('sky.utils.kubernetes.config_map_utils.'
                 'is_running_in_kubernetes')
-    def test_update_config_no_lock_calls_patch_in_kubernetes(
+    def test_update_api_server_config_no_lock_calls_patch_in_kubernetes(
             self, mock_is_k8s, mock_patch):
-        """Test that update_config_no_lock calls ConfigMap patching in K8s."""
+        """Test that update_api_server_config_no_lock calls ConfigMap patching in K8s."""
         mock_is_k8s.return_value = True
 
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -162,7 +162,7 @@ class TestConfigMapSync(unittest.TestCase):
              mock.patch('sky.skypilot_config._reload_config'):
 
             config = config_utils.Config({'test': 'value'})
-            skypilot_config.update_config_no_lock(config)
+            skypilot_config.update_api_server_config_no_lock(config)
 
             # In Kubernetes, should call both dump_yaml and ConfigMap patching
             mock_patch.assert_called_once_with(config, config_path)
@@ -174,9 +174,9 @@ class TestConfigMapSync(unittest.TestCase):
                 'patch_configmap_with_config')
     @mock.patch('sky.utils.kubernetes.config_map_utils.'
                 'is_running_in_kubernetes')
-    def test_update_config_no_lock_calls_dump_yaml_non_kubernetes(
+    def test_update_api_server_config_no_lock_calls_dump_yaml_non_kubernetes(
             self, mock_is_k8s, mock_patch):
-        """Test that update_config_no_lock calls dump_yaml in non-K8s envs."""
+        """Test that update_api_server_config_no_lock calls dump_yaml in non-K8s envs."""
         mock_is_k8s.return_value = False
 
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -189,7 +189,7 @@ class TestConfigMapSync(unittest.TestCase):
              mock.patch('sky.skypilot_config._reload_config'):
 
             config = config_utils.Config({'test': 'value'})
-            skypilot_config.update_config_no_lock(config)
+            skypilot_config.update_api_server_config_no_lock(config)
 
             # In non-Kubernetes, should call dump_yaml but not ConfigMap patch
             mock_dump_yaml.assert_called_once_with(config_path, dict(config))

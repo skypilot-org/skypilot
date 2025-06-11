@@ -79,6 +79,9 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     # server endpoint on the server side. This avoids the warning at
     # server-side.
     config.pop_nested(('api_server',), default_value=None)
+    # Remove the admin policy, as the policy has been applied on the client
+    # side.
+    config.pop_nested(('admin_policy',), default_value=None)
     return config
 
 
@@ -196,8 +199,10 @@ class LaunchBody(RequestBody):
     task: str
     cluster_name: str
     retry_until_up: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     idle_minutes_to_autostop: Optional[int] = None
     dryrun: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     down: bool = False
     backend: Optional[str] = None
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
@@ -331,6 +336,12 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserUpdateBody(RequestBody):
+    """The request body for the user update endpoint."""
+    user_id: str
+    role: str
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]
@@ -375,6 +386,7 @@ class JobsQueueBody(RequestBody):
     refresh: bool = False
     skip_finished: bool = False
     all_users: bool = False
+    job_ids: Optional[List[int]] = None
 
 
 class JobsCancelBody(RequestBody):

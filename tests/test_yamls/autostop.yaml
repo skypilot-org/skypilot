@@ -1,0 +1,3 @@
+resources:
+  autostop:
+    idle_minutes: 5

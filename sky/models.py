@@ -2,11 +2,17 @@
 
 import collections
 import dataclasses
+import getpass
+import os
 from typing import Any, Dict, Optional
+
+from sky.skylet import constants
+from sky.utils import common_utils
 
 
 @dataclasses.dataclass
 class User:
+    """Dataclass to store user information."""
     # User hash
     id: str
     # Display name of the user
@@ -14,6 +20,19 @@ class User:
 
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
+
+    def to_env_vars(self) -> Dict[str, Any]:
+        return {
+            constants.USER_ID_ENV_VAR: self.id,
+            constants.USER_ENV_VAR: self.name,
+        }
+
+    @classmethod
+    def get_current_user(cls) -> 'User':
+        """Returns the current user."""
+        user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
+        user_hash = common_utils.get_user_hash()
+        return User(id=user_hash, name=user_name)
 
 
 RealtimeGpuAvailability = collections.namedtuple(

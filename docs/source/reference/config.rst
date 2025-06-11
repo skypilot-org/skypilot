@@ -76,9 +76,9 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
-  
-  :ref: `ssh <config-yaml-ssh>`:
-    :ref: `allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+
+  :ref:`ssh <config-yaml-ssh>`:
+    :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
 
@@ -145,6 +145,12 @@ Below is the configuration syntax and some example values. See detailed explanat
       fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+
+  :ref:`rbac <config-yaml-rbac>`:
+    :ref:`default_role <config-yaml-rbac-default-role>`: admin
+
+  :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
+
 
 Fields
 ----------
@@ -1067,8 +1073,10 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+.. _config-yaml-ssh:
+
 ``ssh``
-~~~~~~~~~~~~~~~
+~~~~~~~
 
 Advanced SSH node pool configuration (optional).
 
@@ -1222,6 +1230,51 @@ Example:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
 
+.. _config-yaml-rbac:
+
+``rbac``
+~~~~~~~~
+
+RBAC configuration (optional).
+
+.. _config-yaml-rbac-default-role:
+
+``rbac.default_role``
+~~~~~~~~~~~~~~~~~~~~~
+
+Default role for users (optional).  Either ``admin`` or ``user``.
+
+If not specified, the default role is ``admin``.
+
+Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` is configured.
+
+.. _config-yaml-db:
+
+``db``
+~~~~~~
+
+API Server database configuration (optional).
+
+Specify the database connection string to use for SkyPilot. If not specified,
+SkyPilot will use a SQLite database initialized in the ``~/.sky`` directory.
+
+If a PostgreSQL database URL is specified, SkyPilot will use the database to
+persist API server state.
+
+Currently, managed job controller state is not persisted in remote databases
+even if ``db`` is specified.
+
+.. note::
+
+  If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
+
+  Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
+
+Example:
+
+.. code-block:: yaml
+
+  db: postgresql://postgres@localhost/skypilot
 
 .. toctree::
    :hidden:

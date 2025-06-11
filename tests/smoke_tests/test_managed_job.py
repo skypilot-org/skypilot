@@ -1042,7 +1042,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                  f'sky storage delete {output_storage_name} -y || true; '
                  f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
                 env={
-                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: user_config_path,
+                    skypilot_config.ENV_VAR_GLOBAL_CONFIG: user_config_path,
                     constants.SKY_API_SERVER_URL_ENV_VAR:
                         sky.server.common.get_server_url()
                 },

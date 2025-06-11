@@ -1,6 +1,8 @@
 import os
 import pathlib
 import subprocess
+import tempfile
+import textwrap
 from typing import Sequence
 
 import pytest
@@ -177,9 +179,23 @@ class TestBackwardCompatibility:
     def test_autostop_functionality(self, generic_cloud: str):
         """Test autostop functionality across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
+        task_yaml = textwrap.dedent("""\
+            resources:
+              autostop:
+                idle_minutes: 5
+            """)
+
+        with tempfile.NamedTemporaryFile(prefix='autostop_',
+                                         delete=False,
+                                         mode='w') as f:
+            f.write(task_yaml)
+            yaml_path = f.name
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            # Set intiial autostop in base
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} {yaml_path}',
+            f'sky status | grep {cluster_name} | grep "5m"',
+            # Change the autostop time in current
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(

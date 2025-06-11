@@ -6,7 +6,6 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
-from sky.catalog import constants as service_catalog_constants
 from sky.skylet import constants
 
 
@@ -70,7 +69,7 @@ def _get_single_resources_schema():
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
-    all_clouds = list(service_catalog_constants.ALL_CLOUDS)
+    all_clouds = list(constants.ALL_CLOUDS)
     all_clouds.remove('kubernetes')
     cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
 
@@ -107,8 +106,7 @@ def _get_single_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(
-                    service_catalog_constants.ALL_CLOUDS)
+                'case_insensitive_enum': list(constants.ALL_CLOUDS)
             },
             'region': {
                 'type': 'string',
@@ -1162,7 +1160,7 @@ def get_config_schema():
         'items': {
             'type': 'string',
             'case_insensitive_enum':
-                (list(service_catalog_constants.ALL_CLOUDS) + ['cloudflare'])
+                (list(constants.ALL_CLOUDS) + ['cloudflare'])
         }
     }
 
@@ -1207,10 +1205,21 @@ def get_config_schema():
         }
     }
 
+    rbac_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'default_role': {
+                'type': 'string',
+                'case_insensitive_enum': ['admin', 'user']
+            },
+        },
+    }
+
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(
-        service_catalog_constants.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
     # Create pattern for not supported clouds, i.e.
     # all clouds except gcp, kubernetes, ssh
     not_supported_clouds = [
@@ -1240,6 +1249,15 @@ def get_config_schema():
             'properties': {
                 # Explicit definition for GCP allows both project_id and
                 # disabled
+                'private': {
+                    'type': 'boolean',
+                },
+                'allowed_users': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
@@ -1334,6 +1352,9 @@ def get_config_schema():
             'workspace': {
                 'type': 'string',
             },
+            'db': {
+                'type': 'string',
+            },
             'jobs': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
@@ -1344,6 +1365,7 @@ def get_config_schema():
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
             'provision': provision_configs,
+            'rbac': rbac_schema,
             **cloud_configs,
         },
     }
