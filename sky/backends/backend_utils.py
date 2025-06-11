@@ -325,9 +325,10 @@ def path_size_megabytes(path: str) -> int:
     """
     rsync_command = [f'rsync {command_runner.RSYNC_DISPLAY_OPTION}']
     resolved_path = pathlib.Path(path).expanduser().resolve()
-    excluded_files = get_excluded_files(str(resolved_path))
-    rsync_command.extend(
-        map(lambda x: f'--exclude={shlex.quote(x)}', excluded_files))
+    if resolved_path.is_dir():
+        excluded_files = get_excluded_files(str(resolved_path))
+        rsync_command.extend(
+            map(lambda x: f'--exclude={shlex.quote(x)}', excluded_files))
     rsync_command.append(f'--dry-run {path!r}')
     rsync_command = ' '.join(rsync_command)
 
