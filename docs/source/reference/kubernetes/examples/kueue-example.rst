@@ -212,9 +212,9 @@ To create the cluster and local queues above, save the snippet to ``kueue.yaml``
     kubectl apply -f kueue.yaml
 
 
-The team submits jobs to the local queue ``skypilot-local-queue``.
-The jobs from the team are subject to the quota defined in the cluster queue,
-and the jobs from the team are ordered by their priority.
+Now, jobs can be submitted to the local queue ``skypilot-local-queue``.
+Jobs are subject to the quota defined in the cluster queue,
+and the jobs are ordered by their priority.
 
 .. image:: ../../../images/examples/k8s-with-kueue/one-queue.svg
    :alt: One Cluster Queue Architecture
