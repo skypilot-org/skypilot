@@ -1094,6 +1094,7 @@ def initialize_managed_job_id() -> int:
         return highest_job_id + 1
 
 
+@_init_db
 def atomic_increment_managed_job_id() -> int:
     """Atomically increment and return the next managed job ID.
 
@@ -1118,6 +1119,7 @@ def atomic_increment_managed_job_id() -> int:
         return next_id
 
 
+@_init_db
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
     assert _SQLALCHEMY_ENGINE is not None
