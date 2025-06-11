@@ -627,6 +627,7 @@ def test_multiple_accelerators_unordered_with_default():
 
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_hyperbolic  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
