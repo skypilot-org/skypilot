@@ -457,7 +457,7 @@ def check_server_healthy(
 ) -> Literal[
         # Use an incomplete list of Literals here to enforce raising for other
         # enum values.
-        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH,]:
+        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH]:
     """Check if the API server is healthy.
 
     Args:
@@ -739,17 +739,9 @@ def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
     }
 
 
-<<<<<<< HEAD
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool, user: 'models.User'):
-=======
-def reload_for_new_request(
-    client_entrypoint: Optional[str],
-    client_command: Optional[str],
-    using_remote_api_server: bool,
-):
->>>>>>> 8df8aaa2 (Adds preliminary work on adding port number option)
     """Reload modules, global variables, and usage message for a new request."""
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
