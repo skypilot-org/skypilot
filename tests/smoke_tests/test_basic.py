@@ -449,6 +449,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
         sky.down(name)
 
 
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support autostop and host controllers
 def test_jobs_launch_and_logs(generic_cloud: str):
     # The first `with` is to override the sky api endpoint env if --remote-server
     # is specified, so the test knows it's running on the remote server, thats
