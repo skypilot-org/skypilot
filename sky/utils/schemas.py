@@ -33,7 +33,7 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
-time_pattern = '^[0-9]+([m]|[h]|[d]|[w]|[s]|[min]|[hr]|[day]|[week]|[sec])?$'
+time_pattern = '^[0-9]+([m]|[h]|[d]|[s]|[min]|[hr]|[day]|[sec])?$'
 
 _AUTOSTOP_SCHEMA = {
     'anyOf': [
@@ -45,9 +45,16 @@ _AUTOSTOP_SCHEMA = {
         {
             # Shorthand to set idle_minutes by directly specifying, e.g.
             #   autostop: 5
-            'type': 'string',
-            'pattern': time_pattern,
-            'minimum': 0,
+            'anyOf': [
+                {
+                    'type': 'string',
+                    'pattern': time_pattern,
+                    'minimum': 0,
+                },
+                {
+                    'type': 'integer',
+                }
+            ]
         },
         {
             'type': 'object',

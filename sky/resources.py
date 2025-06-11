@@ -1,6 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import math
+import re
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -36,6 +37,31 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
+}
+
+TIME_UNITS = {
+    's': 1/60,
+    'sec': 1/60,
+    'm': 1,
+    'min': 1,
+    'h': 60,
+    'hr': 60,
+    'd': 24 * 60,
+    'day': 24 * 60,
+}
+
+MEMORY_SIZE_UNITS = {
+    'b': 1,
+    'k': 2**10,
+    'kb': 2**10,
+    'm': 2**20,
+    'mb': 2**20,
+    'g': 2**30,
+    'gb': 2**30,
+    't': 2**40,
+    'tb': 2**40,
+    'p': 2**50,
+    'pb': 2**50,
 }
 
 
@@ -283,12 +309,7 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            disk_size = int(_convert_to_gb(str(disk_size)))
-            if round(float(disk_size)) != disk_size:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'OS disk size must be an integer. Got: {disk_size}.')
-            self._disk_size = int(disk_size)
+            self._disk_size = int(parse_memory_resource(disk_size))
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
@@ -694,9 +715,11 @@ class Resources:
             self._memory = None
             return
 
-        self._memory = _convert_to_gb(str(memory))
+        memory = parse_memory_resource(
+            str(memory), allow_plus=True, allow_x=True
+        )
+        self._memory = memory
         if isinstance(memory, str):
-            memory = _convert_to_gb(memory)
             if memory.endswith(('+', 'x')):
                 # 'x' is used internally for make sure our resources used by
                 # jobs controller (memory: 3x) to have enough memory based on
@@ -712,8 +735,6 @@ class Resources:
                     raise ValueError(
                         f'The "memory" field should be either a number or '
                         f'a string "<number>+". Found: {memory!r}') from None
-        else:
-            memory_gb = float(memory)
 
         if memory_gb <= 0:
             with ux_utils.print_exception_no_traceback():
@@ -858,6 +879,7 @@ class Resources:
             else:
                 volume['attach_mode'] = read_write_mode
             if volume['storage_type'] == network_type:
+                # TODO(@luca): add units to this disk_size as well
                 if ('disk_size' in volume and
                         round(volume['disk_size']) != volume['disk_size']):
                     with ux_utils.print_exception_no_traceback():
@@ -1936,19 +1958,12 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
-        if resources_fields['disk_size'] is not None:
-            disk_size = resources_fields['disk_size']
-            disk_size = _convert_to_gb(str(disk_size))
-            resources_fields['disk_size'] = int(disk_size)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
-        autostop = config.pop('autostop', None)
-        if autostop is not None and isinstance(autostop, str):
-            autostop = _time_to_minutes(autostop)
-        resources_fields['autostop'] = autostop
+        resources_fields['autostop'] = config.pop('autostop', None)
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
@@ -1963,16 +1978,18 @@ class Resources:
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
         if resources_fields['memory'] is not None:
-            memory = resources_fields['memory']
-            memory = str(_convert_to_gb(memory))
-            resources_fields['memory'] = memory
+            resources_fields['memory'] = str(resources_fields['memory'])
         if resources_fields['accelerator_args'] is not None:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
+        if resources_fields['disk_size'] is not None:
+            # although it will end up being an int, we don't know at this point
+            # if it has units or not, so we store it as a string
+            resources_fields['disk_size'] = str(resources_fields['disk_size'])
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
-
+    
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:
         """Returns a yaml-style dict of config for this resource bundle."""
         config = {}
@@ -2234,48 +2251,81 @@ def _maybe_add_docker_prefix_to_image_id(
             image_id_dict[k] = f'docker:{v}'
 
 
-def _convert_to_gb(memory: str) -> str:
-    memory = str(memory)
-    plus = memory.endswith('+')
-    if plus:
-        memory = memory[:-1]
+def _time_to_minutes(time: str, allow_plus: bool = False) -> int:
+    """Convert a time string to minutes.
+    
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+    
+    Returns:
+        Time in minutes as an integer
+    """
+    time_str = str(time)
+    
+    if time_str.isdecimal():
+        # We assume it is already in minutes to maintain backwards
+        # compatibility
+        return int(time_str)
+    
+    time_str = time_str.lower()
+    for unit, multiplier in TIME_UNITS.items():
+        if time_str.endswith(unit):
+            try:
+                value = float(time_str[:-len(unit)])
+                return math.ceil(value * multiplier)
+            except ValueError:
+                raise ValueError(f'Invalid time format: {time}')
+    
+    raise ValueError(f'Invalid time format: {time}')
 
-    memory = memory.upper()
-    if memory.endswith('GB'):
-        memory = str(int(memory[:-2]))
-    elif memory.endswith('MB'):
-        memory = str(math.ceil(int(memory[:-2]) / 1024))
-    elif memory.endswith('TB'):
-        memory = str(math.ceil(int(memory[:-2]) * 1024))
-    elif memory.endswith('KB'):
-        memory = str(math.ceil(int(memory[:-2]) / 1024 / 1024))
-    elif memory.endswith('PB'):
-        memory = str(int(memory[:-2]) * 1024 * 1024)
-    elif memory.endswith('B') and memory[:-1].isdigit():
-        memory = str(math.ceil(int(memory[:-1]) / 1024 / 1024 / 1024))
-    elif not memory.isdigit():
-        raise ValueError(f'Invalid memory format: {memory}')
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          unit: str = 'g',
+                          allow_plus: bool = False,
+                          allow_x: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+    
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
 
-    if plus:
-        memory = f'{memory}+'
-    return memory
-
-def _time_to_minutes(time: str) -> int:
-    if time.endswith('min'):
-        return int(time[:-3])
-    elif time.endswith('m'):
-        return int(time[:-1])
-    elif time.endswith('h'):
-        return int(time[:-1]) * 60
-    elif time.endswith('hr'):
-        return int(time[:-2]) * 60
-    elif time.endswith('d'):
-        return int(time[:-1]) * 24 * 60
-    elif time.endswith('s'):
-        return int(time[:-1]) // 60
-    elif time.endswith('sec'):
-        return int(time[:-3]) // 60
-    elif time.isdecimal():
-        return int(time)
-    else:
-        raise ValueError(f'Invalid time format: {time}')
+    resource_str = str(resource_qty_str)
+    
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(f'Invalid resource quantity string: {resource_str}')
+    
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(f'Invalid resource quantity string: {resource_str}')
+    
+    if resource_str.isdecimal():
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        return f'{resource_str}{plus}{x}'
+    
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = int(resource_str[:-len(mem_unit)])
+                converted_value = math.ceil(
+                    value * multiplier / MEMORY_SIZE_UNITS[unit]
+                )
+                return f'{converted_value}{plus}{x}'
+            except ValueError:
+                continue
+    
+    raise ValueError(f'Invalid memory format: {resource_str}')
