@@ -8,6 +8,7 @@ from sky.setup_files import dependencies
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_REMOTE_WORKDIR_ABS = '/sky/workdir'
 SKY_IGNORE_FILE = '.skyignore'
 GIT_IGNORE_FILE = '.gitignore'
 

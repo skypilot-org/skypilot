@@ -287,7 +287,8 @@ def run_with_log(
 
 def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None,
-                          do_cd_sky_workdir: bool = True) -> str:
+                          do_cd_sky_workdir: bool = True,
+                          ln_sky_workdir_from_abs: bool = False) -> str:
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
@@ -295,9 +296,12 @@ def make_task_bash_script(codegen: str,
     # the ray cluster is started within the runtime env, which may cause the
     # user program to run in that env as well.
     # PYTHONUNBUFFERED is used to disable python output buffering.
-    cd_sky_workdir_cmd = ''
+    sky_workdir_cmd = ''
+    if ln_sky_workdir_from_abs:
+        sky_workdir_cmd += (f'ln -s {constants.SKY_REMOTE_WORKDIR_ABS} '
+                            f'{constants.SKY_REMOTE_WORKDIR}\n')
     if do_cd_sky_workdir:
-        cd_sky_workdir_cmd = f'cd {constants.SKY_REMOTE_WORKDIR}'
+        sky_workdir_cmd += f'cd {constants.SKY_REMOTE_WORKDIR}\n'
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
@@ -306,9 +310,9 @@ def make_task_bash_script(codegen: str,
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
-            export PYTHONUNBUFFERED=1
-            {cd_sky_workdir_cmd}"""),
+            export PYTHONUNBUFFERED=1"""),
     ]
+    script += [sky_workdir_cmd]
     if env_vars is not None:
         for k, v in env_vars.items():
             script.append(f'export {k}={shlex.quote(str(v))}')
@@ -348,10 +352,19 @@ def run_bash_command_with_log(
         docker_file_mounts_mapping: Optional[Dict[str, str]] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
-        if docker_image is not None and remote_setup_file_name is not None:
-            with open(remote_setup_file_name, 'r', encoding='utf-8') as f:
-                bash_command = f'{f.read()}\n{bash_command}'
-        bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
+        ln_sky_workdir_from_abs = False
+        if docker_image is not None:
+            if remote_setup_file_name is not None:
+                with open(remote_setup_file_name, 'r', encoding='utf-8') as f:
+                    bash_command = f'{f.read()}\n{bash_command}'
+            if docker_file_mounts_mapping is not None:
+                if (constants.SKY_REMOTE_WORKDIR_ABS
+                        in docker_file_mounts_mapping.values()):
+                    ln_sky_workdir_from_abs = True
+        bash_command = make_task_bash_script(
+            bash_command,
+            env_vars=env_vars,
+            ln_sky_workdir_from_abs=ln_sky_workdir_from_abs)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
@@ -365,8 +378,10 @@ def run_bash_command_with_log(
             all_mapping = {script_path: script_path_in_docker}
             if docker_file_mounts_mapping is not None:
                 all_mapping.update(docker_file_mounts_mapping)
+            for k, v in all_mapping.items():
+                assert '~' not in v, f'{k} -> {v}'
             mount_args = ' '.join([
-                f'-v {k.replace("~", "$HOME")}:{v.replace("~", "/root")}'
+                f'-v {k.replace("~", "$HOME")}:{v}'
                 for k, v in all_mapping.items()
             ])
             maybe_specify_name = ''
@@ -377,12 +392,16 @@ def run_bash_command_with_log(
                 '\'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\' '
                 f'{docker_image} /bin/bash -i {script_path_in_docker}',
                 do_cd_sky_workdir=False)
-            remove_files_cmd = '\n'.join([f'rm -rf {k}' for k in all_mapping])
+            clean_up_cmd = [f'rm -rf {k}' for k in all_mapping]
+            # It is possible that the docker container is not created, or being
+            # removed by the job cancellation.
+            clean_up_cmd.append(f'docker rm {docker_image_unique_id} '
+                                '> /dev/null 2>&1 || true')
             with tempfile.NamedTemporaryFile('w',
                                              prefix='sky_docker_app_',
                                              delete=False) as docker_fp:
                 docker_fp.write(docker_cmd + '\n')
-                docker_fp.write(remove_files_cmd + '\n')
+                docker_fp.write('\n'.join(clean_up_cmd) + '\n')
                 docker_fp.flush()
                 docker_script_path = docker_fp.name
             inner_command = f'/bin/bash -i {docker_script_path}'

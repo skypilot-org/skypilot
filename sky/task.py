@@ -1105,10 +1105,15 @@ class Task:
             self.target_workdir = (
                 f'{constants.SKY_REMOTE_WORKDIR}_{possible_suffix}')
             self.docker_file_mounts_mapping[
-                self.target_workdir] = constants.SKY_REMOTE_WORKDIR
+                self.target_workdir] = constants.SKY_REMOTE_WORKDIR_ABS
         if self.file_mounts is not None:
             new_mounts = {}
             for target, src in self.file_mounts.items():
+                if '~' in target:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Cannot use ~ in file mount target: {target} '
+                            'when using docker image on VM.')
                 new_target = f'{target}_{possible_suffix}'
                 new_mounts[new_target] = src
                 self.docker_file_mounts_mapping[new_target] = target
