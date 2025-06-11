@@ -4,7 +4,6 @@ from typing import Any, Dict, Union
 from sky.skylet import constants as skylet_constants
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
-JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
 JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
