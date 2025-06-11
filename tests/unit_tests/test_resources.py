@@ -763,3 +763,102 @@ def test_autostop_config():
     assert r.autostop_config.enabled is False  # should remain disabled
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 55
+
+
+def test_disk_size_conversion():
+    """Test disk size conversion to GB."""
+    # Test integer input
+    r = Resources(disk_size=100)
+    assert r.disk_size == 100
+
+    # Test string input with different units
+    r = Resources(disk_size='100GB')
+    assert r.disk_size == 100
+
+    r = Resources(disk_size='1024MB')
+    assert r.disk_size == 1
+
+    r = Resources(disk_size='1TB')
+    assert r.disk_size == 1024
+
+    r = Resources(disk_size='1024KB')
+    assert r.disk_size == 1
+
+    r = Resources(disk_size='1024B')
+    assert r.disk_size == 1
+
+    r = Resources(disk_size='1PB')
+    assert r.disk_size == 1024 * 1024
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(disk_size='invalid')
+
+
+def test_memory_conversion():
+    """Test memory conversion to GB."""
+    # Test integer input
+    r = Resources(memory=8)
+    assert r.memory == '8'
+
+    # Test string input with different units
+    r = Resources(memory='8GB')
+    assert r.memory == '8'
+
+    r = Resources(memory='8192MB')
+    assert r.memory == '8'
+
+    r = Resources(memory='1TB')
+    assert r.memory == '1024'
+
+    r = Resources(memory='8192KB')
+    assert r.memory == '1'
+
+    r = Resources(memory='8192B')
+    assert r.memory == '1'
+
+    r = Resources(memory='1PB')
+    assert r.memory == '1048576'
+
+    # Test with plus suffix
+    r = Resources(memory='8GB+')
+    assert r.memory == '8+'
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(memory='invalid')
+
+
+def test_autostop_time_format():
+    """Test autostop time format parsing."""
+    # Test minutes format
+    r = Resources(autostop='5min')
+    assert r.autostop_config.idle_minutes == 5
+
+    r = Resources(autostop='5m')
+    assert r.autostop_config.idle_minutes == 5
+
+    # Test hours format
+    r = Resources(autostop='2h')
+    assert r.autostop_config.idle_minutes == 120
+
+    r = Resources(autostop='2hr')
+    assert r.autostop_config.idle_minutes == 120
+
+    # Test days format
+    r = Resources(autostop='1d')
+    assert r.autostop_config.idle_minutes == 1440
+
+    r = Resources(autostop='30s')
+    assert r.autostop_config.idle_minutes == 0.5
+
+    r = Resources(autostop='30sec')
+    assert r.autostop_config.idle_minutes == 0.5
+
+    # Test numeric format
+    r = Resources(autostop='60')
+    assert r.autostop_config.idle_minutes == 60
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(autostop='invalid')

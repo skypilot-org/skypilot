@@ -1,5 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
+import math
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -60,7 +61,7 @@ class AutostopConfig:
 
     @classmethod
     def from_yaml_config(
-        cls, config: Union[bool, int, Dict[str, Any], None]
+        cls, config: Union[bool, int, str, Dict[str, Any], None]
     ) -> Optional['AutostopConfig']:
         if isinstance(config, bool):
             if config:
@@ -70,6 +71,9 @@ class AutostopConfig:
 
         if isinstance(config, int):
             return cls(idle_minutes=config, down=False, enabled=True)
+
+        if isinstance(config, str):
+            return cls(idle_minutes=_time_to_minutes(config), down=False, enabled=True)
 
         if isinstance(config, dict):
             # If we have a dict, autostop is enabled. (Only way to disable is
@@ -123,7 +127,7 @@ class Resources:
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
-        autostop: Union[bool, int, Dict[str, Any], None] = None,
+        autostop: Union[bool, int, str, Dict[str, Any], None] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
@@ -279,7 +283,8 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            if round(disk_size) != disk_size:
+            disk_size = int(_convert_to_gb(str(disk_size)))
+            if round(float(disk_size)) != disk_size:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'OS disk size must be an integer. Got: {disk_size}.')
@@ -689,8 +694,9 @@ class Resources:
             self._memory = None
             return
 
-        self._memory = str(memory)
+        self._memory = _convert_to_gb(str(memory))
         if isinstance(memory, str):
+            memory = _convert_to_gb(memory)
             if memory.endswith(('+', 'x')):
                 # 'x' is used internally for make sure our resources used by
                 # jobs controller (memory: 3x) to have enough memory based on
@@ -796,7 +802,7 @@ class Resources:
 
     def _set_autostop_config(
         self,
-        autostop: Union[bool, int, Dict[str, Any], None],
+        autostop: Union[bool, int, str, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
 
@@ -1940,23 +1946,8 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         autostop = config.pop('autostop', None)
-        if autostop is not None:
-            if autostop.endswith('min') or autostop.endswith('m'):
-                autostop = str(float(''.join(filter(str.isdigit, autostop))))
-            elif autostop.endswith('h') or autostop.endswith('hr'):
-                autostop = str(
-                    float(''.join(filter(str.isdigit, autostop))) * 60)
-            elif autostop.endswith('d') or autostop.endswith('day'):
-                autostop = str(
-                    float(''.join(filter(str.isdigit, autostop))) * 60 * 24)
-            elif autostop.endswith('w') or autostop.endswith('week'):
-                autostop = str(
-                    float(''.join(filter(str.isdigit, autostop))) * 60 * 24 * 7)
-            elif autostop.endswith('s') or autostop.endswith('sec'):
-                autostop = str(
-                    float(''.join(filter(str.isdigit, autostop))) / 60)
-            else:
-                autostop = str(float(autostop))
+        if autostop is not None and isinstance(autostop, str):
+            autostop = _time_to_minutes(autostop)
         resources_fields['autostop'] = autostop
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
@@ -2244,6 +2235,7 @@ def _maybe_add_docker_prefix_to_image_id(
 
 
 def _convert_to_gb(memory: str) -> str:
+    memory = str(memory)
     plus = memory.endswith('+')
     if plus:
         memory = memory[:-1]
@@ -2252,18 +2244,38 @@ def _convert_to_gb(memory: str) -> str:
     if memory.endswith('GB'):
         memory = str(int(memory[:-2]))
     elif memory.endswith('MB'):
-        memory = str(int(memory[:-2]) // 1024)
+        memory = str(math.ceil(int(memory[:-2]) / 1024))
     elif memory.endswith('TB'):
-        memory = str(int(memory[:-2]) * 1024)
+        memory = str(math.ceil(int(memory[:-2]) * 1024))
     elif memory.endswith('KB'):
-        memory = str(int(memory[:-2]) // 1024 // 1024)
-    elif memory.endswith('B'):
-        memory = str(int(memory[:-1]) // 1024 // 1024 // 1024)
+        memory = str(math.ceil(int(memory[:-2]) / 1024 / 1024))
     elif memory.endswith('PB'):
         memory = str(int(memory[:-2]) * 1024 * 1024)
+    elif memory.endswith('B') and memory[:-1].isdigit():
+        memory = str(math.ceil(int(memory[:-1]) / 1024 / 1024 / 1024))
     elif not memory.isdigit():
         raise ValueError(f'Invalid memory format: {memory}')
 
     if plus:
         memory = f'{memory}+'
     return memory
+
+def _time_to_minutes(time: str) -> int:
+    if time.endswith('min'):
+        return int(time[:-3])
+    elif time.endswith('m'):
+        return int(time[:-1])
+    elif time.endswith('h'):
+        return int(time[:-1]) * 60
+    elif time.endswith('hr'):
+        return int(time[:-2]) * 60
+    elif time.endswith('d'):
+        return int(time[:-1]) * 24 * 60
+    elif time.endswith('s'):
+        return int(time[:-1]) // 60
+    elif time.endswith('sec'):
+        return int(time[:-3]) // 60
+    elif time.isdecimal():
+        return int(time)
+    else:
+        raise ValueError(f'Invalid time format: {time}')
