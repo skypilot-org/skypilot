@@ -4199,7 +4199,7 @@ def jobs():
               type=click.IntRange(0, 1000),
               default=None,
               show_default=True,
-              help=('Job priority from 0 to 1000. A lower number is higher '
+              help=('Job priority from 0 to 1000. A higher number is higher '
                     'priority. Default is 500.'))
 @click.option(
     '--detach-run',

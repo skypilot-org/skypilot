@@ -29,6 +29,7 @@ from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
 from common_test_fixtures import mock_services_one_service
 from common_test_fixtures import mock_stream_utils
+from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
