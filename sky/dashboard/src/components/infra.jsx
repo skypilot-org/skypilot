@@ -319,8 +319,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-lg font-semibold">Available GPUs</h4>
-            {/* Add Grafana link button for in-cluster contexts when grafana_url is configured */}
-            {contextName === 'in-cluster' && window['SKYPILOT_GRAFANA_URL'] && (
+            {/* Add Grafana link button for in-cluster contexts when grafana_url is configured TODO(romilb): Add contextName === 'in-cluster' condition check later.*/}
+            {window['SKYPILOT_GRAFANA_URL'] && (
               <button
                 // TODO(aylei): make the dashboard path stable
                 onClick={() =>
@@ -436,6 +436,56 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </>
+          )}
+
+          {/* GPU Metrics Section */}
+          {window['SKYPILOT_GRAFANA_URL'] && nodesInContext && nodesInContext.length > 0 && (
+            <>
+              <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* GPU Utilization */}
+                <div className="bg-white rounded-md">
+                  <div className="p-2">
+                    <iframe
+                      src={`${window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`}/d-solo/nvidia-dcgm-dashboard/better-nvidia-dcgm-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=$__all&var-gpu=$__all&refresh=5s&theme=light&panelId=6&__feature.dashboardSceneSolo`}
+                      width="100%"
+                      height="400"
+                      frameBorder="0"
+                      title="GPU Utilization"
+                      className="rounded"
+                    />
+                  </div>
+                </div>
+
+                {/* GPU Memory */}
+                <div className="bg-white rounded-md">
+                  <div className="p-2">
+                    <iframe
+                      src={`${window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`}/d-solo/nvidia-dcgm-dashboard/better-nvidia-dcgm-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=$__all&var-gpu=$__all&refresh=5s&theme=light&panelId=18&__feature.dashboardSceneSolo`}
+                      width="100%"
+                      height="400"
+                      frameBorder="0"
+                      title="GPU Memory"
+                      className="rounded"
+                    />
+                  </div>
+                </div>
+
+                {/* GPU Power Consumption */}
+                <div className="bg-white rounded-md">
+                  <div className="p-2">
+                    <iframe
+                      src={`${window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`}/d-solo/nvidia-dcgm-dashboard/better-nvidia-dcgm-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=$__all&var-gpu=$__all&refresh=5s&theme=light&panelId=10&__feature.dashboardSceneSolo`}
+                      width="100%"
+                      height="400"
+                      frameBorder="0"
+                      title="GPU Power Consumption"
+                      className="rounded"
+                    />
+                  </div>
+                </div>
               </div>
             </>
           )}
