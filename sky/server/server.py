@@ -110,6 +110,37 @@ def _basic_auth_401_response(content: str):
         content=content)
 
 
+async def _override_user_info_in_request_body(request: fastapi.Request,
+                                              auth_user: Optional[models.User]):
+    body = await request.body()
+    if auth_user and body:
+        try:
+            original_json = await request.json()
+        except json.JSONDecodeError as e:
+            logger.error(f'Error parsing request JSON: {e}')
+        else:
+            logger.debug(f'Overriding user for {request.state.request_id}: '
+                         f'{auth_user.name}, {auth_user.id}')
+            if 'env_vars' in original_json:
+                if isinstance(original_json.get('env_vars'), dict):
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
+                else:
+                    logger.warning(
+                        f'"env_vars" in request body is not a dictionary '
+                        f'for request {request.state.request_id}. '
+                        'Skipping user info injection into body.')
+            else:
+                original_json['env_vars'] = {}
+                original_json['env_vars'][
+                    constants.USER_ID_ENV_VAR] = auth_user.id
+                original_json['env_vars'][
+                    constants.USER_ENV_VAR] = auth_user.name
+            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+
+
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -191,8 +222,8 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if (username_encoded == db_username_encoded and user.password
                     == hashlib.sha256(password.encode()).hexdigest()):
                 valid_user = True
-                if request.state.auth_user is None:
-                    request.state.auth_user = user
+                request.state.auth_user = user
+                await _override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
@@ -219,33 +250,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         else:
             request.state.auth_user = None
 
-        body = await request.body()
-        if auth_user and body:
-            try:
-                original_json = await request.json()
-            except json.JSONDecodeError as e:
-                logger.error(f'Error parsing request JSON: {e}')
-            else:
-                logger.debug(f'Overriding user for {request.state.request_id}: '
-                             f'{auth_user.name}, {auth_user.id}')
-                if 'env_vars' in original_json:
-                    if isinstance(original_json.get('env_vars'), dict):
-                        original_json['env_vars'][
-                            constants.USER_ID_ENV_VAR] = auth_user.id
-                        original_json['env_vars'][
-                            constants.USER_ENV_VAR] = auth_user.name
-                    else:
-                        logger.warning(
-                            f'"env_vars" in request body is not a dictionary '
-                            f'for request {request.state.request_id}. '
-                            'Skipping user info injection into body.')
-                else:
-                    original_json['env_vars'] = {}
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
-                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        await _override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 

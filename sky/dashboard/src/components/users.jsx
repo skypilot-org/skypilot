@@ -38,6 +38,14 @@ import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import { apiClient } from '@/data/connectors/client';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -86,9 +94,68 @@ export function Users() {
     role: 'user',
   });
   const [creating, setCreating] = useState(false);
+  const [permissionDenialState, setPermissionDenialState] = useState({
+    open: false,
+    message: '',
+    userName: '',
+  });
+  const [userRoleCache, setUserRoleCache] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(false);
+
+  const getUserRole = async () => {
+    if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
+      return userRoleCache;
+    }
+
+    setRoleLoading(true);
+    try {
+      const response = await apiClient.get(`/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const roleData = {
+        role: data.role,
+        name: data.name,
+        timestamp: Date.now(),
+      };
+      setUserRoleCache(roleData);
+      setRoleLoading(false);
+      return roleData;
+    } catch (error) {
+      setRoleLoading(false);
+      throw error;
+    }
+  };
+
+  const checkPermissionAndAct = async (action, actionCallback) => {
+    try {
+      const roleData = await getUserRole();
+
+      if (roleData.role !== 'admin') {
+        setPermissionDenialState({
+          open: true,
+          message: action,
+          userName: roleData.name.toLowerCase(),
+        });
+        return false;
+      }
+
+      actionCallback();
+      return true;
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      setPermissionDenialState({
+        open: true,
+        message: `Error: ${error.message}`,
+        userName: '',
+      });
+      return false;
+    }
+  };
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
@@ -149,12 +216,9 @@ export function Users() {
           </button>
           <button
             onClick={async () => {
-              const isAdmin = await checkIsAdmin();
-              if (!isAdmin) {
-                alert('Only admin can create users.');
-                return;
-              }
-              setShowCreateUser(true);
+              await checkPermissionAndAct('cannot create users', () => {
+                setShowCreateUser(true);
+              });
             }}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1"
             title="Create User"
@@ -165,8 +229,10 @@ export function Users() {
       </div>
       <UsersTable
         refreshInterval={REFRESH_INTERVAL}
-        setLoading={setLoading} // Pass setLoading to UsersTable
+        setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        checkPermissionAndAct={checkPermissionAndAct}
+        roleLoading={roleLoading}
       />
       {showCreateUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
@@ -235,11 +301,60 @@ export function Users() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={permissionDenialState.open}
+        onOpenChange={(open) =>
+          setPermissionDenialState((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent className="sm:max-w-md transition-all duration-200 ease-in-out">
+          <DialogHeader>
+            <DialogTitle>Permission Denied</DialogTitle>
+            <DialogDescription>
+              {roleLoading ? (
+                <div className="flex items-center py-2">
+                  <CircularProgress size={16} className="mr-2" />
+                  <span>Checking permissions...</span>
+                </div>
+              ) : (
+                <>
+                  {permissionDenialState.userName ? (
+                    <>
+                      {permissionDenialState.userName} is logged in as non-admin
+                      and {permissionDenialState.message}.
+                    </>
+                  ) : (
+                    permissionDenialState.message
+                  )}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setPermissionDenialState((prev) => ({ ...prev, open: false }))
+              }
+              disabled={roleLoading}
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
 
-function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
+function UsersTable({
+  refreshInterval,
+  setLoading,
+  refreshDataRef,
+  checkPermissionAndAct,
+  roleLoading,
+}) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
@@ -379,20 +494,10 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   };
 
   const handleEditClick = async (userId, currentRole) => {
-    try {
-      // Get current user's role first
-      const isAdmin = await checkIsAdmin();
-      if (!isAdmin) {
-        alert('Only admin can edit user role.');
-        return;
-      }
-
+    await checkPermissionAndAct('cannot edit user role', () => {
       setEditingUserId(userId);
       setCurrentEditingRole(currentRole);
-    } catch (error) {
-      console.error('Failed to check user role:', error);
-      alert(`Error: ${error.message}`);
-    }
+    });
   };
 
   const handleCancelEdit = () => {
@@ -447,27 +552,23 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
   };
 
   const handleDeleteUser = async (userId) => {
-    // Check the user role
-    const isAdmin = await checkIsAdmin();
-    if (!isAdmin) {
-      alert('Only admin can delete users.');
-      return;
-    }
-    if (!window.confirm('Are you sure you want to delete this user?')) return;
-    try {
-      const response = await apiClient.post('/users/delete', {
-        user_id: userId,
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to delete user');
+    await checkPermissionAndAct('cannot delete users', async () => {
+      if (!window.confirm('Are you sure you want to delete this user?')) return;
+      try {
+        const response = await apiClient.post('/users/delete', {
+          user_id: userId,
+        });
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to delete user');
+        }
+        alert('User deleted successfully.');
+        dashboardCache.invalidate(getUsers);
+        await fetchDataAndProcess(true);
+      } catch (error) {
+        alert(`Error deleting user: ${error.message}`);
       }
-      alert('User deleted successfully.');
-      dashboardCache.invalidate(getUsers);
-      await fetchDataAndProcess(true);
-    } catch (error) {
-      alert(`Error deleting user: ${error.message}`);
-    }
+    });
   };
 
   if (isLoading && usersWithCounts.length === 0 && !hasInitiallyLoaded) {
@@ -621,13 +722,19 @@ function UsersTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableCell className="relative">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       // Check permissions
                       if (
                         currentUserRole !== 'admin' &&
                         user.userId !== currentUserId
                       ) {
-                        alert('Only admin can reset password for other users.');
+                        await checkPermissionAndAct(
+                          'cannot reset password for other users',
+                          () => {
+                            setResetUserId(user.userId);
+                            setResetPassword('');
+                          }
+                        );
                         return;
                       }
                       setResetUserId(user.userId);
@@ -715,4 +822,6 @@ UsersTable.propTypes = {
   refreshDataRef: PropTypes.shape({
     current: PropTypes.func,
   }).isRequired,
+  checkPermissionAndAct: PropTypes.func.isRequired,
+  roleLoading: PropTypes.bool.isRequired,
 };
