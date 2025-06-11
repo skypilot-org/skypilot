@@ -355,6 +355,8 @@ def _start_api_server(deploy: bool = False,
         if foreground:
             # Replaces the current process with the API server
             os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+            if enable_basic_auth:
+                os.environ[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)

@@ -13,6 +13,20 @@ apiService:
     # echo "Installing admin policy"
     # pip install git+https://github.com/michaelvll/admin-policy-examples
 
+  # Initial basic auth credentials for the API server
+  # The user in the credentials will be used to create a new admin user in the API server,
+  # and the password can be updated by the user in the Dashboard.
+  # If basic auth is enabled in API server, the basic auth configuration
+  # `ingress.authCredentials` and `ingress.authSecret` in the ingress will be ignored.
+
+  # To enable basic auth in API server, you need to set `basicAuthSecret` or `basicAuthCredentials`
+  # If `basicAuthCredentials` is set, it will be used to create a new secret with the credentials
+  # If `basicAuthSecret` is set, it will be used to mount the secret to the API server
+  # If both are set, `basicAuthSecret` will be used
+  initialBasicAuthCredentials: {}
+    # username: username
+    # password: password
+  initialBasicAuthSecret: null
 
   # Set ~/.sky/config.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
