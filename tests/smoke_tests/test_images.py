@@ -612,34 +612,43 @@ def private_docker_registry_setup(request):
     'private_docker_registry_setup,cloud_provider',
     [
         # AWS with docker.io registry
-        # This is a test account with only read access to the private registry,
-        # should be fine to include in public repo.
         ({
-            'docker_username': 'skypilottest',
-            'docker_password': 'dckr_pat_fHDX_pX24yxwMQlUegA7R73M8KM',
-            'docker_server': 'docker.io',
-            'full_image_name': 'skypilottest/skypilot-private-test:latest'
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_SERVER'),
+            'full_image_name':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME')
         }, 'aws'),
         # GCP with Artifact Registry
-        (
-            {
-                'docker_username': '',  # Empty string for automatic IAM authentication
-                'docker_password': '',  # Empty string for automatic IAM authentication
-                'docker_server': 'us-docker.pkg.dev',
-                'full_image_name': 'sky-dev-465/sky-test-private-image/skypilot-private-test:latest'
-            },
-            'gcp'),
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_SERVER'),
+            'full_image_name': os.environ.get(
+                'PRIVATE_REGISTRY_TEST_GCP_DOCKER_FULL_IMAGE_NAME')
+        }, 'gcp'),
         # AWS with ECR
-        (
-            {
-                'docker_username': 'AWS',
-                'docker_password': '',  # This should be the ECR token from aws ecr get-login-password
-                'docker_server': '195275664570.dkr.ecr.us-east-1.amazonaws.com',
-                'full_image_name': '195275664570.dkr.ecr.us-east-1.amazonaws.com/skypilot-private-test:latest'
-            },
-            'aws'),
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_SERVER'),
+            'full_image_name':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_FULL_IMAGE_NAME')
+        }, 'aws'),
     ],
     indirect=['private_docker_registry_setup'])
+@pytest.mark.skipif(
+    not os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME'),
+    reason='Skipping test as docker registry environment variables are not set')
 def test_private_docker_registry(generic_cloud,
                                  private_docker_registry_setup: str,
                                  cloud_provider: str):
