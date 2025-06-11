@@ -306,11 +306,11 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
   // Function to open Grafana
-  const openGrafana = () => {
+  const openGrafana = (path = '/') => {
     // Use the configured Grafana URL if available, otherwise construct default
     const grafanaUrl =
       window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
-    window.open(grafanaUrl, '_blank');
+    window.open(`${grafanaUrl}${path}`, '_blank');
   };
 
   return (
@@ -322,7 +322,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
             {/* Add Grafana link button for in-cluster contexts when grafana_url is configured */}
             {contextName === 'in-cluster' && window['SKYPILOT_GRAFANA_URL'] && (
               <button
-                onClick={openGrafana}
+                // TODO(aylei): make the dashboard path stable
+                onClick={() => openGrafana('/d/Oxed_c6Wz/nvidia-dcgm-exporter-dashboard')}
                 className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue"
               >
                 <svg
