@@ -9,7 +9,11 @@ from typing import List
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
+from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy import orm
+from sqlalchemy import text as sqlalchemy_text
 
+from sky import global_user_state
 from sky import sky_logging
 
 # Initialize logger at the top level
@@ -502,4 +506,48 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield
+
+
+@pytest.fixture(autouse=True)
+def patch_db_create_for_parallel_tests(request, monkeypatch):
+    """Mock Base.metadata.create_all with file lock to prevent race conditions in parallel execution."""
+
+    # Store the original create_all method
+    original_create_all = global_user_state.Base.metadata.create_all
+
+    def create_all_with_lock(bind=None, **kwargs):
+        """Wrapper for Base.metadata.create_all with file lock to prevent race conditions."""
+        # Use file lock to ensure only one process creates tables at a time
+        # Use a constant path in ~/.sky so all test processes can see the same lock file
+        lock_file_path = os.path.expanduser('~/.sky/test_db_create_all.lock')
+
+        with open(lock_file_path, 'w') as lock_file:
+            try:
+                # Acquire exclusive lock - blocks other processes until we're done
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                # Check if tables already exist before trying to create them
+                tables_exist = False
+                try:
+                    with orm.Session(bind) as session:
+                        session.execute(
+                            sqlalchemy_text('SELECT 1 FROM config LIMIT 1'))
+                    tables_exist = True
+                except sqlalchemy_exc.OperationalError:
+                    # Tables don't exist, proceed with creation
+                    pass
+
+                # Create all tables only if they don't exist
+                if not tables_exist:
+                    original_create_all(bind=bind, **kwargs)
+
+            finally:
+                # Lock is automatically released when file is closed
+                pass
+
+    # Patch the method
+    monkeypatch.setattr(global_user_state.Base.metadata, 'create_all',
+                        create_all_with_lock)
+
     yield
