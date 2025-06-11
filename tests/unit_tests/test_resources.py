@@ -781,11 +781,11 @@ def test_disk_size_conversion():
     r = Resources(disk_size='1TB')
     assert r.disk_size == 1024
 
-    r = Resources(disk_size='1024KB')
-    assert r.disk_size == 1
+    with pytest.raises(ValueError):
+        Resources(disk_size='1024KB')
 
-    r = Resources(disk_size='1024B')
-    assert r.disk_size == 1
+    with pytest.raises(ValueError):
+        Resources(disk_size='1024B')
 
     r = Resources(disk_size='1PB')
     assert r.disk_size == 1024 * 1024
@@ -808,14 +808,14 @@ def test_memory_conversion():
     r = Resources(memory='8192MB')
     assert r.memory == '8'
 
-    r = Resources(memory='1TB')
-    assert r.memory == '1024'
+    r = Resources(memory='1TB+')
+    assert r.memory == '1024+'
 
-    r = Resources(memory='8192KB')
-    assert r.memory == '1'
+    with pytest.raises(ValueError):
+        Resources(memory='8192KB')
 
-    r = Resources(memory='8192B')
-    assert r.memory == '1'
+    with pytest.raises(ValueError):
+        Resources(memory='8192B')
 
     r = Resources(memory='1PB')
     assert r.memory == '1048576'

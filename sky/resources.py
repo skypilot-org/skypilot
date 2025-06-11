@@ -2281,7 +2281,8 @@ def _time_to_minutes(time: str, allow_plus: bool = False) -> int:
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
                           unit: str = 'g',
                           allow_plus: bool = False,
-                          allow_x: bool = False) -> str:
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
     """Returns memory size in chosen units given a resource quantity string.
     
     Args:
@@ -2321,10 +2322,13 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
         if resource_str.endswith(mem_unit):
             try:
                 value = int(resource_str[:-len(mem_unit)])
-                converted_value = math.ceil(
-                    value * multiplier / MEMORY_SIZE_UNITS[unit]
-                )
-                return f'{converted_value}{plus}{x}'
+                converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
+                if not allow_rounding and int(converted) != converted:
+                    raise ValueError(f'Invalid memory format: {resource_str}')
+                # math.ceil should equal int() if allowed_rounding is False
+                # otherwise, we ceil so we don't under provision
+                converted = math.ceil(converted)
+                return f'{converted}{plus}{x}'
             except ValueError:
                 continue
     
