@@ -457,3 +457,11 @@ def test_restful_policy_server(add_example_policy_paths, task):
         assert 'app' in config.get_nested(
             ('kubernetes', 'custom_metadata', 'labels'),
             {}), ('label should be set')
+
+    with _policy_server('DoNothingPolicy') as url, \
+        tempfile.NamedTemporaryFile() as temp_file:
+        temp_file.write(f'admin_policy: {url}/set_autostop'.encode('utf-8'))
+        temp_file.flush()
+
+        task, _ = _load_task_and_apply_policy(task, temp_file.name)
+        assert task.resources[0].autostop_config.idle_minutes == 10

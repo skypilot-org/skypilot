@@ -23,7 +23,7 @@ SkyPilot has a :ref:`client-server architecture <sky-api-server>`, where a centr
 
 To deploy a admin policy, here are the steps:
 
-1. :ref:`Implement the policy in a Python package <implement-admin-policy>` or :ref:`serve the policy in a RESTful server <serve-admin-policy-in-server>`.
+1. :ref:`Implement the policy in a Python package <implement-admin-policy>` or :ref:`host the policy as a RESTful server <host-admin-policy-as-server>`.
 2. Deploy the policy at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`.
 
 .. hint::
@@ -109,14 +109,26 @@ If you have a :ref:`centralized API server <sky-api-server>` deployed, you can e
 
         admin_policy: mypackage.subpackage.MyPolicy
 
-.. _serve-admin-policy-in-server:
+.. _host-admin-policy-as-server:
 
-Serve admin policy in a RESTful server
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Host admin policy as a RESTful server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can serve an admin policy in a RESTful API server and configure the SkyPilot to call the RESTful url to apply the policy.
+You can host an admin policy as a RESTful API server and configure the SkyPilot to call the RESTful url to apply the policy.
 
-The server can be implemented in any language as long as it follows the API convention:
+It is recommended to :ref:`inherit your implementation from the AdminPolicy interface <implement-admin-policy>` to ensure the request and response body are correctly typed. Here is an example of implementing a policy server using Python and FastAPI:
+
+.. dropdown:: Example Policy Server
+
+    .. literalinclude:: ../../../examples/admin_policy/example_server/policy_server.py
+        :language: python
+        :caption: `Policy Server <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_server/policy_server.py>`_
+
+.. note::
+
+    Since the policy server is typically centralized, hosting admin policies that contains local operations (e.g. :ref:`use-local-gcp-credentials-policy`) at the policy server may lead to unexpected behavior and thus is not recommended.
+
+Optionally, the server can also be implemented in other languages as long as it follows the API convention:
 
 .. dropdown:: The Admin Policy API
 
@@ -158,18 +170,6 @@ The server can be implemented in any language as long as it follows the API conv
           },
           "skypilot_config": {}
         }
-
-If you are going to implement the server in Python, it is recommended to :ref:`inherit your implementation from the AdminPolicy interface <implement-admin-policy>` to ensure the request and response body are correctly typed. Here is an example of implementing a policy server using Python and FastAPI:
-
-.. dropdown:: Example Policy Server
-
-    .. literalinclude:: ../../../examples/admin_policy/example_server/policy_server.py
-        :language: python
-        :caption: `Policy Server <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_server/policy_server.py>`_
-
-.. note::
-
-    Since the policy server is typically centralized, hosting admin policies that contains local operations (e.g. :ref:`use-local-gcp-credentials-policy`) at the policy server may lead to unexpected behavior and thus is not recommended.
 
 .. _implement-admin-policy:
 

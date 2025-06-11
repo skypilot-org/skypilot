@@ -16,16 +16,35 @@ app = FastAPI(title="Example Admin Policy Server", version="1.0.0")
 
 @app.post('/')
 async def apply_policy(request: Request) -> JSONResponse:
-    """Apply admin policy to a user request"""
+    """Apply an admin policy loaded from external package to a user request"""
     # Decode from request body
     json_data = await request.json()
-    print(json_data)
     user_request = sky.UserRequest.decode(json_data)
 
-    # Apply validation and mutation
+    # Apply validation and mutation using the loaded policy
     mutated_request = request.app.state.policy_impl.apply(user_request)
+    return JSONResponse(content=mutated_request.encode())
 
-    print(mutated_request.encode())
+
+class SetAutostoPolicy(sky.AdminPolicy):
+    """Example: implement a policy at server."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        task = user_request.task
+        for r in task.resources:
+            r.override_autostop_config(idle_minutes=10)
+        return sky.MutatedUserRequest(
+            task=task, skypilot_config=user_request.skypilot_config)
+
+
+@app.post('/set_autostop')
+async def set_autostop(request: Request) -> JSONResponse:
+    """Example: apply the above policy at the API handler."""
+    json_data = await request.json()
+    user_request = sky.UserRequest.decode(json_data)
+    mutated_request = SetAutostoPolicy.validate_and_mutate(user_request)
     return JSONResponse(content=mutated_request.encode())
 
 
