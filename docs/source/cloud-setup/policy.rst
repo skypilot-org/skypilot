@@ -19,41 +19,66 @@ Example usage:
 Overview
 --------
 
-Admin policies are :ref:`implemented in Python packages <implement-admin-policy>` first, then get distributed and applied at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`. If both are set, the policy at client-side will be applied first, the mutated tasks and SkyPilot config will then be processed by the policy at server-side.
+SkyPilot has a :ref:`client-server architecture <sky-api-server>`, where a centralized API server can be deployed and users can interact with the server through a client.
+
+To deploy a admin policy, here are the steps:
+
+1. :ref:`Implement the policy in a Python package <implement-admin-policy>`.
+2. [Optional] Make the policy a server. TODO: refer to a section
+3. :ref:`Deploy the policy at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`.
+
+.. hint::
+
+    If admin policy is set at both client-side and server-side, the policy at client-side will be applied first, the mutated tasks and SkyPilot config will then be processed by the policy at server-side.
+
 
 .. _client-side-admin-policy:
 
 Client-side
 ~~~~~~~~~~~
 
-If you want the policy get applied only on your local machine or you don't have a :ref:`centralized API server <sky-api-server>` deployed, you can apply the policy at the client-side.
+If you want the policy get applied you can apply the policy at the client-side.
 
-First, install the Python package that implements the policy:
+Admin policies can be configured with either a Python package or a remote URL.
 
-.. code-block:: bash
+.. tab-set::
 
-    pip install mypackage.subpackage
+  .. tab-item:: Remote URL
+  
+    Set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to the hosted policy URL.
+  
+    .. code-block:: yaml
+  
+      admin_policy: https://example.com/policy
 
-Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to the path of the Python package that implements the policy.
+  .. tab-item:: Python Package
 
-.. code-block:: yaml
-
-    admin_policy: mypackage.subpackage.MyPolicy
-
-Optionally, you can also apply different policies in different projects by leveraging the :ref:`layered config <config-sources-and-overrides>`, e.g. set a different policy in ``$pwd/.sky.yaml`` for the current project:
-
-.. code-block:: yaml
-
-    admin_policy: mypackage.subpackage.AnotherPolicy
-
-.. hint::
-
-    SkyPilot loads the policy from the given package in the same Python environment.
-    You can test the existence of the policy by running:
+    First, install the Python package that implements the policy:
 
     .. code-block:: bash
 
-        python -c "from mypackage.subpackage import MyPolicy"
+        pip install mypackage.subpackage
+
+    Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to the path of the Python package that implements the policy.
+
+    .. code-block:: yaml
+
+        admin_policy: mypackage.subpackage.MyPolicy
+
+    Optionally, you can also apply different policies in different projects by leveraging the :ref:`layered config <config-sources-and-overrides>`, e.g. set a different policy in ``$pwd/.sky.yaml`` for the current project:
+
+    .. code-block:: yaml
+
+        admin_policy: mypackage.subpackage.AnotherPolicy
+
+    .. hint::
+
+        SkyPilot loads the policy from the given package in the same Python environment.
+        You can test the existence of the policy by running:
+
+        .. code-block:: bash
+
+            python -c "from mypackage.subpackage import MyPolicy"
 
 .. _server-side-admin-policy:
 
