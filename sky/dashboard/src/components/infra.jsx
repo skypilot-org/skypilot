@@ -331,7 +331,14 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
       
       for (const endpoint of endpoints) {
         try {
-          const response = await fetch(`${grafanaUrl}${endpoint}`);
+          const response = await fetch(`${grafanaUrl}${endpoint}`, {
+            method: 'GET',
+            credentials: 'include', // Include cookies and basic auth credentials
+            headers: {
+              'Accept': 'application/json',
+            }
+          });
+          
           if (response.ok) {
             const data = await response.json();
             if (data.data && data.data.length > 0) {
@@ -339,6 +346,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
               console.log(`Successfully fetched hosts from ${endpoint}:`, data.data);
               break;
             }
+          } else {
+            console.log(`HTTP ${response.status} from ${endpoint}: ${response.statusText}`);
           }
         } catch (error) {
           console.log(`Failed to fetch from ${endpoint}:`, error);
