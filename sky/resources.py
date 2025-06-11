@@ -1524,11 +1524,18 @@ class Resources:
         return self.cloud.get_reservations_available_resources(
             self.instance_type, self.region, self.zone, specific_reservations)
 
+    def docker_image_on_no_image_cluster(self,
+                                         other: 'Resources') -> Optional[str]:
+        if self.extract_docker_image() is not None and other.image_id is None:
+            return self.extract_docker_image()
+        return None
+
     def less_demanding_than(
         self,
         other: Union[List['Resources'], 'Resources'],
         requested_num_nodes: int = 1,
         check_ports: bool = False,
+        enable_docker_image_on_no_image_cluster: bool = False,
     ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
@@ -1557,20 +1564,24 @@ class Resources:
             return False
         # self.zone <= other.zone
 
-        if self.image_id is not None:
-            if other.image_id is None:
-                return False
-            if other.region is None:
-                # Current image_id should be a subset of other.image_id
-                if not self.image_id.items() <= other.image_id.items():
+        # Only do the image_id check if this is not a
+        # docker image on a no image cluster.
+        if not (self.docker_image_on_no_image_cluster(other) is not None and
+                enable_docker_image_on_no_image_cluster):
+            if self.image_id is not None:
+                if other.image_id is None:
                     return False
-            else:
-                this_image = (self.image_id.get(other.region) or
-                              self.image_id.get(None))
-                other_image = (other.image_id.get(other.region) or
-                               other.image_id.get(None))
-                if this_image != other_image:
-                    return False
+                if other.region is None:
+                    # Current image_id should be a subset of other.image_id
+                    if not self.image_id.items() <= other.image_id.items():
+                        return False
+                else:
+                    this_image = (self.image_id.get(other.region) or
+                                  self.image_id.get(None))
+                    other_image = (other.image_id.get(other.region) or
+                                   other.image_id.get(None))
+                    if this_image != other_image:
+                        return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):

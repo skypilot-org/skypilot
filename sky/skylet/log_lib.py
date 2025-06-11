@@ -286,7 +286,9 @@ def run_with_log(
 
 
 def make_task_bash_script(codegen: str,
-                          env_vars: Optional[Dict[str, str]] = None) -> str:
+                          env_vars: Optional[Dict[str, str]] = None,
+                          do_cd_sky_workdir: bool = True,
+                          ln_sky_workdir_from_abs: bool = False) -> str:
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
@@ -294,6 +296,12 @@ def make_task_bash_script(codegen: str,
     # the ray cluster is started within the runtime env, which may cause the
     # user program to run in that env as well.
     # PYTHONUNBUFFERED is used to disable python output buffering.
+    sky_workdir_cmd = ''
+    if ln_sky_workdir_from_abs:
+        sky_workdir_cmd += (f'ln -s {constants.SKY_REMOTE_WORKDIR_ABS} '
+                            f'{constants.SKY_REMOTE_WORKDIR}\n')
+    if do_cd_sky_workdir:
+        sky_workdir_cmd += f'cd {constants.SKY_REMOTE_WORKDIR}\n'
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
@@ -303,8 +311,9 @@ def make_task_bash_script(codegen: str,
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
             export PYTHONUNBUFFERED=1
-            cd {constants.SKY_REMOTE_WORKDIR}"""),
+            mkdir -p {constants.SKY_REMOTE_WORKDIR}"""),
     ]
+    script += [sky_workdir_cmd]
     if env_vars is not None:
         for k, v in env_vars.items():
             script.append(f'export {k}={shlex.quote(str(v))}')
@@ -332,20 +341,78 @@ def add_ray_env_vars(
     return env_vars
 
 
-def run_bash_command_with_log(bash_command: str,
-                              log_path: str,
-                              env_vars: Optional[Dict[str, str]] = None,
-                              stream_logs: bool = False,
-                              with_ray: bool = False):
+def run_bash_command_with_log(
+        bash_command: str,
+        log_path: str,
+        remote_setup_file_name: Optional[str] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+        stream_logs: bool = False,
+        with_ray: bool = False,
+        docker_image: Optional[str] = None,
+        docker_image_unique_id: Optional[str] = None,
+        docker_file_mounts_mapping: Optional[Dict[str, str]] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
-        bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
+        ln_sky_workdir_from_abs = False
+        if docker_image is not None:
+            if remote_setup_file_name is not None:
+                with open(remote_setup_file_name, 'r', encoding='utf-8') as f:
+                    # Re-cd to the workdir to keep the same abstraction (both
+                    # setup and run starts from the workdir).
+                    bash_command = (f'{f.read()}\n'
+                                    f'cd {constants.SKY_REMOTE_WORKDIR}\n'
+                                    f'{bash_command}')
+            if docker_file_mounts_mapping is not None:
+                if (constants.SKY_REMOTE_WORKDIR_ABS
+                        in docker_file_mounts_mapping.values()):
+                    ln_sky_workdir_from_abs = True
+        bash_command = make_task_bash_script(
+            bash_command,
+            env_vars=env_vars,
+            ln_sky_workdir_from_abs=ln_sky_workdir_from_abs)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
 
-        # Need this `-i` option to make sure `source ~/.bashrc` work.
-        inner_command = f'/bin/bash -i {script_path}'
+        docker_script_path = None
+        if docker_image is None:
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            inner_command = f'/bin/bash -i {script_path}'
+        else:
+            script_path_in_docker = '/root/sky_app.sh'
+            all_mapping = {script_path: script_path_in_docker}
+            if docker_file_mounts_mapping is not None:
+                all_mapping.update(docker_file_mounts_mapping)
+            for k, v in all_mapping.items():
+                assert '~' not in v, f'{k} -> {v}'
+            mount_args = ' '.join([
+                f'-v {k.replace("~", "$HOME")}:{v}'
+                for k, v in all_mapping.items()
+            ])
+            maybe_specify_name = ''
+            if docker_image_unique_id is not None:
+                maybe_specify_name = f'--name {docker_image_unique_id}'
+            docker_cmd = make_task_bash_script(
+                f'docker run {maybe_specify_name} {mount_args} --gpus '
+                '\'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\' '
+                '--network=host --cap-add=IPC_LOCK --ipc=host --shm-size=1g '
+                f'{docker_image} /bin/bash -i {script_path_in_docker}',
+                do_cd_sky_workdir=False)
+            clean_up_cmd = [
+                f'rm -rf {k}' for k in all_mapping if not k.startswith('/tmp')
+            ]
+            # It is possible that the docker container is not created, or being
+            # removed by the job cancellation.
+            clean_up_cmd.append(f'docker rm {docker_image_unique_id} '
+                                '> /dev/null 2>&1 || true')
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='sky_docker_app_',
+                                             delete=False) as docker_fp:
+                docker_fp.write(docker_cmd + '\n')
+                docker_fp.write('\n'.join(clean_up_cmd) + '\n')
+                docker_fp.flush()
+                docker_script_path = docker_fp.name
+            inner_command = f'/bin/bash -i {docker_script_path}'
 
         return run_with_log(inner_command,
                             log_path,
