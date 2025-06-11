@@ -767,3 +767,86 @@ def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     assert 'Try specifying a different memory size' in stdout
     assert 'add "+" to the end of the memory size' in stdout
     assert 'Did you mean:' not in stdout  # No fuzzy candidates
+
+
+def test_accelerator_memory_filtering(capfd):
+    """Test filtering accelerators by memory requirements."""
+    # Test exact memory match
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: 16GB""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout  # T4 has 16GB memory
+    assert 'V100' not in stdout  # V100 has 32GB memory
+
+    # Test memory with plus (greater than or equal)
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: 32GB+""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' not in stdout  # T4 has 16GB memory
+
+    # Test memory with different units
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: 16384MB""")  # 16GB in MB
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: 0.016TB""")  # 16GB in TB
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+
+
+def test_accelerator_manufacturer_filtering(capfd):
+    """Test filtering accelerators by manufacturer."""
+    # Test NVIDIA GPUs
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: nvidia:16GB""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+    assert 'V100' not in stdout
+
+    # Test with memory plus
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: nvidia:32GB+""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout
+    assert 'A100' in stdout
+    assert 'T4' not in stdout
+
+
+def test_accelerator_cloud_filtering(capfd):
+    """Test filtering accelerators by cloud provider."""
+    # Test AWS GPUs
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: 16GB""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+
+    # Test Azure GPUs
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: 16GB""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
+
+    # Test with manufacturer and memory
+    spec = textwrap.dedent("""\
+        resources:
+            accelerators: nvidia:32GB+""")
+    _test_resources_launch(spec)
+    stdout, _ = capfd.readouterr()
