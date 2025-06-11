@@ -8,7 +8,7 @@ Overview
 --------
 By default, the controller for both Managed Jobs and Sky Serve runs as a single instance (either a VM or a Kubernetes Pod). If this instance fails due to node issues, pod crashes, or other unexpected events, the controller plane becomes unavailable, impacting service management capabilities until the controller is manually recovered or relaunched.
 
-To enhance resilience and ensure controller plane continuity, we offer a high availability mode for the controller. When enabled, the controller leverages the automatic recovery feature of Kubernetes Deployments to automatically recover from failures.
+To enhance resilience and ensure controller plane continuity, we offer a high availability mode for the controller, which automatically recovers from failures.
 
 High availability mode for the controller offers several key advantages:
 
@@ -21,7 +21,7 @@ Prerequisites
 * **Kubernetes Cluster:** high availability mode is **currently only supported when using Kubernetes** as the cloud provider for the controller. You must have a Kubernetes cluster configured for SkyPilot. See :ref:`Kubernetes Setup <kubernetes-setup>` for details.
 * **Persistent Kubernetes:** The underlying Kubernetes cluster (control plane and nodes) must be running persistently. If using a local Kubernetes deployment (e.g., Minikube, Kind via ``sky local up``), the machine hosting the cluster must remain online.
 * **PersistentVolumeClaim (PVC) Support:** The Kubernetes cluster must be able to provision PersistentVolumeClaims (e.g., via a default StorageClass or one specified in `config.yaml`), as these are required for storing the controller's persistent state.
-* **Permissions to create Deployments and PVCs:** The user must have permissions to create Deployments and PVCs in the Kubernetes cluster. To enable this, run ``kubectl apply -f ha-rbac.yaml`` on the following YAML:
+* **Permissions to create Deployments and PVCs:** The user must have permissions to create Deployments and PVCs in the Kubernetes cluster. This is enabled by default for k8s clusters that are created by ``sky local up``, but on cloud managed k8s clusters, extra permission is required. For GKE, run ``kubectl apply -f ha-rbac.yaml`` on the following YAML:
 
 .. code-block:: yaml
 
@@ -65,14 +65,12 @@ To enable high availability for the controller, set the ``high_availability`` fl
       controller:
         resources:
           cloud: kubernetes  # High availability mode requires Kubernetes
-        # --- Enable high availability ---
         high_availability: true
 
     serve:
       controller:
         resources:
           cloud: kubernetes  # High availability mode requires Kubernetes
-        # --- Enable high availability ---
         high_availability: true
 
 .. note::
@@ -101,7 +99,7 @@ Configuration details
 Besides the main ``[jobs,serve].controller.high_availability: true`` flag, you can customize high availability behavior further:
 
 *   **Controller Resources** (``[jobs,serve].controller.resources``):
-    As usual, you can specify ``cloud`` (must be Kubernetes), ``region``, ``cpus``, etc.
+    As usual, you can specify ``cloud`` (must be Kubernetes for now), ``region``, ``cpus``, etc.
     The ``disk_size`` here directly determines the size of the PersistentVolumeClaim
     created for the high availability controller.
 
