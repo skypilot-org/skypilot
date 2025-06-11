@@ -80,7 +80,7 @@ jobs:
           - tests/test_jobs_and_serve.py tests/test_cli.py
         include:
           - test-path: tests/test_jobs_and_serve.py tests/test_cli.py
-            test-name: "PYTEST(Limited Deps) - Jobs, Serve & CLI"
+            test-name: "Limited Deps - Jobs, Serve & CLI"
     name: "Python Tests - ${{ matrix.test-name }}"
     steps:
       - name: Checkout repository
