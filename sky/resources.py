@@ -310,7 +310,7 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            self._disk_size = int(parse_memory_resource(disk_size))
+            self._disk_size = int(parse_memory_resource(disk_size, 'disk_size'))
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
@@ -717,6 +717,7 @@ class Resources:
             return
 
         memory = parse_memory_resource(str(memory),
+                                       'memory',
                                        allow_plus=True,
                                        allow_x=True)
         self._memory = memory
@@ -2281,6 +2282,7 @@ def parse_time_minutes(time: str) -> int:
 
 
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
                           unit: str = 'g',
                           allow_plus: bool = False,
                           allow_x: bool = False,
@@ -2295,6 +2297,9 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
     """
     assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
 
+    error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
+                f' got {resource_qty_str}'
+
     resource_str = str(resource_qty_str)
 
     # Handle plus and x suffixes, x is only used internally for jobs controller
@@ -2304,8 +2309,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             resource_str = resource_str[:-1]
             plus = '+'
         else:
-            raise ValueError(
-                f'Invalid resource quantity string: {resource_str}')
+            raise ValueError(error_msg)
 
     x = ''
     if resource_str.endswith('x'):
@@ -2313,8 +2317,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             resource_str = resource_str[:-1]
             x = 'x'
         else:
-            raise ValueError(
-                f'Invalid resource quantity string: {resource_str}')
+            raise ValueError(error_msg)
 
     if resource_str.isdecimal():
         # We assume it is already in the wanted units to maintain backwards
@@ -2328,7 +2331,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
                 value = int(resource_str[:-len(mem_unit)])
                 converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
                 if not allow_rounding and int(converted) != converted:
-                    raise ValueError(f'Invalid memory format: {resource_str}')
+                    raise ValueError(error_msg)
                 # math.ceil should equal int() if allowed_rounding is False
                 # otherwise, we ceil so we don't under provision
                 converted = math.ceil(converted)
@@ -2336,4 +2339,4 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
             except ValueError:
                 continue
 
-    raise ValueError(f'Invalid memory format: {resource_str}')
+    raise ValueError(error_msg)
