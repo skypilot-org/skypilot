@@ -14,10 +14,12 @@ from sky.utils import common as common_utils
 @pytest.fixture
 def mock_get():
     """Mock the get() function to return a mock response."""
+
     async def mock_get_async(*args, **kwargs):
         return mock_get.return_value
 
-    with mock.patch('sky.client.sdk_async.get', side_effect=mock_get_async) as mock_get:
+    with mock.patch('sky.client.sdk_async.get',
+                    side_effect=mock_get_async) as mock_get:
         yield mock_get
 
 
@@ -58,18 +60,18 @@ async def test_list_accelerators(mock_get, mock_sdk):
     mock_sdk.list_accelerators.return_value = 'test-request-id'
     mock_get.return_value = {'aws': ['p3.2xlarge'], 'gcp': ['n1-standard-4']}
 
-    result = await sdk_async.list_accelerators(
-        gpus_only=True,
-        name_filter='p3',
-        region_filter='us-west-1',
-        quantity_filter=1,
-        clouds=['aws'],
-        all_regions=True,
-        require_price=True,
-        case_sensitive=True)
+    result = await sdk_async.list_accelerators(gpus_only=True,
+                                               name_filter='p3',
+                                               region_filter='us-west-1',
+                                               quantity_filter=1,
+                                               clouds=['aws'],
+                                               all_regions=True,
+                                               require_price=True,
+                                               case_sensitive=True)
     assert result == {'aws': ['p3.2xlarge'], 'gcp': ['n1-standard-4']}
-    mock_sdk.list_accelerators.assert_called_once_with(
-        True, 'p3', 'us-west-1', 1, ['aws'], True, True, True)
+    mock_sdk.list_accelerators.assert_called_once_with(True, 'p3', 'us-west-1',
+                                                       1, ['aws'], True, True,
+                                                       True)
     mock_get.assert_called_once_with('test-request-id')
 
 
@@ -79,12 +81,11 @@ async def test_list_accelerator_counts(mock_get, mock_sdk):
     mock_sdk.list_accelerator_counts.return_value = 'test-request-id'
     mock_get.return_value = {'aws': [1, 2, 4], 'gcp': [1, 2, 4, 8]}
 
-    result = await sdk_async.list_accelerator_counts(
-        gpus_only=True,
-        name_filter='p3',
-        region_filter='us-west-1',
-        quantity_filter=1,
-        clouds=['aws'])
+    result = await sdk_async.list_accelerator_counts(gpus_only=True,
+                                                     name_filter='p3',
+                                                     region_filter='us-west-1',
+                                                     quantity_filter=1,
+                                                     clouds=['aws'])
     assert result == {'aws': [1, 2, 4], 'gcp': [1, 2, 4, 8]}
     mock_sdk.list_accelerator_counts.assert_called_once_with(
         True, 'p3', 'us-west-1', 1, ['aws'])
@@ -161,18 +162,17 @@ async def test_local_up(mock_get, mock_sdk):
     mock_sdk.local_up.return_value = 'test-request-id'
     mock_get.return_value = None
 
-    result = await sdk_async.local_up(
-        gpus=True,
-        ips=['1.2.3.4'],
-        ssh_user='ubuntu',
-        ssh_key='/path/to/key',
-        cleanup=True,
-        context_name='test-context',
-        password='test-password')
+    result = await sdk_async.local_up(gpus=True,
+                                      ips=['1.2.3.4'],
+                                      ssh_user='ubuntu',
+                                      ssh_key='/path/to/key',
+                                      cleanup=True,
+                                      context_name='test-context',
+                                      password='test-password')
     assert result is None
-    mock_sdk.local_up.assert_called_once_with(
-        True, ['1.2.3.4'], 'ubuntu', '/path/to/key', True, 'test-context',
-        'test-password')
+    mock_sdk.local_up.assert_called_once_with(True, ['1.2.3.4'], 'ubuntu',
+                                              '/path/to/key', True,
+                                              'test-context', 'test-password')
     mock_get.assert_called_once_with('test-request-id')
 
 
@@ -206,22 +206,17 @@ async def test_api_cancel(mock_get, mock_sdk):
     mock_sdk.api_cancel.return_value = 'test-request-id'
     mock_get.return_value = ['test-request-id']
 
-    result = await sdk_async.api_cancel(
-        request_ids=['test-request-id'],
-        all_users=True,
-        silent=True)
+    result = await sdk_async.api_cancel(request_ids=['test-request-id'],
+                                        all_users=True,
+                                        silent=True)
     assert result == ['test-request-id']
-    mock_sdk.api_cancel.assert_called_once_with(
-        ['test-request-id'], True, True)
+    mock_sdk.api_cancel.assert_called_once_with(['test-request-id'], True, True)
     mock_get.assert_called_once_with('test-request-id')
 
 
 def test_api_info(mock_sdk):
     """Test api_info() function."""
-    mock_sdk.api_info.return_value = {
-        'status': 'healthy',
-        'version': '1.0.0'
-    }
+    mock_sdk.api_info.return_value = {'status': 'healthy', 'version': '1.0.0'}
 
     result = sdk_async.api_info()
     assert result == {'status': 'healthy', 'version': '1.0.0'}
@@ -252,4 +247,4 @@ def test_api_login(mock_sdk):
 
     result = sdk_async.api_login('http://test-endpoint', get_token=True)
     assert result is None
-    mock_sdk.api_login.assert_called_once_with('http://test-endpoint', True) 
+    mock_sdk.api_login.assert_called_once_with('http://test-endpoint', True)

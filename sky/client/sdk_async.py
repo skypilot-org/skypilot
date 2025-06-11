@@ -22,9 +22,9 @@ from sky import backends
 from sky import exceptions
 from sky import models
 from sky import sky_logging
+import sky.catalog
 from sky.client import common as client_common
 from sky.client import sdk
-import sky.clouds.service_catalog
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server.requests import requests as requests_lib
@@ -139,7 +139,7 @@ async def list_accelerators(
     all_regions: bool = False,
     require_price: bool = True,
     case_sensitive: bool = True
-) -> Dict[str, List[sky.clouds.service_catalog.common.InstanceTypeInfo]]:
+) -> Dict[str, List[sky.catalog.common.InstanceTypeInfo]]:
     """Async version of list_accelerators() that lists the names of all
     accelerators offered by Sky."""
     request_id = sdk.list_accelerators(gpus_only, name_filter, region_filter,
