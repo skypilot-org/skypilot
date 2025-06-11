@@ -572,18 +572,39 @@ def private_docker_registry_setup(request):
         request: pytest request object containing the parameters
     """
     # Get parameters from the test function
-    username = request.param['username']
-    password = request.param['password']
-    registry = request.param['registry']
+    docker_username = request.param['docker_username']
+    docker_password = request.param['docker_password']
+    docker_server = request.param['docker_server']
+    full_image_name = request.param['full_image_name']
+
+    # Dynamically get passwords for cloud providers
+    if docker_server == 'us-docker.pkg.dev':
+        # Get GCP access token
+        result = subprocess.run(['gcloud', 'auth', 'print-access-token'],
+                                capture_output=True,
+                                text=True,
+                                check=True)
+        docker_password = result.stdout.strip()
+    elif 'ecr' in docker_server:
+        # Get ECR login password
+        # Extract region from ECR server URL
+        region = docker_server.split(
+            '.'
+        )[3]  # e.g., us-east-1 from 195275664570.dkr.ecr.us-east-1.amazonaws.com
+        result = subprocess.run(
+            ['aws', 'ecr', 'get-login-password', '--region', region],
+            capture_output=True,
+            text=True,
+            check=True)
+        docker_password = result.stdout.strip()
 
     template_str = pathlib.Path(
         'tests/test_yamls/test_private_docker_registry.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(username=username,
-                              password=password,
-                              registry=registry,
-                              image='skypilot-private-test',
-                              tag='latest')
+    content = template.render(docker_username=docker_username,
+                              docker_password=docker_password,
+                              docker_server=docker_server,
+                              full_image_name=full_image_name)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
@@ -592,64 +613,60 @@ def private_docker_registry_setup(request):
         yield file_path
 
 
-@pytest.mark.aws
+@pytest.mark.no_azure
+@pytest.mark.no_kubernetes
 @pytest.mark.parametrize(
-    'private_docker_registry_setup',
-    # This is a test account with only read access to the private registry,
-    # should be fine to include in public repo.
-    [{
-        'username': 'skypilottest',
-        'password': 'dckr_pat_fHDX_pX24yxwMQlUegA7R73M8KM',
-        'registry': 'docker.io'
-    }],
-    indirect=True)
-def test_private_docker_registry_docker_io(private_docker_registry_setup: str):
+    'private_docker_registry_setup,cloud_provider',
+    [
+        # AWS with docker.io registry
+        # This is a test account with only read access to the private registry,
+        # should be fine to include in public repo.
+        ({
+            'docker_username': 'skypilottest',
+            'docker_password': 'dckr_pat_fHDX_pX24yxwMQlUegA7R73M8KM',
+            'docker_server': 'docker.io',
+            'full_image_name': 'skypilottest/skypilot-private-test:latest'
+        }, 'aws'),
+        # GCP with Artifact Registry
+        (
+            {
+                'docker_username': '_json_key',
+                'docker_password': '',  # This should be the GCP service account key
+                'docker_server': 'us-docker.pkg.dev',
+                'full_image_name': 'sky-dev-465/sky-test-private-image/skypilot-private-test:latest'
+            },
+            'gcp'),
+        # AWS with ECR
+        (
+            {
+                'docker_username': 'AWS',
+                'docker_password': '',  # This should be the ECR token from aws ecr get-login-password
+                'docker_server': '195275664570.dkr.ecr.us-east-1.amazonaws.com',
+                'full_image_name': '195275664570.dkr.ecr.us-east-1.amazonaws.com/skypilot-private-test:latest'
+            },
+            'aws'),
+    ],
+    indirect=['private_docker_registry_setup'])
+def test_private_docker_registry(generic_cloud,
+                                 private_docker_registry_setup: str,
+                                 cloud_provider: str):
+    # Skip test if the required cloud provider is not available
+    if cloud_provider != generic_cloud:
+        pytest.skip(
+            f'Skipping test for {cloud_provider} as it is not the generic cloud'
+        )
+
     name = smoke_tests_utils.get_cluster_name()
+    test_name = f'private_docker_registry_{cloud_provider}'
+
     test = smoke_tests_utils.Test(
-        'private_docker_registry_docker_io',
+        test_name,
         [
-            f'sky launch -c {name} -y --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+            f'sky launch -c {name} -y --infra {cloud_provider} {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
         ],
         f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.gcp
-@pytest.mark.parametrize('private_docker_registry_setup', [{
-    'username': 'sky-dev-465/sky-test-private-image',
-    'password': '',
-    'registry': 'us-docker.pkg.dev'
-}],
-                         indirect=True)
-def test_private_docker_registry_gcp(private_docker_registry_setup: str):
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'private_docker_registry_gcp',
-        [
-            f'sky launch -c {name} -y --infra gcp {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
-        ],
-        f'sky down -y {name}',
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.aws
-@pytest.mark.parametrize('private_docker_registry_setup', [{
-    'username': '',
-    'password': '',
-    'registry': '195275664570.dkr.ecr.us-east-1.amazonaws.com'
-}],
-                         indirect=True)
-def test_private_docker_registry_aws(private_docker_registry_setup: str):
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'private_docker_registry_aws',
-        [
-            f'sky launch -c {name} -y --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
-        ],
-        f'sky down -y {name}',
-    )
 
 
 @pytest.mark.gcp

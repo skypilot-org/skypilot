@@ -1,25 +1,11 @@
-setup: |
-  # Authenticate with private registry
-  {% if registry == 'docker.io' %}
-  docker login -u {{username}} -p {{password}} {{registry}}
-  {% elif registry == 'us-docker.pkg.dev' %}
-  gcloud auth configure-docker {{registry}} --quiet
-  {% elif 'ecr' in registry %}
-  sudo apt install unzip
-  curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && \
-    unzip awscliv2.zip && \
-    sudo ./aws/install && \
-    rm -rf aws awscliv2.zip
-  aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin {{registry}}
-  {% else %}
-  echo "Invalid registry"
-  exit 1
-  {% endif %}
+resources:
+  image_id: docker:{{full_image_name}}
+
+envs:
+  SKYPILOT_DOCKER_USERNAME: {{docker_username}}
+  SKYPILOT_DOCKER_PASSWORD: {{docker_password}}
+  SKYPILOT_DOCKER_SERVER: {{docker_server}}
 
 run: |
   set -e
-  {% if username %}
-  docker run {{registry}}/{{username}}/{{image}}:{{tag}} bash -c "sky -v" | grep "1.0.0.dev"
-  {% else %}
-  docker run {{registry}}/{{image}}:{{tag}} bash -c "sky -v" | grep "1.0.0.dev"
-  {% endif %}
+  sky -v | grep "1.0.0.dev"
