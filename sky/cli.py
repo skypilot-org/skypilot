@@ -2063,9 +2063,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 3: Get cluster records and process them in parallel with SSH config
     # updates
-    def get_cluster_records():
-        return sdk.stream_and_get(cluster_status_request_id)
-
     def update_ssh_configs(cluster_records):
         # Update the SSH config for all clusters
         for record in cluster_records:
@@ -2130,7 +2127,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
 
     # Get cluster records
-    cluster_records = get_cluster_records()
+    cluster_records = sdk.stream_and_get(cluster_status_request_id)
 
     # Update SSH configs in background while we process other data
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
