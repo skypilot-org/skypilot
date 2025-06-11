@@ -788,6 +788,16 @@ def write_cluster_config(
                 'ray_head_wait_initialized_command':
                     instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
 
+                # Monitoring exporters
+                'node_exporter_installation_commands':
+                    constants.NODE_EXPORTER_INSTALLATION_COMMANDS,
+                'node_exporter_cloud_start_commands':
+                    constants.NODE_EXPORTER_CLOUD_START_COMMANDS,
+                'dcgm_exporter_installation_commands':
+                    constants.DCGM_EXPORTER_INSTALLATION_COMMANDS,
+                'dcgm_exporter_cloud_start_commands':
+                    constants.DCGM_EXPORTER_CLOUD_START_COMMANDS,
+
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
