@@ -128,7 +128,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                       resumed_instance_ids=[],
                                       created_instance_ids=[])
 
-    # Launch new instance
     try:
         # Get instance type from node_config
         instance_type = config.node_config.get('InstanceType')
@@ -139,39 +138,20 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'InstanceType is not set in node_config. '
                 'Please specify an instance type for Hyperbolic.')
 
-        # Extract GPU configuration from instance type
-        # Format: 1x-T4-4-17 -> gpu_count=1, gpu_model=Tesla-T4
+        # Parse gpu_model configuration from instance type
+        # Format: {gpu_count}x-{gpu_model}-{cpu}-{memory}
+        # Example: 1x-A100-24-271
         try:
             parts = instance_type.split('-')
-            logger.debug(f'Parsing instance type parts: {parts}')
             if len(parts) != 4:
                 raise ValueError(
                     f'Invalid instance type format: {instance_type}. '
-                    'Expected format: <gpu_count>x-<gpu_model>-<cpu>-<memory>')
+                    'Expected format: {gpu_count}x-{gpu_model}-{cpu}-{memory}')
 
-            gpu_count = int(parts[0].replace('x', ''))
-            gpu_model = parts[1].upper()
-            logger.info(
-                f'Parsed GPU config: count={gpu_count}, model={gpu_model}')
-
-            # Map GPU model to Hyperbolic's expected format
-            gpu_model_map = {
-                'T4': 'Tesla-T4',
-                'A100': 'NVIDIA-A100',
-                'V100': 'Tesla-V100',
-                'P100': 'Tesla-P100',
-                'K80': 'Tesla-K80',
-                'RTX3090': 'RTX-3090',
-                'RTX4090': 'RTX-4090',
-                'RTX4080': 'RTX-4080',
-                'RTX4070': 'RTX-4070',
-                'RTX4060': 'RTX-4060',
-                'RTX3080': 'RTX-3080',
-                'RTX3070': 'RTX-3070',
-                'RTX3060': 'RTX-3060',
-            }
-            gpu_model = gpu_model_map.get(gpu_model, gpu_model)
-            logger.info(f'Mapped GPU model to {gpu_model}')
+            gpu_count = int(parts[0].rstrip('x'))
+            gpu_model = parts[1]
+            logger.info(f'Parsed GPU config from instance type: '
+                        f'model={gpu_model}, count={gpu_count}')
 
             # Launch instance
             instance_id, ssh_command = utils.launch_instance(

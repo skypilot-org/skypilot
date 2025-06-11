@@ -1186,6 +1186,7 @@ def test_azure_start_stop():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 def test_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure

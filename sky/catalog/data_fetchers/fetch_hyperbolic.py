@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 import requests
 
-ENDPOINT = 'https://api.dev-hyperbolic.xyz/v2/skypilot/catalog'
+ENDPOINT = 'https://api.hyperbolic.xyz/v2/skypilot/catalog'
 API_KEY_PATH = os.path.expanduser('~/.hyperbolic/api_key')
 
 REQUIRED_FIELDS = [

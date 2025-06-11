@@ -12,12 +12,12 @@ from sky import sky_logging
 from sky.utils import status_lib
 
 #TODO update to prod endpoint
-BASE_URL = 'https://api.dev-hyperbolic.xyz'
+BASE_URL = 'https://api.hyperbolic.xyz'
 API_KEY_PATH = '~/.hyperbolic/api_key'
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
-TIMEOUT = 300
+TIMEOUT = 120
 
 logger = sky_logging.init_logger(__name__)
 

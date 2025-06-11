@@ -61,6 +61,7 @@ ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
 # ---------- file_mounts ----------
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and storage mounting yet.
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     extra_flags = ''
@@ -119,6 +120,7 @@ def test_oci_mounts():
 
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
+@pytest.mark.no_hyperbolic  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
