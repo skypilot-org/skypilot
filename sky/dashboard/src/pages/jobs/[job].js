@@ -5,7 +5,13 @@ import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { useSingleManagedJob } from '@/data/connectors/jobs';
 import Link from 'next/link';
-import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  CheckIcon,
+} from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
@@ -145,7 +151,7 @@ function JobDetails() {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="managed-jobs">
+      <>
         <div className="flex items-center justify-between mb-4">
           <div className="text-base flex items-center">
             <Link href="/jobs" className="text-sky-blue hover:underline">
@@ -295,7 +301,7 @@ function JobDetails() {
             <span>Job not found</span>
           </div>
         )}
-      </Layout>
+      </>
     </>
   );
 }
@@ -314,6 +320,8 @@ function JobDetailsContent({
   const [controllerLogs, setControllerLogs] = useState('');
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
+  const [isCopied, setIsCopied] = useState(false);
+  const [isCommandCopied, setIsCommandCopied] = useState(false);
 
   // Add state for tracking incremental refresh
   const [currentLogLength, setCurrentLogLength] = useState(0);
@@ -331,6 +339,9 @@ function JobDetailsContent({
   const activeLogsRequest = useRef(null);
   const activeControllerLogsRequest = useRef(null);
 
+  // Track aborted controllers to prevent double-abort
+  const abortedControllers = useRef(new WeakSet());
+
   // Auto-scroll refs
   const logsContainerRef = useRef(null);
   const controllerLogsContainerRef = useRef(null);
@@ -344,6 +355,56 @@ function JobDetailsContent({
   // Configuration for performance
   const BATCH_UPDATE_INTERVAL = 100; // Batch updates every 100ms
   const THROTTLE_INTERVAL = 50; // Minimum time between updates
+
+  // Helper function to safely abort an AbortController
+  const safeAbort = useCallback((controller, description = 'request') => {
+    if (!controller) return;
+
+    // Check if we've already aborted this controller
+    if (abortedControllers.current.has(controller)) {
+      console.log(
+        `${description} controller already aborted previously, skipping`
+      );
+      return;
+    }
+
+    try {
+      // Additional safety checks
+      if (typeof controller.abort !== 'function') {
+        console.warn(
+          `Controller for ${description} does not have abort method`
+        );
+        return;
+      }
+
+      // Check if already aborted via signal
+      if (controller.signal && controller.signal.aborted) {
+        console.log(`${description} already aborted via signal, skipping`);
+        abortedControllers.current.add(controller); // Mark as aborted
+        return;
+      }
+
+      // Attempt to abort
+      controller.abort();
+      abortedControllers.current.add(controller); // Mark as aborted
+      console.log(`Successfully aborted ${description}`);
+    } catch (error) {
+      // Handle any type of error that might occur during abort
+      console.log(
+        `Caught error while aborting ${description}:`,
+        error.name,
+        error.message
+      );
+
+      // Mark as aborted even if there was an error to prevent retry
+      abortedControllers.current.add(controller);
+
+      // Only warn for unexpected errors (not AbortError or InvalidStateError)
+      if (error.name !== 'AbortError' && error.name !== 'InvalidStateError') {
+        console.warn(`Unexpected error aborting ${description}:`, error);
+      }
+    }
+  }, []);
 
   // Custom hook for auto-scrolling
   const scrollToBottom = useCallback((logType) => {
@@ -387,6 +448,40 @@ function JobDetailsContent({
       ...prev,
       [index]: !prev[index],
     }));
+  };
+
+  const copyYamlToClipboard = async () => {
+    try {
+      const yamlDocs = formatYaml(jobData.dag_yaml);
+      let textToCopy = '';
+
+      if (yamlDocs.length === 1) {
+        // Single document - use the formatted content directly
+        textToCopy = yamlDocs[0].content;
+      } else if (yamlDocs.length > 1) {
+        // Multiple documents - join them with document separators
+        textToCopy = yamlDocs.map((doc) => doc.content).join('\n---\n');
+      } else {
+        // Fallback to raw YAML if formatting fails
+        textToCopy = jobData.dag_yaml;
+      }
+
+      await navigator.clipboard.writeText(textToCopy);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy YAML to clipboard:', err);
+    }
+  };
+
+  const copyCommandToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(jobData.entrypoint);
+      setIsCommandCopied(true);
+      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy command to clipboard:', err);
+    }
   };
 
   const formatYaml = (yamlString) => {
@@ -623,9 +718,9 @@ function JobDetailsContent({
             console.log(`Cleaning up ${logType} request`);
             active = false;
 
-            // Abort the controller if it matches the current one
+            // Safely abort the controller if it matches the current one
             if (activeRequestRef.current === controller) {
-              activeRequestRef.current.abort();
+              safeAbort(controller, logType);
               activeRequestRef.current = null;
             }
 
@@ -648,9 +743,9 @@ function JobDetailsContent({
           console.log(`Cleaning up ${logType} request`);
           active = false;
 
-          // Abort the controller if it matches the current one
+          // Safely abort the controller if it matches the current one and hasn't been cleaned up yet
           if (activeRequestRef.current === controller) {
-            activeRequestRef.current.abort();
+            safeAbort(controller, `${logType} cleanup`);
             activeRequestRef.current = null;
           }
 
@@ -672,14 +767,14 @@ function JobDetailsContent({
         active = false;
       };
     },
-    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk]
+    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk, safeAbort]
   );
 
   // Fetch both logs and controller logs in parallel, regardless of activeTab
   useEffect(() => {
     // Cancel any existing request
     if (activeLogsRequest.current) {
-      activeLogsRequest.current.abort();
+      safeAbort(activeLogsRequest.current, 'logs');
       activeLogsRequest.current = null;
     }
 
@@ -688,12 +783,19 @@ function JobDetailsContent({
       const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
       return cleanup;
     }
-  }, [jobData.id, fetchLogs, setIsLoadingLogs, isPending, isRecovering]);
+  }, [
+    jobData.id,
+    fetchLogs,
+    setIsLoadingLogs,
+    isPending,
+    isRecovering,
+    safeAbort,
+  ]);
 
   useEffect(() => {
     // Cancel any existing request
     if (activeControllerLogsRequest.current) {
-      activeControllerLogsRequest.current.abort();
+      safeAbort(activeControllerLogsRequest.current, 'controller logs');
       activeControllerLogsRequest.current = null;
     }
 
@@ -707,14 +809,20 @@ function JobDetailsContent({
       );
       return cleanup;
     }
-  }, [jobData.id, fetchLogs, setIsLoadingControllerLogs, isPreStart]);
+  }, [
+    jobData.id,
+    fetchLogs,
+    setIsLoadingControllerLogs,
+    isPreStart,
+    safeAbort,
+  ]);
 
   // Handle refresh for logs
   useEffect(() => {
     if (refreshFlag > 0 && activeTab === 'logs') {
       // Cancel any existing request
       if (activeLogsRequest.current) {
-        activeLogsRequest.current.abort();
+        safeAbort(activeLogsRequest.current, 'logs refresh');
         activeLogsRequest.current = null;
       }
 
@@ -728,14 +836,24 @@ function JobDetailsContent({
       );
       return cleanup;
     }
-  }, [refreshFlag, activeTab, jobData.id, fetchLogs, setIsLoadingLogs]);
+  }, [
+    refreshFlag,
+    activeTab,
+    jobData.id,
+    fetchLogs,
+    setIsLoadingLogs,
+    safeAbort,
+  ]);
 
   // Handle refresh for controller logs
   useEffect(() => {
     if (refreshFlag > 0 && activeTab === 'controllerlogs') {
       // Cancel any existing request
       if (activeControllerLogsRequest.current) {
-        activeControllerLogsRequest.current.abort();
+        safeAbort(
+          activeControllerLogsRequest.current,
+          'controller logs refresh'
+        );
         activeControllerLogsRequest.current = null;
       }
 
@@ -755,6 +873,7 @@ function JobDetailsContent({
     jobData.id,
     fetchLogs,
     setIsLoadingControllerLogs,
+    safeAbort,
   ]);
 
   // Comprehensive cleanup when component unmounts or user navigates away
@@ -764,12 +883,15 @@ function JobDetailsContent({
 
       // Abort all active log requests
       if (activeLogsRequest.current) {
-        activeLogsRequest.current.abort();
+        safeAbort(activeLogsRequest.current, 'logs cleanup');
         activeLogsRequest.current = null;
       }
 
       if (activeControllerLogsRequest.current) {
-        activeControllerLogsRequest.current.abort();
+        safeAbort(
+          activeControllerLogsRequest.current,
+          'controller logs cleanup'
+        );
         activeControllerLogsRequest.current = null;
       }
 
@@ -789,7 +911,7 @@ function JobDetailsContent({
       setIsRefreshingLogs(false);
       setIsRefreshingControllerLogs(false);
     };
-  }, []); // Empty dependency array means this runs only on unmount
+  }, [safeAbort]); // Empty dependency array means this runs only on unmount
 
   // Handle page visibility changes to pause streaming when tab is not active
   useEffect(() => {
@@ -801,11 +923,11 @@ function JobDetailsContent({
         // Uncomment if you want to completely stop streaming when tab is not visible
         /*
         if (activeLogsRequest.current) {
-          activeLogsRequest.current.abort();
+          safeAbort(activeLogsRequest.current, 'logs visibility');
           activeLogsRequest.current = null;
         }
         if (activeControllerLogsRequest.current) {
-          activeControllerLogsRequest.current.abort();
+          safeAbort(activeControllerLogsRequest.current, 'controller logs visibility');
           activeControllerLogsRequest.current = null;
         }
         */
@@ -930,7 +1052,7 @@ function JobDetailsContent({
         <div className="text-base mt-1 flex items-center">
           <StatusBadge status={jobData.status} />
           {jobData.priority && (
-            <span className="ml-2"> (priority: {jobData.priority})</span>
+            <span className="ml-2"> (Priority: {jobData.priority})</span>
           )}
         </div>
       </div>
@@ -980,7 +1102,28 @@ function JobDetailsContent({
       {/* Entrypoint section - spans both columns */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
-          <div className="text-gray-600 font-medium text-base">Entrypoint</div>
+          <div className="flex items-center">
+            <div className="text-gray-600 font-medium text-base">
+              Entrypoint
+            </div>
+            {jobData.entrypoint && (
+              <Tooltip
+                content={isCommandCopied ? 'Copied!' : 'Copy command'}
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={copyCommandToClipboard}
+                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                >
+                  {isCommandCopied ? (
+                    <CheckIcon className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <CopyIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </Tooltip>
+            )}
+          </div>
 
           <div className="space-y-4 mt-3">
             {/* Launch Command */}
@@ -997,19 +1140,35 @@ function JobDetailsContent({
             {/* Task YAML - Collapsible */}
             {jobData.dag_yaml && jobData.dag_yaml !== '{}' && (
               <div>
-                <button
-                  onClick={toggleYamlExpanded}
-                  className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                >
-                  <div className="flex items-center">
+                <div className="flex items-center mb-2">
+                  <button
+                    onClick={toggleYamlExpanded}
+                    className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                  >
                     {isYamlExpanded ? (
                       <ChevronDownIcon className="w-4 h-4 mr-1" />
                     ) : (
                       <ChevronRightIcon className="w-4 h-4 mr-1" />
                     )}
                     <span className="text-base">Show SkyPilot YAML</span>
-                  </div>
-                </button>
+                  </button>
+
+                  <Tooltip
+                    content={isCopied ? 'Copied!' : 'Copy YAML'}
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={copyYamlToClipboard}
+                      className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                    >
+                      {isCopied ? (
+                        <CheckIcon className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <CopyIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                  </Tooltip>
+                </div>
 
                 {isYamlExpanded && (
                   <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">

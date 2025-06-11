@@ -28,7 +28,6 @@ import copy
 import datetime
 import fnmatch
 import functools
-import getpass
 import os
 import pathlib
 import shlex
@@ -4200,7 +4199,7 @@ def jobs():
               type=click.IntRange(0, 1000),
               default=None,
               show_default=True,
-              help=('Job priority from 0 to 1000. A lower number is higher '
+              help=('Job priority from 0 to 1000. A higher number is higher '
                     'priority. Default is 500.'))
 @click.option(
     '--detach-run',
@@ -6056,7 +6055,6 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
 @click.option('--deploy',
               type=bool,
               is_flag=True,
@@ -6107,7 +6105,6 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool,
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
@@ -6263,19 +6260,17 @@ def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
-    user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
-    user_hash = common_utils.get_user_hash()
     api_server_user = api_server_info.get('user')
     if api_server_user is not None:
-        user_name = api_server_user['name']
-        user_hash = api_server_user['id']
-    dashboard_url = server_common.get_dashboard_url(url)
-    click.echo(f'Using SkyPilot API server: {url}\n'
+        user = models.User(id=api_server_user['id'],
+                           name=api_server_user['name'])
+    else:
+        user = models.User.get_current_user()
+    click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
                f'commit: {api_server_info["commit"]}, '
                f'version: {api_server_info["version"]}\n'
-               f'{ux_utils.INDENT_SYMBOL}User: {user_name} ({user_hash})\n'
-               f'{ux_utils.INDENT_LAST_SYMBOL}Dashboard: {dashboard_url}')
+               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user.name} ({user.id})')
 
 
 @cli.group(cls=_NaturalOrderGroup)

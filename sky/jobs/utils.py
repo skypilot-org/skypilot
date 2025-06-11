@@ -245,6 +245,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         return
 
     for job_id in job_ids:
+        assert job_id is not None
         tasks = managed_job_state.get_managed_jobs(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
@@ -933,7 +934,7 @@ def dump_managed_job_queue() -> str:
     # Figure out what the highest priority blocking job is. We need to know in
     # order to determine if other jobs are blocked by a higher priority job, or
     # just by the limited controller resources.
-    lowest_blocking_priority_value = 1000
+    highest_blocking_priority = 0
     for job in jobs:
         if job['schedule_state'] not in (
                 # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with
@@ -949,8 +950,8 @@ def dump_managed_job_queue() -> str:
             continue
 
         priority = job.get('priority')
-        if priority is not None and priority < lowest_blocking_priority_value:
-            lowest_blocking_priority_value = priority
+        if priority is not None and priority > highest_blocking_priority:
+            highest_blocking_priority = priority
 
     for job in jobs:
         end_at = job['end_at']
@@ -998,8 +999,7 @@ def dump_managed_job_queue() -> str:
             state_details = 'In backoff, waiting for resources'
         elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
             priority = job.get('priority')
-            if (priority is not None and
-                    priority > lowest_blocking_priority_value):
+            if (priority is not None and priority < highest_blocking_priority):
                 # Job is lower priority than some other blocking job.
                 state_details = 'Waiting for higher priority jobs to launch'
             else:
@@ -1025,7 +1025,8 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            job['user_name'] = global_user_state.get_user(job['user_hash']).name
+            user = global_user_state.get_user(job['user_hash'])
+            job['user_name'] = user.name if user is not None else None
     return jobs
 
 
