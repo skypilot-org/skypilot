@@ -1149,9 +1149,17 @@ def get_config_schema():
 
     admin_policy_schema = {
         'type': 'string',
-        # Check regex to be a valid python module path
-        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
-                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+        'anyOf': [
+            {
+                # Check regex to be a valid python module path
+                'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                            r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+            },
+            {
+                # Check for valid HTTP/HTTPS URL
+                'pattern': r'^https?://.*$',
+            }
+        ]
     }
 
     allowed_clouds = {
