@@ -323,7 +323,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
             {contextName === 'in-cluster' && window['SKYPILOT_GRAFANA_URL'] && (
               <button
                 // TODO(aylei): make the dashboard path stable
-                onClick={() => openGrafana('/d/Oxed_c6Wz/nvidia-dcgm-exporter-dashboard')}
+                onClick={() =>
+                  openGrafana('/d/Oxed_c6Wz/nvidia-dcgm-exporter-dashboard')
+                }
                 className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue"
               >
                 <svg
