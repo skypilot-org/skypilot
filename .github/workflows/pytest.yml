@@ -63,9 +63,10 @@ jobs:
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
+          TEST_NAME: ${{ matrix.test-name }}
         run: |
           source ~/test-env/bin/activate
-          if [[ "$TEST_PATH" == "tests/test_no_parellel.py" ]]; then
+          if [[ "$TEST_NAME" == "PYTEST - No Parallel Tests" ]]; then
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
           else
             SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 4 --dist worksteal $TEST_PATH"
