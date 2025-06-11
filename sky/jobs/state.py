@@ -1296,30 +1296,29 @@ def get_num_alive_jobs() -> int:
 def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
-    Selects the highest-priority (lowest numerical value) WAITING or
-    ALIVE_WAITING job, provided its priority value is less than or equal to any
-    currently LAUNCHING or ALIVE_BACKOFF job.
+    Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
+    priority is greater than or equal to any currently LAUNCHING or
+    ALIVE_BACKOFF job.
 
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
     """
     assert _db_initialized
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        # Get the highest-priority (lowest numerical value) WAITING or
-        # ALIVE_WAITING job whose priority value is less than or equal to
-        # the highest priority (numerically smallest) LAUNCHING or
+        # Get the highest-priority WAITING or ALIVE_WAITING job whose priority
+        # is greater than or equal to the highest priority LAUNCHING or
         # ALIVE_BACKOFF job's priority.
         waiting_job_row = cursor.execute(
             'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
             'WHERE schedule_state IN (?, ?) '
-            'AND priority <= COALESCE('
-            '    (SELECT MIN(priority) '
+            'AND priority >= COALESCE('
+            '    (SELECT MAX(priority) '
             '     FROM job_info '
             '     WHERE schedule_state IN (?, ?)), '
-            '    1000'
+            '    0'
             ')'
-            'ORDER BY priority ASC, spot_job_id ASC LIMIT 1',
+            'ORDER BY priority DESC, spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
              ManagedJobScheduleState.ALIVE_WAITING.value,
              ManagedJobScheduleState.LAUNCHING.value,

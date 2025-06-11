@@ -323,11 +323,10 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
-    parser.add_argument(
-        '--priority',
-        type=int,
-        default=500,
-        help='Job priority (0-1000, lower is higher). Default: 500.')
+    parser.add_argument('--priority',
+                        type=int,
+                        default=500,
+                        help='Job priority (0-1000). Default: 500.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
                args.priority)
