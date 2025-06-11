@@ -215,6 +215,7 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    ssh_node_pool_cluster_name: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -234,6 +235,8 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        kwargs['_ssh_node_pool_cluster_name'] = kwargs.pop(
+            'ssh_node_pool_cluster_name')
         return kwargs
 
 

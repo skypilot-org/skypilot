@@ -1570,6 +1570,8 @@ def check_owner_identity(cluster_name: str) -> None:
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
+    if handle.docker_cluster_job_id is not None:
+        return
     active_workspace = skypilot_config.get_active_workspace()
     cluster_workspace = record.get('workspace',
                                    constants.SKYPILOT_DEFAULT_WORKSPACE)
@@ -1851,6 +1853,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                      'Removing the cluster from cache.')
         return None
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return record
+    if handle.docker_cluster_job_id is not None:
         return record
     cluster_name = handle.cluster_name
 
@@ -2615,6 +2619,9 @@ def get_clusters(
         handle = record['handle']
         if handle is None:
             return
+        if handle.docker_cluster_job_id is not None:
+            return
+        print(handle)
         record['resources_str'] = resources_utils.get_readable_resources_repr(
             handle, simplify=True)
         record[
@@ -2666,6 +2673,8 @@ def get_clusters(
             return
         handle = record['handle']
         if handle is None:
+            return
+        if handle.docker_cluster_job_id is not None:
             return
         record['nodes'] = handle.launched_nodes
         if handle.launched_resources is None:

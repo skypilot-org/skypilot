@@ -19,13 +19,15 @@ class _Registry(dict, typing.Generic[T]):
     def __init__(self,
                  registry_name: str,
                  exclude: Optional[Set[str]],
-                 type_register: bool = False):
+                 type_register: bool = False,
+                 return_str_on_not_found: bool = False):
         super().__init__()
         self._registry_name = registry_name
         self._exclude = exclude or set()
         self._default: Optional[str] = None
         self._type_register: bool = type_register
         self._aliases: Dict[str, str] = {}
+        self._return_str_on_not_found: bool = return_str_on_not_found
 
     def from_str(self, name: Optional[str]) -> Optional[T]:
         """Returns the cloud instance from the canonical name or alias."""
@@ -41,6 +43,8 @@ class _Registry(dict, typing.Generic[T]):
 
         if search_name in self._aliases:
             return self[self._aliases[search_name]]
+        if self._return_str_on_not_found:
+            return name
 
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -114,8 +118,8 @@ class _Registry(dict, typing.Generic[T]):
 # global_user_state.get_enabled_clouds() would call into this func
 # and fail.
 
-CLOUD_REGISTRY: _Registry = _Registry['cloud.Cloud'](registry_name='cloud',
-                                                     exclude={'local'})
+CLOUD_REGISTRY: _Registry = _Registry['cloud.Cloud'](
+    registry_name='cloud', exclude={'local'}, return_str_on_not_found=True)
 
 BACKEND_REGISTRY: _Registry = _Registry['backend.Backend'](
     registry_name='backend', type_register=True, exclude=None)

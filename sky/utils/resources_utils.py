@@ -182,8 +182,13 @@ def simplify_ports(ports: List[str]) -> List[str]:
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
     resource = resource.assert_launchable()
-    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
-        resource.instance_type)
+    if isinstance(resource.cloud, str):
+        vcpu, mem = '-', '-'
+    else:
+        vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+            resource.instance_type)
+        vcpu = int(vcpu)
+        mem = int(mem)
 
     components = []
 
@@ -194,9 +199,9 @@ def format_resource(resource: 'resources_lib.Resources',
     is_k8s = str(resource.cloud).lower() == 'kubernetes'
     if (resource.accelerators is None or is_k8s or not simplify):
         if vcpu is not None:
-            components.append(f'cpus={int(vcpu)}')
+            components.append(f'cpus={vcpu}')
         if mem is not None:
-            components.append(f'mem={int(mem)}')
+            components.append(f'mem={mem}')
 
     instance_type = resource.instance_type
     if simplify:

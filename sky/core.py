@@ -30,6 +30,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -81,6 +82,9 @@ def optimize(
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, request_options=request_options) as dag:
+        if isinstance(list(dag.tasks[0].resources)[0].cloud, str):
+            optimizer.Optimizer.print_cluster_plan(dag)
+            return None
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
@@ -471,8 +475,11 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
         message = ('Stopping spot instances is currently not supported on '
                    f'{resources.cloud}')
     else:
-        cloud_name = resources.cloud.display_name(
-        ) if resources.cloud else resources.cloud
+        if isinstance(resources.cloud, str):
+            cloud_name = f'SSH Node Pools'
+        else:
+            cloud_name = resources.cloud.display_name(
+            ) if resources.cloud else resources.cloud
         message = ('Stopping is currently not supported for '
                    f'{cloud_name}')
     return message
@@ -510,6 +517,17 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
+        if handle.docker_cluster_job_id is not None:
+            actual_cluster_name = handle.launched_resources.cloud
+            assert isinstance(actual_cluster_name, str), actual_cluster_name
+            actual_handle = global_user_state.get_handle_from_cluster_name(
+                actual_cluster_name)
+            backend.cancel_jobs(actual_handle, [handle.docker_cluster_job_id])
+            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+            global_user_state.remove_cluster(handle.cluster_name,
+                                             terminate=True)
+            return
     backend.teardown(handle, terminate=True, purge=purge)
 
 
@@ -558,6 +576,11 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         cloud = handle.launched_resources.cloud
         assert cloud is not None, handle
         try:
+            if handle.docker_cluster_job_id is not None or isinstance(
+                    cloud, str):
+                raise exceptions.NotSupportedError(
+                    f'Stopping docker cluster {cluster_name!r} '
+                    'is not supported.')
             cloud.check_features_are_supported(
                 handle.launched_resources,
                 {clouds.CloudImplementationFeatures.STOP})

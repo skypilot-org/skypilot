@@ -46,7 +46,7 @@ def print_exception_no_traceback():
     """A context manager that prints out an exception without traceback.
 
     Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
-    tracebacks.
+tracebacks.
 
     If SKYPILOT_DEBUG environment variable is set, this context manager is a
     no-op and the full traceback will be shown.
@@ -58,7 +58,7 @@ def print_exception_no_traceback():
                 raise ValueError('...')
     """
     original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-    sys.tracebacklimit = 0
+    sys.tracebacklimit = original_tracelimit
     yield
     sys.tracebacklimit = original_tracelimit
 

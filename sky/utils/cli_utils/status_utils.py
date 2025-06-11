@@ -337,6 +337,8 @@ def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
         if handle.launched_resources is None:
             # If launched_resources is None, try to get infra from the record
             return cluster_record.get('infra', '-')
+        if isinstance(handle.launched_resources.cloud, str):
+            return f'SSH Node Pools ({handle.launched_resources.cloud})'
         return handle.launched_resources.infra.formatted_str(truncate)
     return '-'
 

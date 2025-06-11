@@ -68,10 +68,8 @@ def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
-    # Match any cloud name (case insensitive)
-    all_clouds = list(constants.ALL_CLOUDS)
-    all_clouds.remove('kubernetes')
-    cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
+    # Match any string for cloud name (case insensitive)
+    cloud_pattern = '(?i:[^/]+)'
 
     # Optional /region followed by optional /zone
     # /[^/]+ matches a slash followed by any characters except slash (region or

@@ -418,7 +418,8 @@ def _execute_dag(
         if docker_image_on_no_image_cluster is not None:
             docker_image = docker_image_on_no_image_cluster
             docker_image_unique_id = docker_image_on_no_image_cluster.replace(
-                '/', '-').replace(':', '-') + '-' + str(uuid.uuid4())[:4]
+                '/', '-').replace(':', '-').replace('.', '-') + '-' + str(
+                    uuid.uuid4())[:4]
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -504,6 +505,7 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _ssh_node_pool_cluster_name: Optional[str] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a cluster or task.
@@ -589,6 +591,10 @@ def launch(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+    original_cluster_name = None
+    if _ssh_node_pool_cluster_name is not None:
+        original_cluster_name = cluster_name
+        cluster_name = _ssh_node_pool_cluster_name
 
     entrypoint = task
     entrypoint.validate()
@@ -650,11 +656,11 @@ def launch(
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
 
-    return _execute(
+    res = _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
-        stream_logs=stream_logs,
+        stream_logs=stream_logs and _ssh_node_pool_cluster_name is None,
         handle=handle,
         backend=backend,
         retry_until_up=retry_until_up,
@@ -672,6 +678,31 @@ def launch(
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
     )
+    if original_cluster_name is not None:
+        # TODO(tian): Add SSH capability.
+        task_ori = dag_utils.convert_entrypoint_to_dag(entrypoint).tasks[0]
+        res_ori = list(task_ori.resources)[0]
+        assert res[0] is not None, res
+        docker_cls_handle = backends.CloudVmRayResourceHandle(
+            cluster_name=original_cluster_name,
+            cluster_name_on_cloud=original_cluster_name,
+            cluster_yaml='',
+            launched_nodes=task_ori.num_nodes,
+            launched_resources=list(task_ori.resources)[0].copy(
+                cloud=cluster_name,
+                instance_type=res_ori.extract_docker_image()),
+            docker_cluster_job_id=res[0],
+        )
+        global_user_state.add_or_update_cluster(
+            docker_cls_handle.cluster_name,
+            docker_cls_handle,
+            set(task_ori.resources),
+            ready=True,
+            config_hash='xxxxxx',
+            task_config=task_ori.to_yaml_config(),
+        )
+        return res[0], docker_cls_handle
+    return res
 
 
 @usage_lib.entrypoint

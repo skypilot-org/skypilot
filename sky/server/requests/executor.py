@@ -28,6 +28,7 @@ import signal
 import sys
 import threading
 import time
+import traceback
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
@@ -374,7 +375,9 @@ def _request_execution_wrapper(request_id: str,
             api_requests.set_request_failed(request_id, e)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to '
-                        f'{common_utils.format_exception(e)}')
+                        f'{common_utils.format_exception(e)}\n'
+                        'Traceback:\n'
+                        f'{traceback.format_exc()}')
             return
         else:
             with api_requests.update_request(request_id) as request_task:

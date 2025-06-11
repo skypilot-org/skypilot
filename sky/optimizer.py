@@ -995,6 +995,38 @@ class Optimizer:
                     'GCP), which can lead to significant higher costs (~$2/h).')
 
     @staticmethod
+    def print_cluster_plan(dag: 'dag_lib.Dag'):
+        from sky import global_user_state
+        fields = [
+            'INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS', 'COST ($)',
+            'CHOSEN'
+        ]
+        table = _create_table(fields)
+        cluster_name = str(list(dag.tasks[0].resources)[0].cloud)
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        if cluster_record is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'SSH Node Pools {cluster_name!r} not found.')
+        from sky.backends import CloudVmRayBackend
+        from sky.backends import CloudVmRayResourceHandle
+        handle: CloudVmRayResourceHandle = cluster_record['handle']
+        lr = handle.launched_resources
+        dag.tasks[0].resources = [
+            r.copy(cloud=lr.cloud) for r in dag.tasks[0].resources
+        ]
+        task_resources = list(dag.tasks[0].resources)[0]
+        CloudVmRayBackend().check_resources_fit_cluster(handle, dag.tasks[0])
+        chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
+                      colorama.Style.RESET_ALL)
+        k, v = list(task_resources.accelerators.items())[0]
+        # TODO(tian): Show actual cpu and memory available on the container.
+        table.add_row([
+            f'SSH Node Pools ({cluster_name})', '-', '-', '-', f'{k}:{v}',
+            '0.00', chosen_str
+        ])
+        logger.info(f'{table}')
+
+    @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
             if node.best_resources:

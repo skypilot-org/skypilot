@@ -552,14 +552,44 @@ def _launch(
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''
         cluster_user_name = getpass.getuser()
+        is_docker_cluster = False
+        ssh_node_pool_cluster_name = None
+        ssh_node_pool_resource = list(dag.tasks[0].resources)[0]
+        if isinstance(ssh_node_pool_resource.cloud, str) and clusters:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(f'Cluster {cluster_name} already exists. '
+                                   'Please use a different cluster name.')
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
             # exist.
             request_id = optimize(dag,
                                   admin_policy_request_options=request_options)
-            stream_and_get(request_id)
-        else:
+            res = stream_and_get(request_id)
+            if res is None:  # means we are using cluster as ssh node pool
+                if ssh_node_pool_resource.extract_docker_image() is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            'Must specify a docker image for ssh node pool.')
+                ssh_node_pool_cluster_name = ssh_node_pool_resource.cloud
+                request_id = status([ssh_node_pool_cluster_name],
+                                    all_users=True)
+                clusters = get(request_id)
+                cluster_user_hash = common_utils.get_user_hash()
+                cluster_user_hash_str = ''
+                cluster_user_name = getpass.getuser()
+                is_docker_cluster = True
+        if clusters:
             cluster_record = clusters[0]
+            if is_docker_cluster:
+                task_ori = dag.tasks[0]
+                task_ori.set_resources_override(override_params={
+                    'cloud': cluster_record['handle'].launched_resources.cloud
+                })
+                if task_ori.run:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError('Cannot specify run command for '
+                                           'docker on SSH Node Pools.')
+                task_ori.run = 'sleep infinity'
             cluster_status = cluster_record['status']
             cluster_user_hash = cluster_record['user_hash']
             cluster_user_name = cluster_record['user_name']
@@ -571,7 +601,7 @@ def _launch(
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
         prompt = None
-        if cluster_status is None:
+        if cluster_status is None or is_docker_cluster:
             prompt = (
                 f'Launching a new cluster {cluster_name!r}. '
                 # '{clone_source_str}. '
@@ -617,6 +647,7 @@ def _launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
+        ssh_node_pool_cluster_name=ssh_node_pool_cluster_name,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/launch',

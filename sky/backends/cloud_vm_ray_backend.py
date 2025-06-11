@@ -2237,20 +2237,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
-            self,
-            *,
-            cluster_name: str,
-            cluster_name_on_cloud: str,
-            cluster_yaml: Optional[str],
-            launched_nodes: int,
-            launched_resources: resources_lib.Resources,
-            stable_internal_external_ips: Optional[List[Tuple[str,
-                                                              str]]] = None,
-            stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
+        self,
+        *,
+        cluster_name: str,
+        cluster_name_on_cloud: str,
+        cluster_yaml: Optional[str],
+        launched_nodes: int,
+        launched_resources: resources_lib.Resources,
+        stable_internal_external_ips: Optional[List[Tuple[str, str]]] = None,
+        stable_ssh_ports: Optional[List[int]] = None,
+        cluster_info: Optional[provision_common.ClusterInfo] = None,
+        docker_cluster_job_id: Optional[int] = None,
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -2270,6 +2270,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.docker_cluster_job_id: Optional[int] = docker_cluster_job_id
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2285,7 +2286,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user}')
+                f'\n\tssh_user={self.ssh_user},'
+                f'\n\tdocker_cluster_job_id={self.docker_cluster_job_id}')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2303,6 +2305,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         Use this method to use any cloud-specific port fetching logic.
         """
+        if self.docker_cluster_job_id is not None:
+            return
         del max_attempts  # Unused.
         if self.cached_cluster_info is not None:
             self.stable_ssh_ports = self.cached_cluster_info.get_ssh_ports()
@@ -2314,6 +2318,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             (self.num_ips_per_node * self.launched_nodes - 1))
 
     def _update_cluster_info(self):
+        if self.docker_cluster_job_id is not None:
+            return
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
         if (self.launched_resources.cloud.PROVISIONER_VERSION >=
@@ -2385,6 +2391,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             exceptions.FetchClusterInfoError: if we failed to get the cluster
                 infos. e.reason is HEAD or WORKER.
         """
+        if self.docker_cluster_job_id is not None:
+            return
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
@@ -2474,6 +2482,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                             avoid_ssh_control: bool = False
                            ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
+        if self.docker_cluster_job_id is not None:
+            return []
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
@@ -2533,6 +2543,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def internal_ips(self,
                      max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> List[str]:
+        if self.docker_cluster_job_id is not None:
+            return []
         internal_ips = self.cached_internal_ips
         if internal_ips is not None:
             return internal_ips
@@ -2549,6 +2561,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def external_ips(self,
                      max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> List[str]:
+        if self.docker_cluster_job_id is not None:
+            return []
         external_ips = self.cached_external_ips
         if external_ips is not None:
             return external_ips
@@ -2566,6 +2580,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def external_ssh_ports(self,
                            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS
                           ) -> List[int]:
+        if self.docker_cluster_job_id is not None:
+            return []
         cached_ssh_ports = self.cached_external_ssh_ports
         if cached_ssh_ports is not None:
             return cached_ssh_ports
@@ -2580,6 +2596,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return hourly_cost
 
     def setup_docker_user(self, cluster_config_file: str):
+        if self.docker_cluster_job_id is not None:
+            return
         ip_list = self.external_ips()
         assert ip_list is not None
         docker_user = backend_utils.get_docker_user(ip_list[0],
@@ -2705,6 +2723,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+
+        if version < 11:
+            self.docker_cluster_job_id = None
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')

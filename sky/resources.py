@@ -469,7 +469,10 @@ class Resources:
 
         cloud_str = '<Cloud>'
         if self.cloud is not None:
-            cloud_str = f'{self.cloud}'
+            if isinstance(self.cloud, str):
+                cloud_str = f'SSH Node Pools ({self.cloud})'
+            else:
+                cloud_str = f'{self.cloud}'
 
         self._cached_repr = f'{cloud_str}({hardware_str})'
         return self._cached_repr
@@ -527,7 +530,8 @@ class Resources:
         """
         if self._cpus is not None:
             return self._cpus
-        if self.cloud is not None and self._instance_type is not None:
+        if self.cloud is not None and not isinstance(
+                self.cloud, str) and self._instance_type is not None:
             vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
             return str(vcpus)
@@ -545,7 +549,15 @@ class Resources:
         type at launch time. Thus, Resources in the backend's ResourceHandle
         will always have the memory field set to None.)
         """
-        return self._memory
+        # return self._memory
+        if self._memory is not None:
+            return self._memory
+        if self.cloud is not None and not isinstance(
+                self.cloud, str) and self._instance_type is not None:
+            _, memory = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            return str(memory)
+        return None
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -1215,6 +1227,8 @@ class Resources:
                             f'GPU Direct TCPX image.')
 
         if self._image_id is None:
+            return
+        if isinstance(self.cloud, str):
             return
 
         if self.extract_docker_image() is not None:

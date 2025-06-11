@@ -141,6 +141,8 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
+        if handle.docker_cluster_job_id is not None:
+            continue
 
         if not (handle is not None and handle.cached_external_ips is not None
                 and 'credentials' in record):
@@ -713,6 +715,8 @@ def _parse_override_params(
             override_params['cloud'] = None
         else:
             override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
+            if override_params['cloud'] is None:
+                override_params['cloud'] = cloud
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -1360,7 +1364,8 @@ def launch(
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
         returncode = 0
-        if not detach_run and job_id is not None:
+        if (not detach_run and job_id is not None and
+                handle.docker_cluster_job_id is None):
             returncode = sdk.tail_logs(handle.get_cluster_name(),
                                        job_id,
                                        follow=True)
