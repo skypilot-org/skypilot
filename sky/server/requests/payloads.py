@@ -355,6 +355,11 @@ class UserUpdateBody(RequestBody):
     password: Optional[str] = None
 
 
+class UserImportBody(RequestBody):
+    """The request body for the user import endpoint."""
+    csv_content: str
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]

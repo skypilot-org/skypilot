@@ -33,6 +33,10 @@ import {
   XIcon,
   KeyRoundIcon,
   Trash2Icon,
+  EyeIcon,
+  EyeOffIcon,
+  UploadIcon,
+  DownloadIcon,
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
@@ -94,6 +98,18 @@ export function Users() {
   });
   const [userRoleCache, setUserRoleCache] = useState(null);
   const [roleLoading, setRoleLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showImportExportDialog, setShowImportExportDialog] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState(null);
+  const [activeTab, setActiveTab] = useState('import');
+  const [showResetPasswordDialog, setShowResetPasswordDialog] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
 
   const getUserRole = async () => {
     if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
@@ -181,6 +197,127 @@ export function Users() {
     }
   };
 
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setCsvFile(file);
+    setImportResults(null);
+  };
+
+  const handleImportUsers = async () => {
+    if (!csvFile) {
+      alert('Please select a CSV file first.');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const csvContent = e.target.result;
+          const response = await apiClient.post('/users/import', { 
+            csv_content: csvContent 
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Failed to import users');
+          }
+          
+          const results = await response.json();
+          
+          // Create user-friendly message
+          let message = `Import completed. ${results.success_count} users created successfully.`;
+          if (results.error_count > 0) {
+            message += `\n${results.error_count} failed.`;
+            if (results.creation_errors.length > 0) {
+              message += `\nErrors: ${results.creation_errors.slice(0, 3).join(', ')}`;
+              if (results.creation_errors.length > 3) {
+                message += ` and ${results.creation_errors.length - 3} more...`;
+              }
+            }
+          }
+          
+          setImportResults({ message });
+          if (results.success_count > 0) {
+            handleRefresh();
+          }
+        } catch (error) {
+          alert(`Error importing users: ${error.message}`);
+        } finally {
+          setImporting(false);
+        }
+      };
+      reader.readAsText(csvFile);
+    } catch (error) {
+      alert(`Error reading file: ${error.message}`);
+      setImporting(false);
+    }
+  };
+
+  const handleResetPasswordClick = async (user) => {
+    setResetPasswordUser(user);
+    setResetPassword('');
+    setShowResetPasswordDialog(true);
+  };
+
+  const handleResetPasswordSubmit = async () => {
+    if (!resetPassword) {
+      alert('Please enter a new password.');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const response = await apiClient.post('/users/update', {
+        user_id: resetPasswordUser.userId,
+        password: resetPassword,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to reset password');
+      }
+      alert('Password reset successfully.');
+      setShowResetPasswordDialog(false);
+      setResetPasswordUser(null);
+      setResetPassword('');
+    } catch (error) {
+      alert(`Error resetting password: ${error.message}`);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleDeleteUserClick = (user) => {
+    checkPermissionAndAct('cannot delete users', () => {
+      setUserToDelete(user);
+      setShowDeleteConfirmDialog(true);
+    });
+  };
+
+  const handleDeleteUserConfirm = async () => {
+    if (!userToDelete) return;
+    setResetLoading(true); // Reuse loading state
+    try {
+      const response = await apiClient.post('/users/delete', {
+        user_id: userToDelete.userId,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete user');
+      }
+      alert('User deleted successfully.');
+      setShowDeleteConfirmDialog(false);
+      setUserToDelete(null);
+      handleRefresh();
+    } catch (error) {
+      alert(`Error deleting user: ${error.message}`);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <>
       <div className="flex items-center justify-between mb-4 h-5">
@@ -200,23 +337,35 @@ export function Users() {
             </div>
           )}
           <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center mr-2"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
-          <button
             onClick={async () => {
               await checkPermissionAndAct('cannot create users', () => {
                 setShowCreateUser(true);
               });
             }}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1"
-            title="Create User"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1 mr-2"
+            title="Create New User"
           >
-            + Create User
+            + New User
+          </button>
+          <button
+            onClick={async () => {
+              await checkPermissionAndAct('cannot import users', () => {
+                setShowImportExportDialog(true);
+              });
+            }}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
+            title="Import/Export Users"
+          >
+            <UploadIcon className="h-4 w-4 mr-1" />
+            Import/Export
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
           </button>
         </div>
       </div>
@@ -226,74 +375,88 @@ export function Users() {
         refreshDataRef={refreshDataRef}
         checkPermissionAndAct={checkPermissionAndAct}
         roleLoading={roleLoading}
+        onResetPassword={handleResetPasswordClick}
+        onDeleteUser={handleDeleteUserClick}
       />
-      {showCreateUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
-          <div className="bg-white rounded shadow-lg p-6 min-w-[320px]">
-            <h2 className="text-lg font-semibold mb-4">Create User</h2>
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Username
-                </label>
+      {/* Create User Dialog */}
+      <Dialog open={showCreateUser} onOpenChange={setShowCreateUser}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create User</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">
+                Username
+              </label>
+              <input
+                className="border rounded px-3 py-2 w-full"
+                placeholder="Username"
+                value={newUser.username}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, username: e.target.value })
+                }
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">
+                Password
+              </label>
+              <div className="relative">
                 <input
-                  className="border rounded px-2 py-1 w-full"
-                  placeholder="Username"
-                  value={newUser.username}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, username: e.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
-                <input
-                  className="border rounded px-2 py-1 w-full"
+                  className="border rounded px-3 py-2 w-full pr-10"
                   placeholder="Password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={newUser.password}
                   onChange={(e) =>
                     setNewUser({ ...newUser, password: e.target.value })
                   }
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Role
-                </label>
-                <select
-                  className="border rounded px-2 py-1 w-full"
-                  value={newUser.role}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, role: e.target.value })
-                  }
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  onClick={() => setShowPassword(!showPassword)}
                 >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                </select>
+                  {showPassword ? (
+                    <EyeOffIcon className="h-4 w-4" />
+                  ) : (
+                    <EyeIcon className="h-4 w-4" />
+                  )}
+                </button>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                className="text-sky-blue hover:underline"
-                disabled={creating}
-                onClick={handleCreateUser}
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">Role</label>
+              <select
+                className="border rounded px-3 py-2 w-full"
+                value={newUser.role}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, role: e.target.value })
+                }
               >
-                Create
-              </button>
-              <button
-                className="text-gray-400 hover:text-gray-700"
-                disabled={creating}
-                onClick={() => setShowCreateUser(false)}
-              >
-                Cancel
-              </button>
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
             </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => setShowCreateUser(false)}
+              disabled={creating}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              onClick={handleCreateUser}
+              disabled={creating}
+            >
+              {creating ? 'Creating...' : 'Create'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={permissionDenialState.open}
@@ -334,6 +497,209 @@ export function Users() {
             >
               OK
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import/Export Users Dialog */}
+      <Dialog open={showImportExportDialog} onOpenChange={setShowImportExportDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import/Export Users</DialogTitle>
+          </DialogHeader>
+          
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200 mb-4">
+            <button
+              className={`px-4 py-2 text-sm font-medium ${
+                activeTab === 'import'
+                  ? 'border-b-2 border-sky-500 text-sky-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => setActiveTab('import')}
+            >
+              Import
+            </button>
+            <button
+              className={`px-4 py-2 text-sm font-medium ${
+                activeTab === 'export'
+                  ? 'border-b-2 border-sky-500 text-sky-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => setActiveTab('export')}
+            >
+              Export
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-4 py-4">
+            {activeTab === 'import' ? (
+              <>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    CSV File
+                  </label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    className="border rounded px-3 py-2 w-full"
+                  />
+                  <p className="text-xs text-gray-500">
+                    CSV should have columns: username, password, role<br/>
+                    Supports both plain text passwords and exported password hashes.
+                  </p>
+                </div>
+                
+                {importResults && (
+                  <div className="p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+                    {importResults.message}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Export Users to CSV
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Download all users as a CSV file with password hashes.
+                  </p>
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded">
+                    <p className="text-sm text-amber-700">
+                      ⚠️ This will export all users with columns: username, password (hashed), role
+                    </p>
+                    <p className="text-xs text-amber-600 mt-1">
+                      Password hashes can be imported directly for system backups.
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => setShowImportExportDialog(false)}
+              disabled={importing}
+            >
+              Cancel
+            </button>
+            {activeTab === 'import' ? (
+              <button
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                onClick={handleImportUsers}
+                disabled={importing || !csvFile}
+              >
+                {importing ? 'Importing...' : 'Import'}
+              </button>
+            ) : (
+              <button
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                onClick={async () => {
+                  try {
+                    const response = await apiClient.get('/users/export');
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      throw new Error(errorData.detail || 'Failed to export users');
+                    }
+                    
+                    const data = await response.json();
+                    const csvContent = data.csv_content;
+                    
+                    // Download the CSV file
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `users_export_${new Date().toISOString().split('T')[0]}.csv`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    
+                    // Show success message
+                    alert(`Successfully exported ${data.user_count} users to CSV file.`);
+                  } catch (error) {
+                    alert(`Error exporting users: ${error.message}`);
+                  }
+                }}
+              >
+                <DownloadIcon className="h-4 w-4 mr-1" />
+                Export
+              </button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={showResetPasswordDialog} onOpenChange={setShowResetPasswordDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Enter a new password for {resetPasswordUser?.usernameDisplay || 'this user'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">
+                New Password
+              </label>
+              <input
+                type="password"
+                className="border rounded px-3 py-2 w-full"
+                placeholder="Enter new password"
+                value={resetPassword}
+                onChange={(e) => setResetPassword(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => setShowResetPasswordDialog(false)}
+              disabled={resetLoading}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              onClick={handleResetPasswordSubmit}
+              disabled={resetLoading || !resetPassword}
+            >
+              {resetLoading ? 'Resetting...' : 'Reset Password'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete User Confirmation Dialog */}
+      <Dialog open={showDeleteConfirmDialog} onOpenChange={setShowDeleteConfirmDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete User</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete user "{userToDelete?.usernameDisplay || 'this user'}"? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => setShowDeleteConfirmDialog(false)}
+              disabled={resetLoading}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2"
+              onClick={handleDeleteUserConfirm}
+              disabled={resetLoading}
+            >
+              {resetLoading ? 'Deleting...' : 'Delete'}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

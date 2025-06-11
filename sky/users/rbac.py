@@ -30,6 +30,12 @@ _DEFAULT_USER_BLOCKLIST = [{
 }, {
     'path': '/users/create',
     'method': 'POST'
+}, {
+    'path': '/users/import',
+    'method': 'POST'
+}, {
+    'path': '/users/export',
+    'method': 'GET'
 }]
 
 
