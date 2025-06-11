@@ -305,11 +305,43 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
+  // Function to open Grafana
+  const openGrafana = () => {
+    // Use the configured Grafana URL if available, otherwise construct default
+    const grafanaUrl = window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
+    window.open(grafanaUrl, '_blank');
+  };
+
   return (
     <div className="mb-4">
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
-          <h4 className="text-lg font-semibold mb-4">Available GPUs</h4>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-lg font-semibold">Available GPUs</h4>
+            {/* Add Grafana link button for in-cluster contexts when grafana_url is configured */}
+            {contextName === 'in-cluster' && window['SKYPILOT_GRAFANA_URL'] && (
+              <button
+                onClick={openGrafana}
+                className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue"
+              >
+                <svg
+                  className="w-4 h-4 mr-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  />
+                </svg>
+                View GPU Metrics
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             {gpusInContext.map((gpu) => {
               const usedGpus = gpu.gpu_total - gpu.gpu_free;
