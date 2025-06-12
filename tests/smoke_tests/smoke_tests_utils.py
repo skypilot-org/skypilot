@@ -246,6 +246,10 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
+def get_cmd_restart_api_server():
+    return 'sky api stop || true && sky api start'
+
+
 # Managed job functions
 
 _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
