@@ -3881,8 +3881,36 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         cancelled_ids = message_utils.decode_payload(stdout)
         if cancelled_ids:
-            logger.info(
-                f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
+            docker_images = []
+            actual_cancelled_ids = []
+            for maybe_job_id in cancelled_ids:
+                if isinstance(maybe_job_id, str):
+                    docker_images.append(maybe_job_id)
+                else:
+                    actual_cancelled_ids.append(maybe_job_id)
+            if docker_images:
+                assert not actual_cancelled_ids, actual_cancelled_ids
+                code = job_lib.JobLibCodeGen.cancel_docker_images(docker_images)
+                def _cleanup_image(runner):
+                    returncode, stdout, stderr = runner.run(
+                        code,
+                        require_outputs=True,
+                        stream_logs=False)
+                    subprocess_utils.handle_returncode(
+                            returncode,
+                            code,
+                            f'Failed to cancel docker images on cluster {handle.cluster_name}.',
+                            stderr=stderr,
+                            stream_logs=False)
+                    return message_utils.decode_payload(stdout)
+                runners = handle.get_command_runners()
+                images = subprocess_utils.run_in_parallel(_cleanup_image, runners)
+                # for image, runner in zip(images, runners):
+                #     if image:
+                #         logger.info(f'Node {runner.node}: deleted docker image(s): {", ".join(image)}')
+            else:
+                logger.info(
+                    f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
         else:
             logger.info('No jobs cancelled. They may be in terminal states.')
 
