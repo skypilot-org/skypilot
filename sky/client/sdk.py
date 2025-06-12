@@ -261,11 +261,15 @@ def list_accelerator_counts(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def optimize(
-    dag: 'sky.Dag',
+    dag: Optional['sky.Dag'] = None,
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
+    dag_id: Optional[str] = None,
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
+
+    Optimize takes a dag or a dag_id that references to the validated dag on
+    API server as the input, dag and dag_id are mutually exclusive.
 
     Args:
         dag: the DAG to optimize.
@@ -273,6 +277,7 @@ def optimize(
         admin_policy_request_options: Request options used for admin policy
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+        dag_id: the UUID of the DAG to optimize.
 
     Returns:
         The request ID of the optimize request.
@@ -285,13 +290,20 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-
-    body = payloads.OptimizeBody(dag=dag_str,
-                                 minimize=minimize,
+    body = payloads.OptimizeBody(minimize=minimize,
                                  request_options=admin_policy_request_options)
+    if dag_id is not None:
+        assert dag is None, 'dag must be None if dag_id is provided'
+        body.dag_id = dag_id
+    else:
+        assert dag is not None, 'dag must be provided if dag_id is not provided'
+        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        body.dag = dag_str
+
+    # For backward compatibility, we exclude unset values.
     response = requests.post(f'{server_common.get_server_url()}/optimize',
-                             json=json.loads(body.model_dump_json()),
+                             json=json.loads(
+                                 body.model_dump_json(exclude_unset=True)),
                              cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
@@ -310,8 +322,11 @@ def validate(
     dag: 'sky.Dag',
     workdir_only: bool = False,
     admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
-) -> None:
-    """Validates the tasks.
+) -> Optional[str]:
+    """Validates the DAG and returns an UUID of the validated DAG.
+
+    There is no UUID returned in old versions of SkyPilot, caller should handle
+    such case for backward-compatibility.
 
     The file paths (workdir and file_mounts) are validated on the client side
     while the rest (e.g. resource) are validated on server side.
@@ -332,7 +347,8 @@ def validate(
             task.expand_and_validate_file_mounts()
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
-                                 request_options=admin_policy_request_options)
+                                 request_options=admin_policy_request_options,
+                                 process_mounts=True)
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
@@ -340,6 +356,10 @@ def validate(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
                 response.json().get('detail'))
+    dag_id = response.json()
+    if dag_id:
+        return dag_id
+    return None
 
 
 @usage_lib.entrypoint
@@ -493,51 +513,17 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         dryrun=dryrun)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options, at_client_side=True) as dag:
-        return _launch(
-            dag,
-            cluster_name,
-            request_options,
-            retry_until_up,
-            idle_minutes_to_autostop,
-            dryrun,
-            down,
-            backend,
-            optimize_target,
-            no_setup,
-            clone_disk_from,
-            fast,
-            _need_confirmation,
-            _is_launched_by_jobs_controller,
-            _is_launched_by_sky_serve_controller,
-            _disable_controller_check,
-        )
-
-
-def _launch(
-    dag: 'sky.Dag',
-    cluster_name: str,
-    request_options: admin_policy.RequestOptions,
-    retry_until_up: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-    dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
-    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
-    no_setup: bool = False,
-    clone_disk_from: Optional[str] = None,
-    fast: bool = False,
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False,
-    _is_launched_by_jobs_controller: bool = False,
-    _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
-) -> server_common.RequestId:
-    """Auxiliary function for launch(), refer to launch() for details."""
-
-    validate(dag, admin_policy_request_options=request_options)
+    # Apply the client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag,
+                                           request_options=request_options,
+                                           at_client_side=True)
+    # Prepare upload mounts, replace the local path to the path on the API
+    # server. This must be called after client-side admin policy since the
+    # admin policy may mutate the file mounts.
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = validate(dag, admin_policy_request_options=request_options)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
     # these flags.
@@ -553,10 +539,21 @@ def _launch(
         cluster_user_hash_str = ''
         cluster_user_name = getpass.getuser()
         if not clusters:
+            # TODO(aylei): Drop backward-compatibility in 0.12.0 to enforce
+            # optimize() applies on validated dag.
+            # Compatibility note: if a dag_id is provided by the API server in
+            # previous steps, then the server must be able to serve
+            # OptimizeRequest with dag_id.
+            if dag_id is not None:
+                request_id = optimize(
+                    dag_id=dag_id, admin_policy_request_options=request_options)
+            else:
+                # Backward-compatibility for legacy API server.
+                request_id = optimize(
+                    dag=dag, admin_policy_request_options=request_options)
+
             # Show the optimize log before the prompt if the cluster does not
             # exist.
-            request_id = optimize(dag,
-                                  admin_policy_request_options=request_options)
             stream_and_get(request_id)
         else:
             cluster_record = clusters[0]
@@ -597,12 +594,9 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
-
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    client_common.upload_mounts_to_api_server(upload_list)
 
     body = payloads.LaunchBody(
-        task=dag_str,
         cluster_name=cluster_name,
         retry_until_up=retry_until_up,
         dryrun=dryrun,
@@ -618,9 +612,14 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
     )
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
+        body.task = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
     response = requests.post(
         f'{server_common.get_server_url()}/launch',
-        json=json.loads(body.model_dump_json()),
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
         timeout=5,
         cookies=server_common.get_api_cookie_jar(),
     )
@@ -691,16 +690,20 @@ def exec(  # pylint: disable=redefined-builtin
           controller that does not support this operation.
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    validate(dag, workdir_only=True)
-    dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(
+        dag, workdir_only=True)
+    dag_id = validate(dag, workdir_only=True)
+    client_common.upload_mounts_to_api_server(upload_list)
     body = payloads.ExecBody(
-        task=dag_str,
         cluster_name=cluster_name,
         dryrun=dryrun,
         down=down,
         backend=backend.NAME if backend else None,
     )
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
+        body.task = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     response = requests.post(
         f'{server_common.get_server_url()}/exec',
