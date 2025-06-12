@@ -2467,7 +2467,7 @@ def cancel(
       sky cancel cluster-glob* -a
 
     Job IDs can be looked up by ``sky queue cluster_name``.
-    Cluster names support glob patterns (e.g., cluster* matches cluster1, cluster2).
+    Cluster names support glob patterns (e.g., px* matches px1, px2).
     """
     # Handle glob patterns in cluster names
     matching_clusters = []
@@ -2475,33 +2475,37 @@ def cancel(
         # This is a glob pattern, expand it
         try:
             # Get list of all available clusters
-            all_records = sdk.get(
-                sdk.status(cluster_names=None, all_users=True))
+            all_records = sdk.get(sdk.status(cluster_names=None,
+                                             all_users=True))
             all_clusters = [record['name'] for record in all_records]
-            matching_clusters = [c for c in all_clusters if fnmatch.fnmatch(c, cluster)]
+            matching_clusters = [
+                c for c in all_clusters if fnmatch.fnmatch(c, cluster)
+            ]
         except Exception:
-            raise click.UsageError(f'No clusters match pattern: {cluster!r}')
+            raise click.UsageError(
+                f'No clusters match pattern: {cluster!r}') from None
     else:
         # Literal cluster name
         matching_clusters = [cluster]
-    
+
     if not matching_clusters:
         raise click.UsageError(f'No clusters match pattern: {cluster!r}')
-    
+
     # Don't allow job IDs when using glob patterns that match multiple clusters
     if len(matching_clusters) > 1 and jobs:
         raise click.UsageError(
-            'Cannot specify job IDs when cluster pattern matches multiple clusters. '
+            'Cannot specify job IDs when cluster pattern'
+            'matches multiple clusters. '
             f'Pattern {cluster!r} matches: {", ".join(matching_clusters)}')
-      
+
     job_identity_str = ''
     job_ids_to_cancel = None
     if not jobs and not all and not all_users:
         if len(matching_clusters) == 1:
-            click.echo(
-                f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
-                'cancelling the latest running job.'
-                f'{colorama.Style.RESET_ALL}')
+            click.echo(f'{colorama.Fore.YELLOW}No job IDs or'
+                       ' --all/--all-users provided; '
+                       'cancelling the latest running job.'
+                       f'{colorama.Style.RESET_ALL}')
             job_identity_str = 'the latest running job'
         else:
             job_identity_str = 'the latest running job on each cluster'
@@ -2520,7 +2524,7 @@ def cancel(
     if len(matching_clusters) == 1:
         job_identity_str += f' on cluster {matching_clusters[0]!r}'
     else:
-        cluster_list = ', '.join(f"'{c}'" for c in matching_clusters)
+        cluster_list = ', '.join(f'"{c}"' for c in matching_clusters)
         job_identity_str += f' on clusters: {cluster_list}'
 
     if not yes:
@@ -2529,8 +2533,7 @@ def cancel(
                       abort=True,
                       show_default=True)
 
-
-    for cluster_name in matching_clusters:
+    for cluster in matching_clusters:
         try:
             request_id = sdk.cancel(cluster,
                                     all=all,
@@ -2541,7 +2544,8 @@ def cancel(
             controller = controller_utils.Controllers.from_name(cluster)
             assert controller is not None, cluster
             with ux_utils.print_exception_no_traceback():
-                raise click.UsageError(controller.value.decline_cancel_hint) from e
+                raise click.UsageError(
+                    controller.value.decline_cancel_hint) from e
         except ValueError as e:
             raise click.UsageError(str(e))
         except exceptions.ClusterNotUpError:
