@@ -1342,6 +1342,32 @@ def get_config_schema():
         }
     }
 
+    logs_configs = {
+        'type': 'object',
+        'required': ['store'],
+        'additionalProperties': False,
+        'properties': {
+            'store': {
+                'type': 'string',
+                'case_insensitive_enum': ['local', 'gcp'],
+            },
+            'gcp': {
+                'type': 'object',
+                'properties': {
+                    'project': 'string',
+                },
+            },
+            'local': {
+                'type': 'object',
+                'properties': {
+                    'path': {
+                        'type': 'string',
+                    },
+                },
+            },
+        },
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(

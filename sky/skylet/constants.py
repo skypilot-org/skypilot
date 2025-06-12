@@ -421,3 +421,10 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
 
 # The user ID of the SkyPilot system.
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
+
+# Environment variables for cluster and task metadata, task execution process
+# can use these env vars to reflect the cluster and task metadata at runtime.
+CLUSTER_INFO_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}CLUSTER_INFO'
+CLUSTER_NAME_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}CLUSTER_NAME'
+CLUSTER_HASH_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}CLUSTER_HASH'
+JOB_NAME_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}JOB_NAME'

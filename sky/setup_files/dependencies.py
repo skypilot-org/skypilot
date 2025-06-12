@@ -126,6 +126,7 @@ extras_require: Dict[str, List[str]] = {
         # see https://github.com/conda/conda/issues/13619
         # see https://github.com/googleapis/google-api-python-client/issues/2554
         'pyopenssl >= 23.2.0, <24.3.0',
+        'google-cloud-logging>=3.12.0',
     ],
     'ibm': [
         'ibm-cloud-sdk-core',

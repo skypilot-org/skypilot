@@ -2231,7 +2231,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
+            cluster_info: Optional[provision_common.ClusterInfo] = None,
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -5172,13 +5172,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         of the info into multiple env vars, we should not treat this json format
         as a sink for all the cluster info.
         """
+        # TODO(aylei): better solution to get cluster hash here
+        # pylint: disable=protected-access
+        cluster_hash = global_user_state._get_hash_for_existing_cluster(
+            handle.cluster_name)
         return {
-            'SKYPILOT_CLUSTER_INFO': json.dumps({
+            constants.CLUSTER_INFO_ENV_VAR: json.dumps({
                 'cluster_name': handle.cluster_name,
                 'cloud': str(handle.launched_resources.cloud),
                 'region': handle.launched_resources.region,
                 'zone': handle.launched_resources.zone,
-            })
+            }),
+            constants.CLUSTER_NAME_ENV_VAR: handle.cluster_name,
+            constants.CLUSTER_HASH_ENV_VAR: cluster_hash,
         }
 
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,

@@ -606,3 +606,8 @@ class RequestAlreadyExistsError(Exception):
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
     pass
+
+
+class LogStoreError(Exception):
+    """Raised when a log store error occurs."""
+    pass

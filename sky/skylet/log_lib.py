@@ -20,6 +20,7 @@ from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
 import colorama
 
 from sky import sky_logging
+from sky.logs import logs
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import context
@@ -442,7 +443,8 @@ def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0,
+              log_store: Optional['logs.LogStore'] = None) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -453,7 +455,30 @@ def tail_logs(job_id: Optional[int],
         follow: Whether to follow the logs or print the logs so far and exit.
         tail: The number of lines to display from the end of the log file,
             if 0, print all lines.
+        log_store: The log store to write the logs to, write to stdout if None.
+            This option can only be used when calling tail_logs() in task
+            execution in order to get the correct task env variables.
     """
+    write_log = print
+    if log_store is not None:
+        labels = logs.LogLabels(
+            cluster_hash=os.environ.get(constants.CLUSTER_HASH_ENV_VAR, ''),
+            cluster_name=os.environ.get(constants.CLUSTER_NAME_ENV_VAR, ''),
+            job_id=str(job_id),
+            managed_job_id=str(managed_job_id),
+            job_name=os.environ.get(constants.JOB_NAME_ENV_VAR, ''),
+        )
+        batch: List[str] = []
+
+        def _write_log(line: str, *args, flush: bool = False, **kwargs) -> None:
+            del args, kwargs
+            batch.append(line)
+            if flush:
+                log_store.write(batch, labels)
+                batch.clear()
+
+        write_log = _write_log
+
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
         # which means no job has been submitted to this cluster. See
@@ -482,13 +507,13 @@ def tail_logs(job_id: Optional[int],
         if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
             break
         if retry_cnt >= SKY_LOG_WAITING_MAX_RETRY:
-            print(
+            write_log(
                 f'{colorama.Fore.RED}ERROR: Logs for '
                 f'{job_str} (status: {status.value}) does not exist '
                 f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return
-        print(f'INFO: Waiting {SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
-              'to be written...')
+        write_log(f'INFO: Waiting {SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+                  'to be written...')
         time.sleep(SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
@@ -515,16 +540,16 @@ def tail_logs(job_id: Optional[int],
                     if start_stream_at in line:
                         start_streaming = True
                     if start_streaming:
-                        print(line, end='')
+                        write_log(line, end='')
                 # Flush the last n lines
-                print(end='', flush=True)
+                write_log(end='', flush=True)
             # Now, the cursor is at the end of the last lines
             # if tail > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
                                          start_streaming=start_streaming,
                                          start_streaming_at=start_stream_at):
-                print(line, end='', flush=True)
+                write_log(line, end='', flush=True)
     else:
         try:
             start_streaming = False
@@ -542,7 +567,7 @@ def tail_logs(job_id: Optional[int],
                     if start_stream_at in line:
                         start_streaming = True
                     if start_streaming:
-                        print(line, end='', flush=True)
+                        write_log(line, end='', flush=True)
                 status_str = status.value if status is not None else 'None'
                 print(ux_utils.finishing_message(
                     f'Job finished (status: {status_str}).'),
