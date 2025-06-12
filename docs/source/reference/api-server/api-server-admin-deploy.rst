@@ -48,11 +48,22 @@ Install the SkyPilot Helm chart with the following command:
     WEB_USERNAME=skypilot
     WEB_PASSWORD=yourpassword
     AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-    # Deploy the API server
+
+    # Deploy the API server with basic auth enabled in ingress
+    # controller, which does not support RBAC
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
       --create-namespace \
       --set ingress.authCredentials=$AUTH_STRING
+
+    # Deploy the API server with basic auth enabled in API
+    # server, which supports RBAC
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --create-namespace \
+      --set apiService.enableUserManagement=true \
+      --set apiService.initialBasicAuthCredentials.username=$WEB_USERNAME \
+      --set apiService.initialBasicAuthCredentials.password=$WEB_PASSWORD
 
 .. dropdown:: Flags explanation
 
@@ -62,7 +73,10 @@ Install the SkyPilot Helm chart with the following command:
     * ``--devel``: Use the latest development version of the SkyPilot helm chart. To use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
     * ``--namespace $NAMESPACE``: Specify the namespace to deploy the API server in.
     * ``--create-namespace``: Create the namespace if it doesn't exist.
-    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials for the API server.
+    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials in ingress controller for the API server.
+    * :ref:`--set apiService.enableUserManagement=true <helm-values-apiService-enableUserManagement>`: Enable basic auth and user management in the API server.
+    * :ref:`--set apiService.initialBasicAuthCredentials.username=$WEB_USERNAME <helm-values-apiService-initialBasicAuthCredentials>`: Set the username for the initial basic auth credentials.
+    * :ref:`--set apiService.initialBasicAuthCredentials.password=$WEB_PASSWORD <helm-values-apiService-initialBasicAuthCredentials>`: Set the password for the initial basic auth credentials.
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 

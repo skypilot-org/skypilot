@@ -16,16 +16,15 @@ apiService:
   # Enable basic auth and user management in the API server
   # If enabled, the user can be created, updated, and deleted in the Dashboard,
   # and the basic auth will be done in the API server instead of the ingress.
-  # If basic auth is enabled in API server, the basic auth configuration
-  # `ingress.authCredentials` and `ingress.authSecret` in the ingress will be ignored.
+  # If enabled, the basic auth configuration `ingress.authCredentials`
+  # and `ingress.authSecret` in the ingress will be ignored.
   enableUserManagement: false
   # Initial basic auth credentials for the API server
   # The user in the credentials will be used to create a new admin user in the API server,
   # and the password can be updated by the user in the Dashboard.
-  # If `basicAuthCredentials` is set, it will be used to create a new secret with the credentials
-  # If `basicAuthSecret` is set, it will be used to mount the secret to the API server
-  # If both are set, `basicAuthSecret` will be used
-  # Only used when `enableUserManagement` is true.
+  # If both `initialBasicAuthCredentials` and `initialBasicAuthSecret` are set,
+  # `initialBasicAuthSecret` will be used.
+  # They are only used when `enableUserManagement` is true.
   initialBasicAuthCredentials:
     username: skypilot
     password: skypilot

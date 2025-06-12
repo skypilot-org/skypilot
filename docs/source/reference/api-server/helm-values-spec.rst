@@ -35,6 +35,11 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.1
+    :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
+    :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`:
+      username: "skypilot"
+      password: "skypilot"
+    :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
     :ref:`preDeployHook <helm-values-apiService-preDeployHook>`: \|-
       # Run commands before deploying the API server, e.g. installing an admin
       # policy. Remember to set the admin policy in the config section below.
@@ -196,6 +201,68 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
   apiService:
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
+
+.. _helm-values-apiService-enableUserManagement:
+
+``apiService.enableUserManagement``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable basic auth and user management in the API server. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
+
+If enabled, the user can be created, updated, and deleted in the Dashboard, and the basic auth will be done in the API server instead of the ingress controller. In this case, the basic auth configuration ``ingress.authCredentials`` and ``ingress.authSecret`` in the ingress will be ignored.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    enableUserManagement: false
+
+.. _helm-values-apiService-initialBasicAuthCredentials:
+
+``apiService.initialBasicAuthCredentials``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Initial basic auth credentials for the API server.
+
+The user in the credentials will be used to create a new admin user in the API server, and the password can be updated by the user in the Dashboard.
+
+If both ``initialBasicAuthCredentials`` and ``initialBasicAuthSecret`` are set, ``initialBasicAuthSecret`` will be used. They are only used when ``enableUserManagement`` is true.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  apiService:
+    initialBasicAuthCredentials:
+      username: "skypilot"
+      password: "skypilot"
+
+.. _helm-values-apiService-initialBasicAuthSecret:
+
+``apiService.initialBasicAuthSecret``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Initial basic auth secret for the API server. If not specified, a new secret will be created using ``initialBasicAuthCredentials``.
+
+To create a new secret, you can use the following command:
+
+.. code-block:: bash
+
+  WEB_USERNAME=skypilot
+  WEB_PASSWORD=skypilot
+  NAMESPACE=skypilot
+  kubectl create secret generic initial-basic-auth \
+    --from-literal=username=$WEB_USERNAME \
+    --from-literal=password=$WEB_PASSWORD \
+    -n $NAMESPACE
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    initialBasicAuthSecret: null
 
 .. _helm-values-apiService-preDeployHook:
 
