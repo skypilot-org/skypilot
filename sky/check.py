@@ -561,7 +561,7 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             # TODO: This is a hack to remove the 'ssh-' prefix from the
             # context name. Once we have a separate kubeconfig for SSH,
             # this will not be required.
-            cleaned_context = context.lstrip('ssh-')
+            cleaned_context = context.removeprefix('ssh-')
         else:
             cleaned_context = context
         symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(filtered_contexts) -

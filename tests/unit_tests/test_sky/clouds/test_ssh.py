@@ -283,9 +283,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             'regular-ctx', 'ssh-prod', 'ssh-dev', 'ssh-staging', 'ssh-test'
         ]
         mock_get_workspace_cloud.return_value.get.return_value = None
-        # Only allow specific node pools - note: lstrip('ssh-') behavior
-        # 'ssh-prod'.lstrip('ssh-') -> 'prod'
-        # 'ssh-staging'.lstrip('ssh-') -> 'taging' (not 'staging'!)
+        # Only allow specific node pools - note: removeprefix('ssh-') behavior
+        # 'ssh-prod'.removeprefix('ssh-') -> 'prod'
+        # 'ssh-staging'.removeprefix('ssh-') -> 'taging' (not 'staging'!)
         mock_get_nested.return_value = ['prod', 'taging', 'nonexistent']
 
         # Node pools file has some contexts

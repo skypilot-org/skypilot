@@ -480,7 +480,7 @@ class Resources:
         if self.region is not None:
             region_name = self.region
             if self.region.startswith('ssh-'):
-                region_name = self.region.lstrip('ssh-')
+                region_name = self.region.removeprefix('ssh-')
             region_str = f', region={region_name}'
         zone_str = ''
         if self.zone is not None:

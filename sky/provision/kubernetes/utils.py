@@ -1167,7 +1167,7 @@ def get_accelerator_label_key_values(
 
     is_ssh_node_pool = context.startswith('ssh-') if context else False
     cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
-    context_display_name = context.lstrip('ssh-') if (
+    context_display_name = context.removeprefix('ssh-') if (
         context and is_ssh_node_pool) else context
 
     autoscaler_type = get_autoscaler_type()
