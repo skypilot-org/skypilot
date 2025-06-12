@@ -226,24 +226,24 @@ def test_get_controller_resources_with_task_resources(
 def test_get_cloud_dependencies_installation_commands_empty_clouds(
         controller_type: str, monkeypatch):
     """Test that the function works correctly with no enabled clouds."""
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return []
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should have at least uv installation and python packages
     assert len(commands) >= 3
     # Check that uv installation is included
@@ -258,63 +258,63 @@ def test_get_cloud_dependencies_installation_commands_empty_clouds(
 def test_get_cloud_dependencies_installation_commands_aws_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only AWS enabled."""
-    
+
     mock_aws = mock.Mock(spec=clouds.AWS)
     mock_aws.canonical_name.return_value = 'aws'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_aws]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include AWS dependencies
     combined_commands = ' '.join(commands)
     assert 'awscli' in combined_commands or 'boto3' in combined_commands
 
 
-@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])  
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_get_cloud_dependencies_installation_commands_gcp_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only GCP enabled."""
-    
+
     mock_gcp = mock.Mock(spec=clouds.GCP)
     mock_gcp.canonical_name.return_value = 'gcp'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_gcp]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     # Mock the GCP installation command
     mock_gcp_install_cmd = 'mock_gcp_install'
     monkeypatch.setattr(
         'sky.utils.controller_utils.gcp.GOOGLE_SDK_INSTALLATION_COMMAND',
         mock_gcp_install_cmd)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include GCP SDK installation
     combined_commands = ' '.join(commands)
     assert 'GCP SDK' in combined_commands
@@ -325,32 +325,31 @@ def test_get_cloud_dependencies_installation_commands_gcp_only(
 def test_get_cloud_dependencies_installation_commands_azure_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only Azure enabled."""
-    
+
     mock_azure = mock.Mock(spec=clouds.Azure)
     mock_azure.canonical_name.return_value = 'azure'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_azure]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     # Mock dependencies
-    monkeypatch.setattr(
-        'sky.utils.controller_utils.dependencies.AZURE_CLI',
-        'azure-cli>=2.65.0')
-    
+    monkeypatch.setattr('sky.utils.controller_utils.dependencies.AZURE_CLI',
+                        'azure-cli>=2.65.0')
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include azure-cli installation
     combined_commands = ' '.join(commands)
     assert 'azure-cli' in combined_commands
@@ -360,27 +359,27 @@ def test_get_cloud_dependencies_installation_commands_azure_only(
 def test_get_cloud_dependencies_installation_commands_kubernetes_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only Kubernetes enabled."""
-    
+
     mock_k8s = mock.Mock(spec=clouds.Kubernetes)
     mock_k8s.canonical_name.return_value = 'kubernetes'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_k8s]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include Kubernetes dependencies
     combined_commands = ' '.join(commands)
     assert 'Kubernetes' in combined_commands
@@ -391,46 +390,45 @@ def test_get_cloud_dependencies_installation_commands_kubernetes_only(
 def test_get_cloud_dependencies_installation_commands_mixed_clouds(
         controller_type: str, monkeypatch):
     """Test dependencies installation with multiple clouds enabled."""
-    
+
     mock_aws = mock.Mock(spec=clouds.AWS)
     mock_aws.canonical_name.return_value = 'aws'
-    
+
     mock_gcp = mock.Mock(spec=clouds.GCP)
     mock_gcp.canonical_name.return_value = 'gcp'
-    
+
     mock_k8s = mock.Mock(spec=clouds.Kubernetes)
     mock_k8s.canonical_name.return_value = 'kubernetes'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_aws, mock_gcp, mock_k8s]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     def mock_cloud_in_iterable(cloud, enabled_clouds):
         # Mock that Kubernetes is in the enabled clouds
         return isinstance(cloud, clouds.Kubernetes)
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    monkeypatch.setattr(
-        'sky.utils.controller_utils.clouds.cloud_in_iterable',
-        mock_cloud_in_iterable)
-    
+    monkeypatch.setattr('sky.utils.controller_utils.clouds.cloud_in_iterable',
+                        mock_cloud_in_iterable)
+
     # Mock the GCP installation command
     mock_gcp_install_cmd = 'mock_gcp_install'
     monkeypatch.setattr(
         'sky.utils.controller_utils.gcp.GOOGLE_SDK_INSTALLATION_COMMAND',
         mock_gcp_install_cmd)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include dependencies for all clouds
     combined_commands = ' '.join(commands)
     assert 'GCP SDK' in combined_commands
@@ -443,33 +441,33 @@ def test_get_cloud_dependencies_installation_commands_mixed_clouds(
 def test_get_cloud_dependencies_installation_commands_ibm_jobs_only(
         monkeypatch):
     """Test that IBM dependencies are only included for jobs controller."""
-    
+
     mock_ibm = mock.Mock(spec=clouds.IBM)
     mock_ibm.canonical_name.return_value = 'ibm'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_ibm]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     # Test with jobs controller - should include IBM deps
     jobs_controller = controller_utils.Controllers.JOBS_CONTROLLER
     jobs_commands = controller_utils._get_cloud_dependencies_installation_commands(
         jobs_controller)
-    
+
     # Test with serve controller - should not include IBM deps
     serve_controller = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     serve_commands = controller_utils._get_cloud_dependencies_installation_commands(
         serve_controller)
-    
+
     # Both should have same number of commands since IBM deps are filtered
     # based on controller type in the function itself
     assert len(jobs_commands) == len(serve_commands)
@@ -479,27 +477,26 @@ def test_get_cloud_dependencies_installation_commands_ibm_jobs_only(
 def test_get_cloud_dependencies_installation_commands_cloudflare_storage(
         controller_type: str, monkeypatch):
     """Test dependencies installation with Cloudflare storage enabled."""
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return []
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return ['cloudflare']
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    monkeypatch.setattr(
-        'sky.utils.controller_utils.cloudflare.NAME',
-        'cloudflare')
-    
+    monkeypatch.setattr('sky.utils.controller_utils.cloudflare.NAME',
+                        'cloudflare')
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include cloudflare dependencies (which are aws dependencies)
     combined_commands = ' '.join(commands)
     # Cloudflare dependencies include AWS dependencies
@@ -509,44 +506,45 @@ def test_get_cloud_dependencies_installation_commands_cloudflare_storage(
 def test_get_cloud_dependencies_installation_commands_command_structure(
         monkeypatch):
     """Test the structure and format of generated commands."""
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return []
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Test command structure
     assert len(commands) >= 3  # At least uv, python packages, and done message
-    
+
     # First command should be uv installation
     assert 'uv' in commands[0]
     assert constants.SKY_UV_INSTALL_CMD in commands[0]
-    
+
     # Python packages command should include flask
-    python_cmd = next((cmd for cmd in commands if 'cloud python packages' in cmd), None)
+    python_cmd = next(
+        (cmd for cmd in commands if 'cloud python packages' in cmd), None)
     assert python_cmd is not None
     assert 'flask' in python_cmd
     assert constants.SKY_UV_PIP_CMD in python_cmd
-    
+
     # Last command should be the "done" message
     assert 'done.' in commands[-1]
-    
+
     # All commands except the last should contain step numbering
     for cmd in commands[:-1]:
         assert '[' in cmd and ']' in cmd  # Step numbering format
-        
+
     # Check that step numbers are properly replaced
     for i, cmd in enumerate(commands[:-1], 1):
         if 'echo -en' in cmd:
@@ -559,27 +557,27 @@ def test_get_cloud_dependencies_installation_commands_command_structure(
 def test_get_cloud_dependencies_installation_commands_vast_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only Vast enabled."""
-    
+
     mock_vast = mock.Mock(spec=clouds.Vast)
     mock_vast.canonical_name.return_value = 'vast'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_vast]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include Vast dependencies
     combined_commands = ' '.join(commands)
     assert 'Vast' in combined_commands
@@ -590,27 +588,27 @@ def test_get_cloud_dependencies_installation_commands_vast_only(
 def test_get_cloud_dependencies_installation_commands_nebius_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only Nebius enabled."""
-    
+
     mock_nebius = mock.Mock(spec=clouds.Nebius)
     mock_nebius.canonical_name.return_value = 'nebius'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_nebius]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include Nebius dependencies
     combined_commands = ' '.join(commands)
     assert 'Nebius' in combined_commands
@@ -621,27 +619,27 @@ def test_get_cloud_dependencies_installation_commands_nebius_only(
 def test_get_cloud_dependencies_installation_commands_cudo_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only Cudo enabled."""
-    
+
     mock_cudo = mock.Mock(spec=clouds.Cudo)
     mock_cudo.canonical_name.return_value = 'cudo'
-    
+
     def mock_get_cached_enabled_clouds_or_refresh(cloud_capability):
         return [mock_cudo]
-    
+
     def mock_get_cached_enabled_storage_cloud_names_or_refresh():
         return []
-    
+
     monkeypatch.setattr(
         'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
         mock_get_cached_enabled_clouds_or_refresh)
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    
+
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
-    
+
     # Should include Cudo dependencies
     combined_commands = ' '.join(commands)
     assert 'cudoctl' in combined_commands
