@@ -64,10 +64,6 @@ class JobInfoLoc(enum.IntEnum):
     PID = 9
 
 
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
-
-
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #3863, #1441 and PR #1509
@@ -136,7 +132,9 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+                db_path = os.path.expanduser('~/.sky/jobs.db')
+                os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper
