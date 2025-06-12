@@ -56,7 +56,8 @@ def optimize(
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     blocked_resources: Optional[List['resources_lib.Resources']] = None,
     quiet: bool = False,
-    request_options: Optional[admin_policy.RequestOptions] = None
+    request_options: Optional[admin_policy.RequestOptions] = None,
+    _is_docker_job: bool = False,
 ) -> 'dag_lib.Dag':
     """Finds the best execution plan for the given DAG.
 
@@ -82,13 +83,16 @@ def optimize(
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, request_options=request_options) as dag:
+        print(list(dag.tasks[0].resources)[0].cloud)
         if isinstance(list(dag.tasks[0].resources)[0].cloud, str):
             optimizer.Optimizer.print_cluster_plan(dag)
-            return None
-        return optimizer.Optimizer.optimize(dag=dag,
-                                            minimize=minimize,
-                                            blocked_resources=blocked_resources,
-                                            quiet=quiet)
+            return None if not _is_docker_job else 'dag'
+        ret = optimizer.Optimizer.optimize(dag=dag,
+                                           minimize=minimize,
+                                           blocked_resources=blocked_resources,
+                                           quiet=quiet)
+        print('after', ret)
+        return 'ret'
 
 
 @usage_lib.entrypoint

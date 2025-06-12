@@ -4272,6 +4272,9 @@ def jobs_launch(
     env = _merge_env_vars(env_file, env)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
+    docker_job_cluster = None
+    if isinstance(cloud, str):
+        docker_job_cluster = cloud
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -4295,6 +4298,44 @@ def jobs_launch(
         priority=priority,
         config_override=config_override,
     )
+
+    if docker_job_cluster is not None:
+        if isinstance(task_or_dag, sky.Dag):
+            raise click.UsageError(
+                _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky jobs launch'))
+        task = task_or_dag
+        backend = backends.CloudVmRayBackend()
+        request_id = sdk.launch(
+            task,
+            dryrun=False,
+            cluster_name=docker_job_cluster,
+            backend=backend,
+            idle_minutes_to_autostop=None,
+            down=False,
+            retry_until_up=False,
+            no_setup=False,
+            clone_disk_from=None,
+            fast=False,
+            _need_confirmation=not yes,
+            _is_docker_job=True,
+        )
+        job_id_handle = _async_call_or_wait(request_id, async_call,
+                                            'sky.jobs.launch')
+        job_id, handle = job_id_handle
+        if not handle:
+            return
+        _get_cluster_records_and_set_ssh_config(
+            clusters=[handle.get_cluster_name()])
+        returncode = 0
+        if (not detach_run and job_id is not None and
+                handle.docker_cluster_job_id is None):
+            returncode = sdk.tail_logs(handle.get_cluster_name(),
+                                       job_id,
+                                       follow=True)
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
+                                           job_id, handle.get_cluster_name()))
+        sys.exit(returncode)
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag

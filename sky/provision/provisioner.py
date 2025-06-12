@@ -413,10 +413,12 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 
 def _post_provision_setup(
-        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cloud_name: str,
+        cluster_name: resources_utils.ClusterName,
         handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
-        custom_resource: Optional[str]) -> provision_common.ClusterInfo:
+        custom_resource: Optional[str],
+        docker_image: Optional[str] = None) -> provision_common.ClusterInfo:
     config_from_yaml = global_user_state.get_cluster_yaml_dict(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
@@ -480,6 +482,8 @@ def _post_provision_setup(
         # For their Docker image settings, we do them when provisioning the
         # cluster. See provision/{cloud}/instance.py:get_cluster_info for more
         # details.
+        if docker_image is not None:
+            docker_config = dict(container_name=docker_image)
         if docker_config:
             status.update(
                 ux_utils.spinner_message(
@@ -489,17 +493,20 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
                 cluster_info=cluster_info,
-                ssh_credentials=ssh_credentials)
-            if docker_user is None:
-                raise RuntimeError(
-                    f'Failed to retrieve docker user for {cluster_name!r}. '
-                    'Please check your docker configuration.')
+                ssh_credentials=ssh_credentials,
+                docker_image=docker_image)
+            if docker_image is None:
+                if docker_user is None:
+                    raise RuntimeError(
+                        f'Failed to retrieve docker user for {cluster_name!r}. '
+                        'Please check your docker configuration.')
 
-            cluster_info.docker_user = docker_user
-            ssh_credentials['docker_user'] = docker_user
-            logger.debug(f'Docker user: {docker_user}')
-            logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
-                        f'Docker container is up.{colorama.Style.RESET_ALL}')
+                cluster_info.docker_user = docker_user
+                ssh_credentials['docker_user'] = docker_user
+                logger.debug(f'Docker user: {docker_user}')
+                logger.info(
+                    f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
+                    f'Docker container is up.{colorama.Style.RESET_ALL}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
@@ -659,11 +666,13 @@ def _post_provision_setup(
 
 @timeline.event
 def post_provision_runtime_setup(
-        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cloud_name: str,
+        cluster_name: resources_utils.ClusterName,
         handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
-        log_dir: str) -> provision_common.ClusterInfo:
+        log_dir: str,
+        docker_image: Optional[str] = None) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.
 
     Here are the steps:
@@ -684,7 +693,8 @@ def post_provision_runtime_setup(
                 cluster_name,
                 handle_cluster_yaml=handle_cluster_yaml,
                 provision_record=provision_record,
-                custom_resource=custom_resource)
+                custom_resource=custom_resource,
+                docker_image=docker_image)
         except Exception:  # pylint: disable=broad-except
             logger.error(
                 ux_utils.error_message(

@@ -55,7 +55,8 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: Optional[str] = None,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str]]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str],
+               Optional[str]]:
         """Provisions resources for the given task.
 
         Args:
@@ -173,7 +174,8 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str]]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str],
+               Optional[str]]:
         raise NotImplementedError
 
     def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path,

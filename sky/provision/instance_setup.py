@@ -169,9 +169,11 @@ def _parallel_ssh_with_cache(func,
 
 
 @common.log_function_start_end
-def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
+def initialize_docker(cluster_name: str,
+                      docker_config: Dict[str, Any],
                       cluster_info: common.ClusterInfo,
-                      ssh_credentials: Dict[str, Any]) -> Optional[str]:
+                      ssh_credentials: Dict[str, Any],
+                      docker_image: Optional[str] = None) -> Optional[str]:
     """Setup docker on the cluster."""
     if not docker_config:
         return None
@@ -180,8 +182,12 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     @_auto_retry(should_retry=lambda e: isinstance(e, exceptions.CommandError)
                  and e.returncode == 255)
     def _initialize_docker(runner: command_runner.CommandRunner, log_path: str):
-        docker_user = docker_utils.DockerInitializer(docker_config, runner,
-                                                     log_path).initialize()
+        docker_initializer = docker_utils.DockerInitializer(
+            docker_config, runner, log_path)
+        if docker_image is not None:
+            docker_initializer.setup_ssh()
+            return
+        docker_user = docker_initializer.initialize()
         logger.debug(f'Initialized docker user: {docker_user}')
         return docker_user
 

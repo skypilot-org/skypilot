@@ -263,7 +263,8 @@ def list_accelerator_counts(
 def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
+    _is_docker_job: bool = False,
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
 
@@ -289,7 +290,8 @@ def optimize(
 
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
-                                 request_options=admin_policy_request_options)
+                                 request_options=admin_policy_request_options,
+                                 _is_docker_job=_is_docker_job)
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
@@ -376,6 +378,7 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _is_docker_job: bool = False,
 ) -> server_common.RequestId:
     """Launches a cluster or task.
 
@@ -512,6 +515,7 @@ def launch(
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
             _disable_controller_check,
+            _is_docker_job,
         )
 
 
@@ -534,6 +538,7 @@ def _launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _is_docker_job: bool = False,
 ) -> server_common.RequestId:
     """Auxiliary function for launch(), refer to launch() for details."""
 
@@ -555,7 +560,8 @@ def _launch(
         is_docker_cluster = False
         ssh_node_pool_cluster_name = None
         ssh_node_pool_resource = list(dag.tasks[0].resources)[0]
-        if isinstance(ssh_node_pool_resource.cloud, str) and clusters:
+        if isinstance(ssh_node_pool_resource.cloud,
+                      str) and not _is_docker_job and clusters:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'Cluster {cluster_name} already exists. '
                                    'Please use a different cluster name.')
@@ -563,7 +569,8 @@ def _launch(
             # Show the optimize log before the prompt if the cluster does not
             # exist.
             request_id = optimize(dag,
-                                  admin_policy_request_options=request_options)
+                                  admin_policy_request_options=request_options,
+                                  _is_docker_job=_is_docker_job)
             res = stream_and_get(request_id)
             if res is None:  # means we are using cluster as ssh node pool
                 if ssh_node_pool_resource.extract_docker_image() is None:
@@ -580,16 +587,24 @@ def _launch(
                 is_docker_cluster = True
         if clusters:
             cluster_record = clusters[0]
-            if is_docker_cluster:
+            if is_docker_cluster or _is_docker_job:
                 task_ori = dag.tasks[0]
                 task_ori.set_resources_override(override_params={
                     'cloud': cluster_record['handle'].launched_resources.cloud
                 })
-                if task_ori.run:
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError('Cannot specify run command for '
-                                           'docker on SSH Node Pools.')
-                task_ori.run = 'sleep infinity'
+                if is_docker_cluster:
+                    assert not _is_docker_job
+                    if task_ori.run:
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError('Cannot specify run command for '
+                                               'docker on SSH Node Pools.')
+                    task_ori.run = 'sleep infinity'
+                else:
+                    assert _is_docker_job
+                    if not task_ori.run:
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError('Must specify a run command for '
+                                               'docker jobs on SSH Node Pools.')
             cluster_status = cluster_record['status']
             cluster_user_hash = cluster_record['user_hash']
             cluster_user_name = cluster_record['user_name']

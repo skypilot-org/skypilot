@@ -10,6 +10,7 @@ import pathlib
 import shlex
 import signal
 import sqlite3
+import subprocess
 import time
 import typing
 from typing import Any, Dict, List, Optional, Sequence
@@ -832,6 +833,26 @@ def _make_ray_job_id(sky_job_id: int) -> str:
     return f'{sky_job_id}-{getpass.getuser()}'
 
 
+def cancel_docker_images(docker_images: List[str]) -> str:
+    """Cancel docker images.
+
+    Args:
+        docker_images: List of docker image IDs to cancel.
+    """
+    actual_cancelled_images = []
+    for docker_image_id in docker_images:
+        try:
+            subprocess_utils.run(
+                f'docker stop {docker_image_id} && '
+                f'docker rm {docker_image_id}',
+                check=True)
+            actual_cancelled_images.append(docker_image_id)
+        except subprocess.CalledProcessError:
+            logger.warning(f'Failed to cancel docker image {docker_image_id}')
+            continue
+    return message_utils.encode_payload(actual_cancelled_images)
+
+
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                                 cancel_all: bool = False,
                                 user_hash: Optional[str] = None) -> str:
@@ -868,8 +889,10 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
             job = _get_jobs_by_ids([job_id])[0]
             if job['docker_image_id'] is not None:
                 # For docker image jobs, we stop and remove the docker image.
-                subprocess_utils.run(f'docker stop {job["docker_image_id"]} && '
-                                     f'docker rm {job["docker_image_id"]}')
+                # subprocess_utils.run(f'docker stop {job["docker_image_id"]} && '
+                #                      f'docker rm {job["docker_image_id"]}')
+                cancelled_ids.append(job['docker_image_id'])
+                continue
             elif _is_job_driver_process_running(job['pid'], job_id):
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
@@ -1034,6 +1057,14 @@ class JobLibCodeGen:
                 # Print cancelled IDs. Caller should parse by decoding.
                 'print(cancelled, flush=True)',
             ]
+        return cls._build(code)
+
+    @classmethod
+    def cancel_docker_images(cls, docker_images: List[str]) -> str:
+        code = [
+            f'deleted = job_lib.cancel_docker_images({docker_images!r})',
+            'print(deleted, flush=True)',
+        ]
         return cls._build(code)
 
     @classmethod

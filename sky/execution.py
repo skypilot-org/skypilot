@@ -3,6 +3,9 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
+import os
+import re
+import time
 import typing
 from typing import List, Optional, Tuple, Union
 import uuid
@@ -18,6 +21,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -397,14 +401,15 @@ def _execute_dag(
 
     try:
         provisioning_skipped = False
-        docker_image_on_no_image_cluster = None
+        docker_image = None
+        docker_image_unique_id = None
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            (handle, provisioning_skipped,
-             docker_image_on_no_image_cluster) = backend.provision(
+            (handle, provisioning_skipped, docker_image,
+             docker_image_unique_id) = backend.provision(
                  task,
                  task.best_resources,
                  dryrun=dryrun,
@@ -412,14 +417,6 @@ def _execute_dag(
                  cluster_name=cluster_name,
                  retry_until_up=retry_until_up,
                  skip_unnecessary_provisioning=skip_unnecessary_provisioning)
-
-        docker_image = None
-        docker_image_unique_id = None
-        if docker_image_on_no_image_cluster is not None:
-            docker_image = docker_image_on_no_image_cluster
-            docker_image_unique_id = docker_image_on_no_image_cluster.replace(
-                '/', '-').replace(':', '-').replace('.', '-') + '-' + str(
-                    uuid.uuid4())[:4]
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -705,6 +702,43 @@ def launch(
             config_hash='xxxxxx',
             task_config=task_ori.to_yaml_config(),
         )
+        handle = global_user_state.get_cluster_from_name(cluster_name)['handle']
+        job_id = str(res[0])
+
+        def _check_worker_nodes():
+            id2file = backend.sync_down_logs(handle, [job_id])
+            fn = id2file[job_id]
+            nodes = set()
+            with open(os.path.expanduser(os.path.join(fn, 'run.log')),
+                      'r') as f:
+                for line in f:
+                    match = re.search(
+                        r'\((head|worker\d+), rank=(\d+), pid=(\d+)', line)
+                    if match:
+                        nodes.add(match.group(1))
+            return nodes
+
+        nodes = set()
+        while True:
+            nodes = _check_worker_nodes()
+            if len(nodes) == task_ori.num_nodes:
+                break
+            time.sleep(1)
+        assert len(nodes) == task_ori.num_nodes, (nodes, task_ori.num_nodes)
+        idxes = sorted(
+            [0 if 'head' in n else int(n.split('worker')[1]) for n in nodes])
+        ips = [handle.cached_external_ips[idx] for idx in idxes]
+        ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
+
+        # TODO(tian): Get docker user from docker run.
+        docker_user = 'root'
+        auth_config = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml,
+            ssh_user=handle.ssh_user,
+            docker_user=docker_user)
+        cluster_utils.SSHConfigHelper.add_cluster(
+            docker_cls_handle.cluster_name, ips, auth_config, ports,
+            docker_user, handle.ssh_user)
         return res[0], docker_cls_handle
     return res
 
