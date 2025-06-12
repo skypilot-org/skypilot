@@ -367,8 +367,13 @@ def run_bash_command_with_log(
                         in docker_file_mounts_mapping.values()):
                     ln_sky_workdir_from_abs = True
             bash_command = (
-                'sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
-                f'echo "Port 10022" >> /etc/ssh/sshd_config\n'
+                '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }\n'
+                'export DEBIAN_FRONTEND=noninteractive\n'
+                'sudo apt-get update\n'
+                'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
+                'rsync curl wget patch openssh-server python3-pip fuse\n'
+                'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
+                f'sudo echo "Port 10022" >> /etc/ssh/sshd_config\n'
                 'mkdir -p ~/.ssh\n'
                 'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys\n'
                 'service ssh start\n'

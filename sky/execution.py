@@ -712,10 +712,15 @@ def launch(
                         r'\((head|worker\d+), rank=(\d+), pid=(\d+)', line)
                     if match:
                         nodes.add(match.group(1))
+            # os.removedirs(fn)
             return nodes
 
         nodes = set()
+        st = time.time()
         while True:
+            if time.time() - st > 60:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Timeout waiting for nodes to setup SSH')
             nodes = _check_worker_nodes()
             if len(nodes) == task_ori.num_nodes:
                 break
