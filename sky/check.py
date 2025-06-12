@@ -21,7 +21,7 @@ from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils.annotations import lru_cache
+from sky.utils import annotations
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
@@ -354,7 +354,7 @@ def check(
     return enabled_clouds_by_workspace
 
 
-@lru_cache('request')
+@annotations.lru_cache('request')
 def get_cached_enabled_clouds_or_refresh(
         capability: sky_cloud.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
