@@ -772,7 +772,7 @@ class Kubernetes(clouds.Cloud):
         """Checks if the user has access credentials to
         Kubernetes."""
         # Check for port forward dependencies
-        logger.info(f'Checking compute credentials for {cls.canonical_name()}')
+        logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
         if reasons is not None:
             formatted = '\n'.join(
