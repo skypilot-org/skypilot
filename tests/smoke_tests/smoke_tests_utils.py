@@ -57,7 +57,7 @@ LOW_RESOURCE_PARAM = {
     'memory': '4+',
 }
 LOW_CONTROLLER_RESOURCE_ENV = {
-    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
+    skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
@@ -373,11 +373,6 @@ def override_sky_config(
         env_dict = os.environ
         env_before_override = os.environ.copy()
 
-    if is_postgres_backend_test():
-        env_dict[
-            constants.
-            SKYPILOT_API_SERVER_DB_URL_ENV_VAR] = 'postgresql://postgres@localhost/skypilot'
-
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
@@ -410,10 +405,10 @@ def override_sky_config(
         return
 
     temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+    if skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_dict:
         # Read the original config
         original_config = skypilot_config.parse_and_validate_config_file(
-            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+            env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
     else:
         original_config = skypilot_config.config_utils.Config()
     overlay_config = skypilot_config.overlay_skypilot_config(
@@ -421,7 +416,7 @@ def override_sky_config(
     temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
-    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+    env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
     yield temp_config_file
     if env_before_override is not None:
         os.environ.clear()

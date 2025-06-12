@@ -44,6 +44,12 @@ The above is achieved by configuring the following section in the config file:
        aws:
          disabled: true
 
+      team-c:
+         private: true
+         allowed_users:
+         - alice@example.com
+         - bob@example.com
+
 
 .. dropdown:: Schema of the ``workspaces`` field:
 
@@ -75,6 +81,10 @@ The above is achieved by configuring the following section in the config file:
              disabled: false
              project_id: GCP project ID
 
+           nebius:
+             disabled: false
+             tenant_id: Nebius tenant ID (tenant-xxxxxxxx)
+             credentials_file_path: ~/.nebius/credentials-file-name.json
 
 To apply the configuration, follow the following steps:
 
@@ -187,6 +197,33 @@ workspace they belong to. Users can filter the view by workspace. Example:
 
 .. image:: ../images/workspaces/resources.png
    :alt: SkyPilot dashboard workspaces resources
+
+
+Private workspaces
+------------------
+
+
+Private workspaces are workspaces that are only accessible to a specific set of users.
+
+To create a private workspace, set the ``private`` field to ``true`` in the workspace configuration.
+
+.. code-block:: yaml
+
+   workspaces:
+     private-ws:
+       private: true
+       allowed_users:
+         - alice@example.com
+         - bob@example.com
+
+
+Private workspaces can only be accessed by admins or the users in the ``allowed_users`` list. For
+users who cannot access the workspace, they cannot see/access/operate on the workspace or the resources in the workspace.
+
+.. note::
+
+   The ``allowed_users`` field can be a list of user names or IDs. Note, if you
+   have multiple users with the same name, you need to specify the user IDs instead.
 
 User management
 ----------------

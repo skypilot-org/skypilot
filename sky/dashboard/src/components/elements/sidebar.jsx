@@ -20,8 +20,9 @@ import {
   BookDocIcon,
   UserCircleIcon,
   UsersIcon,
+  StarIcon,
 } from '@/components/elements/icons';
-import { Settings } from 'lucide-react';
+import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
@@ -32,27 +33,52 @@ const SidebarContext = createContext(null);
 export function SidebarProvider({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [userEmail, setUserEmail] = useState(null);
+  const [userRole, setUserRole] = useState(null);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
   };
 
+  const baseUrl = window.location.origin;
+  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
   useEffect(() => {
-    fetch(`${ENDPOINT}/api/health`)
+    // Fetch user info from health endpoint
+    fetch(`${fullEndpoint}/api/health`)
       .then((res) => res.json())
       .then((data) => {
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
+
+          // Get role from direct API endpoint to avoid cache interference
+          // Using cache would cause race condition, which leads to unexpected
+          // behavior in workspaces and users page.
+          const getUserRole = async () => {
+            try {
+              const response = await fetch(`${fullEndpoint}/users/role`);
+              if (response.ok) {
+                const roleData = await response.json();
+                if (roleData.role) {
+                  setUserRole(roleData.role);
+                }
+              }
+            } catch (error) {
+              // If role data is not available or there's an error,
+              // we just don't show the role - it's not critical
+              console.log('Could not fetch user role:', error);
+            }
+          };
+
+          getUserRole();
         }
       })
       .catch((error) => {
         console.error('Error fetching user data:', error);
       });
-  }, []);
+  }, [fullEndpoint]);
 
   return (
     <SidebarContext.Provider
-      value={{ isSidebarOpen, toggleSidebar, userEmail }}
+      value={{ isSidebarOpen, toggleSidebar, userEmail, userRole }}
     >
       {children}
     </SidebarContext.Provider>
@@ -120,7 +146,7 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
-  const { userEmail } = useSidebar();
+  const { userEmail, userRole } = useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -137,6 +163,19 @@ export function TopBar() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [dropdownRef]);
+
+  // Function to get user initial
+  const getUserInitial = (email) => {
+    if (!email) return '?';
+
+    // If it's an email, get the first letter of the username part
+    if (email.includes('@')) {
+      return email.split('@')[0].charAt(0).toUpperCase();
+    }
+
+    // If it's just a name, get the first letter
+    return email.charAt(0).toUpperCase();
+  };
 
   // Function to determine if a path is active
   const isActivePath = (path) => {
@@ -334,12 +373,14 @@ export function TopBar() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                className="inline-flex items-center justify-center rounded-full transition-colors duration-150 cursor-pointer hover:ring-2 hover:ring-blue-200"
                 title="User Profile"
               >
-                <UserCircleIcon
-                  className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`}
-                />
+                <div
+                  className={`${isMobile ? 'w-6 h-6' : 'w-7 h-7'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium ${isMobile ? 'text-xs' : 'text-sm'} hover:bg-blue-700 transition-colors`}
+                >
+                  {getUserInitial(userEmail)}
+                </div>
               </button>
 
               {isDropdownOpen && (
@@ -357,8 +398,23 @@ export function TopBar() {
                           {displayName}
                         </div>
                         {emailToDisplay && (
-                          <div className="px-4 pt-0 pb-2 text-xs text-gray-500">
+                          <div className="px-4 pt-0 pb-1 text-xs text-gray-500">
                             {emailToDisplay}
+                          </div>
+                        )}
+                        {userRole && (
+                          <div className="px-4 pt-0 pb-2 text-xs">
+                            {userRole === 'admin' ? (
+                              <span className="inline-flex items-center text-blue-600">
+                                <StarIcon className="w-3 h-3 mr-1" />
+                                Admin
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center text-gray-600">
+                                <User className="w-3 h-3 mr-1" />
+                                User
+                              </span>
+                            )}
                           </div>
                         )}
                       </>

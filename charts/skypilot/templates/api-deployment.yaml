@@ -48,6 +48,10 @@ spec:
         - name: SKYPILOT_IN_CLUSTER_NAMESPACE
           value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
         {{- end }}
+        {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
+        - name: KUBECONFIG
+          value: /root/.kube/config:/var/skypilot/kubeconfig/config
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -86,6 +90,10 @@ spec:
           echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
           # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
           ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
+          if [ ! -s /root/.kube/config ]; then
+            echo "{}" > /root/.kube/config
+          fi
           {{- end }}
           # Nebius credentials mounting
           # Since the ~/.nebius directory is also used by the Nebius CLI, we mount the credentials to /root/.nebius_credentials
@@ -93,7 +101,14 @@ spec:
           {{- if .Values.nebiusCredentials.enabled }}
           echo "Setting up Nebius credentials..."
           mkdir -p /root/.nebius
-          ln -sf /root/.nebius_credentials/credentials.json /root/.nebius/credentials.json
+          # Link all files from .nebius_credentials to .nebius
+          # In workspace, it is possible to use multiple credentials files. We need to link all of them to .nebius
+          for file in /root/.nebius_credentials/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ln -sf "$file" "/root/.nebius/$filename"
+            fi
+          done
           echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
           # Create a Nebius profile for the nebius CLI to use as default
           nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
@@ -164,8 +179,18 @@ spec:
           subPath: gcp-cred.json
         {{- end }}
         {{- if .Values.kubernetesCredentials.useKubeconfig }}
+        {{- if .Values.apiService.sshNodePools }}
         - name: kube-config
+          mountPath: /var/skypilot/kubeconfig
+        {{- else }}
+        - name: kube-config
+          mountPath: /root/.kube/config
+        {{- end }}
+        {{- end }}
+        {{- if .Values.apiService.sshNodePools }}
+        - name: state-volume
           mountPath: /root/.kube
+          subPath: .kube
         {{- end }}
         {{- if .Values.runpodCredentials.enabled }}
         - name: runpod-config
@@ -179,8 +204,7 @@ spec:
         {{- end }}
         {{- if .Values.nebiusCredentials.enabled }}
         - name: nebius-credentials
-          mountPath: /root/.nebius_credentials/credentials.json
-          subPath: credentials.json
+          mountPath: /root/.nebius_credentials
         {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
@@ -299,6 +323,10 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
+      {{- if .Values.extraInitContainers }}
+      {{- toYaml .Values.extraInitContainers | nindent 6 }}
+      {{- end }}
+
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume

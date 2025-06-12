@@ -1,13 +1,21 @@
-import { ENDPOINT } from './constants';
-import { getClusters } from './clusters';
-import { getManagedJobs } from './jobs';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
+import { apiClient } from '@/data/connectors/client';
 
 // Helper functions for username parsing
-const parseUsername = (username) => {
+const parseUsername = (username, userId) => {
   if (username && username.includes('@')) {
     return username.split('@')[0];
   }
-  return username || 'N/A';
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
 };
 
 const getFullEmail = (username) => {
@@ -17,16 +25,9 @@ const getFullEmail = (username) => {
   return '-';
 };
 
-// Mock data for now - replace with actual API call
-const mockUsers = [
-  { username: 'user1', last_login: '2023-01-15T10:00:00Z' },
-  { username: 'user2', last_login: '2023-01-16T12:30:00Z' },
-  { username: 'user3', last_login: '2023-01-17T15:45:00Z' },
-];
-
 export async function getUsers() {
   try {
-    const response = await fetch(`${ENDPOINT}/users`);
+    const response = await apiClient.get(`/users`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -37,6 +38,7 @@ export async function getUsers() {
       data.map((user) => ({
         userId: user.id,
         username: user.name,
+        role: user.role,
       })) || []
     );
   } catch (error) {
@@ -67,7 +69,7 @@ export async function getUsersWithCounts() {
     );
     return {
       ...user,
-      usernameDisplay: parseUsername(user.username),
+      usernameDisplay: parseUsername(user.username, user.userId),
       fullEmail: getFullEmail(user.username),
       clusterCount: userClusters.length,
       jobCount: userJobs.length,

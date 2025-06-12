@@ -196,6 +196,13 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "configmaps" ]
       verbs: [ "get", "patch" ]
+    # Required for high-availability controller
+    - apiGroups: ["apps"]
+      resources: ["deployments", "deployments/status"]
+      verbs: ["*"]
+    - apiGroups: [""]
+      resources: ["persistentvolumeclaims"]
+      verbs: ["*"]
   # Cluster-scoped rules for API server.
   clusterRules:
     # Required for getting node resources.
@@ -273,6 +280,9 @@ nebiusCredentials:
   tenantId: null
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
+
+# Extra init containers to run before the api container
+extraInitContainers:
 
 # Set securityContext for the api pod
 podSecurityContext: {}

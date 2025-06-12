@@ -55,9 +55,14 @@ import os
 import tempfile
 import threading
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
+import sqlalchemy
+from sqlalchemy import orm
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
@@ -66,6 +71,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
+from sky.utils import db_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils.kubernetes import config_map_utils
@@ -109,6 +115,56 @@ ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 # Path to the client config files.
 _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
+
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+API_SERVER_CONFIG_KEY = 'api_server_config'
+
+Base = declarative.declarative_base()
+
+config_yaml_table = sqlalchemy.Table(
+    'config_yaml',
+    Base.metadata,
+    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('value', sqlalchemy.Text),
+)
+
+
+def create_table():
+    # Create tables if they don't exist
+    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+
+
+def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_yaml_table).filter_by(key=key).first()
+    if row:
+        db_config = config_utils.Config(yaml.safe_load(row.value))
+        db_config.pop_nested(('db',), None)
+        return db_config
+    return None
+
+
+def _set_config_yaml_to_db(key: str, config: config_utils.Config):
+    assert _SQLALCHEMY_ENGINE is not None
+    config.pop_nested(('db',), None)
+    config_str = common_utils.dump_yaml_str(dict(config))
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(config_yaml_table).values(key=key,
+                                                             value=config_str)
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_yaml_table.c.key],
+            set_={config_yaml_table.c.value: config_str})
+        session.execute(do_update_stmt)
+        session.commit()
 
 
 class ConfigContext:
@@ -163,11 +219,26 @@ def _set_loaded_config(config: config_utils.Config) -> None:
     _get_config_context().config = config
 
 
-def _get_loaded_config_path() -> Optional[str]:
-    return _get_config_context().config_path
+def _get_loaded_config_path() -> List[Optional[str]]:
+    serialized = _get_config_context().config_path
+    if not serialized:
+        return []
+    config_paths = json.loads(serialized)
+    if config_paths is None:
+        return []
+    return config_paths
 
 
-def _set_loaded_config_path(path: Optional[str]) -> None:
+def _set_loaded_config_path(
+        path: Optional[Union[str, List[Optional[str]]]]) -> None:
+    if not path:
+        _get_config_context().config_path = None
+    if isinstance(path, str):
+        path = [path]
+    _get_config_context().config_path = json.dumps(path)
+
+
+def _set_loaded_config_path_serialized(path: Optional[str]) -> None:
     _get_config_context().config_path = path
 
 
@@ -184,9 +255,14 @@ def get_user_config_path() -> str:
     return _GLOBAL_CONFIG_PATH
 
 
-def get_user_config() -> config_utils.Config:
-    """Returns the user config."""
-    # find the user config file
+def _get_config_from_path(path: Optional[str]) -> config_utils.Config:
+    if path is None:
+        return config_utils.Config()
+    return parse_and_validate_config_file(path)
+
+
+def _resolve_user_config_path() -> Optional[str]:
+    # find the user config file path, None if not resolved.
     user_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
     if user_config_path:
         logger.debug('using user config file specified by '
@@ -203,16 +279,17 @@ def get_user_config() -> config_utils.Config:
         user_config_path = get_user_config_path()
         logger.debug(f'using default user config file: {user_config_path}')
         user_config_path = os.path.expanduser(user_config_path)
-
-    # load the user config file
     if os.path.exists(user_config_path):
-        user_config = parse_and_validate_config_file(user_config_path)
-    else:
-        user_config = config_utils.Config()
-    return user_config
+        return user_config_path
+    return None
 
 
-def _get_project_config() -> config_utils.Config:
+def get_user_config() -> config_utils.Config:
+    """Returns the user config."""
+    return _get_config_from_path(_resolve_user_config_path())
+
+
+def _resolve_project_config_path() -> Optional[str]:
     # find the project config file
     project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
     if project_config_path:
@@ -231,17 +308,12 @@ def _get_project_config() -> config_utils.Config:
             f'using default project config file: {_PROJECT_CONFIG_PATH}')
         project_config_path = _PROJECT_CONFIG_PATH
         project_config_path = os.path.expanduser(project_config_path)
-
-    # load the project config file
     if os.path.exists(project_config_path):
-        project_config = parse_and_validate_config_file(project_config_path)
-    else:
-        project_config = config_utils.Config()
-    return project_config
+        return project_config_path
+    return None
 
 
-def get_server_config() -> config_utils.Config:
-    """Returns the server config."""
+def _resolve_server_config_path() -> Optional[str]:
     # find the server config file
     server_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
     if server_config_path:
@@ -259,13 +331,14 @@ def get_server_config() -> config_utils.Config:
         server_config_path = _GLOBAL_CONFIG_PATH
         logger.debug(f'using default server config file: {server_config_path}')
         server_config_path = os.path.expanduser(server_config_path)
-
-    # load the server config file
     if os.path.exists(server_config_path):
-        server_config = parse_and_validate_config_file(server_config_path)
-    else:
-        server_config = config_utils.Config()
-    return server_config
+        return server_config_path
+    return None
+
+
+def get_server_config() -> config_utils.Config:
+    """Returns the server config."""
+    return _get_config_from_path(_resolve_server_config_path())
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -485,35 +558,50 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
 
 
 def _reload_config_as_server() -> None:
+    global _SQLALCHEMY_ENGINE
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
+    _set_loaded_config_path(None)
 
-    overrides: List[config_utils.Config] = []
-    server_config = get_server_config()
-    if server_config:
-        overrides.append(server_config)
+    server_config_path = _resolve_server_config_path()
+    server_config = _get_config_from_path(server_config_path)
 
-    # layer the configs on top of each other based on priority
-    overlaid_server_config: config_utils.Config = config_utils.Config()
-    for override in overrides:
-        overlaid_server_config = overlay_skypilot_config(
-            original_config=overlaid_server_config, override_configs=override)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(
-            f'server config: \n'
-            f'{common_utils.dump_yaml_str(dict(overlaid_server_config))}')
-    _set_loaded_config(overlaid_server_config)
+        logger.debug(f'server config: \n'
+                     f'{common_utils.dump_yaml_str(dict(server_config))}')
+
+    db_url = server_config.get_nested(('db',), None)
+    if db_url and len(server_config.keys()) > 1:
+        raise ValueError(
+            'if db config is specified, no other config is allowed')
+
+    if db_url:
+        if _SQLALCHEMY_ENGINE is None:
+            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url)
+            create_table()
+        db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
+        if db_config:
+            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                logger.debug(f'Config loaded from db:\n'
+                             f'{common_utils.dump_yaml_str(dict(db_config))}')
+            server_config = overlay_skypilot_config(server_config, db_config)
+
+    _set_loaded_config(server_config)
+    _set_loaded_config_path(server_config_path)
 
 
 def _reload_config_as_client() -> None:
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
+    _set_loaded_config_path(None)
 
     overrides: List[config_utils.Config] = []
-    user_config = get_user_config()
+    user_config_path = _resolve_user_config_path()
+    user_config = _get_config_from_path(user_config_path)
     if user_config:
         overrides.append(user_config)
-    project_config = _get_project_config()
+    project_config_path = _resolve_project_config_path()
+    project_config = _get_config_from_path(project_config_path)
     if project_config:
         overrides.append(project_config)
 
@@ -527,14 +615,26 @@ def _reload_config_as_client() -> None:
             f'client config (before task and CLI overrides): \n'
             f'{common_utils.dump_yaml_str(dict(overlaid_client_config))}')
     _set_loaded_config(overlaid_client_config)
+    _set_loaded_config_path([user_config_path, project_config_path])
 
 
 def loaded_config_path() -> Optional[str]:
-    """Returns the path to the loaded config file, or
-    '<overridden>' if the config is overridden."""
-    if _is_config_overridden():
-        return '<overridden>'
-    return _get_loaded_config_path()
+    """Returns the path to the loaded config file, or '<overridden>' if the
+    config is overridden."""
+    path = [p for p in set(_get_loaded_config_path()) if p is not None]
+    if len(path) == 0:
+        return '<overridden>' if _is_config_overridden() else None
+    if len(path) == 1:
+        return path[0]
+
+    header = 'overridden' if _is_config_overridden() else 'merged'
+    path_str = ', '.join(p for p in path if p is not None)
+    return f'<{header} ({path_str})>'
+
+
+def loaded_config_path_serialized() -> Optional[str]:
+    """Returns the json serialized config path list"""
+    return _get_config_context().config_path
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
@@ -548,7 +648,9 @@ def loaded() -> bool:
 
 @contextlib.contextmanager
 def override_skypilot_config(
-        override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
+        override_configs: Optional[Dict[str, Any]],
+        override_config_path_serialized: Optional[str] = None
+) -> Iterator[None]:
     """Overrides the user configurations."""
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
@@ -557,7 +659,13 @@ def override_skypilot_config(
         yield
         return
     original_config = _get_loaded_config()
+    original_config_path = loaded_config_path_serialized()
     override_configs = config_utils.Config(override_configs)
+    if override_config_path_serialized is None:
+        override_config_path = []
+    else:
+        override_config_path = json.loads(override_config_path_serialized)
+
     disallowed_diff_keys = []
     for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
         value = override_configs.pop_nested(key, default_value=None)
@@ -602,6 +710,8 @@ def override_skypilot_config(
             skip_none=False)
         _set_config_overridden(True)
         _set_loaded_config(config)
+        _set_loaded_config_path(_get_loaded_config_path() +
+                                override_config_path)
         yield
     except exceptions.InvalidSkyPilotConfigError as e:
         with ux_utils.print_exception_no_traceback():
@@ -616,6 +726,7 @@ def override_skypilot_config(
     finally:
         _set_loaded_config(original_config)
         _set_config_overridden(False)
+        _set_loaded_config_path_serialized(original_config_path)
 
 
 @contextlib.contextmanager
@@ -628,6 +739,7 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
        sky_utils.context for more details.
     """
     original_config = _get_loaded_config()
+    original_config_path = loaded_config_path_serialized()
     original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if new_configs != original_config:
         # Modify the global config of current process or context
@@ -642,9 +754,11 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         # Note that this code modifies os.environ directly because it
         # will be hijacked to be context-aware if a context is active.
         os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+        _set_loaded_config_path(temp_file.name)
         yield
         # Restore the original config and env var.
         _set_loaded_config(original_config)
+        _set_loaded_config_path_serialized(original_config_path)
         if original_env_var:
             os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
         else:
@@ -705,21 +819,46 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     return parsed_config
 
 
-def update_config_no_lock(config: config_utils.Config) -> None:
+def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
     Args:
         config: The config to save and sync.
     """
-    global_config_path = os.path.expanduser(get_user_config_path())
 
-    # Always save to the local file (PVC in Kubernetes, local file otherwise)
-    common_utils.dump_yaml(global_config_path, dict(config))
+    def is_running_pytest() -> bool:
+        return 'PYTEST_CURRENT_TEST' in os.environ
 
-    if config_map_utils.is_running_in_kubernetes():
-        # In Kubernetes, sync the PVC config to ConfigMap for user convenience
-        # PVC file is the source of truth, ConfigMap is just a mirror for easy
-        # access
-        config_map_utils.patch_configmap_with_config(config, global_config_path)
+    # Only allow this function to be called by the API Server in production.
+    if not is_running_pytest() and os.environ.get(
+            constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        raise ValueError('This function can only be called by the API Server.')
+
+    global_config_path = _resolve_server_config_path()
+    if global_config_path is None:
+        global_config_path = get_user_config_path()
+
+    db_updated = False
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+        existing_db_url = get_nested(('db',), None)
+        if existing_db_url:
+            new_db_url = config.get_nested(('db',), None)
+            if new_db_url and new_db_url != existing_db_url:
+                raise ValueError('Cannot change db url while server is running')
+            logger.debug('saving api_server config to db')
+            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
+            db_updated = True
+
+    if not db_updated:
+        # save to the local file (PVC in Kubernetes, local file otherwise)
+        common_utils.dump_yaml(global_config_path, dict(config))
+
+        if config_map_utils.is_running_in_kubernetes():
+            # In Kubernetes, sync the PVC config to ConfigMap for user
+            # convenience.
+            # PVC file is the source of truth, ConfigMap is just a mirror for
+            # easy access.
+            config_map_utils.patch_configmap_with_config(
+                config, global_config_path)
 
     _reload_config()

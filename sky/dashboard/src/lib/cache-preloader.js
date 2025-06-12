@@ -5,7 +5,7 @@ import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
-import { getUsers, getUsersWithCounts } from '@/data/connectors/users';
+import { getUsers } from '@/data/connectors/users';
 import { getInfraData } from '@/data/connectors/infra';
 
 /**
@@ -15,10 +15,9 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    getManagedJobs: { fn: getManagedJobs, args: [] },
+    getManagedJobs: { fn: getManagedJobs, args: [{ allUsers: true }] },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getUsersWithCounts: { fn: getUsersWithCounts, args: [] },
     getInfraData: { fn: getInfraData, args: [] },
   },
 
@@ -31,14 +30,14 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   pages: {
     clusters: ['getClusters', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces'],
-    infra: ['getInfraData'],
+    infra: ['getInfraData', 'getClusters', 'getManagedJobs'],
     workspaces: [
       'getWorkspaces',
       'getClusters',
       'getManagedJobs',
       'getEnabledClouds',
     ],
-    users: ['getUsersWithCounts'],
+    users: ['getUsers', 'getClusters', 'getManagedJobs'],
   },
 };
 
@@ -205,7 +204,6 @@ class CachePreloader {
     return {
       ...dashboardCache.getStats(),
       isPreloading: this.isPreloading,
-      preloadPromises: this.preloadPromises.size,
     };
   }
 

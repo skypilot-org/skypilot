@@ -1,11 +1,19 @@
 import React from 'react';
-import { Layout } from '@/components/elements/layout';
-import { Workspaces } from '@/components/workspaces'; // This component will be created next
+import Head from 'next/head';
+import dynamic from 'next/dynamic';
+
+const Workspaces = dynamic(
+  () => import('@/components/workspaces').then((mod) => mod.Workspaces),
+  { ssr: false }
+);
 
 export default function WorkspacesPage() {
   return (
-    <Layout highlighted="workspaces">
+    <>
+      <Head>
+        <title>Workspaces | SkyPilot Dashboard</title>
+      </Head>
       <Workspaces />
-    </Layout>
+    </>
   );
 }

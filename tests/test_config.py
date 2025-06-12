@@ -13,6 +13,7 @@ import sky.exceptions
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
@@ -524,6 +525,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
 @mock.patch('sky.skypilot_config.loaded_config_path',
             return_value='/path/to/config.yaml')
 @mock.patch('sky.sky_logging.logging_enabled', return_value=True)
+@annotations.client_api
 def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
                                                   mock_logging_enabled):
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
@@ -625,7 +627,6 @@ def test_override_skypilot_config_without_original_config(
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
-    assert skypilot_config._get_loaded_config_path() is None
     assert not skypilot_config._get_loaded_config()
 
 

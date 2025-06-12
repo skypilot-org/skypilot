@@ -1128,12 +1128,13 @@ class TestStorageWithCredentials:
         # Stores for each object in the list must be added in the test.
         custom_source_names = ['"path With Spaces"', 'path With Spaces']
         storage_mult_obj = []
+        temp_dir = tempfile.TemporaryDirectory(suffix='skypilot-test')
         for name in custom_source_names:
-            src_path = os.path.expanduser(f'~/{name}')
-            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
+            src_path = pathlib.Path(temp_dir.name) / name
+            src_path.expanduser().mkdir(exist_ok=True)
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=src_path)
+                                            source=str(src_path))
             store_obj.construct()
             storage_mult_obj.append(store_obj)
         try:
@@ -1144,6 +1145,7 @@ class TestStorageWithCredentials:
                     storage_obj.name)
                 if handle:
                     storage_obj.delete()
+            temp_dir.cleanup()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
@@ -1308,6 +1310,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
+    @pytest.mark.no_postgres
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1397,6 +1400,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
+    @pytest.mark.no_postgres
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1441,6 +1445,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
+    @pytest.mark.no_postgres
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1469,6 +1474,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
+    @pytest.mark.no_postgres
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
@@ -1711,6 +1717,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
+    @pytest.mark.no_postgres
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and

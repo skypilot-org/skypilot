@@ -51,6 +51,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import requests
@@ -213,7 +214,7 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
 # Add retry for the file mounts optimization, as the underlying cp command may
 # experience transient errors, #4758.
 @common_utils.retry
-def _optimize_file_mounts(yaml_path: str) -> None:
+def _optimize_file_mounts(tmp_yaml_path: str) -> None:
     """Optimize file mounts in the given ray yaml file.
 
     Runtime files handling:
@@ -227,7 +228,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
         subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
-    yaml_config = common_utils.read_yaml(yaml_path)
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -311,7 +312,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
             shell=True,
             check=True)
 
-    common_utils.dump_yaml(yaml_path, yaml_config)
+    common_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -813,9 +814,11 @@ def write_cluster_config(
 
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
+        cluster_config_overrides = to_provision.cluster_config_overrides
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path,
-            cluster_config_overrides=to_provision.cluster_config_overrides)
+            cluster_config_overrides=cluster_config_overrides,
+            cloud=cloud)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
@@ -842,9 +845,8 @@ def write_cluster_config(
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
-    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            old_yaml_content = f.read()
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
@@ -881,18 +883,29 @@ def write_cluster_config(
     # compatibility should go before this call.
     _optimize_file_mounts(tmp_yaml_path)
 
-    # Rename the tmp file to the final YAML path.
-    os.rename(tmp_yaml_path, yaml_path)
-    usage_lib.messages.usage.update_ray_yaml(yaml_path)
+    # commit the final yaml to the database
+    global_user_state.set_cluster_yaml(
+        cluster_name,
+        open(tmp_yaml_path, 'r', encoding='utf-8').read())
+
+    usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
+
+    # Remove the tmp file.
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        debug_yaml_path = yaml_path + '.debug'
+        os.rename(tmp_yaml_path, debug_yaml_path)
+    else:
+        os.remove(tmp_yaml_path)
+
     return config_dict
 
 
-def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
+def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
     """
-    config = common_utils.read_yaml(cluster_config_file)
+    config = common_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
     if isinstance(cloud, (
             clouds.AWS,
@@ -922,7 +935,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_fluidstack_authentication(config)
     else:
         assert False, cloud
-    common_utils.dump_yaml(cluster_config_file, config)
+    common_utils.dump_yaml(tmp_yaml_path, config)
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -980,7 +993,7 @@ def _count_healthy_nodes_from_ray(output: str,
 
 
 @timeline.event
-def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
+def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     """Hash the cluster yaml and contents of file mounts to a unique string.
 
     Two invocations of this function should return the same string if and only
@@ -1024,7 +1037,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
     """
 
     # Load the yaml contents so that we can directly remove keys.
-    yaml_config = common_utils.read_yaml(yaml_path)
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
@@ -1053,7 +1066,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
         file_mounts.pop('')
 
     for dst, src in sorted(file_mounts.items()):
-        if src == yaml_path:
+        if src == tmp_yaml_path:
             # Skip the yaml file itself. We have already hashed a modified
             # version of it. The file may include fields we don't want to hash.
             continue
@@ -1148,7 +1161,7 @@ def wait_until_ray_cluster_ready(
         logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
-    config = common_utils.read_yaml(cluster_config_file)
+    config = global_user_state.get_cluster_yaml_dict(cluster_config_file)
 
     docker_user = None
     if 'docker' in config:
@@ -1248,11 +1261,11 @@ def ssh_credential_from_yaml(
     """
     if cluster_yaml is None:
         return dict()
-    config = common_utils.read_yaml(cluster_yaml)
+    config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     auth_section = config['auth']
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
-    ssh_private_key = auth_section.get('ssh_private_key')
+    ssh_private_key_path = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
@@ -1261,9 +1274,10 @@ def ssh_credential_from_yaml(
             constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
         ssh_proxy_command = ssh_proxy_command.replace(
             constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
+
     credentials = {
         'ssh_user': ssh_user,
-        'ssh_private_key': ssh_private_key,
+        'ssh_private_key': ssh_private_key_path,
         'ssh_control_name': ssh_control_name,
         'ssh_proxy_command': ssh_proxy_command,
     }
@@ -1436,7 +1450,7 @@ def get_node_ips(cluster_yaml: str,
         exceptions.FetchClusterInfoError: if we failed to get the IPs. e.reason is
             HEAD or WORKER.
     """
-    ray_config = common_utils.read_yaml(cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     # Use the new provisioner for AWS.
     provider_name = cluster_utils.get_provider_name(ray_config)
     cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
@@ -1652,7 +1666,7 @@ def _query_cluster_status_via_cloud_api(
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
 
     # Query the cloud provider.
@@ -2557,18 +2571,33 @@ def get_clusters(
             public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
+        all_users: If True, return clusters from all users. If False, only
+            return clusters from the current user.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
+    current_user = common_utils.get_current_user()
+
+    # Filter by user if requested
     if not all_users:
-        current_user_hash = common_utils.get_user_hash()
         records = [
             record for record in records
-            if record['user_hash'] == current_user_hash
+            if record['user_hash'] == current_user.id
         ]
+
+    accessible_workspaces = workspaces_core.get_workspaces()
+
+    workspace_filtered_records = []
+    for record in records:
+        cluster_workspace = record.get('workspace',
+                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if cluster_workspace in accessible_workspaces:
+            workspace_filtered_records.append(record)
+
+    records = workspace_filtered_records
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -2599,6 +2628,8 @@ def get_clusters(
             return
         ssh_private_key_path = credentials.get('ssh_private_key', None)
         if ssh_private_key_path is not None:
+            if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
+                auth.create_ssh_key_files_from_db(ssh_private_key_path)
             with open(os.path.expanduser(ssh_private_key_path),
                       'r',
                       encoding='utf-8') as f:
@@ -2823,6 +2854,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         if is_managed_job:
             if task.best_resources.use_spot:
                 spot_str = '[Spot]'
+            assert task.best_resources.cpus is not None
             task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
@@ -2999,7 +3031,7 @@ def get_endpoints(cluster: str,
             raise ValueError('Querying endpoints is not supported '
                              f'for {cluster!r} on {cloud}.') from None
 
-    config = common_utils.read_yaml(handle.cluster_yaml)
+    config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
                                              handle.cluster_name_on_cloud,
                                              handle.launched_resources.ports,

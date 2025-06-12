@@ -66,14 +66,10 @@ _AUTOSTOP_SCHEMA = {
 
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
-
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
-    all_clouds = list(service_catalog.ALL_CLOUDS)
+    all_clouds = list(constants.ALL_CLOUDS)
     all_clouds.remove('kubernetes')
     cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
 
@@ -110,7 +106,7 @@ def _get_single_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
+                'case_insensitive_enum': list(constants.ALL_CLOUDS)
             },
             'region': {
                 'type': 'string',
@@ -221,6 +217,9 @@ def _get_single_resources_schema():
                 'type': 'integer',
             },
             'disk_tier': {
+                'type': 'string',
+            },
+            'network_tier': {
                 'type': 'string',
             },
             'ports': {
@@ -853,7 +852,6 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
     from sky.utils import kubernetes_enums
 
     resources_schema = {
@@ -1108,6 +1106,9 @@ def get_config_schema():
             'required': [],
             'properties': {
                 **_NETWORK_CONFIG_SCHEMA,
+                'tenant_id': {
+                    'type': 'string',
+                },
             },
             'additionalProperties': {
                 'type': 'object',
@@ -1148,9 +1149,17 @@ def get_config_schema():
 
     admin_policy_schema = {
         'type': 'string',
-        # Check regex to be a valid python module path
-        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
-                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+        'anyOf': [
+            {
+                # Check regex to be a valid python module path
+                'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                            r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+            },
+            {
+                # Check for valid HTTP/HTTPS URL
+                'pattern': r'^https?://.*$',
+            }
+        ]
     }
 
     allowed_clouds = {
@@ -1159,7 +1168,7 @@ def get_config_schema():
         'items': {
             'type': 'string',
             'case_insensitive_enum':
-                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+                (list(constants.ALL_CLOUDS) + ['cloudflare'])
         }
     }
 
@@ -1204,15 +1213,26 @@ def get_config_schema():
         }
     }
 
+    rbac_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'default_role': {
+                'type': 'string',
+                'case_insensitive_enum': ['admin', 'user']
+            },
+        },
+    }
+
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(
-        service_catalog.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
     # Create pattern for not supported clouds, i.e.
     # all clouds except gcp, kubernetes, ssh
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh']
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1237,6 +1257,15 @@ def get_config_schema():
             'properties': {
                 # Explicit definition for GCP allows both project_id and
                 # disabled
+                'private': {
+                    'type': 'boolean',
+                },
+                'allowed_users': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
@@ -1281,6 +1310,22 @@ def get_config_schema():
                     },
                     'additionalProperties': False,
                 },
+                'nebius': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'credentials_file_path': {
+                            'type': 'string',
+                        },
+                        'tenant_id': {
+                            'type': 'string',
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
             },
         },
     }
@@ -1315,6 +1360,9 @@ def get_config_schema():
             'workspace': {
                 'type': 'string',
             },
+            'db': {
+                'type': 'string',
+            },
             'jobs': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
@@ -1325,6 +1373,7 @@ def get_config_schema():
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
             'provision': provision_configs,
+            'rbac': rbac_schema,
             **cloud_configs,
         },
     }

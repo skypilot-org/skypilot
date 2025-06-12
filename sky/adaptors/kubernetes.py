@@ -1,6 +1,7 @@
 """Kubernetes adaptors"""
 import logging
 import os
+import platform
 from typing import Any, Callable, Optional, Set
 
 from sky import sky_logging
@@ -18,6 +19,13 @@ urllib3 = common.LazyImport('urllib3',
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
+
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+# From kubernetes package, keep a copy here to avoid actually importing
+# kubernetes package when parsing the KUBECONFIG env var to do credential
+# file mounts.
+ENV_KUBECONFIG_PATH_SEPARATOR = ';' if platform.system() == 'Windows' else ':'
 
 DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
 # The name for the environment variable that stores the in-cluster context name

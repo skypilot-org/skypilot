@@ -26,6 +26,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   relativeTime,
+  formatDateTime,
 } from '@/components/utils';
 import {
   FileSearchIcon,
@@ -90,7 +91,12 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
 
-  let timeString = relativeTime(timestamp);
+  // Convert timestamp to Date object if it's not already
+  const date =
+    timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
+
+  // Get the original timeString from relativeTime
+  let timeString = relativeTime(date);
 
   // If relativeTime returns a React element, extract the string from its props
   if (
@@ -115,32 +121,72 @@ const formatSubmittedTime = (timestamp) => {
     return timeString; // Return as is if not a string after extraction
   }
 
+  // Apply the same shortening logic
+  const shortenedTime = shortenTimeForJobs(timeString);
+
+  // Return with tooltip functionality like relativeTime does
+  const now = new Date();
+  const differenceInDays =
+    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
+
+  if (Math.abs(differenceInDays) < 7) {
+    return (
+      <Tooltip
+        content={formatDateTime(date)}
+        className="capitalize text-sm text-muted-foreground"
+      >
+        {shortenedTime}
+      </Tooltip>
+    );
+  } else {
+    return (
+      <Tooltip
+        content={formatDateTime(date)}
+        className="text-sm text-muted-foreground"
+      >
+        {shortenedTime}
+      </Tooltip>
+    );
+  }
+};
+
+// Helper function to shorten time strings for jobs
+function shortenTimeForJobs(timeString) {
+  if (!timeString || typeof timeString !== 'string') {
+    return timeString;
+  }
+
   // Handle "just now" case
   if (timeString === 'just now') {
     return 'now';
   }
 
-  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "~1 hr ago"
+  // Handle "less than a minute ago" case
+  if (timeString.toLowerCase() === 'less than a minute ago') {
+    return 'Less than a minute ago';
+  }
+
+  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
   const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
   if (aboutMatch) {
     const num = aboutMatch[1];
     const unit = aboutMatch[2];
     const unitMap = {
-      second: 'sec',
-      seconds: 'secs',
-      minute: 'min',
-      minutes: 'mins',
-      hour: 'hr',
-      hours: 'hrs',
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
       day: 'd',
       days: 'd',
       month: 'mo',
-      months: 'mos',
+      months: 'mo',
       year: 'yr',
-      years: 'yrs',
+      years: 'yr',
     };
     if (unitMap[unit]) {
-      return `~ ${num} ${unitMap[unit]} ago`;
+      return `${num}${unitMap[unit]} ago`;
     }
   }
 
@@ -149,15 +195,15 @@ const formatSubmittedTime = (timestamp) => {
   if (singleUnitMatch) {
     const unit = singleUnitMatch[1];
     const unitMap = {
-      second: 'sec',
-      minute: 'min',
-      hour: 'hr',
+      second: 's',
+      minute: 'm',
+      hour: 'h',
       day: 'd',
       month: 'mo',
       year: 'yr',
     };
     if (unitMap[unit]) {
-      return `1 ${unitMap[unit]} ago`;
+      return `1${unitMap[unit]} ago`;
     }
   }
 
@@ -167,21 +213,27 @@ const formatSubmittedTime = (timestamp) => {
     const num = multiUnitMatch[1];
     const unit = multiUnitMatch[2];
     const unitMap = {
-      seconds: 'secs',
-      minutes: 'mins',
-      hours: 'hrs',
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
+      day: 'd',
       days: 'd',
+      month: 'mo',
       months: 'mo',
+      year: 'yr',
       years: 'yr',
     };
     if (unitMap[unit]) {
-      return `${num} ${unitMap[unit]} ago`;
+      return `${num}${unitMap[unit]} ago`;
     }
   }
 
   // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
   return timeString;
-};
+}
 
 export function ManagedJobs() {
   const router = useRouter();
@@ -219,7 +271,9 @@ export function ManagedJobs() {
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
         // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs);
+        const jobsResponse = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
         const allJobs = jobsResponse.jobs || [];
         const uniqueJobWorkspaces = [
           ...new Set(
@@ -242,8 +296,7 @@ export function ManagedJobs() {
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getManagedJobs);
-    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidate(getWorkspaces);
 
     if (refreshDataRef.current) {
@@ -252,7 +305,7 @@ export function ManagedJobs() {
   };
 
   return (
-    <Layout highlighted="jobs">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link
@@ -314,7 +367,7 @@ export function ManagedJobs() {
         title={confirmationModal.title}
         message={confirmationModal.message}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -340,7 +393,7 @@ export function ManagedJobsTable({
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [activeTab, setActiveTab] = useState('active');
+  const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
@@ -353,8 +406,7 @@ export function ManagedJobsTable({
     setConfirmationModal({
       isOpen: true,
       title: 'Restart Controller',
-      message:
-        'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
+      message: 'Are you sure you want to restart the controller?',
       onConfirm: async () => {
         try {
           setIsRestarting(true);
@@ -378,13 +430,15 @@ export function ManagedJobsTable({
     try {
       // Fetch both jobs and clusters data in parallel
       const [jobsResponse, clustersData] = await Promise.all([
-        dashboardCache.get(getManagedJobs),
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
         dashboardCache.get(getClusters),
       ]);
 
-      const { jobs, controllerStopped } = jobsResponse;
+      // Always process the response, even if it's null
+      const { jobs = [], controllerStopped = false } = jobsResponse || {};
+
       // for the clusters, check if there is a cluster that `isJobController`
-      const jobControllerCluster = clustersData.find((c) =>
+      const jobControllerCluster = clustersData?.find((c) =>
         isJobController(c.cluster)
       );
       const jobControllerClusterStatus = jobControllerCluster
@@ -402,13 +456,16 @@ export function ManagedJobsTable({
 
       setData(jobs);
       setControllerStopped(isControllerStopped);
+      setIsInitialLoad(false);
     } catch (err) {
       console.error('Error fetching data:', err);
+      // Still set data to empty array on error to show proper UI
       setData([]);
+      setControllerStopped(false);
+      setIsInitialLoad(false);
     } finally {
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
-      setIsInitialLoad(false);
     }
   }, [setLoading]);
 
@@ -434,13 +491,15 @@ export function ManagedJobsTable({
     return () => {
       isCurrent = false;
       clearInterval(interval);
+      // Don't invalidate cache on component unmount - this causes premature cache invalidation
+      // Cache should only be invalidated on manual refresh or TTL expiration
     };
   }, [refreshInterval, fetchData]);
 
   // Reset to first page when activeTab changes or when data changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, data.length]);
+  }, [activeTab, data?.length]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
@@ -465,10 +524,11 @@ export function ManagedJobsTable({
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
-    const active = data.filter((item) =>
+    const safeData = data || [];
+    const active = safeData.filter((item) =>
       statusGroups.active.includes(item.status)
     ).length;
-    const finished = data.filter((item) =>
+    const finished = safeData.filter((item) =>
       statusGroups.finished.includes(item.status)
     ).length;
     return { active, finished };
@@ -481,7 +541,12 @@ export function ManagedJobsTable({
       return selectedStatuses.includes(status);
     }
 
-    // If no statuses are selected, highlight all statuses in the active tab
+    // If no statuses are selected, highlight all statuses based on active tab
+    if (activeTab === 'all') {
+      // Highlight all statuses when showing all jobs
+      return true;
+    }
+
     return statusGroups[activeTab].includes(status);
   };
 
@@ -495,8 +560,12 @@ export function ManagedJobsTable({
       return filtered.filter((item) => selectedStatuses.includes(item.status));
     }
 
-    // If no statuses are selected but we're in "show all" mode, show all jobs of the active tab
+    // If no statuses are selected but we're in "show all" mode
     if (showAllMode) {
+      // Show all jobs if activeTab is 'all', otherwise filter by active/finished
+      if (activeTab === 'all') {
+        return filtered; // Show all jobs regardless of status
+      }
       return filtered.filter((item) =>
         statusGroups[activeTab].includes(item.status)
       );
@@ -504,14 +573,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    statusGroups,
-    workspaceFilter,
-  ]);
+  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -561,7 +623,8 @@ export function ManagedJobsTable({
 
   // Update status counts when data changes
   useEffect(() => {
-    const counts = data.reduce((acc, job) => {
+    const safeData = data || [];
+    const counts = safeData.reduce((acc, job) => {
       acc[job.status] = (acc[job.status] || 0) + 1;
       return acc;
     }, {});
@@ -590,7 +653,7 @@ export function ManagedJobsTable({
         <div className="flex flex-wrap items-center text-sm mb-1">
           <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
-            {!loading && data.length === 0 && !isInitialLoad && (
+            {!loading && (!data || data.length === 0) && !isInitialLoad && (
               <span className="text-gray-500 mr-2">No jobs found</span>
             )}
             {Object.entries(statusCounts).map(([status, count]) => (
@@ -612,9 +675,25 @@ export function ManagedJobsTable({
                 </span>
               </button>
             ))}
-            {data.length > 0 && (
+            {data && data.length > 0 && (
               <div className="flex items-center ml-2 gap-2">
                 <span className="text-gray-500">(</span>
+                <button
+                  onClick={() => {
+                    // When showing all jobs, clear all selected statuses
+                    setActiveTab('all');
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                  }}
+                  className={`text-sm font-medium ${
+                    activeTab === 'all' && showAllMode
+                      ? 'text-purple-700 underline'
+                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  }`}
+                >
+                  show all jobs
+                </button>
+                <span className="text-gray-500 mx-1">|</span>
                 <button
                   onClick={() => {
                     // When showing all active jobs, clear all selected statuses
@@ -734,7 +813,7 @@ export function ManagedJobsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && isInitialLoad ? (
+            {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
                   colSpan={13}
@@ -860,8 +939,8 @@ export function ManagedJobsTable({
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller is launching. Please wait
-                          for it to be ready.
+                          The managed job controller is launching. It will be
+                          ready shortly.
                         </p>
                         <div className="flex items-center">
                           <CircularProgress size={12} className="mr-2" />
@@ -875,8 +954,8 @@ export function ManagedJobsTable({
                     {controllerStopped && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller has been stopped. Please
-                          restart it to check the latest job status.
+                          The managed job controller has been stopped. Restart
+                          to check the latest job status.
                         </p>
                         <Button
                           variant="outline"
@@ -908,7 +987,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls */}
-      {sortedData.length > 0 && (
+      {sortedData && sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -1004,6 +1083,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
+        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
       />
     </div>
   );
@@ -1065,7 +1145,12 @@ export function Status2Actions({
   );
 }
 
-export function ClusterJobs({ clusterName, clusterJobData, loading }) {
+export function ClusterJobs({
+  clusterName,
+  clusterJobData,
+  loading,
+  refreshClusterJobsOnly,
+}) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
     key: null,
@@ -1159,12 +1244,18 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
       <Card>
         <div className="flex items-center justify-between p-4">
           <h3 className="text-lg font-semibold">Cluster Jobs</h3>
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
+          <div className="flex items-center">
+            {refreshClusterJobsOnly && (
+              <button
+                onClick={refreshClusterJobsOnly}
+                disabled={loading}
+                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center text-sm ml-2"
+              >
+                <RotateCwIcon className="w-4 h-4 mr-1" />
+                Refresh Jobs
+              </button>
+            )}
+          </div>
         </div>
         <Table>
           <TableHeader>
@@ -1213,12 +1304,6 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('priority')}
-              >
-                Priority{getSortDirection('priority')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources')}
               >
                 Resources{getSortDirection('resources')}
@@ -1227,7 +1312,19 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedData.length > 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={9}
+                  className="text-center py-12 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={24} className="mr-2" />
+                    <span>Loading cluster jobs...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -1270,7 +1367,6 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
-                    <TableCell>{item.priority}</TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions
@@ -1292,7 +1388,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
                   No jobs found
@@ -1303,7 +1399,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
         </Table>
       </Card>
 
-      {sortedData.length > 0 && (
+      {sortedData && sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -1419,10 +1515,11 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 }
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
-  const isTruncated = text.length > 50;
+  const safeText = text || '';
+  const isTruncated = safeText.length > 50;
   const isExpanded = expandedRowId === rowId;
   // Always show truncated text in the table cell
-  const displayText = isTruncated ? `${text.substring(0, 50)}` : text;
+  const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
   const buttonRef = useRef(null);
 
   const handleClick = (e) => {
