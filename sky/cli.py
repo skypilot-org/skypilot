@@ -3613,7 +3613,7 @@ def show_gpus(
                 if not _filter_ctx(ctx):
                     continue
                 if is_ssh:
-                    display_ctx = ctx.lstrip('ssh-')
+                    display_ctx = common_utils.removeprefix(ctx, 'ssh-')
                 else:
                     display_ctx = ctx
                 num_filtered_contexts += 1
