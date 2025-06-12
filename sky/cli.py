@@ -84,6 +84,7 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import string_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -3613,7 +3614,7 @@ def show_gpus(
                 if not _filter_ctx(ctx):
                     continue
                 if is_ssh:
-                    display_ctx = ctx.removeprefix('ssh-')
+                    display_ctx = string_utils.removeprefix(ctx, 'ssh-')
                 else:
                     display_ctx = ctx
                 num_filtered_contexts += 1

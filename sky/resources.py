@@ -27,6 +27,7 @@ from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import string_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -480,7 +481,7 @@ class Resources:
         if self.region is not None:
             region_name = self.region
             if self.region.startswith('ssh-'):
-                region_name = self.region.removeprefix('ssh-')
+                region_name = string_utils.removeprefix(self.region, 'ssh-')
             region_str = f', region={region_name}'
         zone_str = ''
         if self.zone is not None:
