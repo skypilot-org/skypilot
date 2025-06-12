@@ -122,7 +122,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 26
+    _VERSION = 27
 
     def __init__(
         self,
@@ -2269,6 +2269,9 @@ class Resources:
 
         if version < 26:
             self._network_tier = state.get('_network_tier', None)
+
+        if version < 27:
+            self._force_quiet = state.get('_force_quiet', None)
 
         self.__dict__.update(state)
 
