@@ -441,6 +441,7 @@ def queue(refresh: bool,
             cn2remove[handle.launched_resources.cloud].append(
                 handle.docker_cluster_job_id)
     all_jobs = []
+    cnt = 0
     for cn in cns:
         cq = core.queue(cluster_name=cn,
                         skip_finished=True,
@@ -449,14 +450,15 @@ def queue(refresh: bool,
             if j['job_id'] in cn2remove[cn]:
                 continue
             all_jobs.append({
-                'job_id': f'{cn}-{i}',
+                'job_id': cnt,
                 'task_id': 0,
-                'job_name': j['job_name'],
+                'task_name': f'{cn}-{j["job_id"]}',
+                'job_name': f'{cn}-{j["job_id"]}',
                 'resources': j['resources'],
                 'submitted_at': j['submitted_at'],
                 'end_at': j['end_at'],
-                'duration': time.time() -
-                            j['submitted_at'] if j['submitted_at'] else None,
+                'job_duration': time.time() - j['submitted_at']
+                                if j['submitted_at'] else None,
                 'recovery_count': 0,
                 'status': job_state.ManagedJobStatus.RUNNING,
                 'cluster_resources': j['resources'],
@@ -464,6 +466,7 @@ def queue(refresh: bool,
                 'user_name': j['username'],
                 'user_hash': j['user_hash'],
             })
+            cnt += 1
     return all_jobs
     handle = _maybe_restart_controller(refresh,
                                        stopped_message='No in-progress '
@@ -591,7 +594,7 @@ def cancel(name: Optional[str] = None,
 
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str],
-              job_id: Optional[int],
+              job_id: Optional[str],
               follow: bool,
               controller: bool,
               refresh: bool,
@@ -610,6 +613,10 @@ def tail_logs(name: Optional[str],
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    name_parts = name.split('-')
+    job_id = int(name_parts[-1])
+    cluster_name = '-'.join(name_parts[:-1])
+    return core.tail_logs(cluster_name, job_id, follow)
     # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
