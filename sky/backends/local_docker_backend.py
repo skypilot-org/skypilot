@@ -139,6 +139,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        docker_cluster_name: Optional[str] = None,
     ) -> Tuple[Optional[LocalDockerResourceHandle], bool, Optional[str],
                Optional[str]]:
         """Builds docker image for the task and returns cluster name as handle.
@@ -278,7 +279,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  detach_run: bool,
                  docker_image: Optional[str],
                  docker_image_unique_id: Optional[str],
-                 is_docker_cluster: bool,
+                 docker_cluster_name: Optional[str],
                  dryrun: bool = False) -> None:
         """ Launches the container."""
         if detach_run:

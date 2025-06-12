@@ -1370,8 +1370,12 @@ def launch(
                                        job_id,
                                        follow=True)
         click.secho(
-            ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
-                                           job_id, handle.get_cluster_name()))
+            ux_utils.command_hint_messages(
+                ux_utils.CommandHintType.CLUSTER_JOB,
+                job_id,
+                handle.get_cluster_name(),
+                dov_config=None
+                if handle.docker_cluster_job_id is None else False))
         sys.exit(returncode)
 
 
@@ -4324,8 +4328,6 @@ def jobs_launch(
         job_id, handle = job_id_handle
         if not handle:
             return
-        _get_cluster_records_and_set_ssh_config(
-            clusters=[handle.get_cluster_name()])
         returncode = 0
         if (not detach_run and job_id is not None and
                 handle.docker_cluster_job_id is None):
@@ -4334,7 +4336,9 @@ def jobs_launch(
                                        follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
-                                           job_id, handle.get_cluster_name()))
+                                           job_id,
+                                           handle.get_cluster_name(),
+                                           dov_config=True))
         sys.exit(returncode)
 
     if not isinstance(task_or_dag, sky.Dag):

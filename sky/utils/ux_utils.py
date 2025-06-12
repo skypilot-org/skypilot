@@ -211,8 +211,15 @@ class CommandHintType(enum.Enum):
 
 def command_hint_messages(hint_type: CommandHintType,
                           job_id: Optional[str] = None,
-                          cluster_name: Optional[str] = None) -> str:
-    """Gets the command hint messages for the given job id."""
+                          cluster_name: Optional[str] = None,
+                          dov_config: Optional[bool] = None) -> str:
+    """Gets the command hint messages for the given job id.
+
+    dov_config:
+        - if True, the command hint messages are for a dov job.
+        - if False, the command hint messages are for a dov cluster.
+        - if None, normal job.
+    """
     if hint_type == CommandHintType.CLUSTER_JOB:
         job_hint_str = (f'\nJob ID: {job_id}'
                         f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
@@ -224,18 +231,19 @@ def command_hint_messages(hint_type: CommandHintType,
         cluster_hint_str = (f'\nCluster name: {cluster_name}'
                             f'\n{INDENT_SYMBOL}To log into the head VM:\t'
                             f'{BOLD}ssh {cluster_name}'
-                            f'{RESET_BOLD}'
-                            f'\n{INDENT_SYMBOL}To submit a job:'
-                            f'\t\t{BOLD}sky exec {cluster_name} yaml_file'
-                            f'{RESET_BOLD}'
-                            f'\n{INDENT_SYMBOL}To stop the cluster:'
-                            f'\t{BOLD}sky stop {cluster_name}'
-                            f'{RESET_BOLD}'
-                            f'\n{INDENT_LAST_SYMBOL}To teardown the cluster:'
-                            f'\t{BOLD}sky down {cluster_name}'
                             f'{RESET_BOLD}')
+        if dov_config is not False:
+            cluster_hint_str += (f'\n{INDENT_SYMBOL}To submit a job:'
+                                 f'\t\t{BOLD}sky exec {cluster_name} yaml_file'
+                                 f'{RESET_BOLD}'
+                                 f'\n{INDENT_SYMBOL}To stop the cluster:'
+                                 f'\t{BOLD}sky stop {cluster_name}'
+                                 f'{RESET_BOLD}')
+        cluster_hint_str += (f'\n{INDENT_LAST_SYMBOL}To teardown the cluster:'
+                             f'\t{BOLD}sky down {cluster_name}'
+                             f'{RESET_BOLD}')
         hint_str = '\n📋 Useful Commands'
-        if job_id is not None:
+        if job_id is not None and dov_config is not False:
             hint_str += f'{job_hint_str}'
         hint_str += f'{cluster_hint_str}'
         return hint_str

@@ -564,7 +564,7 @@ class RayCodeGen:
                      docker_image_unique_id: Optional[str] = None,
                      docker_file_mounts_mapping: Optional[Dict[str,
                                                                str]] = None,
-                     is_docker_cluster: bool = False,
+                     docker_cluster_name: Optional[str] = None,
                      env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command."""
@@ -684,7 +684,7 @@ class RayCodeGen:
                         docker_image={docker_image!r},
                         docker_image_unique_id={docker_image_unique_id!r},
                         docker_file_mounts_mapping={docker_file_mounts_mapping!r},
-                        is_docker_cluster={is_docker_cluster},
+                        docker_cluster_name={docker_cluster_name!r},
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -1353,6 +1353,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
         docker_image_on_no_image_cluster: Optional[str],
+        docker_cluster_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1375,6 +1376,10 @@ class RetryingVmProvisioner(object):
             os.system(f'touch {log_path}')
         rich_utils.force_update_status(
             ux_utils.spinner_message('Launching', log_path))
+
+        launching_on_override = None
+        if docker_cluster_name is not None:
+            launching_on_override = (f'SSH Node Pools ({cluster_name})')
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -1574,17 +1579,23 @@ class RetryingVmProvisioner(object):
                         suffix = '.'
                         if region.name.startswith('ssh-'):
                             suffix = f' ({region.name.lstrip("ssh-")})'
+                        cloud_str = f'{to_provision.cloud}'
+                        if launching_on_override is not None:
+                            cloud_str = launching_on_override
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on '
-                                f'{to_provision.cloud}{suffix}'))
+                                f'{cloud_str}{suffix}'))
                     else:
+                        infra_str = (f'{to_provision.cloud} {region.name}'
+                                     f'{colorama.Style.RESET_ALL}{zone_str}')
+                        if launching_on_override is not None:
+                            infra_str = (
+                                f'{launching_on_override}{colorama.Style.RESET_ALL}'
+                            )
                         logger.info(
                             ux_utils.starting_message(
-                                f'Launching{controller_str} on '
-                                f'{to_provision.cloud} '
-                                f'{region.name}{colorama.Style.RESET_ALL}'
-                                f'{zone_str}.'))
+                                f'Launching{controller_str} on {infra_str}.'))
                     assert handle.cluster_yaml is not None
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
@@ -1644,7 +1655,8 @@ class RetryingVmProvisioner(object):
                 self._gang_schedule_ray_up(to_provision.cloud,
                                            cluster_config_file, handle,
                                            log_abs_path, stream_logs,
-                                           logging_info, to_provision.use_spot))
+                                           logging_info, to_provision.use_spot,
+                                           launching_on_override))
 
             if status == GangSchedulingStatus.CLUSTER_READY:
                 # We must query the IPs from the cloud provider, when the
@@ -1678,9 +1690,10 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
+                cn = cluster_name if docker_cluster_name is None else docker_cluster_name
                 logger.info(
-                    ux_utils.finishing_message(
-                        f'Cluster launched: {cluster_name!r}.', log_path))
+                    ux_utils.finishing_message(f'Cluster launched: {cn!r}.',
+                                               log_path))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -1773,9 +1786,15 @@ class RetryingVmProvisioner(object):
     # once the `provision_utils` is adopted for all the clouds.
     @timeline.event
     def _gang_schedule_ray_up(
-        self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
-        cluster_handle: 'backends.CloudVmRayResourceHandle', log_abs_path: str,
-        stream_logs: bool, logging_info: dict, use_spot: bool
+        self,
+        to_provision_cloud: clouds.Cloud,
+        cluster_config_file: str,
+        cluster_handle: 'backends.CloudVmRayResourceHandle',
+        log_abs_path: str,
+        stream_logs: bool,
+        logging_info: dict,
+        use_spot: bool,
+        launching_on_override: Optional[str] = None,
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str], Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
@@ -1834,14 +1853,19 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-        if isinstance(to_provision_cloud, clouds.Kubernetes):
+        if launching_on_override is not None:
+            logger.info(
+                ux_utils.starting_message(
+                    f'Launching on {launching_on_override}.'))
+        elif isinstance(to_provision_cloud, clouds.Kubernetes):
             logger.info(
                 ux_utils.starting_message(
                     f'Launching on {to_provision_cloud}.'))
         else:
             logger.info(
-                ux_utils.starting_message(f'Launching on {to_provision_cloud} '
-                                          f'{region_name}{zone_str}.'))
+                ux_utils.starting_message(
+                    f'Launching on {to_provision_cloud} '
+                    f'{region_name}{zone_str}.{launching_on_override}'))
         start = time.time()
 
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
@@ -2033,6 +2057,7 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         skip_unnecessary_provisioning: bool,
+        docker_cluster_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Provision with retries for all launchable resources.
 
@@ -2113,7 +2138,8 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up,
                     skip_if_config_hash_matches=skip_if_config_hash_matches,
                     docker_image_on_no_image_cluster=
-                    docker_image_on_no_image_cluster)
+                    docker_image_on_no_image_cluster,
+                    docker_cluster_name=docker_cluster_name)
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2898,6 +2924,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        docker_cluster_name: Optional[str] = None,
     ) -> Tuple[Optional[CloudVmRayResourceHandle], bool, Optional[str],
                Optional[str]]:
         """Provisions the cluster, or re-provisions an existing cluster.
@@ -2983,7 +3010,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         ux_utils.spinner_message('Launching', log_path))
                     config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs,
-                        skip_unnecessary_provisioning)
+                        skip_unnecessary_provisioning, docker_cluster_name)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     log_path = retry_provisioner.log_dir + '/provision.log'
@@ -3062,7 +3089,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle.cluster_yaml,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
-                    log_dir=self.log_dir)
+                    log_dir=self.log_dir,
+                    docker_cluster_name=docker_cluster_name)
                 # We use the IPs from the cluster_info to update_cluster_ips,
                 # when the provisioning is done, to make sure the cluster IPs
                 # are up-to-date.
@@ -3526,6 +3554,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
+        docker_cluster_name: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
@@ -3634,10 +3663,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
             logger.info(ux_utils.starting_message('Service registered.'))
-        else:
+        elif docker_cluster_name is None:
             logger.info(
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
-        rich_utils.stop_safe_status()
+        if docker_cluster_name is None:
+            rich_utils.stop_safe_status()
         if not detach_run:
             if (handle.cluster_name == controller_utils.Controllers.
                     JOBS_CONTROLLER.value.cluster_name):
@@ -3691,7 +3721,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         detach_run: bool,
         docker_image: Optional[str],
         docker_image_unique_id: Optional[str],
-        is_docker_cluster: bool,
+        docker_cluster_name: Optional[str],
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -3747,12 +3777,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, docker_image,
                                        docker_image_unique_id,
-                                       is_docker_cluster, detach_run)
+                                       docker_cluster_name, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, docker_image,
                                         docker_image_unique_id,
-                                        is_docker_cluster, detach_run)
+                                        docker_cluster_name, detach_run)
 
         return job_id
 
@@ -5322,7 +5352,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                task: task_lib.Task, job_id: int,
                                docker_image: Optional[str],
                                docker_image_unique_id: Optional[str],
-                               is_docker_cluster: bool,
+                               docker_cluster_name: Optional[str],
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
@@ -5361,7 +5391,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             log_dir=log_dir,
             docker_image=docker_image,
             docker_image_unique_id=docker_image_unique_id,
-            is_docker_cluster=is_docker_cluster,
+            docker_cluster_name=docker_cluster_name,
             docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
         codegen.add_epilogue()
@@ -5370,13 +5400,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                docker_cluster_name=docker_cluster_name)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
                               docker_image: Optional[str],
                               docker_image_unique_id: Optional[str],
-                              is_docker_cluster: bool,
+                              docker_cluster_name: Optional[str],
                               detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
@@ -5425,7 +5456,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 gang_scheduling_id=i,
                 docker_image=docker_image,
                 docker_image_unique_id=docker_image_unique_id,
-                is_docker_cluster=is_docker_cluster,
+                docker_cluster_name=docker_cluster_name,
                 docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
         codegen.add_epilogue()
@@ -5434,4 +5465,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                docker_cluster_name=docker_cluster_name)

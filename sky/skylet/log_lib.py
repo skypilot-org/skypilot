@@ -351,7 +351,7 @@ def run_bash_command_with_log(
         docker_image: Optional[str] = None,
         docker_image_unique_id: Optional[str] = None,
         docker_file_mounts_mapping: Optional[Dict[str, str]] = None,
-        is_docker_cluster: bool = False):
+        docker_cluster_name: Optional[str] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         ln_sky_workdir_from_abs = False
@@ -367,7 +367,7 @@ def run_bash_command_with_log(
                 if (constants.SKY_REMOTE_WORKDIR_ABS
                         in docker_file_mounts_mapping.values()):
                     ln_sky_workdir_from_abs = True
-            if is_docker_cluster:
+            if docker_cluster_name is not None:
                 bash_command = (
                     '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }\n'
                     'export DEBIAN_FRONTEND=noninteractive\n'
@@ -412,7 +412,7 @@ def run_bash_command_with_log(
                 maybe_specify_name = f'--name {docker_image_unique_id}'
             maybe_find_docker_port_cmd = ''
             maybe_docker_port_env = ''
-            if is_docker_cluster:
+            if docker_cluster_name is not None:
                 maybe_find_docker_port_cmd = (
                     # Install ss.
                     'sudo apt-get update > /dev/null 2>&1\n'

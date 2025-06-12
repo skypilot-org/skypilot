@@ -124,7 +124,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _is_docker_cluster: bool = False,
+    docker_cluster_name: Optional[str] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -219,7 +219,7 @@ def _execute(
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
             _is_launched_by_sky_serve_controller,
-            _is_docker_cluster=_is_docker_cluster)
+            docker_cluster_name=docker_cluster_name)
 
 
 def _execute_dag(
@@ -241,7 +241,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
-    _is_docker_cluster: bool,
+    docker_cluster_name: Optional[str],
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
 
@@ -420,7 +420,8 @@ def _execute_dag(
                  stream_logs=stream_logs,
                  cluster_name=cluster_name,
                  retry_until_up=retry_until_up,
-                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+                 skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+                 docker_cluster_name=docker_cluster_name)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -470,7 +471,7 @@ def _execute_dag(
                                          detach_run,
                                          docker_image,
                                          docker_image_unique_id,
-                                         _is_docker_cluster,
+                                         docker_cluster_name,
                                          dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
@@ -683,7 +684,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
-        _is_docker_cluster=original_cluster_name is not None,
+        docker_cluster_name=original_cluster_name,
     )
     if original_cluster_name is not None:
         task_ori = dag_utils.convert_entrypoint_to_dag(entrypoint).tasks[0]
@@ -731,8 +732,11 @@ def launch(
                 shutil.rmtree(fn)
             return node2user, node2port
 
+        ready_cnt = 0
         with rich_utils.safe_status(
-                ux_utils.spinner_message('Setting up SSH on the cluster')):
+                ux_utils.spinner_message(
+                    f'Setting up SSH on cluster {original_cluster_name!r} (0/{task_ori.num_nodes} ready)'
+                )) as spinner:
             node2user = {}
             node2port = {}
             st = time.time()
@@ -742,8 +746,15 @@ def launch(
                         raise RuntimeError(
                             'Timeout waiting for nodes to setup SSH')
                 node2user, node2port = _check_worker_nodes()
-                if (len(node2user) == task_ori.num_nodes and
-                        len(node2port) == task_ori.num_nodes):
+                cur_ready_cnt = len(
+                    set(node2user.keys()) & set(node2port.keys()))
+                if cur_ready_cnt > ready_cnt:
+                    ready_cnt = cur_ready_cnt
+                    spinner.update(
+                        ux_utils.spinner_message(
+                            f'Setting up SSH on cluster {original_cluster_name!r} '
+                            f'({ready_cnt}/{task_ori.num_nodes} ready)'))
+                if cur_ready_cnt == task_ori.num_nodes:
                     break
                 time.sleep(1)
             assert (len(node2user) == task_ori.num_nodes and

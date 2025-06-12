@@ -55,6 +55,7 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: Optional[str] = None,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        docker_cluster_name: Optional[str] = None,
     ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str],
                Optional[str]]:
         """Provisions resources for the given task.
@@ -89,7 +90,8 @@ class Backend(Generic[_ResourceHandleType]):
         with rich_utils.safe_status(ux_utils.spinner_message('Launching')):
             return self._provision(task, to_provision, dryrun, stream_logs,
                                    cluster_name, retry_until_up,
-                                   skip_unnecessary_provisioning)
+                                   skip_unnecessary_provisioning,
+                                   docker_cluster_name)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
@@ -130,7 +132,7 @@ class Backend(Generic[_ResourceHandleType]):
                 detach_run: bool,
                 docker_image: Optional[str],
                 docker_image_unique_id: Optional[str],
-                is_docker_cluster: bool,
+                docker_cluster_name: Optional[str],
                 dryrun: bool = False) -> Optional[int]:
         """Execute the task on the cluster.
 
@@ -142,7 +144,7 @@ class Backend(Generic[_ResourceHandleType]):
         usage_lib.messages.usage.update_actual_task(task)
         with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
             return self._execute(handle, task, detach_run, docker_image,
-                                 docker_image_unique_id, is_docker_cluster,
+                                 docker_image_unique_id, docker_cluster_name,
                                  dryrun)
 
     @timeline.event
@@ -176,6 +178,7 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
+        docker_cluster_name: Optional[str] = None,
     ) -> Tuple[Optional[_ResourceHandleType], bool, Optional[str],
                Optional[str]]:
         raise NotImplementedError
@@ -203,7 +206,7 @@ class Backend(Generic[_ResourceHandleType]):
                  detach_run: bool,
                  docker_image: Optional[str],
                  docker_image_unique_id: Optional[str],
-                 is_docker_cluster: bool,
+                 docker_cluster_name: Optional[str],
                  dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 
