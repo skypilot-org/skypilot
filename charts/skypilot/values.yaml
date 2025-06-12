@@ -235,6 +235,7 @@ rbac:
   # object store mounting or you manage system components manually, i.e. outside of SkyPilot.
   manageSystemComponents: true
 
+
 # kubernetesCredentials add additional kubernetes cluster permissions to the API server.
 kubernetesCredentials:
   # Enable/disable using the API server's cluster for workloads
