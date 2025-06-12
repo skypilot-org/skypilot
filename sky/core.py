@@ -91,8 +91,7 @@ def optimize(
                                            minimize=minimize,
                                            blocked_resources=blocked_resources,
                                            quiet=quiet)
-        print('after', ret)
-        return 'ret'
+        return ret
 
 
 @usage_lib.entrypoint

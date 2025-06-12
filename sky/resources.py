@@ -570,7 +570,7 @@ class Resources:
         """
         if self._accelerators is not None:
             return self._accelerators
-        if self.cloud is not None and self._instance_type is not None:
+        if isinstance(self.cloud, clouds.Cloud) and self._instance_type is not None:
             return self.cloud.get_accelerators_from_instance_type(
                 self._instance_type)
         return None
