@@ -1024,7 +1024,8 @@ class Optimizer:
             acc_str = f'{k}:{v}'
         # TODO(tian): Show actual cpu and memory available on the container.
         table.add_row([
-            f'SSH Node Pools ({cluster_name})', '-', '-', '-', acc_str, '0.00',
+            f'SSH Node Pools ({cluster_name})',
+            task_resources.extract_docker_image(), '-', '-', acc_str, '0.00',
             chosen_str
         ])
         logger.info(f'{table}')

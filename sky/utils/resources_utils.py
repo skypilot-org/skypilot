@@ -183,12 +183,12 @@ def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
     resource = resource.assert_launchable()
     if isinstance(resource.cloud, str):
-        vcpu, mem = '-', '-'
+        vcpu, mem = None, None
     else:
-        vcpu_, mem_ = resource.cloud.get_vcpus_mem_from_instance_type(
+        vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
             resource.instance_type)
-        vcpu = str(int(vcpu_)) if vcpu_ is not None else '-'
-        mem = str(int(mem_)) if mem_ is not None else '-'
+        vcpu = int(vcpu) if vcpu is not None else None
+        mem = int(mem) if mem is not None else None
 
     components = []
 

@@ -58,7 +58,7 @@ def optimize(
     quiet: bool = False,
     request_options: Optional[admin_policy.RequestOptions] = None,
     _is_docker_job: bool = False,
-) -> 'dag_lib.Dag':
+) -> Optional['dag_lib.Dag']:
     """Finds the best execution plan for the given DAG.
 
     Args:

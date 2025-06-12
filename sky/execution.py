@@ -706,31 +706,38 @@ def launch(
             id2file = backend.sync_down_logs(handle, [job_id])
             fn = os.path.expanduser(id2file[job_id])
             node2user = {}
+            node2port = {}
             with open(os.path.join(fn, 'run.log'), 'r') as f:
                 for line in f:
-                    if 'docker_user:' not in line:
+                    if 'docker_user:' not in line and 'docker_port:' not in line:
                         continue
                     match = re.search(
                         r'\((head|worker\d+), rank=(\d+), pid=(\d+)', line)
                     docker_user_match = re.search(r'docker_user:(\S+)', line)
                     if match and docker_user_match:
                         node2user[match.group(1)] = docker_user_match.group(1)
+                    docker_port_match = re.search(r'docker_port:(\d+)', line)
+                    if match and docker_port_match:
+                        node2port[match.group(1)] = docker_port_match.group(1)
             if os.path.exists(fn):
                 shutil.rmtree(fn)
-            return node2user
+            return node2user, node2port
 
         node2user = {}
+        node2port = {}
         st = time.time()
         while True:
             if time.time() - st > 60:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError('Timeout waiting for nodes to setup SSH')
-            node2user = _check_worker_nodes()
-            if len(node2user) == task_ori.num_nodes:
+            node2user, node2port = _check_worker_nodes()
+            if (len(node2user) == task_ori.num_nodes and
+                    len(node2port) == task_ori.num_nodes):
                 break
             time.sleep(1)
-        assert len(node2user) == task_ori.num_nodes, (node2user,
-                                                      task_ori.num_nodes)
+        assert (len(node2user) == task_ori.num_nodes and
+                len(node2port) == task_ori.num_nodes), (node2user, node2port,
+                                                        task_ori.num_nodes)
         idxes = sorted([
             0 if 'head' in n else int(n.split('worker')[1]) for n in node2user
         ])
@@ -739,14 +746,22 @@ def launch(
         docker_user = docker_user_set.pop()
         ips = [handle.cached_external_ips[idx] for idx in idxes]
         ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
+        docker_ports = [
+            node2port['head' if idx == 0 else f'worker{idx}'] for idx in idxes
+        ]
 
         auth_config = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml,
             ssh_user=handle.ssh_user,
             docker_user=docker_user)
         cluster_utils.SSHConfigHelper.add_cluster(
-            docker_cls_handle.cluster_name, ips, auth_config, ports,
-            docker_user, handle.ssh_user)
+            docker_cls_handle.cluster_name,
+            ips,
+            auth_config,
+            ports,
+            docker_user,
+            handle.ssh_user,
+            docker_ports=docker_ports)
         return res[0], docker_cls_handle
     return res
 
