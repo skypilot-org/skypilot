@@ -378,7 +378,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     const grafanaUrl = window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
     const hostParam = selectedHosts === '$__all' ? '$__all' : selectedHosts;
     
-    return `${grafanaUrl}/d-solo/nvidia-dcgm-dashboard/better-nvidia-dcgm-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/nvidia-dcgm-dashboard/skypilot-nvidia-dcgm-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // Handle host selection change
@@ -536,7 +536,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   {/* Host Selection */}
                   <div className="flex items-center gap-2">
                     <label htmlFor="host-select" className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                      Host:
+                      Node:
                     </label>
                     <select
                       id="host-select"
@@ -545,7 +545,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                       disabled={isLoadingHosts}
                       className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
                     >
-                      <option value="$__all">All Hosts</option>
+                      <option value="$__all">All Nodes</option>
                       {availableHosts.map((host) => (
                         <option key={host} value={host}>
                           {host}
