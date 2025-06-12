@@ -2603,6 +2603,9 @@ def get_clusters(
 
     records = workspace_filtered_records
 
+    # Filter out clusters that are used as infra
+    records = [record for record in records if not record['used_as_infra']]
+
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL

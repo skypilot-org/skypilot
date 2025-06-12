@@ -1250,10 +1250,23 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
             If None, the first cluster in the file is used.
         cleanup: If True, clean up the cluster instead of deploying.
     """
-    kubernetes_deploy_utils.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
+    skypilot_cluster_exists = False
+    if infra is not None:
+        # Check if infra exists in cluster table.
+        records = global_user_state.get_cluster_from_name(infra)
+        if len(records) != 0:
+            skypilot_cluster_exists = True
+    if skypilot_cluster_exists:
+        # If the cluster exists, we mark the cluster as an infra, which will
+        # then be filtered out when displaying the list of clusters.
+        # TODO(zhwu): check if there are any clusters/jobs running on the infra.
+        global_user_state.set_cluster_used_as_infra(infra,
+                                                    used_as_infra=not cleanup)
+    else:
+        kubernetes_deploy_utils.deploy_ssh_cluster(
+            cleanup=cleanup,
+            infra=infra,
+        )
 
 
 def get_all_contexts() -> List[str]:

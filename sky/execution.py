@@ -595,6 +595,10 @@ def launch(
     if _ssh_node_pool_cluster_name is not None:
         original_cluster_name = cluster_name
         cluster_name = _ssh_node_pool_cluster_name
+        records = global_user_state.get_cluster_from_name(cluster_name)
+        if records is None or not records['used_as_infra']:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Infra {cluster_name!r} does not exist.')
 
     entrypoint = task
     entrypoint.validate()
