@@ -341,7 +341,7 @@ def path_size_megabytes(path: str) -> int:
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:
-        # rsync sometimes fails, however this function is only used to display
+        # rsync sometimes fails `--dry-run` for MacOS' rsync build, however this function is only used to display
         # a warning message to the user if the size of a file/directory is too
         # large, so we can safely ignore the error.
         rsync_output = str(
