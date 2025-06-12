@@ -73,7 +73,7 @@ metadata:
 
 {{/* Whether to enable basic auth */}}
 {{- define "skypilot.enableBasicAuthInAPIServer" -}}
-{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.enableUserManagement -}}
+{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.apiService.enableUserManagement -}}
 true
 {{- else -}}
 false

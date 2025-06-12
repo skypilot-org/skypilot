@@ -883,7 +883,6 @@ function UsersTable({
   currentUserRole,
   currentUserId,
 }) {
-  console.log('daniel UsersTable', currentUserRole, currentUserId);
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
