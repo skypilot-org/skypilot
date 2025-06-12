@@ -139,7 +139,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[LocalDockerResourceHandle], bool, Optional[str]]:
+    ) -> Tuple[Optional[LocalDockerResourceHandle], bool, Optional[str],
+               Optional[str]]:
         """Builds docker image for the task and returns cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
@@ -149,7 +150,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
         if dryrun:
-            return None, False, None
+            return None, False, None, None
         if retry_until_up:
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
@@ -175,7 +176,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                                                 requested_resources=set(
                                                     task.resources),
                                                 ready=False)
-        return handle, False, None
+        return handle, False, None, None
 
     def _sync_workdir(self, handle: LocalDockerResourceHandle, workdir: Path,
                       target_workdir: Path) -> None:

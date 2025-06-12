@@ -5,6 +5,7 @@ See `Stage` for a Task's life cycle.
 import enum
 import os
 import re
+import shutil
 import time
 import typing
 from typing import List, Optional, Tuple, Union
@@ -703,36 +704,42 @@ def launch(
 
         def _check_worker_nodes():
             id2file = backend.sync_down_logs(handle, [job_id])
-            fn = id2file[job_id]
-            nodes = set()
-            with open(os.path.expanduser(os.path.join(fn, 'run.log')),
-                      'r') as f:
+            fn = os.path.expanduser(id2file[job_id])
+            node2user = {}
+            with open(os.path.join(fn, 'run.log'), 'r') as f:
                 for line in f:
+                    if 'docker_user:' not in line:
+                        continue
                     match = re.search(
                         r'\((head|worker\d+), rank=(\d+), pid=(\d+)', line)
-                    if match:
-                        nodes.add(match.group(1))
-            # os.removedirs(fn)
-            return nodes
+                    docker_user_match = re.search(r'docker_user:(\S+)', line)
+                    if match and docker_user_match:
+                        node2user[match.group(1)] = docker_user_match.group(1)
+            if os.path.exists(fn):
+                shutil.rmtree(fn)
+            return node2user
 
-        nodes = set()
+        node2user = {}
         st = time.time()
         while True:
             if time.time() - st > 60:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError('Timeout waiting for nodes to setup SSH')
-            nodes = _check_worker_nodes()
-            if len(nodes) == task_ori.num_nodes:
+            node2user = _check_worker_nodes()
+            if len(node2user) == task_ori.num_nodes:
                 break
             time.sleep(1)
-        assert len(nodes) == task_ori.num_nodes, (nodes, task_ori.num_nodes)
-        idxes = sorted(
-            [0 if 'head' in n else int(n.split('worker')[1]) for n in nodes])
+        assert len(node2user) == task_ori.num_nodes, (node2user,
+                                                      task_ori.num_nodes)
+        idxes = sorted([
+            0 if 'head' in n else int(n.split('worker')[1]) for n in node2user
+        ])
+        docker_user_set = set(node2user.values())
+        assert len(docker_user_set) == 1, (docker_user_set, node2user)
+        docker_user = docker_user_set.pop()
         ips = [handle.cached_external_ips[idx] for idx in idxes]
         ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
 
-        # TODO(tian): Get docker user from docker run.
-        docker_user = 'root'
         auth_config = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml,
             ssh_user=handle.ssh_user,

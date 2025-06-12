@@ -185,10 +185,10 @@ def format_resource(resource: 'resources_lib.Resources',
     if isinstance(resource.cloud, str):
         vcpu, mem = '-', '-'
     else:
-        vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+        vcpu_, mem_ = resource.cloud.get_vcpus_mem_from_instance_type(
             resource.instance_type)
-        vcpu = int(vcpu)
-        mem = int(mem)
+        vcpu = str(int(vcpu_)) if vcpu_ is not None else '-'
+        mem = str(int(mem_)) if mem_ is not None else '-'
 
     components = []
 

@@ -369,14 +369,15 @@ def run_bash_command_with_log(
             bash_command = (
                 '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }\n'
                 'export DEBIAN_FRONTEND=noninteractive\n'
-                'sudo apt-get update\n'
+                'sudo apt-get update > /dev/null 2>&1\n'
                 'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
-                'rsync curl wget patch openssh-server python3-pip fuse\n'
+                'rsync curl wget patch openssh-server python3-pip fuse > /dev/null 2>&1\n'
                 'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
                 f'sudo echo "Port 10022" >> /etc/ssh/sshd_config\n'
                 'mkdir -p ~/.ssh\n'
                 'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys\n'
-                'service ssh start\n'
+                'service ssh start > /dev/null 2>&1\n'
+                'echo "docker_user:$(whoami)"\n'
                 f'{bash_command}')
         bash_command = make_task_bash_script(
             bash_command,
