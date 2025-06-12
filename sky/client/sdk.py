@@ -579,7 +579,8 @@ def _launch(
                             'Must specify a docker image for ssh node pool.')
                 ssh_node_pool_cluster_name = ssh_node_pool_resource.cloud
                 request_id = status([ssh_node_pool_cluster_name],
-                                    all_users=True)
+                                    all_users=True,
+                                    infra_only=True)
                 clusters = get(request_id)
                 cluster_user_hash = common_utils.get_user_hash()
                 cluster_user_hash_str = ''
@@ -1257,6 +1258,7 @@ def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    infra_only: bool = False,
 ) -> server_common.RequestId:
     """Gets cluster statuses.
 
@@ -1339,6 +1341,7 @@ def status(
         cluster_names=cluster_names,
         refresh=refresh,
         all_users=all_users,
+        infra_only=infra_only,
     )
     response = requests.post(f'{server_common.get_server_url()}/status',
                              json=json.loads(body.model_dump_json()),

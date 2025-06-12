@@ -597,12 +597,6 @@ def launch(
         if records is None or not records['used_as_infra']:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Infra {cluster_name!r} does not exist.')
-        dag = dag_utils.convert_entrypoint_to_dag(task)
-        dag_task = dag.tasks[0]
-        dag_task.set_resources(
-            type(dag_task.resources)(
-                r.copy(cloud=None) for r in dag_task.resources))
-        task = dag
 
     entrypoint = task
     entrypoint.validate()

@@ -58,7 +58,7 @@ def optimize(
     quiet: bool = False,
     request_options: Optional[admin_policy.RequestOptions] = None,
     _is_docker_job: bool = False,
-) -> Optional['dag_lib.Dag']:
+) -> Optional[str]:
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -85,11 +85,12 @@ def optimize(
             dag, request_options=request_options) as dag:
         if isinstance(list(dag.tasks[0].resources)[0].cloud, str):
             optimizer.Optimizer.print_cluster_plan(dag)
-            return None if not _is_docker_job else dag
-        return optimizer.Optimizer.optimize(dag=dag,
-                                            minimize=minimize,
-                                            blocked_resources=blocked_resources,
-                                            quiet=quiet)
+            return None if not _is_docker_job else 'dag'
+        _ = optimizer.Optimizer.optimize(dag=dag,
+                                         minimize=minimize,
+                                         blocked_resources=blocked_resources,
+                                         quiet=quiet)
+        return 'ret'
 
 
 @usage_lib.entrypoint
@@ -1256,9 +1257,8 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     skypilot_cluster_exists = False
     if infra is not None:
         # Check if infra exists in cluster table.
-        records = global_user_state.get_cluster_from_name(infra)
-        if len(records) != 0:
-            record = records[0]
+        record = global_user_state.get_cluster_from_name(infra)
+        if record:
             if record['handle'] is not None:
                 skypilot_cluster_exists = True
                 handle = record['handle']
@@ -1274,6 +1274,7 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         global_user_state.set_cluster_used_as_infra(infra,
                                                     used_as_infra=not cleanup)
     else:
+        raise ValueError(f'Cluster {infra} does not exist.')
         kubernetes_deploy_utils.deploy_ssh_cluster(
             cleanup=cleanup,
             infra=infra,
