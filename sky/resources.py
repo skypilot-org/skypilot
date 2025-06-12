@@ -153,7 +153,7 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
-        _force_quiet: bool = False,
+        _force_quiet: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -653,6 +653,8 @@ class Resources:
     @property
     def force_quiet(self) -> bool:
         """Returns whether to force quiet mode for this resource."""
+        if self._force_quiet is None:
+            return False
         return self._force_quiet
 
     def set_requires_fuse(self, value: bool) -> None:
