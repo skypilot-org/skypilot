@@ -141,6 +141,34 @@ async def _override_user_info_in_request_body(request: fastapi.Request,
             request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
 
 
+def _try_set_basic_auth_user(request: fastapi.Request):
+    auth_header = request.headers.get('authorization')
+    if not auth_header or not auth_header.lower().startswith('basic '):
+        return
+
+    # Check username and password
+    encoded = auth_header.split(' ', 1)[1]
+    try:
+        decoded = base64.b64decode(encoded).decode()
+        username, password = decoded.split(':', 1)
+    except Exception:  # pylint: disable=broad-except
+        return
+
+    users = global_user_state.get_user_by_name(username)
+    if not users:
+        return
+
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        username_encoded = username.encode('utf8')
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                user.password == hashlib.sha256(password.encode()).hexdigest()):
+            request.state.auth_user = user
+            break
+
+
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -193,6 +221,9 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/api/'):
+            # Try to set the auth user from the basic auth header so the
+            # following endpoint handlers can leverage the auth_user info
+            _try_set_basic_auth_user(request)
             return await call_next(request)
         enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
                                            'false')
@@ -1291,7 +1322,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
-    user = _get_auth_user_header(request)
+    user = request.state.auth_user
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
@@ -1299,6 +1330,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
         'user': user.to_dict() if user is not None else None,
+        'basic_auth_enabled': os.environ.get(
+            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
     }
 
 

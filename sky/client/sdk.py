@@ -2125,6 +2125,22 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                       'w',
                       encoding='utf-8') as f:
                 f.write(user_hash)
+    else:
+        # Check if basic auth is enabled
+        api_server_info = server_common.get_api_server_status(endpoint)
+        if api_server_info.basic_auth_enabled:
+            if api_server_info.user is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Basic auth is enabled but no valid user is found')
+            # Set the user hash in the local file
+            user_hash = api_server_info.user.get('id')
+            if not user_hash or not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            with open(os.path.expanduser('~/.sky/user_hash'),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(user_hash)
 
     # Set the endpoint in the config file
     config_path = pathlib.Path(

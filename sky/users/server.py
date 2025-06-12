@@ -121,11 +121,18 @@ async def user_update(request: fastapi.Request,
     if user_info is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
-    # Disallow updating roles for the internal users.
-    if user_info.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+    # Disallow updating the internal users.
+    if need_update_role and user_info.id in [
+            common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
+    ]:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot update role for internal '
                                     f'API server user {user_info.name}')
+    if password and user_info.id == constants.SKYPILOT_SYSTEM_USER_ID:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Cannot update password for internal '
+            f'API server user {user_info.name}')
 
     with _user_lock(user_info.id):
         if password:
@@ -147,7 +154,11 @@ async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
     if user_info is None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
-
+    # Disallow deleting the internal users.
+    if user_info.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Cannot delete internal '
+                                    f'API server user {user_info.name}')
     with _user_lock(user_id):
         global_user_state.delete_user(user_id)
         permission.permission_service.delete_user(user_id)

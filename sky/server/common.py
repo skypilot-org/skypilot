@@ -128,6 +128,8 @@ class ApiServerInfo:
     version: Optional[str] = None
     version_on_disk: Optional[str] = None
     commit: Optional[str] = None
+    user: Optional[Dict[str, Any]] = None
+    basic_auth_enabled: bool = False
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
@@ -261,11 +263,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             version = result.get('version')
             version_on_disk = result.get('version_on_disk')
             commit = result.get('commit')
+            user = result.get('user')
+            basic_auth_enabled = result.get('basic_auth_enabled')
             server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
                                         api_version=api_version,
                                         version=version,
                                         version_on_disk=version_on_disk,
-                                        commit=commit)
+                                        commit=commit,
+                                        user=user,
+                                        basic_auth_enabled=basic_auth_enabled)
             if api_version is None or version is None or commit is None:
                 logger.warning(f'API server response missing '
                                f'version info. {server_url} may '

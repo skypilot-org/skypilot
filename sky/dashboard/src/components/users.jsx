@@ -170,6 +170,30 @@ export function Users() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [createSuccess, setCreateSuccess] = useState(null);
   const [createError, setCreateError] = useState(null);
+  const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
+
+  useEffect(() => {
+    async function fetchHealth() {
+      try {
+        const resp = await apiClient.get('/api/health');
+        if (resp.ok) {
+          const data = await resp.json();
+          setBasicAuthEnabled(!!data.basic_auth_enabled);
+        } else {
+          setBasicAuthEnabled(false);
+        }
+      } catch {
+        setBasicAuthEnabled(false);
+      }
+    }
+    fetchHealth();
+  }, []);
+
+  useEffect(() => {
+    getUserRole().catch(() => {
+      console.error('Failed to get user role');
+    });
+  }, []);
 
   const getUserRole = async () => {
     if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
@@ -187,6 +211,7 @@ export function Users() {
       const roleData = {
         role: data.role,
         name: data.name,
+        id: data.id,
         timestamp: Date.now(),
       };
       setUserRoleCache(roleData);
@@ -249,9 +274,7 @@ export function Users() {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create user');
       }
-      setCreateSuccess(
-        `User &quot;${newUser.username}&quot; created successfully!`
-      );
+      setCreateSuccess(`User "${newUser.username}" created successfully!`);
       setShowCreateUser(false);
       setNewUser({ username: '', password: '', role: 'user' });
       handleRefresh();
@@ -347,7 +370,7 @@ export function Users() {
         throw new Error(errorData.detail || 'Failed to reset password');
       }
       setCreateSuccess(
-        `Password reset successfully for user &quot;${resetPasswordUser.usernameDisplay}&quot;!`
+        `Password reset successfully for user "${resetPasswordUser.usernameDisplay}"!`
       );
       setShowResetPasswordDialog(false);
       setResetPasswordUser(null);
@@ -379,7 +402,7 @@ export function Users() {
         throw new Error(errorData.detail || 'Failed to delete user');
       }
       setCreateSuccess(
-        `User &quot;${userToDelete.usernameDisplay}&quot; deleted successfully!`
+        `User "${userToDelete.usernameDisplay}" deleted successfully!`
       );
       setShowDeleteConfirmDialog(false);
       setUserToDelete(null);
@@ -422,29 +445,33 @@ export function Users() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <button
-            onClick={async () => {
-              await checkPermissionAndAct('cannot create users', () => {
-                setShowCreateUser(true);
-              });
-            }}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1 mr-2"
-            title="Create New User"
-          >
-            + New User
-          </button>
-          <button
-            onClick={async () => {
-              await checkPermissionAndAct('cannot import users', () => {
-                setShowImportExportDialog(true);
-              });
-            }}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
-            title="Import/Export Users"
-          >
-            <UploadIcon className="h-4 w-4 mr-1" />
-            Import/Export
-          </button>
+          {basicAuthEnabled && userRoleCache?.role === 'admin' && (
+            <button
+              onClick={async () => {
+                await checkPermissionAndAct('cannot create users', () => {
+                  setShowCreateUser(true);
+                });
+              }}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1 mr-2"
+              title="Create New User"
+            >
+              + New User
+            </button>
+          )}
+          {basicAuthEnabled && userRoleCache?.role === 'admin' && (
+            <button
+              onClick={async () => {
+                await checkPermissionAndAct('cannot import users', () => {
+                  setShowImportExportDialog(true);
+                });
+              }}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
+              title="Import/Export Users"
+            >
+              <UploadIcon className="h-4 w-4 mr-1" />
+              Import/Export
+            </button>
+          )}
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -475,6 +502,9 @@ export function Users() {
         roleLoading={roleLoading}
         onResetPassword={handleResetPasswordClick}
         onDeleteUser={handleDeleteUserClick}
+        basicAuthEnabled={basicAuthEnabled}
+        currentUserRole={userRoleCache?.role}
+        currentUserId={userRoleCache?.id}
       />
 
       {/* Create User Dialog */}
@@ -849,7 +879,11 @@ function UsersTable({
   roleLoading,
   onResetPassword,
   onDeleteUser,
+  basicAuthEnabled,
+  currentUserRole,
+  currentUserId,
 }) {
+  console.log('daniel UsersTable', currentUserRole, currentUserId);
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
@@ -859,8 +893,6 @@ function UsersTable({
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const [currentUserRole, setCurrentUserRole] = useState(null);
 
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
@@ -948,23 +980,6 @@ function UsersTable({
     }, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
-
-  useEffect(() => {
-    // Get current user info
-    async function fetchCurrentUser() {
-      try {
-        const response = await apiClient.get('/users/role');
-        if (response.ok) {
-          const data = await response.json();
-          setCurrentUserId(data.id);
-          setCurrentUserRole(data.role);
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-    fetchCurrentUser();
-  }, []);
 
   const sortedUsers = useMemo(() => {
     return sortData(usersWithCounts, sortConfig.key, sortConfig.direction);
@@ -1088,7 +1103,10 @@ function UsersTable({
             >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
-            <TableHead className="whitespace-nowrap w-1/6">Actions</TableHead>
+            {/* Show Actions column if basicAuthEnabled */}
+            {basicAuthEnabled && (
+              <TableHead className="whitespace-nowrap w-1/6">Actions</TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -1130,13 +1148,18 @@ function UsersTable({
                   ) : (
                     <>
                       <span className="capitalize">{user.role}</span>
-                      <button
-                        onClick={() => handleEditClick(user.userId, user.role)}
-                        className="text-sky-blue hover:text-sky-blue-bright p-1"
-                        title="Edit role"
-                      >
-                        <PenIcon className="h-3 w-3" />
-                      </button>
+                      {/* Only show edit role button if admin */}
+                      {currentUserRole === 'admin' && (
+                        <button
+                          onClick={() =>
+                            handleEditClick(user.userId, user.role)
+                          }
+                          className="text-sky-blue hover:text-sky-blue-bright p-1"
+                          title="Edit role"
+                        >
+                          <PenIcon className="h-3 w-3" />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -1173,39 +1196,52 @@ function UsersTable({
                   </span>
                 )}
               </TableCell>
-              <TableCell className="relative">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      // Check permissions
-                      if (
+              {/* Actions cell logic */}
+              {basicAuthEnabled && (
+                <TableCell className="relative">
+                  <div className="flex items-center gap-2">
+                    {/* Reset password icon: admin can reset any, user can only reset self */}
+                    <button
+                      onClick={
+                        currentUserRole === 'admin' ||
+                        user.userId === currentUserId
+                          ? async () => {
+                              onResetPassword(user);
+                            }
+                          : undefined
+                      }
+                      className={
+                        currentUserRole === 'admin' ||
+                        user.userId === currentUserId
+                          ? 'text-sky-blue hover:text-sky-blue-bright p-1'
+                          : 'text-gray-300 cursor-not-allowed p-1'
+                      }
+                      title={
+                        currentUserRole === 'admin' ||
+                        user.userId === currentUserId
+                          ? 'Reset Password'
+                          : 'You can only reset your own password'
+                      }
+                      disabled={
                         currentUserRole !== 'admin' &&
                         user.userId !== currentUserId
-                      ) {
-                        await checkPermissionAndAct(
-                          'cannot reset password for other users',
-                          () => {
-                            onResetPassword(user);
-                          }
-                        );
-                        return;
                       }
-                      onResetPassword(user);
-                    }}
-                    className="text-sky-blue hover:text-sky-blue-bright p-1"
-                    title="Reset Password"
-                  >
-                    <KeyRoundIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => onDeleteUser(user)}
-                    className="text-sky-blue hover:text-red-500 p-1"
-                    title="Delete User"
-                  >
-                    <Trash2Icon className="h-4 w-4" />
-                  </button>
-                </div>
-              </TableCell>
+                    >
+                      <KeyRoundIcon className="h-4 w-4" />
+                    </button>
+                    {/* Only admin can see delete */}
+                    {currentUserRole === 'admin' && (
+                      <button
+                        onClick={() => onDeleteUser(user)}
+                        className="text-sky-blue hover:text-red-500 p-1"
+                        title="Delete User"
+                      >
+                        <Trash2Icon className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>
@@ -1224,4 +1260,7 @@ UsersTable.propTypes = {
   roleLoading: PropTypes.bool.isRequired,
   onResetPassword: PropTypes.func.isRequired,
   onDeleteUser: PropTypes.func.isRequired,
+  basicAuthEnabled: PropTypes.bool,
+  currentUserRole: PropTypes.string,
+  currentUserId: PropTypes.string,
 };

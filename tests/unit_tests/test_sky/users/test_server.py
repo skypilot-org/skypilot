@@ -157,7 +157,6 @@ class TestUsersEndpoints:
 
         # Verify
         assert result is None  # Function returns None on success
-        mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
 
@@ -240,59 +239,6 @@ class TestUsersEndpoints:
             exc_info.value.detail)
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('nonexistent_user')
-
-    @mock.patch('sky.users.rbac.get_supported_roles')
-    @mock.patch('sky.global_user_state.get_user')
-    @pytest.mark.asyncio
-    async def test_user_update_server_user_forbidden(self, mock_get_user,
-                                                     mock_get_supported_roles,
-                                                     mock_request):
-        """Test POST /users/update endpoint with server internal user."""
-        # Setup
-        mock_get_supported_roles.return_value = ['admin', 'user']
-        server_user = models.User(id=common.SERVER_ID, name='Server User')
-        mock_get_user.return_value = server_user
-        mock_request.state.auth_user = None
-
-        update_body = payloads.UserUpdateBody(user_id=common.SERVER_ID,
-                                              role='user')
-
-        # Execute & Verify
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
-
-        assert exc_info.value.status_code == 400
-        assert 'Cannot update role for internal API server user' in str(
-            exc_info.value.detail)
-        mock_get_supported_roles.assert_called_once()
-        mock_get_user.assert_called_once_with(common.SERVER_ID)
-
-    @mock.patch('sky.users.rbac.get_supported_roles')
-    @mock.patch('sky.global_user_state.get_user')
-    @pytest.mark.asyncio
-    async def test_user_update_system_user_forbidden(self, mock_get_user,
-                                                     mock_get_supported_roles,
-                                                     mock_request):
-        """Test POST /users/update endpoint with system user."""
-        # Setup
-        mock_get_supported_roles.return_value = ['admin', 'user']
-        system_user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
-                                  name='System User')
-        mock_get_user.return_value = system_user
-        mock_request.state.auth_user = None
-
-        update_body = payloads.UserUpdateBody(
-            user_id=constants.SKYPILOT_SYSTEM_USER_ID, role='user')
-
-        # Execute & Verify
-        with pytest.raises(fastapi.HTTPException) as exc_info:
-            await server.user_update(mock_request, update_body)
-
-        assert exc_info.value.status_code == 400
-        assert 'Cannot update role for internal API server user' in str(
-            exc_info.value.detail)
-        mock_get_supported_roles.assert_called_once()
-        mock_get_user.assert_called_once_with(constants.SKYPILOT_SYSTEM_USER_ID)
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -697,3 +643,74 @@ class TestUsersEndpoints:
         assert user_obj.name == 'Test User'
         assert user_obj.password == hashlib.sha256(
             'new_password'.encode()).hexdigest()
+
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @pytest.mark.asyncio
+    async def test_user_update_forbidden_internal_users(self,
+                                                        mock_get_user_roles,
+                                                        mock_get_user,
+                                                        mock_request):
+        """Test POST /users/update endpoint forbidden for internal users."""
+        # Setup
+        mock_get_user_roles.return_value = ['admin']
+        # Internal server user
+        server_user = models.User(id=common.SERVER_ID, name='Server User')
+        mock_get_user.return_value = server_user
+        mock_request.state.auth_user = models.User(id='admin', name='Admin')
+        update_body = payloads.UserUpdateBody(user_id=common.SERVER_ID,
+                                              role='user')
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_update(mock_request, update_body)
+        assert exc_info.value.status_code == 400
+        assert 'Cannot update role for internal API server user' in str(
+            exc_info.value.detail)
+        # Internal system user
+        system_user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
+                                  name='System User')
+        mock_get_user.return_value = system_user
+        update_body = payloads.UserUpdateBody(
+            user_id=constants.SKYPILOT_SYSTEM_USER_ID, role='user')
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_update(mock_request, update_body)
+        assert exc_info.value.status_code == 400
+        assert 'Cannot update role for internal API server user' in str(
+            exc_info.value.detail)
+        # Password update for system user
+        update_body = payloads.UserUpdateBody(
+            user_id=constants.SKYPILOT_SYSTEM_USER_ID, password='pw')
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_update(mock_request, update_body)
+        assert exc_info.value.status_code == 400
+        assert 'Cannot update password for internal API server user' in str(
+            exc_info.value.detail)
+
+    @mock.patch('sky.global_user_state.get_user')
+    @mock.patch('sky.global_user_state.delete_user')
+    @mock.patch('sky.users.permission.permission_service.delete_user')
+    @pytest.mark.asyncio
+    async def test_user_delete_forbidden_internal_users(self,
+                                                        mock_delete_user_role,
+                                                        mock_delete_user,
+                                                        mock_get_user):
+        """Test POST /users/delete endpoint forbidden for internal users."""
+        # Internal server user
+        server_user = models.User(id=common.SERVER_ID, name='Server User')
+        mock_get_user.return_value = server_user
+        delete_body = payloads.UserDeleteBody(user_id=common.SERVER_ID)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_delete(delete_body)
+        assert exc_info.value.status_code == 400
+        assert 'Cannot delete internal API server user' in str(
+            exc_info.value.detail)
+        # Internal system user
+        system_user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
+                                  name='System User')
+        mock_get_user.return_value = system_user
+        delete_body = payloads.UserDeleteBody(
+            user_id=constants.SKYPILOT_SYSTEM_USER_ID)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_delete(delete_body)
+        assert exc_info.value.status_code == 400
+        assert 'Cannot delete internal API server user' in str(
+            exc_info.value.detail)

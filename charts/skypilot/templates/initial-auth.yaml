@@ -1,4 +1,4 @@
-{{- if and .Values.apiService.initialBasicAuthCredentials .Values.apiService.initialBasicAuthCredentials.username .Values.apiService.initialBasicAuthCredentials.password (not .Values.apiService.initialBasicAuthSecret) (not (index .Values.ingress "oauth2-proxy" "enabled")) }}
+{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.enableUserManagement (not .Values.apiService.initialBasicAuthSecret) .Values.apiService.initialBasicAuthCredentials .Values.apiService.initialBasicAuthCredentials.username .Values.apiService.initialBasicAuthCredentials.password }}
 apiVersion: v1
 kind: Secret
 metadata:
