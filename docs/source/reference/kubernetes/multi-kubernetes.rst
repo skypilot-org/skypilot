@@ -33,19 +33,21 @@ Using "Exec"-based Auth
 ^^^^^^^^^^^^^^^^^^^^^^^
 For managed-Kubernetes like GKE and EKS, a typical local ``~/.kube/config`` file will already contain exec-based auth information under ``users``:
 .. code-block:: yaml
-  contexts:
-  - name: <some context>
-    context:
-      cluster: <some cluster>
-      user: <some user>
-  ...
-  users:
-  - name: <some user>
-    user:
-      exec:
-        apiVersion: client.authentication.k8s.io/v1beta1
-        command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
-  ...
+
+    contexts:
+    - name: <some context>
+      context:
+        cluster: <some cluster>
+        user: <some user>
+    ...
+    users:
+    - name: <some user>
+      user:
+        exec:
+          apiVersion: client.authentication.k8s.io/v1beta1
+          command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
+    ...
+
 
 SkyPilot will use the binary (currently we support exec-auth for GKE and EKS) and your cloud local credentials to authenticate to the cluster. For SkyPilot to take advantage of exec-based auth, there are two requirements:
 * **Cloud also activated**: e.g., if using GKE with exec-based auth, GCP must also be allowed for SkyPilot.
