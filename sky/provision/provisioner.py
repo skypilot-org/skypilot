@@ -418,7 +418,9 @@ def _post_provision_setup(
         handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
-        docker_image: Optional[str] = None) -> provision_common.ClusterInfo:
+        docker_image: Optional[str] = None,
+        docker_cluster_name: Optional[str] = None
+) -> provision_common.ClusterInfo:
     config_from_yaml = global_user_state.get_cluster_yaml_dict(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
@@ -658,8 +660,9 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
+    cn = cluster_name if docker_cluster_name is None else docker_cluster_name
     logger.info(
-        ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
+        ux_utils.finishing_message(f'Cluster launched: {cn}.',
                                    provision_logging.config.log_path))
     return cluster_info
 
@@ -672,7 +675,9 @@ def post_provision_runtime_setup(
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
         log_dir: str,
-        docker_image: Optional[str] = None) -> provision_common.ClusterInfo:
+        docker_image: Optional[str] = None,
+        docker_cluster_name: Optional[str] = None
+) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.
 
     Here are the steps:
@@ -694,7 +699,8 @@ def post_provision_runtime_setup(
                 handle_cluster_yaml=handle_cluster_yaml,
                 provision_record=provision_record,
                 custom_resource=custom_resource,
-                docker_image=docker_image)
+                docker_image=docker_image,
+                docker_cluster_name=docker_cluster_name)
         except Exception:  # pylint: disable=broad-except
             logger.error(
                 ux_utils.error_message(

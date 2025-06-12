@@ -2557,6 +2557,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    infra_only: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2603,6 +2604,14 @@ def get_clusters(
 
     records = workspace_filtered_records
 
+    # Filter clusters based on infra_only parameter
+    if infra_only:
+        # Return only clusters that are used as infra
+        records = [record for record in records if record['used_as_infra']]
+    else:
+        # Filter out clusters that are used as infra (default behavior)
+        records = [record for record in records if not record['used_as_infra']]
+
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
@@ -2619,14 +2628,13 @@ def get_clusters(
         handle = record['handle']
         if handle is None:
             return
-        if handle.docker_cluster_job_id is not None:
-            return
-        print(handle)
         record['resources_str'] = resources_utils.get_readable_resources_repr(
             handle, simplify=True)
         record[
             'resources_str_full'] = resources_utils.get_readable_resources_repr(
                 handle, simplify=False)
+        if handle.docker_cluster_job_id is not None:
+            return
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
@@ -2673,8 +2681,6 @@ def get_clusters(
             return
         handle = record['handle']
         if handle is None:
-            return
-        if handle.docker_cluster_job_id is not None:
             return
         record['nodes'] = handle.launched_nodes
         if handle.launched_resources is None:

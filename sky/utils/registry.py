@@ -44,7 +44,7 @@ class _Registry(dict, typing.Generic[T]):
         if search_name in self._aliases:
             return self[self._aliases[search_name]]
         if self._return_str_on_not_found:
-            return name
+            return name  # type: ignore
 
         with ux_utils.print_exception_no_traceback():
             raise ValueError(

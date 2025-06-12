@@ -124,6 +124,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    docker_cluster_name: Optional[str] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -217,7 +218,8 @@ def _execute(
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
-            _is_launched_by_sky_serve_controller)
+            _is_launched_by_sky_serve_controller,
+            docker_cluster_name=docker_cluster_name)
 
 
 def _execute_dag(
@@ -239,6 +241,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    docker_cluster_name: Optional[str],
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
 
@@ -417,7 +420,8 @@ def _execute_dag(
                  stream_logs=stream_logs,
                  cluster_name=cluster_name,
                  retry_until_up=retry_until_up,
-                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+                 skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+                 docker_cluster_name=docker_cluster_name)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -467,6 +471,7 @@ def _execute_dag(
                                          detach_run,
                                          docker_image,
                                          docker_image_unique_id,
+                                         docker_cluster_name,
                                          dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
@@ -593,6 +598,10 @@ def launch(
     if _ssh_node_pool_cluster_name is not None:
         original_cluster_name = cluster_name
         cluster_name = _ssh_node_pool_cluster_name
+        records = global_user_state.get_cluster_from_name(cluster_name)
+        if records is None or not records['used_as_infra']:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Infra {cluster_name!r} does not exist.')
 
     entrypoint = task
     entrypoint.validate()
@@ -675,9 +684,9 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        docker_cluster_name=original_cluster_name,
     )
     if original_cluster_name is not None:
-        # TODO(tian): Add SSH capability.
         task_ori = dag_utils.convert_entrypoint_to_dag(entrypoint).tasks[0]
         res_ori = list(task_ori.resources)[0]
         assert res[0] is not None, res
@@ -723,45 +732,62 @@ def launch(
                 shutil.rmtree(fn)
             return node2user, node2port
 
-        node2user = {}
-        node2port = {}
-        st = time.time()
-        while True:
-            if time.time() - st > 60:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Timeout waiting for nodes to setup SSH')
-            node2user, node2port = _check_worker_nodes()
-            if (len(node2user) == task_ori.num_nodes and
-                    len(node2port) == task_ori.num_nodes):
-                break
-            time.sleep(1)
-        assert (len(node2user) == task_ori.num_nodes and
-                len(node2port) == task_ori.num_nodes), (node2user, node2port,
-                                                        task_ori.num_nodes)
-        idxes = sorted([
-            0 if 'head' in n else int(n.split('worker')[1]) for n in node2user
-        ])
-        docker_user_set = set(node2user.values())
-        assert len(docker_user_set) == 1, (docker_user_set, node2user)
-        docker_user = docker_user_set.pop()
-        ips = [handle.cached_external_ips[idx] for idx in idxes]
-        ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
-        docker_ports = [
-            node2port['head' if idx == 0 else f'worker{idx}'] for idx in idxes
-        ]
+        ready_cnt = 0
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    f'Setting up SSH on cluster {original_cluster_name!r} (0/{task_ori.num_nodes} ready)'
+                )) as spinner:
+            node2user = {}
+            node2port = {}
+            st = time.time()
+            while True:
+                if time.time() - st > 600:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'Timeout waiting for nodes to setup SSH')
+                node2user, node2port = _check_worker_nodes()
+                cur_ready_cnt = len(
+                    set(node2user.keys()) & set(node2port.keys()))
+                if cur_ready_cnt > ready_cnt:
+                    ready_cnt = cur_ready_cnt
+                    spinner.update(
+                        ux_utils.spinner_message(
+                            f'Setting up SSH on cluster {original_cluster_name!r} '
+                            f'({ready_cnt}/{task_ori.num_nodes} ready)'))
+                if cur_ready_cnt == task_ori.num_nodes:
+                    break
+                time.sleep(1)
+            assert (len(node2user) == task_ori.num_nodes and
+                    len(node2port) == task_ori.num_nodes), (node2user,
+                                                            node2port,
+                                                            task_ori.num_nodes)
+            idxes = sorted([
+                0 if 'head' in n else int(n.split('worker')[1])
+                for n in node2user
+            ])
+            docker_user_set = set(node2user.values())
+            assert len(docker_user_set) == 1, (docker_user_set, node2user)
+            docker_user = docker_user_set.pop()
+            ips = [handle.cached_external_ips[idx] for idx in idxes]
+            ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
+            docker_ports = [
+                node2port['head' if idx == 0 else f'worker{idx}']
+                for idx in idxes
+            ]
 
-        auth_config = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml,
-            ssh_user=handle.ssh_user,
-            docker_user=docker_user)
-        cluster_utils.SSHConfigHelper.add_cluster(
-            docker_cls_handle.cluster_name,
-            ips,
-            auth_config,
-            ports,
-            docker_user,
-            handle.ssh_user,
-            docker_ports=docker_ports)
+            auth_config = backend_utils.ssh_credential_from_yaml(
+                handle.cluster_yaml,
+                ssh_user=handle.ssh_user,
+                docker_user=docker_user)
+            cluster_utils.SSHConfigHelper.add_cluster(
+                docker_cls_handle.cluster_name,
+                ips,
+                auth_config,
+                ports,
+                docker_user,
+                handle.ssh_user,
+                docker_ports=docker_ports)
+
         return res[0], docker_cls_handle
     return res
 

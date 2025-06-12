@@ -97,6 +97,7 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('used_as_infra', sqlalchemy.Integer, server_default='0'),
 )
 
 storage_table = sqlalchemy.Table(
@@ -300,6 +301,11 @@ def create_table():
             'last_creation_command',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(session,
+                                                'clusters',
+                                                'used_as_infra',
+                                                sqlalchemy.Integer(),
+                                                default_statement='DEFAULT 0')
         session.commit()
 
 
@@ -397,6 +403,15 @@ def add_or_update_user(user: models.User) -> bool:
             return bool(row.was_inserted) if row else False
         else:
             raise ValueError('Unsupported database dialect')
+
+
+@_init_db
+def set_cluster_used_as_infra(cluster_name: str, used_as_infra: bool) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(cluster_table).filter_by(name=cluster_name).update(
+            {cluster_table.c.used_as_infra: used_as_infra})
+        session.commit()
 
 
 @_init_db
@@ -942,6 +957,7 @@ def get_cluster_from_name(
         'workspace': row.workspace,
         'last_creation_yaml': row.last_creation_yaml,
         'last_creation_command': row.last_creation_command,
+        'used_as_infra': bool(row.used_as_infra),
     }
 
     return record
@@ -980,6 +996,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'workspace': row.workspace,
             'last_creation_yaml': row.last_creation_yaml,
             'last_creation_command': row.last_creation_command,
+            'used_as_infra': bool(row.used_as_infra),
         }
 
         records.append(record)

@@ -1004,7 +1004,7 @@ class Optimizer:
         table = _create_table(fields)
         cluster_name = str(list(dag.tasks[0].resources)[0].cloud)
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
+        if cluster_record is None or not cluster_record['used_as_infra']:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'SSH Node Pools {cluster_name!r} not found.')
         from sky.backends import CloudVmRayBackend

@@ -350,7 +350,8 @@ def run_bash_command_with_log(
         with_ray: bool = False,
         docker_image: Optional[str] = None,
         docker_image_unique_id: Optional[str] = None,
-        docker_file_mounts_mapping: Optional[Dict[str, str]] = None):
+        docker_file_mounts_mapping: Optional[Dict[str, str]] = None,
+        docker_cluster_name: Optional[str] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         ln_sky_workdir_from_abs = False
@@ -366,19 +367,20 @@ def run_bash_command_with_log(
                 if (constants.SKY_REMOTE_WORKDIR_ABS
                         in docker_file_mounts_mapping.values()):
                     ln_sky_workdir_from_abs = True
-            bash_command = (
-                '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }\n'
-                'export DEBIAN_FRONTEND=noninteractive\n'
-                'sudo apt-get update > /dev/null 2>&1\n'
-                'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
-                'rsync curl wget patch openssh-server python3-pip fuse > /dev/null 2>&1\n'
-                'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
-                f'sudo echo "Port $DOCKER_PORT" >> /etc/ssh/sshd_config\n'
-                'mkdir -p ~/.ssh\n'
-                'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys\n'
-                'service ssh start > /dev/null 2>&1\n'
-                'echo "docker_user:$(whoami)"\n'
-                f'{bash_command}')
+            if docker_cluster_name is not None:
+                bash_command = (
+                    '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }\n'
+                    'export DEBIAN_FRONTEND=noninteractive\n'
+                    'sudo apt-get update > /dev/null 2>&1\n'
+                    'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
+                    'rsync curl wget patch openssh-server python3-pip fuse > /dev/null 2>&1\n'
+                    'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
+                    f'sudo echo "Port $DOCKER_PORT" >> /etc/ssh/sshd_config\n'
+                    'mkdir -p ~/.ssh\n'
+                    'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys\n'
+                    'service ssh start > /dev/null 2>&1\n'
+                    'echo "docker_user:$(whoami)"\n'
+                    f'{bash_command}')
         bash_command = make_task_bash_script(
             bash_command,
             env_vars=env_vars,
@@ -408,6 +410,19 @@ def run_bash_command_with_log(
             maybe_specify_name = ''
             if docker_image_unique_id is not None:
                 maybe_specify_name = f'--name {docker_image_unique_id}'
+            maybe_find_docker_port_cmd = ''
+            maybe_docker_port_env = ''
+            if docker_cluster_name is not None:
+                maybe_find_docker_port_cmd = (
+                    # Install ss.
+                    'sudo apt-get update > /dev/null 2>&1\n'
+                    'sudo apt-get install -y iproute2 > /dev/null 2>&1\n'
+                    'DOCKER_PORT=10022\n'
+                    'while ss -lntu | awk \'{print $5}\' | grep -q ":$DOCKER_PORT\$"; do\n'
+                    '  ((DOCKER_PORT++))\n'
+                    'done\n'
+                    'echo "docker_port:$DOCKER_PORT"\n')
+                maybe_docker_port_env = '-e DOCKER_PORT=$DOCKER_PORT'
             docker_cmd = make_task_bash_script(
                 'id -nG $USER | grep -qw docker || '
                 'sudo usermod -aG docker $USER > /dev/null 2>&1\n'
@@ -419,16 +434,12 @@ def run_bash_command_with_log(
                 'if [ -d "/dev/infiniband" ]; then\n'
                 '  IB_OPTIONS="--device=/dev/infiniband --cap-add=IPC_LOCK --ipc=host --shm-size=1g"\n'  # pylint: disable=line-too-long
                 'fi\n'
-                # Install ss.
-                'sudo apt-get update > /dev/null 2>&1\n'
-                'sudo apt-get install -y iproute2 > /dev/null 2>&1\n'
-                'DOCKER_PORT=10022\n'
-                'while ss -lntu | awk \'{print $5}\' | grep -q ":$DOCKER_PORT\$"; do\n'
-                '  ((DOCKER_PORT++))\n'
-                'done\n'
-                'echo "docker_port:$DOCKER_PORT"\n'
+                f'{maybe_find_docker_port_cmd}'
+                'echo "Pulling docker image..."\n'
+                # Suppress the output of docker pull.
+                f'sudo docker pull {docker_image} > /dev/null 2>&1\n'
                 f'sudo docker run {maybe_specify_name} {mount_args} '
-                f'--network=host $GPU_OPTIONS $IB_OPTIONS -e DOCKER_PORT=$DOCKER_PORT '
+                f'--network=host $GPU_OPTIONS $IB_OPTIONS {maybe_docker_port_env} '
                 f'{docker_image} /bin/bash -i {script_path_in_docker}\n',
                 do_cd_sky_workdir=False)
             clean_up_cmd = [

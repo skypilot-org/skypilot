@@ -58,7 +58,7 @@ def optimize(
     quiet: bool = False,
     request_options: Optional[admin_policy.RequestOptions] = None,
     _is_docker_job: bool = False,
-) -> Optional['dag_lib.Dag']:
+) -> Optional[str]:
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -85,11 +85,12 @@ def optimize(
             dag, request_options=request_options) as dag:
         if isinstance(list(dag.tasks[0].resources)[0].cloud, str):
             optimizer.Optimizer.print_cluster_plan(dag)
-            return None if not _is_docker_job else dag
-        return optimizer.Optimizer.optimize(dag=dag,
-                                            minimize=minimize,
-                                            blocked_resources=blocked_resources,
-                                            quiet=quiet)
+            return None if not _is_docker_job else 'dag'
+        _ = optimizer.Optimizer.optimize(dag=dag,
+                                         minimize=minimize,
+                                         blocked_resources=blocked_resources,
+                                         quiet=quiet)
+        return 'ret'
 
 
 @usage_lib.entrypoint
@@ -97,6 +98,7 @@ def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    infra_only: bool = False,
 ) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -172,7 +174,8 @@ def status(
     """
     clusters = backend_utils.get_clusters(refresh=refresh,
                                           cluster_names=cluster_names,
-                                          all_users=all_users)
+                                          all_users=all_users,
+                                          infra_only=infra_only)
     return clusters
 
 
@@ -1251,10 +1254,31 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
             If None, the first cluster in the file is used.
         cleanup: If True, clean up the cluster instead of deploying.
     """
-    kubernetes_deploy_utils.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
+    skypilot_cluster_exists = False
+    if infra is not None:
+        # Check if infra exists in cluster table.
+        record = global_user_state.get_cluster_from_name(infra)
+        if record:
+            if record['handle'] is not None:
+                skypilot_cluster_exists = True
+                handle = record['handle']
+    if skypilot_cluster_exists:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        if (handle.docker_cluster_job_id is not None or
+                handle.launched_resources.extract_docker_image() is not None):
+            raise ValueError(f'Cluster {infra} is a docker cluster. '
+                             'It cannot be used as an infra.')
+        # If the cluster exists, we mark the cluster as an infra, which will
+        # then be filtered out when displaying the list of clusters.
+        # TODO(zhwu): check if there are any clusters/jobs running on the infra.
+        global_user_state.set_cluster_used_as_infra(infra,
+                                                    used_as_infra=not cleanup)
+    else:
+        raise ValueError(f'Cluster {infra} does not exist.')
+        kubernetes_deploy_utils.deploy_ssh_cluster(
+            cleanup=cleanup,
+            infra=infra,
+        )
 
 
 def get_all_contexts() -> List[str]:
