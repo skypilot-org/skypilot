@@ -681,7 +681,6 @@ def launch(
         _is_launched_by_sky_serve_controller,
     )
     if original_cluster_name is not None:
-        # TODO(tian): Add SSH capability.
         task_ori = dag_utils.convert_entrypoint_to_dag(entrypoint).tasks[0]
         res_ori = list(task_ori.resources)[0]
         assert res[0] is not None, res
@@ -727,45 +726,52 @@ def launch(
                 shutil.rmtree(fn)
             return node2user, node2port
 
-        node2user = {}
-        node2port = {}
-        st = time.time()
-        while True:
-            if time.time() - st > 60:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Timeout waiting for nodes to setup SSH')
-            node2user, node2port = _check_worker_nodes()
-            if (len(node2user) == task_ori.num_nodes and
-                    len(node2port) == task_ori.num_nodes):
-                break
-            time.sleep(1)
-        assert (len(node2user) == task_ori.num_nodes and
-                len(node2port) == task_ori.num_nodes), (node2user, node2port,
-                                                        task_ori.num_nodes)
-        idxes = sorted([
-            0 if 'head' in n else int(n.split('worker')[1]) for n in node2user
-        ])
-        docker_user_set = set(node2user.values())
-        assert len(docker_user_set) == 1, (docker_user_set, node2user)
-        docker_user = docker_user_set.pop()
-        ips = [handle.cached_external_ips[idx] for idx in idxes]
-        ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
-        docker_ports = [
-            node2port['head' if idx == 0 else f'worker{idx}'] for idx in idxes
-        ]
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Setting up SSH on the cluster')):
+            node2user = {}
+            node2port = {}
+            st = time.time()
+            while True:
+                if time.time() - st > 600:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'Timeout waiting for nodes to setup SSH')
+                node2user, node2port = _check_worker_nodes()
+                if (len(node2user) == task_ori.num_nodes and
+                        len(node2port) == task_ori.num_nodes):
+                    break
+                time.sleep(1)
+            assert (len(node2user) == task_ori.num_nodes and
+                    len(node2port) == task_ori.num_nodes), (node2user,
+                                                            node2port,
+                                                            task_ori.num_nodes)
+            idxes = sorted([
+                0 if 'head' in n else int(n.split('worker')[1])
+                for n in node2user
+            ])
+            docker_user_set = set(node2user.values())
+            assert len(docker_user_set) == 1, (docker_user_set, node2user)
+            docker_user = docker_user_set.pop()
+            ips = [handle.cached_external_ips[idx] for idx in idxes]
+            ports = [handle.cached_external_ssh_ports[idx] for idx in idxes]
+            docker_ports = [
+                node2port['head' if idx == 0 else f'worker{idx}']
+                for idx in idxes
+            ]
 
-        auth_config = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml,
-            ssh_user=handle.ssh_user,
-            docker_user=docker_user)
-        cluster_utils.SSHConfigHelper.add_cluster(
-            docker_cls_handle.cluster_name,
-            ips,
-            auth_config,
-            ports,
-            docker_user,
-            handle.ssh_user,
-            docker_ports=docker_ports)
+            auth_config = backend_utils.ssh_credential_from_yaml(
+                handle.cluster_yaml,
+                ssh_user=handle.ssh_user,
+                docker_user=docker_user)
+            cluster_utils.SSHConfigHelper.add_cluster(
+                docker_cls_handle.cluster_name,
+                ips,
+                auth_config,
+                ports,
+                docker_user,
+                handle.ssh_user,
+                docker_ports=docker_ports)
+
         return res[0], docker_cls_handle
     return res
 
