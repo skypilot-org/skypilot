@@ -155,7 +155,8 @@ class SSH(kubernetes.Kubernetes):
             if allowed_node_pools is None:
                 return ctxs
             return [
-                ctx for ctx in ctxs if ctx.removeprefix('ssh-') in allowed_node_pools
+                ctx for ctx in ctxs
+                if ctx.removeprefix('ssh-') in allowed_node_pools
             ]
 
         if all_node_pool_contexts:
