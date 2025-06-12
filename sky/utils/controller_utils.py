@@ -290,7 +290,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
                 'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
-                '| NEBIUS_INSTALL_FOLDER=/usr/local/bin bash')
+                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null')
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
