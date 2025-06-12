@@ -17,22 +17,23 @@ tests:
           content:
             name: kube-config
             secret:
-              secretName: kubeconfig-secret
+              secretName: kube-credentials
 
   - it: should persist .kube directory when sshNodePool is enabled
     set:
-      sshNodePool.enabled: true
+      apiService.sshNodePools: test
     asserts:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: state-volume
             mountPath: /root/.kube
+            subPath: .kube
 
   - it: should merge kubeconfig from .kube and configmap when useKubeconfig and sshNodePool are both enabled
     set:
       kubernetesCredentials.useKubeconfig: true
-      sshNodePool.enabled: true
+      apiService.sshNodePools: test
     asserts:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
@@ -44,6 +45,7 @@ tests:
           content:
             name: state-volume
             mountPath: /root/.kube
+            subPath: .kube
       - contains:
           path: spec.template.spec.containers[0].env
           content:
