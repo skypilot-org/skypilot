@@ -65,4 +65,11 @@ RUN conda clean -afy && \
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    # Remove source code if installed from wheel (not needed for wheel installs)
+    if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
+        echo "Removing source code (wheel installation)" && \
+        rm -rf /skypilot-src; \
+    else \
+        echo "Keeping source code (editable installation)"; \
+    fi
