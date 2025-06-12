@@ -204,6 +204,9 @@ class DockerInitializer:
             stream_logs=log_err_when_fail)
         return stdout.strip()
 
+    def setup_ssh(self):
+        return
+
     def initialize(self) -> str:
         specific_image = self.docker_config['image']
 

@@ -366,6 +366,13 @@ def run_bash_command_with_log(
                 if (constants.SKY_REMOTE_WORKDIR_ABS
                         in docker_file_mounts_mapping.values()):
                     ln_sky_workdir_from_abs = True
+            bash_command = (
+                'sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
+                f'echo "Port 10022" >> /etc/ssh/sshd_config\n'
+                'mkdir -p ~/.ssh\n'
+                'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys\n'
+                'service ssh start\n'
+                f'{bash_command}')
         bash_command = make_task_bash_script(
             bash_command,
             env_vars=env_vars,
@@ -380,7 +387,10 @@ def run_bash_command_with_log(
             inner_command = f'/bin/bash -i {script_path}'
         else:
             script_path_in_docker = '/root/sky_app.sh'
-            all_mapping = {script_path: script_path_in_docker}
+            all_mapping = {
+                script_path: script_path_in_docker,
+                '~/.ssh/authorized_keys': '/tmp/host_ssh_authorized_keys'
+            }
             if docker_file_mounts_mapping is not None:
                 all_mapping.update(docker_file_mounts_mapping)
             for k, v in all_mapping.items():
@@ -411,7 +421,8 @@ def run_bash_command_with_log(
                 f'$GPU_OPTIONS $IB_OPTIONS {docker_image} /bin/bash -i {script_path_in_docker}\n',  # pylint: disable=line-too-long
                 do_cd_sky_workdir=False)
             clean_up_cmd = [
-                f'rm -rf {k}' for k in all_mapping if not k.startswith('/tmp')
+                f'rm -rf {k}' for k in all_mapping
+                if not k.startswith('/tmp') and k != '~/.ssh/authorized_keys'
             ]
             # It is possible that the docker container is not created, or being
             # removed by the job cancellation.

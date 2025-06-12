@@ -4319,7 +4319,8 @@ def jobs_launch(
             _need_confirmation=not yes,
             _is_docker_job=True,
         )
-        job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.jobs.launch')
+        job_id_handle = _async_call_or_wait(request_id, async_call,
+                                            'sky.jobs.launch')
         job_id, handle = job_id_handle
         if not handle:
             return

@@ -504,7 +504,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_id=request.state.request_id,
         request_name='optimize',
         request_body=optimize_body,
-        ignore_return_value=True,
+        ignore_return_value=False,
         func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )

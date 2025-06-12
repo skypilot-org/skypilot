@@ -560,7 +560,8 @@ def _launch(
         is_docker_cluster = False
         ssh_node_pool_cluster_name = None
         ssh_node_pool_resource = list(dag.tasks[0].resources)[0]
-        if isinstance(ssh_node_pool_resource.cloud, str) and not _is_docker_job and clusters:
+        if isinstance(ssh_node_pool_resource.cloud,
+                      str) and not _is_docker_job and clusters:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'Cluster {cluster_name} already exists. '
                                    'Please use a different cluster name.')
@@ -596,14 +597,14 @@ def _launch(
                     if task_ori.run:
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError('Cannot specify run command for '
-                                            'docker on SSH Node Pools.')
+                                               'docker on SSH Node Pools.')
                     task_ori.run = 'sleep infinity'
                 else:
                     assert _is_docker_job
                     if not task_ori.run:
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError('Must specify a run command for '
-                                            'docker jobs on SSH Node Pools.')
+                                               'docker jobs on SSH Node Pools.')
             cluster_status = cluster_record['status']
             cluster_user_hash = cluster_record['user_hash']
             cluster_user_name = cluster_record['user_name']

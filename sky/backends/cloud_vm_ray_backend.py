@@ -18,6 +18,7 @@ import time
 import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
+import uuid
 
 import colorama
 import filelock
@@ -2882,6 +2883,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             })
         return valid_resource
 
+    def _make_docker_unique_id(self, docker_image_on_no_image_cluster):
+        return docker_image_on_no_image_cluster.replace('/', '-').replace(
+            ':', '-').replace('.', '-') + '-' + str(uuid.uuid4())[:4]
+
     def _provision(
         self,
         task: task_lib.Task,
@@ -2891,7 +2896,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool, Optional[str]]:
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool, Optional[str],
+               Optional[str]]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
         Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
@@ -3021,7 +3027,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 return record[
-                    'handle'] if record is not None else None, False, None
+                    'handle'] if record is not None else None, False, None, None
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -3032,7 +3038,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 assert record is not None and record['handle'] is not None, (
                     cluster_name, record)
-                return record['handle'], True, None
+                return record['handle'], True, None, None
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -3074,8 +3080,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, lock_path, config_hash)
-                return (handle, False,
+                docker_image_unique_id = None
+                if to_provision_config.docker_image_on_no_image_cluster is not None:
+                    docker_image_unique_id = self._make_docker_unique_id(
                         to_provision_config.docker_image_on_no_image_cluster)
+                return (handle, False,
+                        to_provision_config.docker_image_on_no_image_cluster,
+                        docker_image_unique_id)
 
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
@@ -3147,8 +3158,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, lock_path, config_hash)
+            docker_image_unique_id = self._make_docker_unique_id(
+                to_provision_config.docker_image_on_no_image_cluster)
             return (handle, False,
-                    to_provision_config.docker_image_on_no_image_cluster)
+                    to_provision_config.docker_image_on_no_image_cluster,
+                    docker_image_unique_id)
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
@@ -3891,26 +3905,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if docker_images:
                 assert not actual_cancelled_ids, actual_cancelled_ids
                 code = job_lib.JobLibCodeGen.cancel_docker_images(docker_images)
+
                 def _cleanup_image(runner):
                     returncode, stdout, stderr = runner.run(
-                        code,
-                        require_outputs=True,
-                        stream_logs=False)
+                        code, require_outputs=True, stream_logs=False)
                     subprocess_utils.handle_returncode(
-                            returncode,
-                            code,
-                            f'Failed to cancel docker images on cluster {handle.cluster_name}.',
-                            stderr=stderr,
-                            stream_logs=False)
+                        returncode,
+                        code,
+                        f'Failed to cancel docker images on cluster {handle.cluster_name}.',
+                        stderr=stderr,
+                        stream_logs=False)
                     return message_utils.decode_payload(stdout)
+
                 runners = handle.get_command_runners()
-                images = subprocess_utils.run_in_parallel(_cleanup_image, runners)
+                images = subprocess_utils.run_in_parallel(
+                    _cleanup_image, runners)
                 # for image, runner in zip(images, runners):
                 #     if image:
                 #         logger.info(f'Node {runner.node}: deleted docker image(s): {", ".join(image)}')
             else:
                 logger.info(
-                    f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
+                    f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}'
+                )
         else:
             logger.info('No jobs cancelled. They may be in terminal states.')
 

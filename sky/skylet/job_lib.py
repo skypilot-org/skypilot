@@ -842,15 +842,15 @@ def cancel_docker_images(docker_images: List[str]) -> str:
     actual_cancelled_images = []
     for docker_image_id in docker_images:
         try:
-            subprocess_utils.run(f'docker stop {docker_image_id} && '
-                                 f'docker rm {docker_image_id}',
-                                 check=True)
+            subprocess_utils.run(
+                f'docker stop {docker_image_id} && '
+                f'docker rm {docker_image_id}',
+                check=True)
             actual_cancelled_images.append(docker_image_id)
         except subprocess.CalledProcessError:
             logger.warning(f'Failed to cancel docker image {docker_image_id}')
             continue
     return message_utils.encode_payload(actual_cancelled_images)
-
 
 
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
