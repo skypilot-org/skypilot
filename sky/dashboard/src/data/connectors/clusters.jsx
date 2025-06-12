@@ -106,6 +106,69 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getInfraClusters({ clusterNames = null } = {}) {
+  try {
+    const clusters = await apiClient.fetch('/status', {
+      cluster_names: clusterNames,
+      all_users: true,
+      infra_only: true,
+    });
+
+    const clusterData = clusters.map((cluster) => {
+      // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
+      let region_or_zone = '';
+      if (cluster.zone) {
+        region_or_zone = cluster.zone;
+      } else {
+        region_or_zone = cluster.region;
+      }
+      // Store the full value before truncation
+      const full_region_or_zone = region_or_zone;
+      // Truncate region_or_zone in the middle if it's too long
+      if (region_or_zone && region_or_zone.length > 25) {
+        region_or_zone = truncateMiddle(region_or_zone, 25);
+      }
+      return {
+        status: clusterStatusMap[cluster.status],
+        cluster: cluster.name,
+        user: cluster.user_name,
+        user_hash: cluster.user_hash,
+        cloud: cluster.cloud,
+        region: cluster.region,
+        infra: region_or_zone
+          ? cluster.cloud + ' (' + region_or_zone + ')'
+          : cluster.cloud,
+        full_infra: full_region_or_zone
+          ? `${cluster.cloud} (${full_region_or_zone})`
+          : cluster.cloud,
+        cpus: cluster.cpus,
+        mem: cluster.memory,
+        gpus: cluster.accelerators,
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: new Date(cluster.launched_at * 1000),
+        num_nodes: cluster.nodes,
+        workspace: cluster.workspace,
+        autostop: cluster.autostop,
+        to_down: cluster.to_down,
+        jobs: [],
+        command: cluster.last_creation_command || cluster.last_use,
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: new Date(cluster.launched_at * 1000),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+    return clusterData;
+  } catch (error) {
+    console.error('Error fetching infra clusters:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,

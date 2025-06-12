@@ -271,6 +271,7 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
+    infra_only: bool = False
 
 
 class StartBody(RequestBody):

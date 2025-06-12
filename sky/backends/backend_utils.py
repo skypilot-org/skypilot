@@ -2557,6 +2557,7 @@ def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
     all_users: bool = True,
+    infra_only: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2603,8 +2604,13 @@ def get_clusters(
 
     records = workspace_filtered_records
 
-    # Filter out clusters that are used as infra
-    records = [record for record in records if not record['used_as_infra']]
+    # Filter clusters based on infra_only parameter
+    if infra_only:
+        # Return only clusters that are used as infra
+        records = [record for record in records if record['used_as_infra']]
+    else:
+        # Filter out clusters that are used as infra (default behavior)
+        records = [record for record in records if not record['used_as_infra']]
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT

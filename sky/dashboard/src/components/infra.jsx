@@ -9,7 +9,7 @@ import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { getInfraData } from '@/data/connectors/infra';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, getInfraClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
@@ -21,6 +21,149 @@ import { NonCapitalizedTooltip } from '@/components/utils';
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+// Reusable component for SSH Node Pool clusters
+export function SSHNodePoolClustersSection({
+  title,
+  isLoading,
+  isDataLoaded,
+  clusters,
+  handleClusterClick,
+}) {
+  // Add defensive check for clusters
+  const safeClusters = clusters || [];
+
+  // Show loading spinner while data is being fetched
+  if (isLoading || !isDataLoaded) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <h3 className="text-lg font-semibold mb-4">{title}</h3>
+          <div className="flex items-center justify-center py-6">
+            <CircularProgress size={24} className="mr-3" />
+            <span className="text-gray-500">Loading {title}...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Only show "no data" message after data has been loaded and confirmed empty
+  if (isDataLoaded && safeClusters.length === 0) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <h3 className="text-lg font-semibold mb-4">{title}</h3>
+          <p className="text-sm text-gray-500">
+            No {title} clusters found.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isDataLoaded && safeClusters.length > 0) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <div className="flex items-center mb-4">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+              {safeClusters.length}{' '}
+              {safeClusters.length === 1 ? 'cluster' : 'clusters'}
+            </span>
+          </div>
+          <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                    Node Pool
+                  </th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                    Status
+                  </th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                    User
+                  </th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                    Cloud
+                  </th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                    Resources
+                  </th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                    Launched
+                  </th>
+                </tr>
+              </thead>
+              <tbody
+                className={`bg-white divide-y divide-gray-200 ${safeClusters.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+              >
+                {safeClusters.map((cluster) => {
+                  const statusColor = {
+                    RUNNING: 'bg-green-100 text-green-800',
+                    STOPPED: 'bg-yellow-100 text-yellow-800',
+                    LAUNCHING: 'bg-blue-100 text-blue-800',
+                    TERMINATED: 'bg-red-100 text-red-800',
+                  }[cluster.status] || 'bg-gray-100 text-gray-500';
+
+                  return (
+                    <tr key={cluster.cluster} className="hover:bg-gray-50">
+                      <td className="p-3">
+                        <NonCapitalizedTooltip
+                          content={cluster.cluster}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span
+                            className="text-blue-600 hover:underline cursor-pointer"
+                            onClick={() => handleClusterClick && handleClusterClick(cluster.cluster)}
+                          >
+                            {cluster.cluster.length > NAME_TRUNCATE_LENGTH
+                              ? `${cluster.cluster.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${cluster.cluster.substring(cluster.cluster.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+                              : cluster.cluster}
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor}`}>
+                          {cluster.status}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-gray-700">{cluster.user}</span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-gray-700">{cluster.cloud}</span>
+                      </td>
+                      <td className="p-3">
+                        <NonCapitalizedTooltip
+                          content={cluster.resources_str_full || cluster.resources_str}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span className="text-sm text-gray-700">
+                            {cluster.resources_str || '-'}
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-gray-700">
+                          {cluster.time ? cluster.time.toLocaleDateString() : '-'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
@@ -423,6 +566,11 @@ export function GPUs() {
   const [enabledClouds, setEnabledClouds] = useState(0);
   const [contextStats, setContextStats] = useState({});
 
+  // SSH Node Pool clusters state
+  const [sshNodePoolClusters, setSshNodePoolClusters] = useState([]);
+  const [sshNodePoolLoading, setSshNodePoolLoading] = useState(true);
+  const [sshNodePoolDataLoaded, setSshNodePoolDataLoaded] = useState(false);
+
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
@@ -431,6 +579,7 @@ export function GPUs() {
       if (options.showLoadingIndicators) {
         setKubeLoading(true);
         setCloudLoading(true);
+        setSshNodePoolLoading(true);
       }
 
       try {
@@ -484,6 +633,17 @@ export function GPUs() {
           // If no data at all, still need to clear loading eventually
           console.log('No cloud data received from cache');
         }
+
+        // Fetch SSH Node Pool clusters
+        try {
+          const infraClusters = await dashboardCache.get(getInfraClusters);
+          setSshNodePoolClusters(infraClusters || []);
+          setSshNodePoolDataLoaded(true);
+        } catch (error) {
+          console.error('Error fetching SSH Node Pool clusters:', error);
+          setSshNodePoolClusters([]);
+          setSshNodePoolDataLoaded(true);
+        }
       } catch (error) {
         console.error('Error in fetchData:', error);
         // On error, we should still mark data as loaded but with empty values
@@ -495,14 +655,17 @@ export function GPUs() {
         setCloudInfraData([]);
         setTotalClouds(0);
         setEnabledClouds(0);
+        setSshNodePoolClusters([]);
         setKubeDataLoaded(true);
         setCloudDataLoaded(true);
+        setSshNodePoolDataLoaded(true);
       } finally {
         // Always clear loading states when showLoadingIndicators is true
         // This prevents infinite loading state
         if (options.showLoadingIndicators) {
           setKubeLoading(false);
           setCloudLoading(false);
+          setSshNodePoolLoading(false);
         }
 
         // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
@@ -557,6 +720,7 @@ export function GPUs() {
       // Reset loading states for fresh load next time
       setKubeDataLoaded(false);
       setCloudDataLoaded(false);
+      setSshNodePoolDataLoaded(false);
       setIsInitialLoad(true);
     };
   }, []);
@@ -564,6 +728,7 @@ export function GPUs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getInfraClusters);
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidate(getInfraData);
 
@@ -810,17 +975,12 @@ export function GPUs() {
 
   const renderSSHNodePoolInfrastructure = () => {
     return (
-      <InfrastructureSection
+      <SSHNodePoolClustersSection
         title="SSH Node Pool"
-        isLoading={kubeLoading}
-        isDataLoaded={kubeDataLoaded}
-        contexts={sshContexts}
-        gpus={sshGPUs}
-        groupedPerContextGPUs={groupedPerContextGPUs}
-        groupedPerNodeGPUs={groupedPerNodeGPUs}
-        handleContextClick={handleContextClick}
-        contextStats={contextStats}
-        isSSH={true}
+        isLoading={sshNodePoolLoading}
+        isDataLoaded={sshNodePoolDataLoaded}
+        clusters={sshNodePoolClusters}
+        handleClusterClick={handleContextClick}
       />
     );
   };
@@ -854,10 +1014,10 @@ export function GPUs() {
   };
 
   // Check if any data is currently loading
-  const isAnyLoading = kubeLoading || cloudLoading;
+  const isAnyLoading = kubeLoading || cloudLoading || sshNodePoolLoading;
 
   // Check if all data has been loaded at least once
-  const isAllDataLoaded = kubeDataLoaded && cloudDataLoaded && !isInitialLoad;
+  const isAllDataLoaded = kubeDataLoaded && cloudDataLoaded && sshNodePoolDataLoaded && !isInitialLoad;
 
   return (
     <>
