@@ -56,7 +56,7 @@ MEMORY_SIZE_UNITS = {
     'pb': 2**50,
 }
 
-ACCELERATORS_PATH = 'common/accelerators.csv'
+ACCELERATORS_PATH = 'common/metadata.csv'
 
 
 @dataclasses.dataclass
@@ -1942,7 +1942,7 @@ class Resources:
 
                 accelerators = [
                     f'{device}:{count}' for device in _get_devices(
-                        memory_gb, plus, manufacturer=manufacturer, cloud=cloud)
+                        memory_gb, plus, manufacturer=manufacturer)
                 ]
                 if not accelerators:
                     with ux_utils.print_exception_no_traceback():
@@ -2317,15 +2317,15 @@ def _maybe_add_docker_prefix_to_image_id(
 
 def _get_devices(memory: float,
                  plus: bool = False,
-                 manufacturer: Optional[str] = None,
-                 cloud: Optional[str] = None) -> List[str]:
+                 manufacturer: Optional[str] = None) -> List[str]:
     """Returns a list of device names that meet the memory and manufacturer
        requirements.
 
     Args:
         memory: The minimum memory size in GB.
+        plus: If True, returns devices with memory >= memory, otherwise returns
+              devices with memory == memory.
         manufacturer: The manufacturer of the GPU.
-        cloud: The cloud provider to filter by.
     """
     common = CATALOG_DIR + '/' +\
              CATALOG_SCHEMA_VERSION + '/' +\
@@ -2342,14 +2342,9 @@ def _get_devices(memory: float,
 
     # Filter by manufacturer if specified
     if manufacturer is not None:
-        manufacturer = manufacturer.lower()
-        df = df[df['Manufacturer'] == manufacturer]
+        df = df[df['Manufacturer'].str.lower() == manufacturer.lower()]
 
-    # Filter by cloud if specified
-    if cloud is not None:
-        df = df[df['Clouds'].str.contains(cloud, case=False, na=False)]
-
-    return df['AcceleratorName'].tolist()
+    return df['GPU'].tolist()
 
 
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
