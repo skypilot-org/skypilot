@@ -26,62 +26,50 @@ MASTER_PAYLOADS_URL = "https://raw.githubusercontent.com/skypilot-org/skypilot/m
 MASTER_CONSTANTS_URL = "https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/server/constants.py"
 
 
-def fetch_master_api_version():
+def fetch_master_api_version() -> str:
     """Fetch the API version from the master branch constants.py."""
-    try:
-        # Download the master constants.py file
-        with urllib.request.urlopen(MASTER_CONSTANTS_URL) as response:
-            master_content = response.read().decode('utf-8')
+    # Download the master constants.py file
+    with urllib.request.urlopen(MASTER_CONSTANTS_URL) as response:
+        master_content = response.read().decode('utf-8')
 
-        # Extract API_VERSION using regex
-        # Matches: API_VERSION = 'value' (pylint enforced format)
-        pattern = r"API_VERSION = '([^']+)'"
-        match = re.search(pattern, master_content)
+    # Extract API_VERSION using regex
+    # Matches: API_VERSION = 'value' (pylint enforced format)
+    pattern = r"API_VERSION = '([^']+)'"
+    match = re.search(pattern, master_content)
 
-        if match:
-            return match.group(1)
-        else:
-            raise ValueError("API_VERSION not found in master constants.py")
-    except Exception as e:
-        pytest.skip(f"Could not fetch master API version: {e}")
+    if match:
+        return match.group(1)
+    else:
+        raise ValueError("API_VERSION not found in master constants.py")
 
 
-def check_api_version_compatibility():
+def check_api_version_compatibility() -> bool:
     """Check if current and master API versions match."""
     current_version = current_constants.API_VERSION
     master_version = fetch_master_api_version()
 
-    if current_version != master_version:
-        pytest.skip(
-            f"API version mismatch: current={current_version}, master={master_version}. "
-            f"Skipping compatibility check as this indicates intentional breaking changes."
-        )
-
-    return True
+    return current_version == master_version
 
 
 def fetch_master_payloads_module():
     """Fetch and load the master branch payloads.py as a module."""
-    try:
-        # Download the master payloads.py file
-        with urllib.request.urlopen(MASTER_PAYLOADS_URL) as response:
-            master_content = response.read().decode('utf-8')
+    # Download the master payloads.py file
+    with urllib.request.urlopen(MASTER_PAYLOADS_URL) as response:
+        master_content = response.read().decode('utf-8')
 
-        # Create a temporary file to store the master version
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py',
-                                         delete=False) as temp_file:
-            temp_file.write(master_content)
-            temp_file_path = temp_file.name
+    # Create a temporary file to store the master version
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py',
+                                     delete=False) as temp_file:
+        temp_file.write(master_content)
+        temp_file_path = temp_file.name
 
-        # Load the master version as a module
-        spec = importlib.util.spec_from_file_location("master_payloads",
-                                                      temp_file_path)
-        master_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(master_module)
+    # Load the master version as a module
+    spec = importlib.util.spec_from_file_location("master_payloads",
+                                                  temp_file_path)
+    master_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(master_module)
 
-        return master_module
-    except Exception as e:
-        pytest.skip(f"Could not fetch master payloads.py: {e}")
+    return master_module
 
 
 def get_request_body_classes(module):
@@ -319,16 +307,17 @@ def get_test_data_for_model(model_name: str) -> Dict[str, Any]:
     return {}
 
 
+@pytest.mark.skipif(
+    not API_VERSIONS_COMPATIBLE,
+    reason=
+    "API versions don't match - skipping compatibility check as this indicates intentional breaking changes"
+)
 class TestAPICompatibility:
     """Test API compatibility between current payloads.py and master branch payloads.py."""
 
     @pytest.mark.parametrize('model_name', REQUEST_BODIES)
     def test_model_compatibility(self, model_name: str):
         """Test that models from current payloads.py are compatible with master branch payloads.py."""
-        # Skip if API versions don't match (indicates intentional breaking changes)
-        if not MASTER_PAYLOADS_MODULE:
-            pytest.skip(
-                "API versions don't match - skipping compatibility check")
 
         # Fail if model doesn't exist in master (new model added locally - incompatible)
         if model_name not in MASTER_PAYLOADS_CLASSES:
@@ -344,12 +333,12 @@ class TestAPICompatibility:
         current_fields = get_field_info(current_model)
         master_fields = get_field_info(master_model)
 
-        # Check for missing fields (fields removed from master)
+        # Check for missing fields (fields removed from current, still exist in master)
         missing_in_current = set(master_fields.keys()) - set(
             current_fields.keys())
         if missing_in_current:
             pytest.fail(
-                f"Fields missing in current {model_name} (removed from master): {missing_in_current}"
+                f"Fields removed from current {model_name} but still exist in master: {missing_in_current}"
             )
 
         # Check for new fields (fields added to current) - strict mode: any new field breaks compatibility
@@ -419,10 +408,6 @@ class TestAPICompatibility:
 
     def test_no_models_removed(self):
         """Test that no models were removed from the current version compared to master."""
-        # Skip if API versions don't match (indicates intentional breaking changes)
-        if not MASTER_PAYLOADS_MODULE:
-            pytest.skip(
-                "API versions don't match - skipping compatibility check")
 
         missing_models = set(MASTER_PAYLOADS_CLASSES.keys()) - set(
             CURRENT_PAYLOADS_CLASSES.keys())
@@ -432,10 +417,6 @@ class TestAPICompatibility:
 
     def test_no_new_models_added(self):
         """Test that no new models were added locally (would break API compatibility)."""
-        # Skip if API versions don't match (indicates intentional breaking changes)
-        if not MASTER_PAYLOADS_MODULE:
-            pytest.skip(
-                "API versions don't match - skipping compatibility check")
 
         new_models = set(CURRENT_PAYLOADS_CLASSES.keys()) - set(
             MASTER_PAYLOADS_CLASSES.keys())
