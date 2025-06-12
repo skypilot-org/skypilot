@@ -435,6 +435,9 @@ def run_bash_command_with_log(
                 '  IB_OPTIONS="--device=/dev/infiniband --cap-add=IPC_LOCK --ipc=host --shm-size=1g"\n'  # pylint: disable=line-too-long
                 'fi\n'
                 f'{maybe_find_docker_port_cmd}'
+                'echo "Pulling docker image..."\n'
+                # Suppress the output of docker pull.
+                f'sudo docker pull {docker_image} > /dev/null 2>&1\n'
                 f'sudo docker run {maybe_specify_name} {mount_args} '
                 f'--network=host $GPU_OPTIONS $IB_OPTIONS {maybe_docker_port_env} '
                 f'{docker_image} /bin/bash -i {script_path_in_docker}\n',
