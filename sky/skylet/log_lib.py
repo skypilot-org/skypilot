@@ -397,16 +397,16 @@ def run_bash_command_with_log(
                 'sudo usermod -aG docker $USER > /dev/null 2>&1\n'
                 'GPU_OPTIONS=""\n'
                 'if [ ! -z "${CUDA_VISIBLE_DEVICES}" ] && command -v nvidia-smi > /dev/null 2>&1; then\n'  # pylint: disable=line-too-long
-                '  echo "Enabling GPU Options: ${CUDA_VISIBLE_DEVICES}"\n'
+                # '  echo "Enabling GPU Options: ${CUDA_VISIBLE_DEVICES}"\n'
                 '  GPU_OPTIONS=$(echo --gpus \'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\')\n'
                 'fi\n'
                 'IB_OPTIONS=""\n'
                 'if [ -d "/dev/infiniband" ]; then\n'
-                '  echo "Enabling IB Options"\n'
+                # '  echo "Enabling IB Options"\n'
                 '  IB_OPTIONS="--device=/dev/infiniband --cap-add=IPC_LOCK --ipc=host --shm-size=1g"\n'  # pylint: disable=line-too-long
                 'fi\n'
-                'echo "GPU_OPTIONS: $GPU_OPTIONS"\n'
-                'echo "IB_OPTIONS: $IB_OPTIONS"\n'
+                # 'echo "GPU_OPTIONS: $GPU_OPTIONS"\n'
+                # 'echo "IB_OPTIONS: $IB_OPTIONS"\n'
                 f'sudo docker run {maybe_specify_name} {mount_args} --network=host '
                 f'$GPU_OPTIONS $IB_OPTIONS {docker_image} /bin/bash -i {script_path_in_docker}\n',  # pylint: disable=line-too-long
                 do_cd_sky_workdir=False)

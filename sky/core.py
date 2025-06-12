@@ -56,7 +56,8 @@ def optimize(
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     blocked_resources: Optional[List['resources_lib.Resources']] = None,
     quiet: bool = False,
-    request_options: Optional[admin_policy.RequestOptions] = None
+    request_options: Optional[admin_policy.RequestOptions] = None,
+    _is_docker_job: bool = False,
 ) -> 'dag_lib.Dag':
     """Finds the best execution plan for the given DAG.
 
@@ -84,7 +85,7 @@ def optimize(
             dag, request_options=request_options) as dag:
         if isinstance(list(dag.tasks[0].resources)[0].cloud, str):
             optimizer.Optimizer.print_cluster_plan(dag)
-            return None
+            return None if not _is_docker_job else dag
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,

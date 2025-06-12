@@ -192,6 +192,7 @@ class OptimizeBody(DagRequestBody):
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
     request_options: Optional[admin_policy.RequestOptions]
+    _is_docker_job: bool = False
 
 
 class LaunchBody(RequestBody):
