@@ -3138,7 +3138,7 @@ def get_kubeconfig_paths() -> List[str]:
     return expanded
 
 
-def format_kubeconfig_exec_auth(config: Any,
+def format_kubeconfig_exec_auth(config: Dict[str, Any],
                                 output_path: str,
                                 inject_wrapper: bool = True) -> bool:
     """Reformat the kubeconfig so that exec-based authentication can be used
@@ -3165,7 +3165,10 @@ def format_kubeconfig_exec_auth(config: Any,
     Returns: whether config was updated, for logging purposes
     """
     updated = False
-    for user in config.get('users', []):
+    users = config.get('users', [])
+    if users is None:
+        users = []
+    for user in users:
         exec_info = user.get('user', {}).get('exec', {})
         current_command = exec_info.get('command', '')
 
