@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import collections
 import os
 import signal
 import subprocess
@@ -23,6 +24,7 @@ from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
@@ -421,6 +423,48 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    crs = core.status(cluster_names=None,
+                      refresh=refresh,
+                      all_users=all_users,
+                      infra_only=True)
+    cns = []
+    cn2remove = collections.defaultdict(list)
+    for cr in crs:
+        cns.append(cr['name'])
+    non_infra_cns = core.status(cluster_names=None,
+                                refresh=refresh,
+                                all_users=all_users,
+                                infra_only=False)
+    for cr in non_infra_cns:
+        handle = cr['handle']
+        if handle.docker_cluster_job_id is not None:
+            cn2remove[handle.launched_resources.cloud].append(
+                handle.docker_cluster_job_id)
+    all_jobs = []
+    for cn in cns:
+        cq = core.queue(cluster_name=cn,
+                        skip_finished=True,
+                        all_users=all_users)
+        for i, j in enumerate(cq):
+            if j['job_id'] in cn2remove[cn]:
+                continue
+            all_jobs.append({
+                'job_id': f'{cn}-{i}',
+                'task_id': 0,
+                'job_name': j['job_name'],
+                'resources': j['resources'],
+                'submitted_at': j['submitted_at'],
+                'end_at': j['end_at'],
+                'duration': time.time() -
+                            j['submitted_at'] if j['submitted_at'] else None,
+                'recovery_count': 0,
+                'status': job_state.ManagedJobStatus.RUNNING,
+                'cluster_resources': j['resources'],
+                'region': cn,
+                'user_name': j['username'],
+                'user_hash': j['user_hash'],
+            })
+    return all_jobs
     handle = _maybe_restart_controller(refresh,
                                        stopped_message='No in-progress '
                                        'managed jobs.',

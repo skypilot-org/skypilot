@@ -122,6 +122,8 @@ def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
+    infra_only: bool = False,
+    skip_add_ssh_config: bool = False,
 ) -> List[dict]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -136,8 +138,13 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
+    request_id = sdk.status(clusters,
+                            refresh=refresh,
+                            all_users=all_users,
+                            infra_only=infra_only)
     cluster_records = sdk.stream_and_get(request_id)
+    if skip_add_ssh_config:
+        return cluster_records
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
