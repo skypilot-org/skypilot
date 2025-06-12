@@ -290,7 +290,11 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
                 'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
-                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null')
+                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
+                'nebius profile create --profile sky '
+                '--endpoint api.nebius.cloud '
+                '--service-account-file $HOME/.nebius/credentials.json '
+                '&> /dev/null || echo "Unable to create Nebius profile."')
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
