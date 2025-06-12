@@ -315,7 +315,9 @@ prometheus:
       enabled: true
       size: 10Gi
   kube-state-metrics:
-    enabled: false
+    enabled: true
+    metricLabelsAllowlist:
+      - pods=[skypilot-cluster]
   prometheus-node-exporter:
     enabled: false
   prometheus-pushgateway:

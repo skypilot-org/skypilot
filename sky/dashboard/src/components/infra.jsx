@@ -378,7 +378,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     const grafanaUrl = window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
     const hostParam = selectedHosts === '$__all' ? '$__all' : selectedHosts;
     
-    return `${grafanaUrl}/d-solo/nvidia-dcgm-dashboard/skypilot-nvidia-dcgm-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // Handle host selection change
