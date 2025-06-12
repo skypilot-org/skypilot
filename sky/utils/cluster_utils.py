@@ -116,6 +116,7 @@ class SSHConfigHelper(object):
         ports: List[int],
         docker_user: Optional[str] = None,
         ssh_user: Optional[str] = None,
+        docker_ports: Optional[List[int]] = None,
     ):
         """Add authentication information for cluster to local SSH config file.
 
@@ -136,6 +137,8 @@ class SSHConfigHelper(object):
             docker_user: If not None, use this user to ssh into the docker
             ssh_user: Override the ssh_user in auth_config
         """
+        if docker_ports is not None:
+            assert len(docker_ports) == len(ips), (docker_ports, ips)
         if ssh_user is None:
             username = auth_config['ssh_user']
         else:
@@ -204,7 +207,8 @@ class SSHConfigHelper(object):
             if docker_proxy_command_generator is not None:
                 docker_proxy_command = docker_proxy_command_generator(ip, port)
                 ip = 'localhost'
-                port = constants.DEFAULT_DOCKER_PORT
+                port = constants.DEFAULT_DOCKER_PORT if docker_ports is None else docker_ports[
+                    i]
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(

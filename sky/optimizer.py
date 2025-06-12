@@ -1018,14 +1018,14 @@ class Optimizer:
         CloudVmRayBackend().check_resources_fit_cluster(handle, dag.tasks[0])
         chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                       colorama.Style.RESET_ALL)
-        if task_resources.accelerators is not None:
+        acc_str = '-'
+        if task_resources.accelerators:
             k, v = list(task_resources.accelerators.items())[0]
-            gpu_str = f'{k}:{v}'
-        else:
-            gpu_str = '-'
+            acc_str = f'{k}:{v}'
         # TODO(tian): Show actual cpu and memory available on the container.
         table.add_row([
-            f'SSH Node Pools ({cluster_name})', '-', '-', '-', gpu_str, '0.00',
+            f'SSH Node Pools ({cluster_name})',
+            task_resources.extract_docker_image(), '-', '-', acc_str, '0.00',
             chosen_str
         ])
         logger.info(f'{table}')

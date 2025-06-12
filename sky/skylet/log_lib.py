@@ -367,11 +367,17 @@ def run_bash_command_with_log(
                         in docker_file_mounts_mapping.values()):
                     ln_sky_workdir_from_abs = True
             bash_command = (
-                'sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
-                f'echo "Port 10022" >> /etc/ssh/sshd_config\n'
+                '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }\n'
+                'export DEBIAN_FRONTEND=noninteractive\n'
+                'sudo apt-get update > /dev/null 2>&1\n'
+                'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
+                'rsync curl wget patch openssh-server python3-pip fuse > /dev/null 2>&1\n'
+                'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config\n'
+                f'sudo echo "Port $DOCKER_PORT" >> /etc/ssh/sshd_config\n'
                 'mkdir -p ~/.ssh\n'
                 'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys\n'
-                'service ssh start\n'
+                'service ssh start > /dev/null 2>&1\n'
+                'echo "docker_user:$(whoami)"\n'
                 f'{bash_command}')
         bash_command = make_task_bash_script(
             bash_command,
@@ -407,18 +413,23 @@ def run_bash_command_with_log(
                 'sudo usermod -aG docker $USER > /dev/null 2>&1\n'
                 'GPU_OPTIONS=""\n'
                 'if [ ! -z "${CUDA_VISIBLE_DEVICES}" ] && command -v nvidia-smi > /dev/null 2>&1; then\n'  # pylint: disable=line-too-long
-                # '  echo "Enabling GPU Options: ${CUDA_VISIBLE_DEVICES}"\n'
                 '  GPU_OPTIONS=$(echo --gpus \'"device=\'"${CUDA_VISIBLE_DEVICES}"\'"\')\n'
                 'fi\n'
                 'IB_OPTIONS=""\n'
                 'if [ -d "/dev/infiniband" ]; then\n'
-                # '  echo "Enabling IB Options"\n'
                 '  IB_OPTIONS="--device=/dev/infiniband --cap-add=IPC_LOCK --ipc=host --shm-size=1g"\n'  # pylint: disable=line-too-long
                 'fi\n'
-                # 'echo "GPU_OPTIONS: $GPU_OPTIONS"\n'
-                # 'echo "IB_OPTIONS: $IB_OPTIONS"\n'
-                f'sudo docker run {maybe_specify_name} {mount_args} --network=host '
-                f'$GPU_OPTIONS $IB_OPTIONS {docker_image} /bin/bash -i {script_path_in_docker}\n',  # pylint: disable=line-too-long
+                # Install ss.
+                'sudo apt-get update > /dev/null 2>&1\n'
+                'sudo apt-get install -y iproute2 > /dev/null 2>&1\n'
+                'DOCKER_PORT=10022\n'
+                'while ss -lntu | awk \'{print $5}\' | grep -q ":$DOCKER_PORT\$"; do\n'
+                '  ((DOCKER_PORT++))\n'
+                'done\n'
+                'echo "docker_port:$DOCKER_PORT"\n'
+                f'sudo docker run {maybe_specify_name} {mount_args} '
+                f'--network=host $GPU_OPTIONS $IB_OPTIONS -e DOCKER_PORT=$DOCKER_PORT '
+                f'{docker_image} /bin/bash -i {script_path_in_docker}\n',
                 do_cd_sky_workdir=False)
             clean_up_cmd = [
                 f'rm -rf {k}' for k in all_mapping
