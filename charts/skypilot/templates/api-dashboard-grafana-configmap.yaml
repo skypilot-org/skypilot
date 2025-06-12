@@ -10,4 +10,4 @@ metadata:
 data:
   api-server-overview.json: |
 {{ .Files.Get "manifests/api-server-overview.json" | indent 4 }}
-{{- end }}
+{{- end }} 
