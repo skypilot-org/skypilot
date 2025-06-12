@@ -2475,7 +2475,9 @@ def cancel(
         # This is a glob pattern, expand it
         try:
             # Get list of all available clusters
-            all_clusters = sdk.get_cluster_names()
+            all_records = sdk.get(
+                sdk.status(cluster_names=None, all_users=True))
+            all_clusters = [record['name'] for record in all_records]
             matching_clusters = [c for c in all_clusters if fnmatch.fnmatch(c, cluster)]
         except Exception:
             raise click.UsageError(f'No clusters match pattern: {cluster!r}')
