@@ -133,6 +133,30 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
 
+def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
+    """Normalize TPU names to the k8s-compatible name and extract count."""
+    # Examples:
+    # 'tpu-v6e-8' -> ('tpu-v6e-slice', 8)
+    # 'tpu-v5litepod-4' -> ('tpu-v5-lite-podslice', 4)
+
+    gcp_to_k8s_patterns = [
+        (r'^tpu-v6e-(\d+)$', 'tpu-v6e-slice'),
+        (r'^tpu-v5p-(\d+)$', 'tpu-v5p-slice'),
+        (r'^tpu-v5litepod-(\d+)$', 'tpu-v5-lite-podslice'),
+        (r'^tpu-v5lite-(\d+)$', 'tpu-v5-lite-device'),
+        (r'^tpu-v4-(\d+)$', 'tpu-v4-podslice'),
+    ]
+
+    for pattern, replacement in gcp_to_k8s_patterns:
+        match = re.match(pattern, accelerator)
+        if match:
+            count = int(match.group(1))
+            return replacement, count
+
+    # Default fallback
+    return accelerator, 1
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -427,6 +451,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
+        acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
         count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
                                                        {}).get(acc_count, None)
         if count_to_topology is None:
@@ -754,6 +779,8 @@ class GKEAutoscaler(Autoscaler):
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
                 if 'resourceLabels' in node_config:
+                    requested_acc_type, requested_acc_count = normalize_tpu_accelerator_name(
+                        requested_acc_type)
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
@@ -993,7 +1020,7 @@ def check_instance_fits(context: Optional[str],
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    def check_tpu_fits(candidate_instance_type: 'KubernetesInstanceType',
+    def check_tpu_fits(acc_type: str, acc_count: int,
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on requested TPU.
 
@@ -1003,8 +1030,6 @@ def check_instance_fits(context: Optional[str],
         node (node_tpu_chip_count) and the total TPU chips across the entire
         podslice (topology_chip_count) are correctly handled.
         """
-        acc_type = candidate_instance_type.accelerator_type
-        acc_count = candidate_instance_type.accelerator_count
         tpu_list_in_cluster = []
         for node in node_list:
             if acc_type == node.metadata.labels[
@@ -1055,7 +1080,8 @@ def check_instance_fits(context: Optional[str],
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason
         else:
@@ -2911,7 +2937,8 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 def is_tpu_on_gke(accelerator: str) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
-    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
+    normalized, _ = normalize_tpu_accelerator_name(accelerator)
+    return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
 def get_node_accelerator_count(attribute_dict: dict) -> int:
