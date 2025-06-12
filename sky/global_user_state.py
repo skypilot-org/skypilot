@@ -450,7 +450,10 @@ def get_all_users() -> List[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
-    return [models.User(id=row.id, name=row.name) for row in rows]
+    return [
+        models.User(id=row.id, name=row.name, password=row.password)
+        for row in rows
+    ]
 
 
 @_init_db

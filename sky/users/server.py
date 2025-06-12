@@ -297,9 +297,17 @@ async def user_export() -> Dict[str, Any]:
             # Get user role
             user_roles = permission.permission_service.get_user_roles(user.id)
             role = user_roles[0] if user_roles else rbac.get_default_role()
-
-            # Add user data with password hash
-            csv_lines.append(f'{user.name},{user.password},{role}')
+            # Avoid exporting `None` values
+            line = ''
+            if user.name:
+                line += user.name
+            line += ','
+            if user.password:
+                line += user.password
+            line += ','
+            if role:
+                line += role
+            csv_lines.append(line)
 
         csv_content = '\n'.join(csv_lines)
 

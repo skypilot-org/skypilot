@@ -714,3 +714,278 @@ class TestUsersEndpoints:
         assert exc_info.value.status_code == 400
         assert 'Cannot delete internal API server user' in str(
             exc_info.value.detail)
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_import_success(self, mock_get_default_role,
+                                       mock_add_or_update_user,
+                                       mock_update_role,
+                                       mock_get_supported_roles,
+                                       mock_get_user_by_name):
+        """Test successful POST /users/import endpoint."""
+        # Setup
+        mock_get_user_by_name.return_value = None
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_default_role.return_value = 'user'
+
+        csv_content = """username,password,role
+alice,pw123,admin
+bob,pw456,user
+charlie,pw789,"""
+
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+
+        # Execute
+        result = await server.user_import(import_body)
+
+        # Verify
+        assert result['success_count'] == 3
+        assert result['error_count'] == 0
+        assert result['total_processed'] == 3
+        assert not result['parse_errors']
+        assert not result['creation_errors']
+
+        # Verify function calls
+        assert mock_get_user_by_name.call_count == 3
+        assert mock_add_or_update_user.call_count == 3
+        assert mock_update_role.call_count == 3
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_import_with_errors(self, mock_get_default_role,
+                                           mock_add_or_update_user,
+                                           mock_update_role,
+                                           mock_get_supported_roles,
+                                           mock_get_user_by_name):
+        """Test POST /users/import endpoint with some errors."""
+        # Setup
+        mock_get_user_by_name.side_effect = [None, object(), None]  # bob exists
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_default_role.return_value = 'user'
+        mock_add_or_update_user.side_effect = [
+            None, Exception('DB error'), None
+        ]
+
+        csv_content = """username,password,role
+alice,pw123,admin
+bob,pw456,user
+charlie,pw789,invalid_role"""
+
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+
+        # Execute
+        result = await server.user_import(import_body)
+
+        # Verify
+        assert result['success_count'] == 1
+        assert result['error_count'] == 2
+        assert result['total_processed'] == 3
+        assert not result['parse_errors']
+        assert len(result['creation_errors']) == 2
+        assert 'bob: User already exists' in result['creation_errors']
+        assert 'charlie: DB error' in result['creation_errors']
+
+    @pytest.mark.asyncio
+    async def test_user_import_invalid_csv(self):
+        """Test POST /users/import endpoint with invalid CSV."""
+        # Missing required headers
+        csv_content = """username,password
+alice,pw123"""
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_import(import_body)
+        assert exc_info.value.status_code == 400
+        assert 'Missing required columns' in str(exc_info.value.detail)
+
+        # Empty CSV
+        csv_content = ""
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_import(import_body)
+        assert exc_info.value.status_code == 400
+        assert 'CSV content is required' in str(exc_info.value.detail)
+
+        # Only header row
+        csv_content = "username,password,role"
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_import(import_body)
+        assert exc_info.value.status_code == 400
+        assert 'CSV must have at least a header row and one data row' in str(
+            exc_info.value.detail)
+
+    @mock.patch('sky.global_user_state.get_all_users')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_export_success(self, mock_get_default_role,
+                                       mock_get_user_roles, mock_get_all_users):
+        """Test successful GET /users/export endpoint."""
+        # Setup
+        users = [
+            models.User(id='user1', name='alice', password='hash1'),
+            models.User(id='user2', name='bob', password='hash2'),
+            models.User(id='user3', name='charlie', password='hash3')
+        ]
+        mock_get_all_users.return_value = users
+        mock_get_default_role.return_value = 'user'
+        mock_get_user_roles.side_effect = [
+            ['admin'],  # alice
+            ['user'],  # bob
+            []  # charlie (no role)
+        ]
+
+        # Execute
+        result = await server.user_export()
+
+        # Verify
+        assert result['user_count'] == 3
+        csv_lines = result['csv_content'].split('\n')
+        assert len(csv_lines) == 4  # header + 3 users
+        assert csv_lines[0] == 'username,password,role'
+        assert csv_lines[1] == 'alice,hash1,admin'
+        assert csv_lines[2] == 'bob,hash2,user'
+        assert csv_lines[3] == 'charlie,hash3,user'
+
+        # Verify function calls
+        mock_get_all_users.assert_called_once()
+        assert mock_get_user_roles.call_count == 3
+
+    @mock.patch('sky.global_user_state.get_all_users')
+    @pytest.mark.asyncio
+    async def test_user_export_empty(self, mock_get_all_users):
+        """Test GET /users/export endpoint with no users."""
+        # Setup
+        mock_get_all_users.return_value = []
+
+        # Execute
+        result = await server.user_export()
+
+        # Verify
+        assert result['user_count'] == 0
+        csv_lines = result['csv_content'].split('\n')
+        assert len(csv_lines) == 1  # only header
+        assert csv_lines[0] == 'username,password,role'
+
+        # Verify function calls
+        mock_get_all_users.assert_called_once()
+
+    @mock.patch('sky.global_user_state.get_all_users')
+    @pytest.mark.asyncio
+    async def test_user_export_error(self, mock_get_all_users):
+        """Test GET /users/export endpoint with error."""
+        # Setup
+        mock_get_all_users.side_effect = Exception('Database error')
+
+        # Execute & Verify
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_export()
+        assert exc_info.value.status_code == 500
+        assert 'Failed to export users' in str(exc_info.value.detail)
+        mock_get_all_users.assert_called_once()
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_import_missing_username_or_password(
+            self, mock_get_default_role, mock_add_or_update_user,
+            mock_update_role, mock_get_supported_roles, mock_get_user_by_name):
+        """Test import with some rows missing username or password."""
+        mock_get_user_by_name.return_value = None
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_default_role.return_value = 'user'
+        # Second row missing password, third row valid
+        csv_content = """username,password,role
+alice,,admin
+bob,pw456,user
+"""
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        result = await server.user_import(import_body)
+        # Only bob is imported
+        assert result['success_count'] == 1
+        assert result['error_count'] == 0
+        assert result['total_processed'] == 1
+        assert len(result['parse_errors']) == 1
+        assert 'Line 2: Username and password are required' in result[
+            'parse_errors'][0]
+
+    @pytest.mark.asyncio
+    async def test_user_import_all_invalid_rows(self):
+        """Test import where all rows are invalid (should raise 400)."""
+        csv_content = """username,password,role
+,,
+,,
+"""
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.user_import(import_body)
+        assert exc_info.value.status_code == 400
+        assert 'No valid users found. Errors:' in str(exc_info.value.detail)
+        assert 'Username and password are required' in str(
+            exc_info.value.detail)
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_import_with_empty_line(self, mock_get_default_role,
+                                               mock_add_or_update_user,
+                                               mock_update_role,
+                                               mock_get_supported_roles,
+                                               mock_get_user_by_name):
+        """Test import with empty lines in CSV (should be skipped)."""
+        mock_get_user_by_name.return_value = None
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_default_role.return_value = 'user'
+        csv_content = """username,password,role
+alice,pw123,admin
+
+bob,pw456,user
+"""
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        result = await server.user_import(import_body)
+        assert result['success_count'] == 2
+        assert result['error_count'] == 0
+        assert result['total_processed'] == 2
+        assert not result['parse_errors']
+        assert not result['creation_errors']
+
+    @mock.patch('sky.global_user_state.get_user_by_name')
+    @mock.patch('sky.users.rbac.get_supported_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.users.rbac.get_default_role')
+    @pytest.mark.asyncio
+    async def test_user_import_with_invalid_column_count(
+            self, mock_get_default_role, mock_add_or_update_user,
+            mock_update_role, mock_get_supported_roles, mock_get_user_by_name):
+        """Test import with a row that has invalid column count (should be parse error)."""
+        mock_get_user_by_name.return_value = None
+        mock_get_supported_roles.return_value = ['admin', 'user']
+        mock_get_default_role.return_value = 'user'
+        csv_content = """username,password,role
+alice,1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014,admin
+bob,pw456,user,extra_column
+charlie,pw789,user
+"""
+        import_body = payloads.UserImportBody(csv_content=csv_content)
+        result = await server.user_import(import_body)
+        # Only alice and charlie are imported, bob's row is invalid
+        assert result['success_count'] == 2
+        assert result['error_count'] == 0
+        assert result['total_processed'] == 2
+        assert len(result['parse_errors']) == 1
+        assert 'Line 3: Invalid number of columns' in result['parse_errors'][0]
