@@ -1868,7 +1868,7 @@ class Resources:
                     not isinstance(accelerators, set)):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify multiple "accelerators" with prefered '
+                        'Cannot specify multiple "accelerators" with preferred '
                         'order (i.e., list of accelerators) with "any_of" '
                         'in resources.')
 

@@ -17,7 +17,6 @@ _BENCHMARK_BUCKET_NAME_KEY = 'bucket_name'
 _BENCHMARK_BUCKET_TYPE_KEY = 'bucket_type'
 
 _BENCHMARK_DB_PATH = os.path.expanduser('~/.sky/benchmark.db')
-os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
 
 
 class _BenchmarkSQLiteConn(threading.local):
@@ -80,6 +79,8 @@ def _init_db(func):
             return func(*args, **kwargs)
         with _benchmark_db_init_lock:
             if not _BENCHMARK_DB:
+                os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0],
+                            exist_ok=True)
                 _BENCHMARK_DB = _BenchmarkSQLiteConn()
         return func(*args, **kwargs)
 

@@ -126,7 +126,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
 # If a cluster is less than LAUNCH_DOUBLE_CHECK_WINDOW seconds old, and we don't
-# see any instances in the cloud, the instances might be in the proccess of
+# see any instances in the cloud, the instances might be in the process of
 # being created. We will wait LAUNCH_DOUBLE_CHECK_DELAY seconds and then double
 # check to make sure there are still no instances. LAUNCH_DOUBLE_CHECK_DELAY
 # should be set longer than the delay between (sending the create instance

@@ -9,6 +9,7 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import threading
 import time
 import traceback
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
@@ -409,10 +410,6 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     return cancelled_request_ids
 
 
-_DB_PATH = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
-pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-
-
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -453,6 +450,7 @@ def create_table(cursor, conn):
 
 
 _DB = None
+_init_db_lock = threading.Lock()
 
 
 def init_db(func):
@@ -461,8 +459,15 @@ def init_db(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global _DB
-        if _DB is None:
-            _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+        if _DB is not None:
+            return func(*args, **kwargs)
+        with _init_db_lock:
+            if _DB is None:
+                db_path = os.path.expanduser(
+                    server_constants.API_SERVER_REQUEST_DB_PATH)
+                pathlib.Path(db_path).parents[0].mkdir(parents=True,
+                                                       exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper

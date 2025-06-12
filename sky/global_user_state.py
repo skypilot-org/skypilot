@@ -47,7 +47,9 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
-_MANAGED_JOB_ID_KEY = 'SKY-MANAGED-JOB-ID'
+_ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
+
+_MANAGED_JOB_ID_KEY = 'sky_managed_job_id_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _DB_INIT_LOCK = threading.Lock()
@@ -1171,6 +1173,43 @@ def set_enabled_clouds(enabled_clouds: List[str],
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
     return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
+
+
+@_init_db
+def get_allowed_clouds(workspace: str) -> List[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(config_table).filter_by(
+            key=_get_allowed_clouds_key(workspace)).first()
+    if row:
+        return json.loads(row.value)
+    return []
+
+
+@_init_db
+def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(config_table).values(
+            key=_get_allowed_clouds_key(workspace),
+            value=json.dumps(allowed_clouds))
+        do_update_stmt = insert_stmnt.on_conflict_do_update(
+            index_elements=[config_table.c.key],
+            set_={config_table.c.value: json.dumps(allowed_clouds)})
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+def _get_allowed_clouds_key(workspace: str) -> str:
+    return _ALLOWED_CLOUDS_KEY_PREFIX + workspace
 
 
 @_init_db
