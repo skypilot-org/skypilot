@@ -2628,14 +2628,13 @@ def get_clusters(
         handle = record['handle']
         if handle is None:
             return
-        if handle.docker_cluster_job_id is not None:
-            return
-        print(handle)
         record['resources_str'] = resources_utils.get_readable_resources_repr(
             handle, simplify=True)
         record[
             'resources_str_full'] = resources_utils.get_readable_resources_repr(
                 handle, simplify=False)
+        if handle.docker_cluster_job_id is not None:
+            return
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
@@ -2682,8 +2681,6 @@ def get_clusters(
             return
         handle = record['handle']
         if handle is None:
-            return
-        if handle.docker_cluster_job_id is not None:
             return
         record['nodes'] = handle.launched_nodes
         if handle.launched_resources is None:

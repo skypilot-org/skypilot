@@ -1025,8 +1025,8 @@ class Optimizer:
             gpu_str = '-'
         # TODO(tian): Show actual cpu and memory available on the container.
         table.add_row([
-            f'SSH Node Pools ({cluster_name})', '-', '-', '-', gpu_str,
-            '0.00', chosen_str
+            f'SSH Node Pools ({cluster_name})', '-', '-', '-', gpu_str, '0.00',
+            chosen_str
         ])
         logger.info(f'{table}')
 

@@ -99,6 +99,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         ],
       };
     });
+    console.log('clusterData', clusterData);
     return clusterData;
   } catch (error) {
     console.error('Error fetching clusters:', error);

@@ -97,8 +97,7 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
-    sqlalchemy.Column('used_as_infra', sqlalchemy.Integer,
-                      server_default='0'),
+    sqlalchemy.Column('used_as_infra', sqlalchemy.Integer, server_default='0'),
 )
 
 storage_table = sqlalchemy.Table(
@@ -302,12 +301,11 @@ def create_table():
             'last_creation_command',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'used_as_infra',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0')
+        db_utils.add_column_to_table_sqlalchemy(session,
+                                                'clusters',
+                                                'used_as_infra',
+                                                sqlalchemy.Integer(),
+                                                default_statement='DEFAULT 0')
         session.commit()
 
 

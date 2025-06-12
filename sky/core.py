@@ -1260,8 +1260,16 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         # Check if infra exists in cluster table.
         records = global_user_state.get_cluster_from_name(infra)
         if len(records) != 0:
-            skypilot_cluster_exists = True
+            record = records[0]
+            if record['handle'] is not None:
+                skypilot_cluster_exists = True
+                handle = record['handle']
     if skypilot_cluster_exists:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        if (handle.docker_cluster_job_id is not None or
+                handle.launched_resources.extract_docker_image() is not None):
+            raise ValueError(f'Cluster {infra} is a docker cluster. '
+                             'It cannot be used as an infra.')
         # If the cluster exists, we mark the cluster as an infra, which will
         # then be filtered out when displaying the list of clusters.
         # TODO(zhwu): check if there are any clusters/jobs running on the infra.

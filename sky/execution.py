@@ -600,9 +600,7 @@ def launch(
         dag_task = dag.tasks[0]
         dag_task.set_resources(
             type(dag_task.resources)(
-                r.copy(cloud=None) for r in dag_task.resources
-            )
-        )
+                r.copy(cloud=None) for r in dag_task.resources))
         task = dag
 
     entrypoint = task
