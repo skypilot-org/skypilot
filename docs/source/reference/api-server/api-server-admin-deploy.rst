@@ -187,25 +187,17 @@ Following tabs describe how to configure credentials for different clouds on the
 
             The default permissions granted to the API server works out of box. For further hardening, you can refer to :ref:`Setting minimum permissions in helm deployment <minimum-permissions-in-helm>` to understand the permissions and how to customize them.
 
-        To authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file with :ref:`necessary permissions <cloud-permissions-kubernetes>`:
+        To authenticate to other clusters, pass the kubeconfig file directly during installation:
 
         .. code-block:: bash
 
-            kubectl create secret generic kube-credentials \
-              --namespace $NAMESPACE \
-              --from-file=config=$HOME/.kube/config
-
-
-        Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig for authentication:
-
-        .. code-block:: bash
-
-            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set kubernetesCredentials.useKubeconfig=true \
-              --set kubernetesCredentials.kubeconfigSecretName=kube-credentials
+              --set-file kubernetesCredentials.kubeconfig=$HOME/.kube/config
+
+        The chart will create a secret named ``kube-credentials`` automatically.
 
         .. tip::
 
@@ -237,20 +229,7 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: AWS
         :sync: aws-creds-tab
 
-        Make sure you have the access key id and secret access key.
-
-        Create a Kubernetes secret with your AWS credentials:
-
-        .. code-block:: bash
-
-            kubectl create secret generic aws-credentials \
-              --namespace $NAMESPACE \
-              --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
-              --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
-
-        Replace ``YOUR_ACCESS_KEY_ID`` and ``YOUR_SECRET_ACCESS_KEY`` with your actual AWS credentials.
-
-        Enable AWS credentials by setting ``awsCredentials.enabled=true`` and ``awsCredentials.awsSecretName=aws-credentials`` in the Helm values file.
+        Provide your AWS credentials directly when installing the chart:
 
         .. code-block:: bash
 
@@ -258,9 +237,17 @@ Following tabs describe how to configure credentials for different clouds on the
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
                 --namespace $NAMESPACE \
                 --reuse-values \
-                --set awsCredentials.enabled=true
+                --set awsCredentials.enabled=true \
+                --set awsCredentials.accessKeyId=YOUR_ACCESS_KEY_ID \
+                --set awsCredentials.secretAccessKey=YOUR_SECRET_ACCESS_KEY
 
-        .. dropdown:: Use existing AWS credentials
+        The chart will create a secret named ``aws-credentials`` automatically.
+
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret aws-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing AWS credentials secret
 
             You can also set the following values to use a secret that already contains your AWS credentials:
 
@@ -280,15 +267,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         We use service accounts to authenticate with GCP. Refer to :ref:`GCP service account <gcp-service-account>` guide on how to set up a service account.
 
-        Once you have the JSON key for your service account, create a Kubernetes secret to store it:
-
-        .. code-block:: bash
-
-            kubectl create secret generic gcp-credentials \
-              --namespace $NAMESPACE \
-              --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
-
-        When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` to your project ID:
+        Provide the service account JSON key when installing the chart:
 
         .. code-block:: bash
 
@@ -297,9 +276,16 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --reuse-values \
               --set gcpCredentials.enabled=true \
-              --set gcpCredentials.projectId=YOUR_PROJECT_ID
+              --set gcpCredentials.projectId=YOUR_PROJECT_ID \
+              --set-file gcpCredentials.credentialsJson=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
 
-        .. dropdown:: Use existing GCP credentials
+        The chart will create a secret named ``gcp-credentials`` automatically.
+
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret gcp-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing GCP credentials secret
 
             You can also set the following values to use a secret that already contains your GCP credentials:
 
@@ -315,19 +301,23 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: RunPod
         :sync: runpod-creds-tab
 
-        SkyPilot API server use **API key** to authenticate with RunPod. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**.
-
-        Once the key is generated, create a Kubernetes secret to store it:
+        SkyPilot API server uses an **API key** to authenticate with RunPod. Generate an API key from the `Settings <https://www.runpod.io/console/user/settings>`_ page and pass it to the chart directly:
 
         .. code-block:: bash
 
-            kubectl create secret generic runpod-credentials \
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
-              --from-literal api_key=YOUR_API_KEY
+              --reuse-values \
+              --set runpodCredentials.enabled=true \
+              --set runpodCredentials.apiKey=YOUR_API_KEY
 
-        When installing or upgrading the Helm chart, enable RunPod credentials by setting ``runpodCredentials.enabled=true``
+        The chart will create a secret named ``runpod-credentials`` automatically.
 
-        .. dropdown:: Use existing RunPod credentials
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret runpod-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing RunPod credentials secret
 
             You can also set the following values to use a secret that already contains your RunPod API key:
 
@@ -343,27 +333,23 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: Lambda
         :sync: lambda-creds-tab
 
-        SkyPilot API server uses an **API key** to authenticate with Lambda. To configure Lambda access, go to the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page on your Lambda Cloud console and generate an **API key**.
-
-        Once the key is generated, create a Kubernetes secret to store it:
+        SkyPilot API server uses an **API key** to authenticate with Lambda. Generate an API key from the `API Keys <https://cloud.lambda.ai/api-keys/cloud-api>`_ page and pass it directly to the chart:
 
         .. code-block:: bash
 
-            kubectl create secret generic lambda-credentials \
-              --namespace $NAMESPACE \
-              --from-literal api_key=YOUR_API_KEY
-
-        When installing or upgrading the Helm chart, enable Lambda credentials by setting ``lambdaCredentials.enabled=true``
-
-        .. code-block:: bash
-
-            # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
-              --set lambdaCredentials.enabled=true
+              --set lambdaCredentials.enabled=true \
+              --set lambdaCredentials.apiKey=YOUR_API_KEY
 
-        .. dropdown:: Use existing Lambda credentials
+        The chart will create a secret named ``lambda-credentials`` automatically.
+
+        .. note::
+
+            If you get an "invalid ownership metadata" error, delete the existing secret first: ``kubectl delete secret lambda-credentials --namespace $NAMESPACE --ignore-not-found`` or use the existing secret below.
+
+        .. dropdown:: Use existing Lambda credentials secret
 
             You can also set the following values to use a secret that already contains your Lambda credentials:
 
@@ -381,42 +367,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         We use service accounts to authenticate with Nebius. Refer to :ref:`Nebius service account <nebius-service-account>` guide on how to set up a service account.
 
-        Once you have the JSON credentials for your service account, create a Kubernetes secret to store it:
-
-        .. code-block:: bash
-
-            kubectl create secret generic nebius-credentials \
-              --namespace $NAMESPACE \
-              --from-file=credentials.json=$HOME/.nebius/credentials.json
-
-        Optionally, if you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files, following the pattern ``--from-file=<filename>=$HOME/.nebius/<filename>``. Files in this secret will be linked to `~/.nebius/` in the container.
-
-        .. code-block:: bash
-
-            kubectl create secret generic nebius-credentials \
-              --namespace $NAMESPACE \
-              --from-file=credentials.json=$HOME/.nebius/credentials.json \
-              --from-file=serviceaccount-1-credentials.json=$HOME/.nebius/serviceaccount-1-credentials.json \
-              --from-file=serviceaccount-2-credentials.json=$HOME/.nebius/serviceaccount-2-credentials.json
-
-
-        .. code-block:: yaml
-
-            # SkyPilot config
-
-            workspaces:
-
-              team-a:
-                nebius:
-                  credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
-                  tenant_id: tenant-rrww0kh3nnfo7v0dgw
-
-              team-b:
-                nebius:
-                  credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
-                  tenant_id: tenant-52czfp5clbtq0er1ol
-
-        When installing or upgrading the Helm chart, enable Nebius credentials by setting ``nebiusCredentials.enabled=true`` and ``nebiusCredentials.tenantId`` to your tenant ID:
+        Provide the service account credentials JSON when installing the chart:
 
         .. code-block:: bash
 
@@ -425,9 +376,45 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --reuse-values \
               --set nebiusCredentials.enabled=true \
-              --set nebiusCredentials.tenantId=YOUR_TENANT_ID
+              --set nebiusCredentials.tenantId=YOUR_TENANT_ID \
+              --set-file nebiusCredentials.credentialsJson=$HOME/.nebius/credentials.json
 
-        .. dropdown:: Use existing Nebius credentials
+        The chart will create a secret named ``nebius-credentials`` automatically.
+
+        .. dropdown:: Use multiple credential files for workspaces
+
+            If you have multiple credentials files used in :ref:`workspaces <workspaces>`, you can create a secret with multiple files:
+
+            .. code-block:: bash
+
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  --namespace $NAMESPACE \
+                  --reuse-values \
+                  --set nebiusCredentials.enabled=true \
+                  --set nebiusCredentials.tenantId=YOUR_TENANT_ID \
+                  --set-file nebiusCredentials.credentialsFiles.credentials.json=$HOME/.nebius/credentials.json \
+                  --set-file nebiusCredentials.credentialsFiles.serviceaccount-1-credentials.json=$HOME/.nebius/serviceaccount-1-credentials.json \
+                  --set-file nebiusCredentials.credentialsFiles.serviceaccount-2-credentials.json=$HOME/.nebius/serviceaccount-2-credentials.json
+
+            Files in this secret will be linked to `~/.nebius/` in the container. You can then reference them in your workspace configuration:
+
+            .. code-block:: yaml
+
+                # SkyPilot config
+
+                workspaces:
+
+                  team-a:
+                    nebius:
+                      credentials_file_path: ~/.nebius/serviceaccount-1-credentials.json
+                      tenant_id: tenant-rrww0kh3nnfo7v0dgw
+
+                  team-b:
+                    nebius:
+                      credentials_file_path: ~/.nebius/serviceaccount-2-credentials.json
+                      tenant_id: tenant-52czfp5clbtq0er1ol
+
+        .. dropdown:: Use existing Nebius credentials secret
 
             You can also set the following values to use a secret that already contains your Nebius credentials:
 
@@ -455,24 +442,29 @@ Following tabs describe how to configure credentials for different clouds on the
               --reuse-values \
               --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
 
-        If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
+        If your ``ssh_node_pools.yaml`` requires SSH keys, pass them directly to the chart:
 
         .. code-block:: bash
 
-            SECRET_NAME=apiserver-ssh-key
-
-            # Create a secret that contains the SSH keys
-            # The NAMESPACE should be consistent with the API server deployment
-            kubectl create secret generic $SECRET_NAME \
-              --namespace $NAMESPACE \
-              --from-file=id_rsa=/path/to/id_rsa \
-              --from-file=other_id_rsa=/path/to/other_id_rsa
-
-            # Keys will be mounted to ~/.ssh/ (e.g., ~/.ssh/id_rsa, ~/.ssh/other_id_rsa)
             helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
-              --set apiService.sshKeySecret=$SECRET_NAME
+              --set-file apiService.sshKeys.id_rsa=/path/to/id_rsa \
+              --set-file apiService.sshKeys.other_id_rsa=/path/to/other_id_rsa
+
+        The chart will create a secret named ``$RELEASE_NAME-ssh-keys`` automatically.
+
+        .. dropdown:: Use existing SSH key secret
+
+            You can also set the following value to use a secret that already contains your SSH keys:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set apiService.sshKeySecret=your_secret_name
 
         After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
 
