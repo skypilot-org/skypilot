@@ -29,23 +29,23 @@ Step 1: Set up credentials
 
 There are two broad ways to use multiple Kubernetes clusters with SkyPilot. You can either provide credentials that SkyPilot will use to access the individual Kubernetes clusters or you can use "exec"-based authentication that is typically provided by managed-Kubernetes cloud providers. 
 
-Using "Exec"-based Auth
+Using "exec"-based auth
 ^^^^^^^^^^^^^^^^^^^^^^^
 For managed-Kubernetes like GKE and EKS, a typical local ``~/.kube/config`` file will already contain exec-based auth information under ``users``:
 .. code-block:: yaml
 
     contexts:
     - name: <some context>
-      context:
-        cluster: <some cluster>
-        user: <some user>
+        context:
+          cluster: <some cluster>
+          user: <some user>
     ...
     users:
     - name: <some user>
-      user:
-        exec:
-          apiVersion: client.authentication.k8s.io/v1beta1
-          command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
+        user:
+          exec:
+            apiVersion: client.authentication.k8s.io/v1beta1
+            command: gke-gcloud-auth-plugin # this is the exec-auth binary for GKE
     ...
 
 
@@ -53,7 +53,7 @@ SkyPilot will use the binary (currently we support exec-auth for GKE and EKS) an
 * **Cloud also activated**: e.g., if using GKE with exec-based auth, GCP must also be allowed for SkyPilot.
 * **Use LOCAL_CREDENTIALS**: refer in Step 2
 
-Setting up Credentials Manually
+Setting up credentials manually
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 To work with multiple Kubernetes clusters, their credentials must be set up as individual `contexts <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/>`_ in your local ``~/.kube/config`` file.
 
