@@ -3,7 +3,6 @@ import dataclasses
 from typing import Optional
 
 from sky.utils import common_utils
-from sky.utils import string_utils
 from sky.utils import ux_utils
 
 _REGION_OR_ZONE_TRUNCATION_LENGTH = 25
@@ -181,7 +180,7 @@ class InfraInfo:
             # Node Pools.
             # TODO(romilb): This is a workaround while we use the global
             # kubeconfig to store the ssh contexts.
-            region_or_zone = string_utils.removeprefix(self.region, 'ssh-')
+            region_or_zone = common_utils.removeprefix(self.region, 'ssh-')
 
         if region_or_zone is not None and truncate:
             region_or_zone = common_utils.truncate_long_string(

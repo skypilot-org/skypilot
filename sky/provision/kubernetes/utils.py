@@ -34,7 +34,6 @@ from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
 from sky.utils import status_lib
-from sky.utils import string_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -1168,7 +1167,7 @@ def get_accelerator_label_key_values(
 
     is_ssh_node_pool = context.startswith('ssh-') if context else False
     cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
-    context_display_name = string_utils.removeprefix(
+    context_display_name = common_utils.removeprefix(
         context, 'ssh-') if (context and is_ssh_node_pool) else context
 
     autoscaler_type = get_autoscaler_type()

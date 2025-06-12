@@ -20,7 +20,6 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import status_lib
-from sky.utils import string_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -1278,7 +1277,7 @@ def query_instances(
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
             if is_ssh:
-                node_pool = string_utils.removeprefix(context,
+                node_pool = common_utils.removeprefix(context,
                                                       'ssh-') if context else ''
                 msg = (
                     f'Cannot connect to SSH Node Pool {node_pool}. '
