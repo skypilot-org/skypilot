@@ -42,16 +42,27 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
 
+      - name: Determine installation method
+        id: install_method
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "install_from_source=true" >> $GITHUB_OUTPUT
+            echo "Installing from source (manual trigger)"
+          else
+            echo "install_from_source=false" >> $GITHUB_OUTPUT
+            echo "Installing from wheel (pipeline trigger)"
+          fi
+
       # For workflow trigger: download all artifacts
       - name: Download artifacts
-        if: github.event_name == 'workflow_call'
+        if: steps.install_method.outputs.install_from_source == 'false'
         uses: actions/download-artifact@v4
         with:
           name: skypilot-artifacts
           path: .
 
       - name: Extract source tarball
-        if: github.event_name == 'workflow_call'
+        if: steps.install_method.outputs.install_from_source == 'false'
         run: |
           # Find the tarball in dist directory
           TARBALL=$(ls dist/skypilot-*.tar.gz)
@@ -72,7 +83,7 @@ jobs:
       - name: Find and verify version
         id: version
         run: |
-          if [ "${{ github.event_name }}" == "workflow_call" ]; then
+          if [ "${{ steps.install_method.outputs.install_from_source }}" == "false" ]; then
             if [ -n "${{ inputs.version }}" ]; then
               # Use the provided version
               echo "Using provided version: ${{ inputs.version }}"
@@ -102,7 +113,7 @@ jobs:
           cat $GITHUB_OUTPUT
 
       - name: Update version in source code
-        if: github.event_name == 'workflow_call'
+        if: steps.install_method.outputs.install_from_source == 'false'
         run: |
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${{ steps.version.outputs.latest_version }}'/g" sky/__init__.py
 
@@ -125,5 +136,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest,${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ steps.version.outputs.latest_version }}"
+          build-args: |
+            INSTALL_FROM_SOURCE=${{ steps.install_method.outputs.install_from_source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

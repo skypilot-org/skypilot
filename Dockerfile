@@ -4,6 +4,9 @@ FROM continuumio/miniconda3:23.3.1-0
 # Detect architecture
 ARG TARGETARCH
 
+# Control installation method - default to install from source
+ARG INSTALL_FROM_SOURCE=true
+
 # Install dependencies
 RUN conda install -c conda-forge google-cloud-sdk && \
     gcloud components install gke-gcloud-auth-plugin --quiet && \
@@ -31,25 +34,11 @@ RUN conda install -c conda-forge google-cloud-sdk && \
 # Add source code
 COPY . /skypilot-src
 
-# Install SkyPilot
-# If triggered from release/nightly build pipeline, install from wheel file
-# Otherwise install from source in editable mode
+# Install SkyPilot and set up dashboard based on installation method
 RUN cd /skypilot-src && \
-    if ls dist/skypilot-*.whl 1> /dev/null 2>&1; then \
-        echo "Installing from wheel file" && \
-        WHEEL_FILE=$(ls dist/skypilot-*.whl) && \
-        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system; \
-    else \
-        echo "Installing in editable mode" && \
-        ~/.local/bin/uv pip install -e ".[all]" --system; \
-    fi
-
-
-RUN sky -v && \
-    sky api info
-
-# Set up Node.js and build dashboard (only when installing from source)
-RUN if [ ! -f /skypilot-src/dist/skypilot-*.whl ]; then \
+    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Installing from source in editable mode" && \
+        ~/.local/bin/uv pip install -e ".[all]" --system && \
         echo "Setting up Node.js and building dashboard" && \
         curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
         apt-get update && \
@@ -58,8 +47,18 @@ RUN if [ ! -f /skypilot-src/dist/skypilot-*.whl ]; then \
         npm ci && \
         npm run build; \
     else \
-        echo "Skipping dashboard build as wheel file exists"; \
+        echo "Installing from wheel file" && \
+        if [ ! -f /skypilot-src/dist/skypilot-*.whl ]; then \
+            echo "Error: No wheel file found in /skypilot-src/dist/" && \
+            exit 1; \
+        fi && \
+        WHEEL_FILE=$(ls dist/skypilot-*.whl) && \
+        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
+        echo "Skipping dashboard build for wheel installation"; \
     fi
+
+RUN sky -v && \
+    sky api info
 
 # Cleanup all caches to reduce the image size
 RUN conda clean -afy && \
