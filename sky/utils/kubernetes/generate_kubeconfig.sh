@@ -316,7 +316,7 @@ EOF
 echo "---
 Done!
 
-Kubeconfig using service acccount '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
+Kubeconfig using service account '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
 
 Copy the generated kubeconfig file to your ~/.kube/ directory to use it with
 kubectl and skypilot:
