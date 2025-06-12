@@ -124,6 +124,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _is_docker_cluster: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -217,7 +218,8 @@ def _execute(
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
-            _is_launched_by_sky_serve_controller)
+            _is_launched_by_sky_serve_controller,
+            _is_docker_cluster=_is_docker_cluster)
 
 
 def _execute_dag(
@@ -239,6 +241,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    _is_docker_cluster: bool,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
 
@@ -467,6 +470,7 @@ def _execute_dag(
                                          detach_run,
                                          docker_image,
                                          docker_image_unique_id,
+                                         _is_docker_cluster,
                                          dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
@@ -679,6 +683,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _is_docker_cluster=original_cluster_name is not None,
     )
     if original_cluster_name is not None:
         task_ori = dag_utils.convert_entrypoint_to_dag(entrypoint).tasks[0]

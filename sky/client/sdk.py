@@ -552,8 +552,7 @@ def _launch(
     if _need_confirmation:
         cluster_status = None
         # TODO(SKY-998): we should reduce RTTs before launching the cluster.
-        request_id = status([cluster_name], all_users=True,
-                                    infra_only=True)
+        request_id = status([cluster_name], all_users=True, infra_only=True)
         clusters = get(request_id)
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''

@@ -564,6 +564,7 @@ class RayCodeGen:
                      docker_image_unique_id: Optional[str] = None,
                      docker_file_mounts_mapping: Optional[Dict[str,
                                                                str]] = None,
+                     is_docker_cluster: bool = False,
                      env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command."""
@@ -683,6 +684,7 @@ class RayCodeGen:
                         docker_image={docker_image!r},
                         docker_image_unique_id={docker_image_unique_id!r},
                         docker_file_mounts_mapping={docker_file_mounts_mapping!r},
+                        is_docker_cluster={is_docker_cluster},
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -3689,6 +3691,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         detach_run: bool,
         docker_image: Optional[str],
         docker_image_unique_id: Optional[str],
+        is_docker_cluster: bool,
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -3743,11 +3746,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, docker_image,
-                                       docker_image_unique_id, detach_run)
+                                       docker_image_unique_id,
+                                       is_docker_cluster, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, docker_image,
-                                        docker_image_unique_id, detach_run)
+                                        docker_image_unique_id,
+                                        is_docker_cluster, detach_run)
 
         return job_id
 
@@ -5317,6 +5322,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                task: task_lib.Task, job_id: int,
                                docker_image: Optional[str],
                                docker_image_unique_id: Optional[str],
+                               is_docker_cluster: bool,
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
@@ -5355,6 +5361,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             log_dir=log_dir,
             docker_image=docker_image,
             docker_image_unique_id=docker_image_unique_id,
+            is_docker_cluster=is_docker_cluster,
             docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
         codegen.add_epilogue()
@@ -5369,6 +5376,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               task: task_lib.Task, job_id: int,
                               docker_image: Optional[str],
                               docker_image_unique_id: Optional[str],
+                              is_docker_cluster: bool,
                               detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
@@ -5417,6 +5425,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 gang_scheduling_id=i,
                 docker_image=docker_image,
                 docker_image_unique_id=docker_image_unique_id,
+                is_docker_cluster=is_docker_cluster,
                 docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
         codegen.add_epilogue()
