@@ -221,11 +221,6 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
-                                           'false')
-        if str(enable_basic_auth).lower() != 'true':
-            return await call_next(request)
-
         if request.url.path.startswith('/api/'):
             # Try to set the auth user from the basic auth header so the
             # following endpoint handlers can leverage the auth_user info
@@ -397,7 +392,9 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
-app.add_middleware(BasicAuthMiddleware)
+enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
+if str(enable_basic_auth).lower() == 'true':
+    app.add_middleware(BasicAuthMiddleware)
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
