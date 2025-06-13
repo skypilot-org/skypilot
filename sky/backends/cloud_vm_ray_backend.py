@@ -141,6 +141,7 @@ _MAX_RAY_UP_RETRY = 5
 _MAX_GET_ZONE_RETRY = 3
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
+_LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 
 # Path to the monkey-patched ray up script.
 # We don't do import then __file__ because that script needs to be filled in
@@ -3454,10 +3455,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
+        remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
-        remote_log_dir = self.log_dir
+        if remote_log_dir is None:
+            remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         cd = f'cd {SKY_REMOTE_WORKDIR}'
@@ -3576,13 +3579,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str) -> int:
+                 job_name: Optional[str],
+                 resources_str: str) -> Tuple[int, str]:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
             resources_str=resources_str)
-        returncode, job_id_str, stderr = self.run_on_head(handle,
+        returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
                                                           require_outputs=True,
@@ -3596,17 +3600,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to fetch job id.', stderr)
         try:
-            job_id_match = _JOB_ID_PATTERN.search(job_id_str)
+            job_id_match = _JOB_ID_PATTERN.search(result_str)
             if job_id_match is not None:
                 job_id = int(job_id_match.group(1))
             else:
                 # For backward compatibility.
-                job_id = int(job_id_str)
+                job_id = int(result_str)
+            log_dir_match = _LOG_DIR_PATTERN.search(result_str)
+            if log_dir_match is not None:
+                log_dir = log_dir_match.group(1).strip()
+            else:
+                # For backward compatibility, use the same log dir as local.
+                log_dir = self.log_dir
         except ValueError as e:
             logger.error(stderr)
-            raise ValueError(f'Failed to parse job id: {job_id_str}; '
+            raise ValueError(f'Failed to parse job id: {result_str}; '
                              f'Returncode: {returncode}') from e
-        return job_id
+        return job_id, log_dir
 
     def _execute(
         self,
@@ -3658,15 +3668,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id = self._add_job(handle, task_copy.name, resources_str)
+        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
+            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
+                                       log_dir)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
+            self._execute_task_one_node(handle, task_copy, job_id, detach_run,
+                                        log_dir)
 
         return job_id
 
@@ -5198,9 +5210,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
-                               detach_run: bool) -> None:
+                               detach_run: bool, remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
-        log_dir = os.path.join(self.log_dir, 'tasks')
+        log_dir = os.path.join(remote_log_dir, 'tasks')
 
         resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
@@ -5238,17 +5250,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
-                              detach_run: bool) -> None:
+                              detach_run: bool, remote_log_dir: str) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
-        log_dir_base = self.log_dir
-        log_dir = os.path.join(log_dir_base, 'tasks')
+        log_dir = os.path.join(remote_log_dir, 'tasks')
         resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
@@ -5294,4 +5306,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                remote_log_dir=remote_log_dir)
