@@ -7,7 +7,6 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
-import pandas as pd
 
 import sky
 from sky import catalog
@@ -21,8 +20,6 @@ from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
-from sky.skylet.constants import CATALOG_DIR
-from sky.skylet.constants import CATALOG_SCHEMA_VERSION
 from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -55,8 +52,6 @@ MEMORY_SIZE_UNITS = {
     'p': 2**50,
     'pb': 2**50,
 }
-
-ACCELERATORS_PATH = 'common/metadata.csv'
 
 
 @dataclasses.dataclass
@@ -1828,10 +1823,9 @@ class Resources:
 
     @classmethod
     def _parse_accelerators_from_str(
-            cls, config: Dict[str, Any],
-            accelerators: str) -> List[Tuple[str, bool]]:
+            cls, accelerators: str) -> List[Tuple[str, bool]]:
         """Parse accelerators string into a list of possible accelerators.
-        
+
         Returns:
             A list of possible accelerators. Each element is a tuple of
             (accelerator_name, was_user_specified).
@@ -1871,8 +1865,11 @@ class Resources:
             memory_parsed = memory_parsed[:-1]
         memory_gb = int(memory_parsed)
 
-        accelerators = [(f'{device}:{count}', False) for device in _get_devices(
-            memory_gb, plus, manufacturer=manufacturer)]
+        accelerators = [
+            (f'{device}:{count}', False)
+            for device in accelerator_registry.get_devices_by_memory(
+                memory_gb, plus, manufacturer=manufacturer)
+        ]
 
         return accelerators
 
@@ -1946,33 +1943,34 @@ class Resources:
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
             if isinstance(accelerators, str):
-                accelerators = cls._parse_accelerators_from_str(
-                    config, accelerators)
+                accelerators_list = cls._parse_accelerators_from_str(
+                    accelerators)
             elif isinstance(accelerators, dict):
                 accelerator_names = [
                     f'{k}:{v}' if v is not None else f'{k}'
                     for k, v in accelerators.items()
                 ]
-                accelerators = [
-                    accel_name for accel_name in accelerator_names
-                    for accel_name in cls._parse_accelerators_from_str(
-                        config, accel_name)
-                ]
-            elif isinstance(accelerators, list) or isinstance(accelerators, set):
-                accelerators = [
-                    accel_name for accel_name in accelerators
-                    for accel_name in cls._parse_accelerators_from_str(
-                        config, accel_name)
-                ]
+                accelerators_list = []
+                for accel_name in accelerator_names:
+                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    accelerators_list.extend(parsed_accels)
+            elif isinstance(accelerators, list) or isinstance(
+                    accelerators, set):
+                accelerators_list = []
+                for accel_name in accelerators:
+                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    accelerators_list.extend(parsed_accels)
             # now that accelerators is a list, we need to decide which to
             # include in the final set
-            accel_dict = {}
-            for accel, user_specified in accelerators:
-                # If this accelerator is not in dict yet, or if current one is user specified
-                # and existing one is not, update the entry
-                if accel not in accel_dict or (user_specified and not accel_dict[accel]):
+            accel_dict: Dict[str, bool] = {}
+            for accel, user_specified in accelerators_list:
+                # If this accelerator is not in dict yet, or if current one is
+                # user specified and existing one is not, update the entry
+                if accel not in accel_dict or (user_specified and
+                                               not accel_dict[accel]):
                     accel_dict[accel] = user_specified
-            accelerators = {(accel, user_specified) for accel, user_specified in accel_dict.items()}
+            accelerators = {(accel, user_specified)
+                            for accel, user_specified in accel_dict.items()}
 
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
@@ -2344,38 +2342,6 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
-
-
-def _get_devices(memory: float,
-                 plus: bool = False,
-                 manufacturer: Optional[str] = None) -> List[str]:
-    """Returns a list of device names that meet the memory and manufacturer
-       requirements.
-
-    Args:
-        memory: The minimum memory size in GB.
-        plus: If True, returns devices with memory >= memory, otherwise returns
-              devices with memory == memory.
-        manufacturer: The manufacturer of the GPU.
-    """
-    common = CATALOG_DIR + '/' +\
-             CATALOG_SCHEMA_VERSION + '/' +\
-             ACCELERATORS_PATH
-
-    # Read the accelerators CSV file
-    df = pd.read_csv(common)
-
-    # Filter by memory requirements
-    if plus:
-        df = df[df['MemoryGB'] >= memory]
-    else:
-        df = df[df['MemoryGB'] == memory]
-
-    # Filter by manufacturer if specified
-    if manufacturer is not None:
-        df = df[df['Manufacturer'].str.lower() == manufacturer.lower()]
-
-    return df['GPU'].tolist()
 
 
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
