@@ -17,11 +17,11 @@ from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils import annotations
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
@@ -354,7 +354,6 @@ def check(
     return enabled_clouds_by_workspace
 
 
-@annotations.lru_cache('request')
 def get_cached_enabled_clouds_or_refresh(
         capability: sky_cloud.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
@@ -382,23 +381,42 @@ def get_cached_enabled_clouds_or_refresh(
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
         capability, active_workspace)
     if not cached_enabled_clouds or allowed_clouds_changed:
-        try:
-            check_capability(capability, quiet=True, workspace=active_workspace)
-            if allowed_clouds_changed:
-                global_user_state.set_allowed_clouds(
-                    skypilot_config_allowed_clouds, active_workspace)
-        except SystemExit:
-            # If no cloud is enabled, check() will raise SystemExit.
-            # Here we catch it and raise the exception later only if
-            # raise_if_no_cloud_access is set to True.
-            pass
-        cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-            capability, active_workspace)
+        cached_enabled_clouds = _refresh_cached_enabled_clouds(
+            capability, active_workspace, allowed_clouds_changed)
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
+    return cached_enabled_clouds
+
+
+# This cache improves performance of `sky check` during `sky launch` by
+# using the same result during the ~4 times `sky jobs launch` calls this.
+# A potential issue is that if the jobs controller keeps calling this after
+# the user has added new clouds, the new values might not be reflected in the
+# cache.
+@annotations.lru_cache('request')
+def _refresh_cached_enabled_clouds(
+    capability: sky_cloud.CloudCapability,
+    active_workspace: str,
+    allowed_clouds_changed: bool,
+) -> List[sky_clouds.Cloud]:
+    # this is an unhashable type, so we need to get it here again
+    skypilot_config_allowed_clouds = _get_workspace_allowed_clouds(
+        active_workspace)
+    try:
+        check_capability(capability, quiet=True, workspace=active_workspace)
+        if allowed_clouds_changed:
+            global_user_state.set_allowed_clouds(skypilot_config_allowed_clouds,
+                                                 active_workspace)
+    except SystemExit:
+        # If no cloud is enabled, check() will raise SystemExit.
+        # Here we catch it and raise the exception later only if
+        # raise_if_no_cloud_access is set to True.
+        pass
+    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
+        capability, active_workspace)
     return cached_enabled_clouds
 
 
