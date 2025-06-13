@@ -1,5 +1,8 @@
 """Smoke tests for SkyPilot centralized log collection."""
 
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 import tempfile
 import textwrap
 
@@ -13,6 +16,9 @@ from sky import skypilot_config
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_log_collection_to_gcp(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    # Calculate timestamp 1 hour ago in ISO format
+    one_hour_ago = (datetime.now(timezone.utc) -
+                    timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
             textwrap.dedent(f"""\
@@ -22,19 +28,24 @@ def test_log_collection_to_gcp(generic_cloud: str):
         f.flush()
         logs_cmd = 'for i in {1..10}; do echo $i; done'
         validate_logs_cmd = (
-            'echo $output && echo "===Validate logs from GCP Cloud Logging===" &&'
-            'for i in {1..10}; echo $output | grep $i; done')
+            'echo $output && echo "===Validate logs from GCP Cloud Logging===" && '
+            'for i in {1..10}; do echo $output | grep $i; done')
         test = smoke_tests_utils.Test(
             'log_collection_to_gcp',
             [
                 f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; ',
                 f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
                 f'sky logs {name} 1',
-                (f'output=$(gcloud logging read "labels.skypilot_cluster_name={name}" --format=json | jq -r ".[].jsonPayload.log") && '
+                # Wait for the logs to be available in the GCP Cloud Logging.
+                f'sleep 30',
+                # Use grep instead of jq to avoid the dependency on jq.
+                (f'output=$(gcloud logging read \'labels.skypilot_cluster_name={name} AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
-                f'sky jobs launch -y -n {name}-job -j {name}-0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "{logs_cmd}"',
+                f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "{logs_cmd}"',
                 f'sky jobs logs {name}-job 1',
-                (f'output=$(gcloud logging read "labels.skypilot_cluster_name={name}-job" --format=json | jq -r ".[].jsonPayload.log") && '
+                # Wait for the logs to be available in the GCP Cloud Logging.
+                f'sleep 30',
+                (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\'") && '
                  f'{validate_logs_cmd}'),
             ],
             # f'sky down -y {name}',
