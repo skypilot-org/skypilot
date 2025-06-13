@@ -692,7 +692,7 @@ class RayCodeGen:
                     ))""")
         ]
 
-    def add_epilogue(self) -> None:
+    def add_epilogue(self, respect_cancelled: bool) -> None:
         """Generates code that waits for all tasks, then exits."""
         assert self._has_prologue, 'Call add_prologue() before add_epilogue().'
         assert not self._has_epilogue, 'add_epilogue() called twice?'
@@ -724,7 +724,7 @@ class RayCodeGen:
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED, respect_cancelled={respect_cancelled!r})
                 # Schedule the next pending job immediately to make the job
                 # scheduling more efficient.
                 job_lib.scheduler.schedule_step()
@@ -5403,7 +5403,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             docker_cluster_name=docker_cluster_name,
             docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
-        codegen.add_epilogue()
+        codegen.add_epilogue(respect_cancelled=docker_image is not None)
 
         self._exec_code_on_head(handle,
                                 codegen.build(),
@@ -5468,7 +5468,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 docker_cluster_name=docker_cluster_name,
                 docker_file_mounts_mapping=task.docker_file_mounts_mapping)
 
-        codegen.add_epilogue()
+        codegen.add_epilogue(respect_cancelled=docker_image is not None)
         # TODO(zhanghao): Add help info for downloading logs.
         self._exec_code_on_head(handle,
                                 codegen.build(),

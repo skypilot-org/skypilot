@@ -364,10 +364,15 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
-def set_status(job_id: int, status: JobStatus) -> None:
+def set_status(job_id: int,
+               status: JobStatus,
+               respect_cancelled: bool = False) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
+        if respect_cancelled and get_status_no_lock(
+                job_id) == JobStatus.CANCELLED:
+            return
         _set_status_no_lock(job_id, status)
 
 
@@ -896,6 +901,8 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
             job = _get_jobs_by_ids([job_id])[0]
             if job['docker_image_id'] is not None:
                 cancelled_ids.append(job['docker_image_id'])
+                if get_status_no_lock(job['job_id']) == JobStatus.RUNNING:
+                    _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
                 continue
             elif _is_job_driver_process_running(job['pid'], job_id):
                 # Not use process.terminate() as that will only terminate the
