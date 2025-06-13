@@ -238,20 +238,10 @@ def get_quota_code(accelerator: str, use_spot: bool) -> Optional[str]:
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    """Returns whether the instance type exists in the catalog."""
-    # Debug print
-    print(f"Checking instance type: {instance_type}")
-    print(f"Available instance types: {_df['InstanceType'].unique()}")
-    
-    # Check if it's a GPU instance type
-    if instance_type in GCP_ACC_INSTANCE_TYPES:
+    """Check the existence of the instance type."""
+    if instance_type == 'TPU-VM':
         return True
-    
-    # Check if it's a regular instance type
-    if instance_type.startswith(('n1-', 'n2-', 'n4-', 'c2-', 'c2d-', 'e2-', 'm1-', 'm2-', 'm3-', 'a2-', 'g2-', 'a3-', 'a4-')):
-        return True
-    
-    return False
+    return common.instance_type_exists_impl(_df, instance_type)
 
 
 def get_hourly_cost(
