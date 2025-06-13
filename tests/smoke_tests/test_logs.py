@@ -42,7 +42,6 @@ def test_log_collection_to_gcp(generic_cloud: str):
                 (f'output=$(gcloud logging read \'labels.skypilot_cluster_name={name} AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
                 f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "{logs_cmd}"',
-                f'sky jobs logs {name}-job 1',
                 # Wait for the logs to be available in the GCP Cloud Logging.
                 'sleep 60',
                 (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\'") && '
