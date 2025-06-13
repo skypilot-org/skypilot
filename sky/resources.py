@@ -153,7 +153,7 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
-        _force_quiet: Optional[bool] = None,
+        _no_missing_accel_warnings: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -378,7 +378,7 @@ class Resources:
 
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
-        self._force_quiet = _force_quiet
+        self._no_missing_accel_warnings = _no_missing_accel_warnings
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -651,11 +651,11 @@ class Resources:
         return self._requires_fuse
 
     @property
-    def force_quiet(self) -> bool:
+    def no_missing_accel_warnings(self) -> bool:
         """Returns whether to force quiet mode for this resource."""
-        if self._force_quiet is None:
+        if self._no_missing_accel_warnings is None:
             return False
-        return self._force_quiet
+        return self._no_missing_accel_warnings
 
     def set_requires_fuse(self, value: bool) -> None:
         """Sets whether this resource requires FUSE mounting support.
@@ -1759,7 +1759,7 @@ class Resources:
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override_configs,
-            _force_quiet=override.pop('force_quiet', self._force_quiet),
+            _no_missing_accel_warnings=override.pop('no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
         assert not override
         return resources
@@ -1852,7 +1852,7 @@ class Resources:
             for ordered_config in ordered:
                 Resources._apply_resource_config_aliases(ordered_config)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
-                                     'Invalid resources YAML: ')
+                                    'Invalid resources YAML: ')
 
         def _override_resources(
                 base_resource_config: Dict[str, Any],
@@ -1950,7 +1950,7 @@ class Resources:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('No GPUs found.')
                 accelerators = set(accelerators)
-                config['_force_quiet'] = True
+                config['_no_missing_accel_warnings'] = True
 
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
@@ -1990,7 +1990,6 @@ class Resources:
 
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
-
         resources_fields: Dict[str, Any] = {}
 
         # Extract infra field if present
@@ -2049,7 +2048,7 @@ class Resources:
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
             resources_fields['disk_size'] = int(resources_fields['disk_size'])
-        resources_fields['_force_quiet'] = config.pop('_force_quiet', False)
+        resources_fields['_no_missing_accel_warnings'] = config.pop('_no_missing_accel_warnings', False)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2100,8 +2099,8 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
-        if self._force_quiet is not None:
-            config['_force_quiet'] = self._force_quiet
+        if self._no_missing_accel_warnings is not None:
+            config['_no_missing_accel_warnings'] = self._no_missing_accel_warnings
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -2271,7 +2270,7 @@ class Resources:
             self._network_tier = state.get('_network_tier', None)
 
         if version < 27:
-            self._force_quiet = state.get('_force_quiet', None)
+            self._no_missing_accel_warnings = state.get('_no_missing_accel_warnings', None)
 
         self.__dict__.update(state)
 

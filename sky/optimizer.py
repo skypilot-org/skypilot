@@ -1329,7 +1329,7 @@ def _fill_in_launchable_resources(
             num_node_str = ''
             if task.num_nodes > 1:
                 num_node_str = f'{task.num_nodes}x '
-            if not (quiet or resources.force_quiet):
+            if not (quiet or resources.no_missing_accel_warnings):
                 logger.info(
                     f'No resource satisfying {num_node_str}'
                     f'{resources.repr_with_region_zone} on {clouds_str}.')

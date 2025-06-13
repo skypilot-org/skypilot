@@ -262,7 +262,7 @@ def _get_single_resources_schema():
                     }
                 }
             },
-            '_force_quiet': {
+            '_no_missing_accel_warnings': {
                 'type': 'boolean'
             },
             'image_id': {
