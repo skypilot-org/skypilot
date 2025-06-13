@@ -474,7 +474,8 @@ def maybe_show_privacy_policy():
     """Show the privacy policy if it is not already shown."""
     # Show the policy message only when the entrypoint is used.
     # An indicator for PRIVACY_POLICY has already been shown.
-    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
+    privacy_policy_indicator = os.path.expanduser(
+        constants.PRIVACY_POLICY_SHOWN_PATH)
     if not env_options.Options.DISABLE_LOGGING.get():
         os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
         try:
