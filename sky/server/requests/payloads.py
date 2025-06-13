@@ -405,7 +405,7 @@ class JobsCancelBody(RequestBody):
 class JobsLogsBody(RequestBody):
     """The request body for the jobs logs endpoint."""
     name: Optional[str] = None
-    job_id: Optional[int] = None
+    job_id: Optional[str] = None
     follow: bool = True
     controller: bool = False
     refresh: bool = False

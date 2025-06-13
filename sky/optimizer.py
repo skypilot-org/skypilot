@@ -1000,6 +1000,7 @@ class Optimizer:
         from sky import global_user_state
         from sky.backends import CloudVmRayBackend
         from sky.backends import CloudVmRayResourceHandle
+
         # pylint: enable=import-outside-toplevel
         fields = [
             'INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS', 'COST ($)',

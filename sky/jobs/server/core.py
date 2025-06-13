@@ -452,7 +452,7 @@ def queue(refresh: bool,
             if j['job_id'] in cn2remove[cn]:
                 continue
             all_jobs.append({
-                'job_id': cnt,
+                'job_id': f'{cn}-{j["job_id"]}',
                 'task_id': 0,
                 'task_name': f'{cn}-{j["job_id"]}',
                 'job_name': f'{cn}-{j["job_id"]}',
@@ -615,18 +615,20 @@ def tail_logs(name: Optional[str],
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
-    del job_id, controller, refresh, tail  # Unused.
-    if name is None:
+    del controller, refresh, tail  # Unused.
+    # TODO(zhwu): Automatically restart the jobs controller
+    if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Must specify --name for managed job logs.')
-    name_parts = name.split('-')
+            raise ValueError('Cannot specify both name and job_id.')
+    if name is None and job_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Must specify at least one of --name or --job-id.')
+    id_to_use = job_id if job_id is not None else name
+    assert id_to_use is not None, (name, job_id)
+    name_parts = id_to_use.split('-')
     real_job_id = int(name_parts[-1])
     cluster_name = '-'.join(name_parts[:-1])
     return core.tail_logs(cluster_name, real_job_id, follow)
-    # TODO(zhwu): Automatically restart the jobs controller
-    # if name is not None and job_id is not None:
-    #     with ux_utils.print_exception_no_traceback():
-    #         raise ValueError('Cannot specify both name and job_id.')
 
     # jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     # job_name_or_id_str = ''

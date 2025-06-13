@@ -199,7 +199,7 @@ def cancel(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def tail_logs(name: Optional[str] = None,
-              job_id: Optional[int] = None,
+              job_id: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,

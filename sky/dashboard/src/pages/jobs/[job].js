@@ -255,46 +255,6 @@ function JobDetails() {
                 </div>
               </Card>
             </div>
-
-            {/* Controller Logs Section */}
-            <div id="controller-logs-section" className="mt-6">
-              <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="flex items-center">
-                    <h3 className="text-lg font-semibold">Controller Logs</h3>
-                    <span className="ml-2 text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
-                  </div>
-                  <Tooltip
-                    content="Refresh controller logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleControllerLogsRefresh}
-                      disabled={isLoadingControllerLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                    >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
-                </div>
-                <div className="p-4">
-                  <JobDetailsContent
-                    jobData={detailJobData}
-                    activeTab="controllerlogs"
-                    setIsLoadingLogs={setIsLoadingLogs}
-                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                    isLoadingLogs={isLoadingLogs}
-                    isLoadingControllerLogs={isLoadingControllerLogs}
-                    refreshFlag={refreshControllerLogsFlag}
-                  />
-                </div>
-              </Card>
-            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center py-32">

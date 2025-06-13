@@ -4606,9 +4606,9 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
-@click.argument('job_id', required=False, type=int)
+@click.argument('job_id', required=False, type=str)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+def jobs_logs(name: Optional[str], job_id: Optional[str], follow: bool,
               controller: bool, refresh: bool, sync_down: bool):
     """Tail or sync down the log of a managed job."""
     try:
