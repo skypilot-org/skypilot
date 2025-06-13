@@ -11,6 +11,7 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -71,7 +72,7 @@ class SSH(kubernetes.Kubernetes):
                         # Get cluster names and prepend 'ssh-' to match
                         # context naming convention
                         contexts = [
-                            f'ssh-{cluster_name}'
+                            f'{constants.SSH_CLUSTER_PREFIX}{cluster_name}'
                             for cluster_name in ssh_config.keys()
                         ]
             except Exception:  # pylint: disable=broad-except
@@ -89,9 +90,11 @@ class SSH(kubernetes.Kubernetes):
         all_contexts = self.existing_allowed_contexts()
 
         if region is not None and region not in all_contexts:
-            region_name = common_utils.removeprefix(region, 'ssh-')
+            region_name = common_utils.removeprefix(
+                region, constants.SSH_CLUSTER_PREFIX)
             available_contexts = [
-                common_utils.removeprefix(c, 'ssh-') for c in all_contexts
+                common_utils.removeprefix(c, constants.SSH_CLUSTER_PREFIX)
+                for c in all_contexts
             ]
             err_str = (f'SSH Node Pool {region_name!r} is not set up. '
                        'Run `sky check` for more details. ')
@@ -148,7 +151,8 @@ class SSH(kubernetes.Kubernetes):
 
         # Filter for SSH contexts (those starting with 'ssh-')
         ssh_contexts = [
-            context for context in all_contexts if context.startswith('ssh-')
+            context for context in all_contexts
+            if context.startswith(constants.SSH_CLUSTER_PREFIX)
         ]
 
         # Get contexts from SSH node pools file
@@ -158,8 +162,8 @@ class SSH(kubernetes.Kubernetes):
             if allowed_node_pools is None:
                 return ctxs
             return [
-                ctx for ctx in ctxs
-                if common_utils.removeprefix(ctx, 'ssh-') in allowed_node_pools
+                ctx for ctx in ctxs if common_utils.removeprefix(
+                    ctx, constants.SSH_CLUSTER_PREFIX) in allowed_node_pools
             ]
 
         if all_node_pool_contexts:
@@ -214,7 +218,7 @@ class SSH(kubernetes.Kubernetes):
     @classmethod
     def expand_infras(cls) -> List[str]:
         return [
-            f'{cls.canonical_name()}/{c.lstrip("ssh-")}'
+            f'{cls.canonical_name()}/{c.lstrip(constants.SSH_CLUSTER_PREFIX)}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 

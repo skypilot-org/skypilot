@@ -2,6 +2,7 @@
 import dataclasses
 from typing import Optional
 
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -94,7 +95,7 @@ class InfraInfo:
             # kubeconfig to store the ssh contexts.
             region = '/'.join(parts[1:]) if len(parts) >= 2 else None
             if region:
-                region = f'ssh-{region}'
+                region = f'{constants.SSH_CLUSTER_PREFIX}{region}'
             zone = None
         else:
             # For non-Kubernetes clouds, continue with regular parsing
@@ -146,8 +147,9 @@ class InfraInfo:
         # If the cloud is ssh, we remove the ssh- prefix from the region
         # TODO(romilb): This is a workaround while we use the global
         # kubeconfig to store the ssh contexts.
-        if region and region.startswith('ssh-'):
-            region = region[4:]
+        if region and region.startswith(constants.SSH_CLUSTER_PREFIX):
+            region = common_utils.removeprefix(region,
+                                               constants.SSH_CLUSTER_PREFIX)
 
         # Build the parts list and filter out trailing wildcards
         parts = [cloud.lower(), region, zone]
@@ -180,7 +182,8 @@ class InfraInfo:
             # Node Pools.
             # TODO(romilb): This is a workaround while we use the global
             # kubeconfig to store the ssh contexts.
-            region_or_zone = common_utils.removeprefix(self.region, 'ssh-')
+            region_or_zone = common_utils.removeprefix(
+                self.region, constants.SSH_CLUSTER_PREFIX)
 
         if region_or_zone is not None and truncate:
             region_or_zone = common_utils.truncate_long_string(

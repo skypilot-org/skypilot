@@ -479,8 +479,10 @@ class Resources:
         region_str = ''
         if self.region is not None:
             region_name = self.region
-            if self.region.startswith('ssh-'):
-                region_name = common_utils.removeprefix(self.region, 'ssh-')
+            if self.region.startswith(constants.SSH_CLUSTER_PREFIX):
+                region_name = common_utils.removeprefix(
+                    self.region, constants.SSH_CLUSTER_PREFIX)
+                return f'SSH Node Pool {region_name}'
             region_str = f', region={region_name}'
         zone_str = ''
         if self.zone is not None:

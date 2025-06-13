@@ -3596,7 +3596,7 @@ def show_gpus(
         # display an aggregated table for all contexts
         # if there are more than one contexts with GPUs.
         def _filter_ctx(ctx: str) -> bool:
-            ctx_is_ssh = ctx and ctx.startswith('ssh-')
+            ctx_is_ssh = ctx and ctx.startswith(constants.SSH_CLUSTER_PREFIX)
             return ctx_is_ssh is is_ssh
 
         num_filtered_contexts = 0
@@ -3613,7 +3613,8 @@ def show_gpus(
                 if not _filter_ctx(ctx):
                     continue
                 if is_ssh:
-                    display_ctx = common_utils.removeprefix(ctx, 'ssh-')
+                    display_ctx = common_utils.removeprefix(
+                        ctx, constants.SSH_CLUSTER_PREFIX)
                 else:
                     display_ctx = ctx
                 num_filtered_contexts += 1
