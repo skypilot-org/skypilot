@@ -760,8 +760,8 @@ class Resources:
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
-                    assert isinstance(accelerators, str), \
-                        'Accelerators should be a string'
+                    assert isinstance(accelerators, str), (
+                        type(accelerators), accelerators)
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
