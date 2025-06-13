@@ -247,10 +247,10 @@ To create a new secret, you can use the following command:
 
   WEB_USERNAME=skypilot
   WEB_PASSWORD=skypilot
+  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
   NAMESPACE=skypilot
   kubectl create secret generic initial-basic-auth \
-    --from-literal=username=$WEB_USERNAME \
-    --from-literal=password=$WEB_PASSWORD \
+    --from-literal=auth=$AUTH_STRING \
     -n $NAMESPACE
 
 Default: ``null``
