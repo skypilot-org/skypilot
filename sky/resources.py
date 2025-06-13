@@ -890,7 +890,7 @@ class Resources:
             else:
                 volume['attach_mode'] = read_write_mode
             if volume['storage_type'] == network_type:
-                # TODO(@luca): add units to this disk_size as well
+                # TODO(luca): add units to this disk_size as well
                 if ('disk_size' in volume and
                         round(volume['disk_size']) != volume['disk_size']):
                     with ux_utils.print_exception_no_traceback():
