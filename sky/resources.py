@@ -158,7 +158,7 @@ class Resources:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[Optional[str], str], str, None] = None,
-        disk_size: Optional[int] = None,
+        disk_size: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
