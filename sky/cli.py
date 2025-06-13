@@ -1295,6 +1295,7 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
+    infra = infra.removeprefix('ssh/')
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
 
@@ -4281,6 +4282,7 @@ def jobs_launch(
                                    'Use one of the flags as they are alias.')
         name = cluster
     env = _merge_env_vars(env_file, env)
+    infra = infra.removeprefix('ssh/')
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     docker_job_cluster = None
