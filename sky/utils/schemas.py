@@ -6,6 +6,7 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
+from sky import resources
 from sky.skylet import constants
 
 
@@ -33,8 +34,6 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
-time_pattern = '^[0-9]+([m]|[h]|[d]|[s]|[min]|[hr]|[day]|[sec])?$'
-
 _AUTOSTOP_SCHEMA = {
     'anyOf': [
         {
@@ -47,7 +46,7 @@ _AUTOSTOP_SCHEMA = {
             #   autostop: 5
             'anyOf': [{
                 'type': 'string',
-                'pattern': time_pattern,
+                'pattern': resources.TIME_PATTERN,
                 'minimum': 0,
             }, {
                 'type': 'integer',
@@ -104,8 +103,6 @@ def _get_single_resources_schema():
     infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
                      f'{wildcard_cloud}{wildcard_with_region}|'
                      f'{kubernetes_pattern})$')
-
-    memory_pattern = '^[0-9]+([GgMmTt][Bb])$'
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -201,7 +198,7 @@ def _get_single_resources_schema():
                         'disk_size': {
                             'anyOf': [{
                                 'type': 'string',
-                                'pattern': memory_pattern,
+                                'pattern': resources.MEMORY_SIZE_PATTERN,
                             }, {
                                 'type': 'integer',
                             }],
@@ -230,7 +227,7 @@ def _get_single_resources_schema():
             'disk_size': {
                 'anyOf': [{
                     'type': 'string',
-                    'pattern': memory_pattern,
+                    'pattern': resources.MEMORY_SIZE_PATTERN,
                 }, {
                     'type': 'integer',
                 }],
@@ -385,8 +382,6 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
-    memory_pattern = '^[0-9]+([GgMmTt][Bb])$'
-
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -428,7 +423,7 @@ def get_storage_schema():
                     'disk_size': {
                         'anyOf': [{
                             'type': 'string',
-                            'pattern': memory_pattern,
+                            'pattern': resources.MEMORY_SIZE_PATTERN,
                         }, {
                             'type': 'integer',
                         }],

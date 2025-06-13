@@ -49,6 +49,9 @@ TIME_UNITS = {
     'day': 24 * 60,
 }
 
+TIME_PATTERN = (
+    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
+
 MEMORY_SIZE_UNITS = {
     'b': 1,
     'k': 2**10,
@@ -62,6 +65,12 @@ MEMORY_SIZE_UNITS = {
     'p': 2**50,
     'pb': 2**50,
 }
+
+MEMORY_SIZE_PATTERN = (
+    '^[0-9]+('
+    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
+    ')?$/i')
+MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
 
 
 @dataclasses.dataclass
