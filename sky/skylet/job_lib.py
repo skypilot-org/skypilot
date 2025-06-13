@@ -62,6 +62,7 @@ class JobInfoLoc(enum.IntEnum):
     RESOURCES = 8
     PID = 9
     DOCKER_IMAGE_ID = 10
+    DOCKER_CLUSTER_NAME = 11
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -106,7 +107,8 @@ def create_table(cursor, conn):
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
         pid INTEGER DEFAULT -1,
-        docker_image_id TEXT DEFAULT NULL)""")
+        docker_image_id TEXT DEFAULT NULL,
+        docker_cluster_name TEXT DEFAULT NULL)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -120,6 +122,8 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'docker_image_id',
+                                 'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'docker_cluster_name',
                                  'TEXT DEFAULT NULL')
     conn.commit()
 
@@ -317,14 +321,16 @@ def add_job(job_name: str,
             username: str,
             run_timestamp: str,
             resources_str: str,
-            docker_image_id: Optional[str] = None) -> int:
+            docker_image_id: Optional[str] = None,
+            docker_cluster_name: Optional[str] = None) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _CURSOR.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, ?)',
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, ?, ?)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str, docker_image_id))
+         run_timestamp, None, resources_str, docker_image_id,
+         docker_cluster_name))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -501,6 +507,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
             'docker_image_id': row[JobInfoLoc.DOCKER_IMAGE_ID.value],
+            'docker_cluster_name': row[JobInfoLoc.DOCKER_CLUSTER_NAME.value],
         })
     return records
 
@@ -988,7 +995,8 @@ class JobLibCodeGen:
                 username: str,
                 run_timestamp: str,
                 resources_str: str,
-                docker_image_id: Optional[str] = None) -> str:
+                docker_image_id: Optional[str] = None,
+                docker_cluster_name: Optional[str] = None) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1004,7 +1012,8 @@ class JobLibCodeGen:
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
-            f'{docker_image_id!r})',
+            f'{docker_image_id!r},'
+            f'{docker_cluster_name!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)

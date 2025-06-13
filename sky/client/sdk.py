@@ -549,7 +549,7 @@ def _launch(
     # these flags.
     del down, idle_minutes_to_autostop
 
-    confirm_shown = False
+    # confirm_shown = False
     if _need_confirmation:
         cluster_status = None
         # TODO(SKY-998): we should reduce RTTs before launching the cluster.
@@ -637,12 +637,12 @@ def _launch(
                       f'{cluster_user_name!r}{cluster_user_hash_str}. '
                       'Reusing the cluster. Proceed?')
         if prompt is not None:
-            confirm_shown = True
+            # confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    if not confirm_shown:
-        click.secho('Running on cluster: ', fg='cyan', nl=False)
-        click.secho(cluster_name)
+    # if not confirm_shown:
+    #     click.secho('Running on cluster: ', fg='cyan', nl=False)
+    #     click.secho(cluster_name)
 
     dag = client_common.upload_mounts_to_api_server(dag)
 

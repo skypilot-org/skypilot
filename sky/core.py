@@ -1059,6 +1059,13 @@ def enabled_clouds(workspace: Optional[str] = None,
                 enabled_k8s_infras.extend(cloud_infra)
             else:
                 enabled_cloud_infras.extend(cloud_infra)
+        infra_cls = backend_utils.get_clusters(
+            refresh=common.StatusRefreshMode.NONE,
+            cluster_names=None,
+            all_users=True,
+            infra_only=True)
+        if infra_cls:
+            enabled_ssh_infras = ['ssh/' + c['name'] for c in infra_cls]
         all_infras = sorted(enabled_ssh_infras) + sorted(
             enabled_k8s_infras) + sorted(enabled_cloud_infras)
         return all_infras
@@ -1274,6 +1281,14 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         # TODO(zhwu): check if there are any clusters/jobs running on the infra.
         global_user_state.set_cluster_used_as_infra(infra,
                                                     used_as_infra=not cleanup)
+        if cleanup:
+            logger.info(
+                ux_utils.finishing_message(
+                    f'Successfully removed {infra} from the infra list.'))
+        else:
+            logger.info(
+                ux_utils.finishing_message(
+                    f'Successfully transferred {infra} to an infra.'))
     else:
         raise ValueError(f'Cluster {infra} does not exist.')
         # kubernetes_deploy_utils.deploy_ssh_cluster(

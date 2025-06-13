@@ -1379,7 +1379,7 @@ class RetryingVmProvisioner(object):
             ux_utils.spinner_message('Launching', log_path))
 
         launching_on_override = None
-        if docker_cluster_name is not None:
+        if docker_image_on_no_image_cluster is not None:
             launching_on_override = (f'SSH Node Pools ({cluster_name})')
 
         # Get previous cluster status
@@ -1692,9 +1692,12 @@ class RetryingVmProvisioner(object):
                 config_dict['handle'] = handle
                 cn = (cluster_name
                       if docker_cluster_name is None else docker_cluster_name)
-                logger.info(
-                    ux_utils.finishing_message(f'Cluster launched: {cn!r}.',
-                                               log_path))
+                # Skip this logging for sky jobs launch.
+                if not (docker_image_on_no_image_cluster is not None and
+                        docker_cluster_name is None):
+                    logger.info(
+                        ux_utils.finishing_message(f'Cluster launched: {cn!r}.',
+                                                   log_path))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -3679,17 +3682,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # ssh keep connected after ctrl-c.
                 self.tail_logs(handle, job_id)
 
-    def _add_job(self,
-                 handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str],
-                 resources_str: str,
-                 docker_image_id: Optional[str] = None) -> int:
+    def _add_job(
+        self,
+        handle: CloudVmRayResourceHandle,
+        job_name: Optional[str],
+        resources_str: str,
+        docker_image_id: Optional[str] = None,
+        docker_cluster_name: Optional[str] = None,
+    ) -> int:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
             resources_str=resources_str,
-            docker_image_id=docker_image_id)
+            docker_image_id=docker_image_id,
+            docker_cluster_name=docker_cluster_name)
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -3772,7 +3779,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id = self._add_job(handle,
                                task_copy.name,
                                resources_str,
-                               docker_image_id=docker_image_unique_id)
+                               docker_image_id=docker_image_unique_id,
+                               docker_cluster_name=docker_cluster_name)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods

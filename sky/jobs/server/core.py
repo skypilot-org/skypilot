@@ -1,5 +1,4 @@
 """SDK functions for managed jobs."""
-import collections
 import os
 import signal
 import subprocess
@@ -429,19 +428,7 @@ def queue(refresh: bool,
                       refresh=refresh,
                       all_users=all_users,
                       infra_only=True)
-    cns = []
-    cn2remove = collections.defaultdict(list)
-    for cr in crs:
-        cns.append(cr['name'])
-    non_infra_cns = core.status(cluster_names=None,
-                                refresh=refresh,
-                                all_users=all_users,
-                                infra_only=False)
-    for cr in non_infra_cns:
-        handle = cr['handle']
-        if handle.docker_cluster_job_id is not None:
-            cn2remove[handle.launched_resources.cloud].append(
-                handle.docker_cluster_job_id)
+    cns = [cr['name'] for cr in crs]
     all_jobs = []
     cnt = 0
     for cn in cns:
@@ -449,7 +436,8 @@ def queue(refresh: bool,
                         skip_finished=True,
                         all_users=all_users)
         for j in cq:
-            if j['job_id'] in cn2remove[cn]:
+            # Skip docker dev box jobs.
+            if j['docker_cluster_name'] is not None:
                 continue
             all_jobs.append({
                 'job_id': f'{cn}-{j["job_id"]}',

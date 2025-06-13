@@ -661,9 +661,10 @@ def _post_provision_setup(
                                                  cluster_info, ssh_credentials)
 
     cn = cluster_name if docker_cluster_name is None else docker_cluster_name
-    logger.info(
-        ux_utils.finishing_message(f'Cluster launched: {cn}.',
-                                   provision_logging.config.log_path))
+    if not (docker_image is not None and docker_cluster_name is None):
+        logger.info(
+            ux_utils.finishing_message(f'Cluster launched: {cn}.',
+                                       provision_logging.config.log_path))
     return cluster_info
 
 
