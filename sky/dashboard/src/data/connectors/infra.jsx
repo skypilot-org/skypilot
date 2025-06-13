@@ -437,6 +437,7 @@ async function getKubernetesGPUs(clustersAndJobsData) {
             gpu_name: acceleratorType,
             gpu_total: totalAccelerators,
             gpu_free: freeAccelerators,
+            ip_address: nodeData['ip_address'] || null,
             context: context,
           };
 

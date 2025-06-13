@@ -148,6 +148,7 @@ export function TopBar() {
   const isMobile = useMobile();
   const { userEmail, userRole } = useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [grafanaUrl, setGrafanaUrl] = useState(null);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -164,6 +165,12 @@ export function TopBar() {
     };
   }, [dropdownRef]);
 
+  // Check for Grafana URL from the injected global variable
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.SKYPILOT_GRAFANA_URL) {
+      setGrafanaUrl(window.SKYPILOT_GRAFANA_URL);
+    }
+  }, []);
   // Function to get user initial
   const getUserInitial = (email) => {
     if (!email) return '?';
@@ -298,6 +305,27 @@ export function TopBar() {
               />
             </a>
           </CustomTooltip>
+
+          {/* Conditionally render Grafana link if URL is available */}
+          {grafanaUrl && (
+            <CustomTooltip
+              content="Grafana Dashboard"
+              className="text-sm text-muted-foreground"
+            >
+              <a
+                href={grafanaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+                title="Grafana"
+              >
+                {!isMobile && <span className="mr-1">Grafana</span>}
+                <ExternalLinkIcon
+                  className={`${isMobile ? 'w-4 h-4' : 'w-3.5 h-3.5'}`}
+                />
+              </a>
+            </CustomTooltip>
+          )}
 
           {/* Keep the rest of the external links as icons only */}
           <CustomTooltip
