@@ -328,7 +328,12 @@ export function ManagedJobs() {
         setNameFilter(nameParam);
       }
     }
-  }, [router.isReady, router.query.workspace, router.query.user, router.query.name]);
+  }, [
+    router.isReady,
+    router.query.workspace,
+    router.query.user,
+    router.query.name,
+  ]);
 
   // Helper function to update URL query parameters
   const updateURLParams = (newWorkspace, newUser, newName) => {
