@@ -760,8 +760,8 @@ class Resources:
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
-                    assert isinstance(accelerators, str), (
-                        type(accelerators), accelerators)
+                    assert isinstance(accelerators,
+                                      str), (type(accelerators), accelerators)
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
@@ -1759,7 +1759,8 @@ class Resources:
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override_configs,
-            _no_missing_accel_warnings=override.pop('no_missing_accel_warnings', self._no_missing_accel_warnings),
+            _no_missing_accel_warnings=override.pop(
+                'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
         assert not override
         return resources
@@ -1826,6 +1827,56 @@ class Resources:
                 del config[alias]
 
     @classmethod
+    def _parse_accelerators_from_str(
+            cls, config: Dict[str, Any],
+            accelerators: str) -> List[Tuple[str, bool]]:
+        """Parse accelerators string into a list of possible accelerators.
+        
+        Returns:
+            A list of possible accelerators. Each element is a tuple of
+            (accelerator_name, was_user_specified).
+        """
+        # sanity check
+        assert isinstance(accelerators, str), accelerators
+
+        manufacturer = None
+        memory = None
+        count = 1
+
+        split = accelerators.split(':')
+        if len(split) == 3:
+            manufacturer, memory, count_str = split
+            count = int(count_str)
+            assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
+                'If specifying a GPU manufacturer, you must also' \
+                'specify the memory size'
+        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            memory = split[0]
+            count = int(split[1])
+        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[1]):
+            manufacturer, memory = split
+        elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            memory = split[0]
+        else:
+            # it is just an accelerator name, not a memory size
+            return [(accelerators, True)]
+
+        # we know we have some case of manufacturer, memory, count, now we
+        # need to convert that to a list of possible accelerators
+        memory_parsed = parse_memory_resource(memory,
+                                              'accelerators',
+                                              allow_plus=True)
+        plus = memory_parsed[-1] == '+'
+        if plus:
+            memory_parsed = memory_parsed[:-1]
+        memory_gb = int(memory_parsed)
+
+        accelerators = [(f'{device}:{count}', False) for device in _get_devices(
+            memory_gb, plus, manufacturer=manufacturer)]
+
+        return accelerators
+
+    @classmethod
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
@@ -1852,7 +1903,7 @@ class Resources:
             for ordered_config in ordered:
                 Resources._apply_resource_config_aliases(ordered_config)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
-                                    'Invalid resources YAML: ')
+                                     'Invalid resources YAML: ')
 
         def _override_resources(
                 base_resource_config: Dict[str, Any],
@@ -1894,63 +1945,34 @@ class Resources:
         # Parse resources.accelerators field.
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
-            manufacturer = None
-            memory = None
-            count = 1
-
-            split = []
-            split = str(accelerators).split(':')
-            if len(split) == 3:
-                manufacturer, memory, count_str = split
-                count = int(count_str)
-                assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
-                    'If specifying a GPU manufacturer, you must also' \
-                    'specify the memory size'
-            elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
-                                              split[0]):
-                memory = split[0]
-                count = int(split[1])
-            elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
-                                              split[1]):
-                manufacturer, memory = split
-            elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$',
-                                              split[0]):
-                memory = split[0]
-            elif isinstance(accelerators, str):
-                accelerators = {accelerators}
+            if isinstance(accelerators, str):
+                accelerators = cls._parse_accelerators_from_str(
+                    config, accelerators)
             elif isinstance(accelerators, dict):
-                accelerators = [
+                accelerator_names = [
                     f'{k}:{v}' if v is not None else f'{k}'
                     for k, v in accelerators.items()
                 ]
-                accelerators = set(accelerators)
-
-            if memory is not None:
-                # set accelerators to a dictionary of DEVICE NAME: DEVICE COUNT
-                # where each DEVICE NAME has at least memory size
-                memory_parsed = parse_memory_resource(memory,
-                                                      'accelerators',
-                                                      allow_plus=True)
-                plus = '+' in memory_parsed
-                if plus:
-                    memory_parsed = memory_parsed[:-1]
-                memory_gb = int(memory_parsed)
-
-                cloud = None
-                if config.get('infra') is not None:
-                    cloud = config.get('infra')
-                    if not isinstance(cloud, str):
-                        cloud = None
-
                 accelerators = [
-                    f'{device}:{count}' for device in _get_devices(
-                        memory_gb, plus, manufacturer=manufacturer)
+                    accel_name for accel_name in accelerator_names
+                    for accel_name in cls._parse_accelerators_from_str(
+                        config, accel_name)
                 ]
-                if not accelerators:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError('No GPUs found.')
-                accelerators = set(accelerators)
-                config['_no_missing_accel_warnings'] = True
+            elif isinstance(accelerators, list) or isinstance(accelerators, set):
+                accelerators = [
+                    accel_name for accel_name in accelerators
+                    for accel_name in cls._parse_accelerators_from_str(
+                        config, accel_name)
+                ]
+            # now that accelerators is a list, we need to decide which to
+            # include in the final set
+            accel_dict = {}
+            for accel, user_specified in accelerators:
+                # If this accelerator is not in dict yet, or if current one is user specified
+                # and existing one is not, update the entry
+                if accel not in accel_dict or (user_specified and not accel_dict[accel]):
+                    accel_dict[accel] = user_specified
+            accelerators = {(accel, user_specified) for accel, user_specified in accel_dict.items()}
 
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
@@ -1977,9 +1999,11 @@ class Resources:
             # In Task, we store a list of resources, each with 1 accelerator.
             # This for loop is for format conversion.
             tmp_resources_list = []
-            for acc in accelerators:
+            for acc, user_specified in accelerators:
                 tmp_resource = config.copy()
                 tmp_resource['accelerators'] = acc
+                if not user_specified:
+                    tmp_resource['_no_missing_accel_warnings'] = True
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
@@ -2048,7 +2072,8 @@ class Resources:
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
             resources_fields['disk_size'] = int(resources_fields['disk_size'])
-        resources_fields['_no_missing_accel_warnings'] = config.pop('_no_missing_accel_warnings', False)
+        resources_fields['_no_missing_accel_warnings'] = config.pop(
+            '_no_missing_accel_warnings', False)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2100,7 +2125,8 @@ class Resources:
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
         if self._no_missing_accel_warnings is not None:
-            config['_no_missing_accel_warnings'] = self._no_missing_accel_warnings
+            config[
+                '_no_missing_accel_warnings'] = self._no_missing_accel_warnings
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -2270,7 +2296,8 @@ class Resources:
             self._network_tier = state.get('_network_tier', None)
 
         if version < 27:
-            self._no_missing_accel_warnings = state.get('_no_missing_accel_warnings', None)
+            self._no_missing_accel_warnings = state.get(
+                '_no_missing_accel_warnings', None)
 
         self.__dict__.update(state)
 
