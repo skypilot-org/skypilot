@@ -505,6 +505,11 @@ def test_parse_accelerators_from_yaml():
         accelerators: \"V100: 0.5\"""")
     _test_parse_accelerators(spec, {'V100': 0.5})
 
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: {V100: 0.5}""")
+    _test_parse_accelerators(spec, {'V100': 0.5})
+
     # Invalid.
     spec = textwrap.dedent("""\
       resources:
@@ -793,6 +798,31 @@ def test_accelerator_memory_filtering(capfd):
     assert 'V100' in stdout  # V100 has 32GB memory
     assert 'A100' in stdout  # A100 has 40GB/80GB memory
     assert 'T4' not in stdout  # T4 has 16GB memory
+
+    spec = {'accelerators': {'32GB+'}}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' not in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': {'32GB+', 'T4'}})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': ['32GB+', 'T4']})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': ['32GB+', '16gb']})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
 
     # Test memory with different units
     spec = {'accelerators': '16384MB'}  # 16GB in MB
