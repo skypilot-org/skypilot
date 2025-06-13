@@ -9,7 +9,6 @@ import shutil
 import time
 import typing
 from typing import List, Optional, Tuple, Union
-import uuid
 
 import colorama
 
@@ -716,9 +715,10 @@ def launch(
             fn = os.path.expanduser(id2file[job_id])
             node2user = {}
             node2port = {}
-            with open(os.path.join(fn, 'run.log'), 'r') as f:
+            with open(os.path.join(fn, 'run.log'), 'r', encoding='utf-8') as f:
                 for line in f:
-                    if 'docker_user:' not in line and 'docker_port:' not in line:
+                    if ('docker_user:' not in line and
+                            'docker_port:' not in line):
                         continue
                     match = re.search(
                         r'\((head|worker\d+), rank=(\d+), pid=(\d+)', line)
@@ -735,8 +735,8 @@ def launch(
         ready_cnt = 0
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Setting up SSH on cluster {original_cluster_name!r} (0/{task_ori.num_nodes} ready)'
-                )) as spinner:
+                    f'Setting up SSH on cluster {original_cluster_name!r} '
+                    f'(0/{task_ori.num_nodes} ready)')) as spinner:
             node2user = {}
             node2port = {}
             st = time.time()
@@ -752,7 +752,8 @@ def launch(
                     ready_cnt = cur_ready_cnt
                     spinner.update(
                         ux_utils.spinner_message(
-                            f'Setting up SSH on cluster {original_cluster_name!r} '
+                            'Setting up SSH on cluster '
+                            f'{original_cluster_name!r} '
                             f'({ready_cnt}/{task_ori.num_nodes} ready)'))
                 if cur_ready_cnt == task_ori.num_nodes:
                     break

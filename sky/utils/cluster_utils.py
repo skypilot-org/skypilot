@@ -207,8 +207,8 @@ class SSHConfigHelper(object):
             if docker_proxy_command_generator is not None:
                 docker_proxy_command = docker_proxy_command_generator(ip, port)
                 ip = 'localhost'
-                port = constants.DEFAULT_DOCKER_PORT if docker_ports is None else docker_ports[
-                    i]
+                port = (constants.DEFAULT_DOCKER_PORT
+                        if docker_ports is None else docker_ports[i])
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(

@@ -341,6 +341,7 @@ def add_ray_env_vars(
     return env_vars
 
 
+# pylint: disable=line-too-long
 def run_bash_command_with_log(
         bash_command: str,
         log_path: str,
@@ -418,7 +419,7 @@ def run_bash_command_with_log(
                     'sudo apt-get update > /dev/null 2>&1\n'
                     'sudo apt-get install -y iproute2 > /dev/null 2>&1\n'
                     'DOCKER_PORT=10022\n'
-                    'while ss -lntu | awk \'{print $5}\' | grep -q ":$DOCKER_PORT\$"; do\n'
+                    'while ss -lntu | awk \'{print $5}\' | grep -q ":$DOCKER_PORT\$"; do\n'  # pylint: disable=anomalous-backslash-in-string
                     '  ((DOCKER_PORT++))\n'
                     'done\n'
                     'echo "docker_port:$DOCKER_PORT"\n')
@@ -464,6 +465,9 @@ def run_bash_command_with_log(
                             stream_logs=stream_logs,
                             with_ray=with_ray,
                             shell=True)
+
+
+# pylint: enable=line-too-long
 
 
 def _follow_job_logs(file,

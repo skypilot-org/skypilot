@@ -54,9 +54,7 @@ export function SSHNodePoolClustersSection({
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
           <h3 className="text-lg font-semibold mb-4">{title}</h3>
-          <p className="text-sm text-gray-500">
-            No {title} clusters found.
-          </p>
+          <p className="text-sm text-gray-500">No {title} clusters found.</p>
         </div>
       </div>
     );
@@ -101,12 +99,13 @@ export function SSHNodePoolClustersSection({
                 className={`bg-white divide-y divide-gray-200 ${safeClusters.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
               >
                 {safeClusters.map((cluster) => {
-                  const statusColor = {
-                    RUNNING: 'bg-green-100 text-green-800',
-                    STOPPED: 'bg-yellow-100 text-yellow-800',
-                    LAUNCHING: 'bg-blue-100 text-blue-800',
-                    TERMINATED: 'bg-red-100 text-red-800',
-                  }[cluster.status] || 'bg-gray-100 text-gray-500';
+                  const statusColor =
+                    {
+                      RUNNING: 'bg-green-100 text-green-800',
+                      STOPPED: 'bg-yellow-100 text-yellow-800',
+                      LAUNCHING: 'bg-blue-100 text-blue-800',
+                      TERMINATED: 'bg-red-100 text-red-800',
+                    }[cluster.status] || 'bg-gray-100 text-gray-500';
 
                   return (
                     <tr key={cluster.cluster} className="hover:bg-gray-50">
@@ -117,7 +116,10 @@ export function SSHNodePoolClustersSection({
                         >
                           <span
                             className="text-blue-600 hover:underline cursor-pointer"
-                            onClick={() => handleClusterClick && handleClusterClick(cluster.cluster)}
+                            onClick={() =>
+                              handleClusterClick &&
+                              handleClusterClick(cluster.cluster)
+                            }
                           >
                             {cluster.cluster.length > NAME_TRUNCATE_LENGTH
                               ? `${cluster.cluster.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${cluster.cluster.substring(cluster.cluster.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
@@ -126,19 +128,27 @@ export function SSHNodePoolClustersSection({
                         </NonCapitalizedTooltip>
                       </td>
                       <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor}`}>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor}`}
+                        >
                           {cluster.status}
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-gray-700">{cluster.user}</span>
+                        <span className="text-sm text-gray-700">
+                          {cluster.user}
+                        </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-gray-700">{cluster.cloud}</span>
+                        <span className="text-sm text-gray-700">
+                          {cluster.cloud}
+                        </span>
                       </td>
                       <td className="p-3">
                         <NonCapitalizedTooltip
-                          content={cluster.resources_str_full || cluster.resources_str}
+                          content={
+                            cluster.resources_str_full || cluster.resources_str
+                          }
                           className="text-sm text-muted-foreground"
                         >
                           <span className="text-sm text-gray-700">
@@ -148,7 +158,9 @@ export function SSHNodePoolClustersSection({
                       </td>
                       <td className="p-3">
                         <span className="text-sm text-gray-700">
-                          {cluster.time ? cluster.time.toLocaleDateString() : '-'}
+                          {cluster.time
+                            ? cluster.time.toLocaleDateString()
+                            : '-'}
                         </span>
                       </td>
                     </tr>
@@ -1017,7 +1029,11 @@ export function GPUs() {
   const isAnyLoading = kubeLoading || cloudLoading || sshNodePoolLoading;
 
   // Check if all data has been loaded at least once
-  const isAllDataLoaded = kubeDataLoaded && cloudDataLoaded && sshNodePoolDataLoaded && !isInitialLoad;
+  const isAllDataLoaded =
+    kubeDataLoaded &&
+    cloudDataLoaded &&
+    sshNodePoolDataLoaded &&
+    !isInitialLoad;
 
   return (
     <>

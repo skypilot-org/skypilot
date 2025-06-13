@@ -39,7 +39,8 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.workspaces import core as workspaces_core
+
+# from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import sky
@@ -423,6 +424,7 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    del skip_finished, job_ids  # Unused.
     crs = core.status(cluster_names=None,
                       refresh=refresh,
                       all_users=all_users,
@@ -446,7 +448,7 @@ def queue(refresh: bool,
         cq = core.queue(cluster_name=cn,
                         skip_finished=True,
                         all_users=all_users)
-        for i, j in enumerate(cq):
+        for j in cq:
             if j['job_id'] in cn2remove[cn]:
                 continue
             all_jobs.append({
@@ -468,61 +470,61 @@ def queue(refresh: bool,
             })
             cnt += 1
     return all_jobs
-    handle = _maybe_restart_controller(refresh,
-                                       stopped_message='No in-progress '
-                                       'managed jobs.',
-                                       spinner_message='Checking '
-                                       'managed jobs')
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
+    # handle = _maybe_restart_controller(refresh,
+    #                                    stopped_message='No in-progress '
+    #                                    'managed jobs.',
+    #                                    spinner_message='Checking '
+    #                                    'managed jobs')
+    # backend = backend_utils.get_backend_from_handle(handle)
+    # assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
-    returncode, job_table_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+    # code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    # returncode, job_table_payload, stderr = backend.run_on_head(
+    #     handle,
+    #     code,
+    #     require_outputs=True,
+    #     stream_logs=False,
+    #     separate_stderr=True)
 
-    if returncode != 0:
-        logger.error(job_table_payload + stderr)
-        raise RuntimeError('Failed to fetch managed jobs with returncode: '
-                           f'{returncode}.\n{job_table_payload + stderr}')
+    # if returncode != 0:
+    #     logger.error(job_table_payload + stderr)
+    #     raise RuntimeError('Failed to fetch managed jobs with returncode: '
+    #                        f'{returncode}.\n{job_table_payload + stderr}')
 
-    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    # jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
 
-    if not all_users:
+    # if not all_users:
 
-        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
-            user_hash = job.get('user_hash', None)
-            if user_hash is None:
-                # For backwards compatibility, we show jobs that do not have a
-                # user_hash. TODO(cooperc): Remove before 0.12.0.
-                return True
-            return user_hash == common_utils.get_user_hash()
+    #     def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
+    #         user_hash = job.get('user_hash', None)
+    #         if user_hash is None:
+    #             # For backwards compatibility, we show jobs that do not have a
+    #             # user_hash. TODO(cooperc): Remove before 0.12.0.
+    #             return True
+    #         return user_hash == common_utils.get_user_hash()
 
-        jobs = list(filter(user_hash_matches_or_missing, jobs))
+    #     jobs = list(filter(user_hash_matches_or_missing, jobs))
 
-    accessible_workspaces = workspaces_core.get_workspaces()
-    jobs = list(
-        filter(
-            lambda job: job.get('workspace', skylet_constants.
-                                SKYPILOT_DEFAULT_WORKSPACE) in
-            accessible_workspaces, jobs))
+    # accessible_workspaces = workspaces_core.get_workspaces()
+    # jobs = list(
+    #     filter(
+    #         lambda job: job.get('workspace', skylet_constants.
+    #                             SKYPILOT_DEFAULT_WORKSPACE) in
+    #         accessible_workspaces, jobs))
 
-    if skip_finished:
-        # Filter out the finished jobs. If a multi-task job is partially
-        # finished, we will include all its tasks.
-        non_finished_tasks = list(
-            filter(lambda job: not job['status'].is_terminal(), jobs))
-        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
-        jobs = list(
-            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+    # if skip_finished:
+    #     # Filter out the finished jobs. If a multi-task job is partially
+    #     # finished, we will include all its tasks.
+    #     non_finished_tasks = list(
+    #         filter(lambda job: not job['status'].is_terminal(), jobs))
+    #     non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+    #     jobs = list(
+    #         filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
 
-    if job_ids:
-        jobs = [job for job in jobs if job['job_id'] in job_ids]
+    # if job_ids:
+    #     jobs = [job for job in jobs if job['job_id'] in job_ids]
 
-    return jobs
+    # return jobs
 
 
 @usage_lib.entrypoint
@@ -613,40 +615,44 @@ def tail_logs(name: Optional[str],
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
-    name_parts = name.split('-')
-    job_id = int(name_parts[-1])
-    cluster_name = '-'.join(name_parts[:-1])
-    return core.tail_logs(cluster_name, job_id, follow)
-    # TODO(zhwu): Automatically restart the jobs controller
-    if name is not None and job_id is not None:
+    del job_id, controller, refresh, tail  # Unused.
+    if name is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Cannot specify both name and job_id.')
+            raise ValueError('Must specify --name for managed job logs.')
+    name_parts = name.split('-')
+    real_job_id = int(name_parts[-1])
+    cluster_name = '-'.join(name_parts[:-1])
+    return core.tail_logs(cluster_name, real_job_id, follow)
+    # TODO(zhwu): Automatically restart the jobs controller
+    # if name is not None and job_id is not None:
+    #     with ux_utils.print_exception_no_traceback():
+    #         raise ValueError('Cannot specify both name and job_id.')
 
-    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-    job_name_or_id_str = ''
-    if job_id is not None:
-        job_name_or_id_str = str(job_id)
-    elif name is not None:
-        job_name_or_id_str = f'-n {name}'
-    else:
-        job_name_or_id_str = ''
-    handle = _maybe_restart_controller(
-        refresh,
-        stopped_message=(
-            f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
-            f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
-            f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
-        spinner_message='Retrieving job logs')
+    # jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    # job_name_or_id_str = ''
+    # if job_id is not None:
+    #     job_name_or_id_str = str(job_id)
+    # elif name is not None:
+    #     job_name_or_id_str = f'-n {name}'
+    # else:
+    #     job_name_or_id_str = ''
+    # handle = _maybe_restart_controller(
+    #     refresh,
+    #     stopped_message=(
+    #         f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
+    #         f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
+    #         f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
+    #     spinner_message='Retrieving job logs')
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend), backend
+    # backend = backend_utils.get_backend_from_handle(handle)
+    # assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    return backend.tail_managed_job_logs(handle,
-                                         job_id=job_id,
-                                         job_name=name,
-                                         follow=follow,
-                                         controller=controller,
-                                         tail=tail)
+    # return backend.tail_managed_job_logs(handle,
+    #                                      job_id=job_id,
+    #                                      job_name=name,
+    #                                      follow=follow,
+    #                                      controller=controller,
+    #                                      tail=tail)
 
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:

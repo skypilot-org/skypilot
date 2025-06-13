@@ -264,6 +264,7 @@ def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     admin_policy_request_options: Optional[admin_policy.RequestOptions] = None,
+    # pylint: disable=invalid-name
     _is_docker_job: bool = False,
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.

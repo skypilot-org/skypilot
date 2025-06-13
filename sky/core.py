@@ -57,6 +57,7 @@ def optimize(
     blocked_resources: Optional[List['resources_lib.Resources']] = None,
     quiet: bool = False,
     request_options: Optional[admin_policy.RequestOptions] = None,
+    # pylint: disable=invalid-name
     _is_docker_job: bool = False,
 ) -> Optional[str]:
     """Finds the best execution plan for the given DAG.
@@ -480,7 +481,7 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
                    f'{resources.cloud}')
     else:
         if isinstance(resources.cloud, str):
-            cloud_name = f'SSH Node Pools'
+            cloud_name = 'SSH Node Pools'
         else:
             cloud_name = resources.cloud.display_name(
             ) if resources.cloud else resources.cloud
@@ -1275,10 +1276,10 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
                                                     used_as_infra=not cleanup)
     else:
         raise ValueError(f'Cluster {infra} does not exist.')
-        kubernetes_deploy_utils.deploy_ssh_cluster(
-            cleanup=cleanup,
-            infra=infra,
-        )
+        # kubernetes_deploy_utils.deploy_ssh_cluster(
+        #     cleanup=cleanup,
+        #     infra=infra,
+        # )
 
 
 def get_all_contexts() -> List[str]:

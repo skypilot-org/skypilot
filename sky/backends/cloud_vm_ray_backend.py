@@ -568,6 +568,7 @@ class RayCodeGen:
                      env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command."""
+        del task_name  # Unused.
         assert self._has_gang_scheduling, (
             'Call add_gang_scheduling_placement_group_and_setup() before '
             'add_ray_task().')
@@ -1590,9 +1591,8 @@ class RetryingVmProvisioner(object):
                         infra_str = (f'{to_provision.cloud} {region.name}'
                                      f'{colorama.Style.RESET_ALL}{zone_str}')
                         if launching_on_override is not None:
-                            infra_str = (
-                                f'{launching_on_override}{colorama.Style.RESET_ALL}'
-                            )
+                            infra_str = (f'{launching_on_override}'
+                                         f'{colorama.Style.RESET_ALL}')
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on {infra_str}.'))
@@ -1690,7 +1690,8 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
-                cn = cluster_name if docker_cluster_name is None else docker_cluster_name
+                cn = (cluster_name
+                      if docker_cluster_name is None else docker_cluster_name)
                 logger.info(
                     ux_utils.finishing_message(f'Cluster launched: {cn!r}.',
                                                log_path))
@@ -3111,7 +3112,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, lock_path, config_hash)
                 docker_image_unique_id = None
-                if to_provision_config.docker_image_on_no_image_cluster is not None:
+                if (to_provision_config.docker_image_on_no_image_cluster
+                        is not None):
                     docker_image_unique_id = self._make_docker_unique_id(
                         to_provision_config.docker_image_on_no_image_cluster)
                 return (handle, False,
@@ -3946,18 +3948,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         code, require_outputs=True, stream_logs=False)
                     subprocess_utils.handle_returncode(
                         returncode,
-                        code,
-                        f'Failed to cancel docker images on cluster {handle.cluster_name}.',
+                        code, ('Failed to cancel docker images '
+                               f'on cluster {handle.cluster_name}.'),
                         stderr=stderr,
                         stream_logs=False)
                     return message_utils.decode_payload(stdout)
 
                 runners = handle.get_command_runners()
-                images = subprocess_utils.run_in_parallel(
-                    _cleanup_image, runners)
-                # for image, runner in zip(images, runners):
-                #     if image:
-                #         logger.info(f'Node {runner.node}: deleted docker image(s): {", ".join(image)}')
+                subprocess_utils.run_in_parallel(_cleanup_image, runners)
             else:
                 logger.info(
                     f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}'

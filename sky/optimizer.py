@@ -996,7 +996,11 @@ class Optimizer:
 
     @staticmethod
     def print_cluster_plan(dag: 'dag_lib.Dag'):
+        # pylint: disable=import-outside-toplevel
         from sky import global_user_state
+        from sky.backends import CloudVmRayBackend
+        from sky.backends import CloudVmRayResourceHandle
+        # pylint: enable=import-outside-toplevel
         fields = [
             'INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS', 'COST ($)',
             'CHOSEN'
@@ -1007,8 +1011,6 @@ class Optimizer:
         if cluster_record is None or not cluster_record['used_as_infra']:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'SSH Node Pools {cluster_name!r} not found.')
-        from sky.backends import CloudVmRayBackend
-        from sky.backends import CloudVmRayResourceHandle
         handle: CloudVmRayResourceHandle = cluster_record['handle']
         lr = handle.launched_resources
         dag.tasks[0].resources = [

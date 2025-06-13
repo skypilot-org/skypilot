@@ -888,9 +888,6 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         with filelock.FileLock(_get_lock_path(job_id)):
             job = _get_jobs_by_ids([job_id])[0]
             if job['docker_image_id'] is not None:
-                # For docker image jobs, we stop and remove the docker image.
-                # subprocess_utils.run(f'docker stop {job["docker_image_id"]} && '
-                #                      f'docker rm {job["docker_image_id"]}')
                 cancelled_ids.append(job['docker_image_id'])
                 continue
             elif _is_job_driver_process_running(job['pid'], job_id):
