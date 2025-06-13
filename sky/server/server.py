@@ -23,6 +23,7 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
+from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 
 import sky
@@ -164,7 +165,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
         username_encoded = username.encode('utf8')
         db_username_encoded = user.name.encode('utf8')
         if (username_encoded == db_username_encoded and
-                user.password == hashlib.sha256(password.encode()).hexdigest()):
+                apr_md5_crypt.verify(password, user.password)):
             request.state.auth_user = user
             break
 
@@ -252,8 +253,8 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 continue
             username_encoded = username.encode('utf8')
             db_username_encoded = user.name.encode('utf8')
-            if (username_encoded == db_username_encoded and user.password
-                    == hashlib.sha256(password.encode()).hexdigest()):
+            if (username_encoded == db_username_encoded and
+                    apr_md5_crypt.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
                 await _override_user_info_in_request_body(request, user)

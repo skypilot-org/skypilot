@@ -7,6 +7,7 @@ from typing import Any, Dict, Generator, List
 
 import fastapi
 import filelock
+from passlib.hash import apr_md5_crypt
 
 from sky import global_user_state
 from sky import models
@@ -80,7 +81,7 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
         role = rbac.get_default_role()
 
     # Create user
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = apr_md5_crypt.hash(password)
     user_hash = hashlib.md5(
         username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
@@ -136,7 +137,7 @@ async def user_update(request: fastapi.Request,
 
     with _user_lock(user_info.id):
         if password:
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            password_hash = apr_md5_crypt.hash(password)
             global_user_state.add_or_update_user(
                 models.User(id=user_info.id,
                             name=user_info.name,
@@ -249,14 +250,13 @@ async def user_import(
                 creation_errors.append(f'{username}: User already exists')
                 continue
 
-            # Check if password is already hashed (SHA-256 hash is 64 chars hex)
-            if len(password) == 64 and all(
-                    c in '0123456789abcdef' for c in password.lower()):
+            # Check if password is already hashed (APR1 hash)
+            if password.startswith('$apr1$'):
                 # Password is already hashed, use it directly
-                password_hash = password.lower()
+                password_hash = password
             else:
                 # Password is plain text, hash it
-                password_hash = hashlib.sha256(password.encode()).hexdigest()
+                password_hash = apr_md5_crypt.hash(password)
 
             user_hash = hashlib.md5(
                 username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]

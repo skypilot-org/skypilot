@@ -62,10 +62,10 @@ class PermissionService:
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
-        username = os.environ.get(
-            constants.SKYPILOT_INITIAL_BASIC_AUTH_USERNAME)
-        password = os.environ.get(
-            constants.SKYPILOT_INITIAL_BASIC_AUTH_PASSWORD)
+        basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
+        if not basic_auth:
+            return
+        username, password = basic_auth.split(':', 1)
         if username and password:
             user_hash = hashlib.md5(
                 username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
@@ -73,10 +73,8 @@ class PermissionService:
             if user_info:
                 logger.info(f'Basic auth user {username} already exists')
                 return
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
             global_user_state.add_or_update_user(
-                models.User(id=user_hash, name=username,
-                            password=password_hash))
+                models.User(id=user_hash, name=username, password=password))
             self.enforcer.add_grouping_policy(user_hash,
                                               rbac.RoleName.ADMIN.value)
             self.enforcer.save_policy()

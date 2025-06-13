@@ -25,9 +25,7 @@ apiService:
   # If both `initialBasicAuthCredentials` and `initialBasicAuthSecret` are set,
   # `initialBasicAuthSecret` will be used.
   # They are only used when `enableUserManagement` is true.
-  initialBasicAuthCredentials:
-    username: skypilot
-    password: skypilot
+  initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
   initialBasicAuthSecret: null
 
   # Set ~/.sky/config.yaml content on the API server

@@ -754,7 +754,15 @@ export function Users() {
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = url;
-                    link.download = `users_export_${new Date().toISOString().split('T')[0]}.csv`;
+                    const now = new Date();
+                    const pad = (n) => String(n).padStart(2, '0');
+                    const y = now.getFullYear();
+                    const m = pad(now.getMonth() + 1);
+                    const d = pad(now.getDate());
+                    const h = pad(now.getHours());
+                    const min = pad(now.getMinutes());
+                    const s = pad(now.getSeconds());
+                    link.download = `users_export_${y}-${m}-${d}-${h}-${min}-${s}.csv`;
                     link.click();
                     URL.revokeObjectURL(url);
 

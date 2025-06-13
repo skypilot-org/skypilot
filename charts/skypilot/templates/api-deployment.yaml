@@ -41,16 +41,11 @@ spec:
         - name: SKYPILOT_RELEASE_NAME
           value: {{ .Release.Name | quote }}
         {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
-        - name: SKYPILOT_INITIAL_BASIC_AUTH_USERNAME
+        - name: SKYPILOT_INITIAL_BASIC_AUTH
           valueFrom:
             secretKeyRef:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
-              key: username
-        - name: SKYPILOT_INITIAL_BASIC_AUTH_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "skypilot.initialBasicAuthSecretName" . }}
-              key: password
+              key: auth
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS

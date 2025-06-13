@@ -36,9 +36,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.1
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
-    :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`:
-      username: "skypilot"
-      password: "skypilot"
+    :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
     :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
     :ref:`preDeployHook <helm-values-apiService-preDeployHook>`: \|-
       # Run commands before deploying the API server, e.g. installing an admin
@@ -229,14 +227,12 @@ The user in the credentials will be used to create a new admin user in the API s
 
 If both ``initialBasicAuthCredentials`` and ``initialBasicAuthSecret`` are set, ``initialBasicAuthSecret`` will be used. They are only used when ``enableUserManagement`` is true.
 
-Default: see the yaml below.
+Default: ``"skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"``
 
 .. code-block:: yaml
 
   apiService:
-    initialBasicAuthCredentials:
-      username: "skypilot"
-      password: "skypilot"
+    initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
 
 .. _helm-values-apiService-initialBasicAuthSecret:
 

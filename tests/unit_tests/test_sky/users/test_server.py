@@ -189,11 +189,11 @@ class TestUsersEndpoints:
         mock_get_supported_roles.assert_called_once()
         mock_get_user.assert_called_once_with('test_user')
         mock_update_role.assert_called_once_with('test_user', 'admin')
-        mock_add_or_update_user.assert_called_once_with(
-            models.User(id='test_user',
-                        name='Test User',
-                        password=hashlib.sha256(
-                            'new_password'.encode()).hexdigest()))
+        args, kwargs = mock_add_or_update_user.call_args
+        user_obj = args[0]
+        assert user_obj.id == 'test_user'
+        assert user_obj.name == 'Test User'
+        assert user_obj.password.startswith('$apr1$')
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @pytest.mark.asyncio
@@ -347,7 +347,7 @@ class TestUsersEndpoints:
         args, kwargs = mock_add_or_update_user.call_args
         user_obj = args[0]
         assert user_obj.name == 'alice'
-        assert user_obj.password == hashlib.sha256('pw123'.encode()).hexdigest()
+        assert user_obj.password.startswith('$apr1$')
 
     @mock.patch('sky.global_user_state.get_user_by_name')
     @pytest.mark.asyncio
@@ -480,8 +480,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password == hashlib.sha256(
-            'new_password'.encode()).hexdigest()
+        assert user_obj.password.startswith('$apr1$')
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -517,8 +516,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password == hashlib.sha256(
-            'new_password'.encode()).hexdigest()
+        assert user_obj.password.startswith('$apr1$')
 
     @mock.patch('sky.users.rbac.get_supported_roles')
     @mock.patch('sky.global_user_state.get_user')
@@ -641,8 +639,7 @@ class TestUsersEndpoints:
         user_obj = args[0]
         assert user_obj.id == 'test_user'
         assert user_obj.name == 'Test User'
-        assert user_obj.password == hashlib.sha256(
-            'new_password'.encode()).hexdigest()
+        assert user_obj.password.startswith('$apr1$')
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
@@ -977,7 +974,7 @@ bob,pw456,user
         mock_get_supported_roles.return_value = ['admin', 'user']
         mock_get_default_role.return_value = 'user'
         csv_content = """username,password,role
-alice,1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014,admin
+alice,$apr1$dUKyQFs/$8ZVZOFWaDzpL0JTKVpI8W0,admin
 bob,pw456,user,extra_column
 charlie,pw789,user
 """

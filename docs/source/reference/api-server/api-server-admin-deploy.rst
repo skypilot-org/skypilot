@@ -62,8 +62,7 @@ Install the SkyPilot Helm chart with the following command:
       --namespace $NAMESPACE \
       --create-namespace \
       --set apiService.enableUserManagement=true \
-      --set apiService.initialBasicAuthCredentials.username=$WEB_USERNAME \
-      --set apiService.initialBasicAuthCredentials.password=$WEB_PASSWORD
+      --set apiService.initialBasicAuthCredentials=$AUTH_STRING
 
 .. dropdown:: Flags explanation
 
@@ -75,8 +74,7 @@ Install the SkyPilot Helm chart with the following command:
     * ``--create-namespace``: Create the namespace if it doesn't exist.
     * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials in ingress controller for the API server.
     * :ref:`--set apiService.enableUserManagement=true <helm-values-apiService-enableUserManagement>`: Enable basic auth and user management in the API server.
-    * :ref:`--set apiService.initialBasicAuthCredentials.username=$WEB_USERNAME <helm-values-apiService-initialBasicAuthCredentials>`: Set the username for the initial basic auth credentials.
-    * :ref:`--set apiService.initialBasicAuthCredentials.password=$WEB_PASSWORD <helm-values-apiService-initialBasicAuthCredentials>`: Set the password for the initial basic auth credentials.
+    * :ref:`--set apiService.initialBasicAuthCredentials=$AUTH_STRING <helm-values-apiService-initialBasicAuthCredentials>`: Set the initial basic auth credentials in the API server, if this is not set, a default user ``skypilot`` with password ``skypilot`` will be created.
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
