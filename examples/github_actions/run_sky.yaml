@@ -1,0 +1,39 @@
+name: Run SkyPilot Task
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  merge_group:
+
+jobs:
+  run-skypilot-task:
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          uv venv --seed ~/sky
+          source ~/sky/bin/activate
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
+          uv pip install 'omegaconf>=2.4.0dev3' 'skypilot[all]'
+      - name: Run SkyPilot job
+        run: |
+          source ~/sky/bin/activate
+          sky api login --endpoint $SKYPILOT_API_SERVER_ENDPOINT
+          SKYPILOT_PROJECT_CONFIG=skypilot_config.yaml sky jobs launch sample_job.yaml -y
+        env:
+          SKYPILOT_API_SERVER_ENDPOINT: ${{ secrets.SKYPILOT_API_SERVER_ENDPOINT }}
