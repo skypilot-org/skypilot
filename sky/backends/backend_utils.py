@@ -2587,12 +2587,34 @@ def get_clusters(
     records = global_user_state.get_clusters()
     current_user = common_utils.get_current_user()
 
+
     # Filter by user if requested
     if not all_users:
         records = [
             record for record in records
             if record['user_hash'] == current_user.id
         ]
+
+    # TODO(zhwu): We should do the following:
+    # 1. if it is a full cluster name, we should allow it for other users
+    # 2. If it is a glob, we should only allow it for the current user
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
 
     accessible_workspaces = workspaces_core.get_workspaces()
 
@@ -2648,23 +2670,7 @@ def get_clusters(
                 credentials['ssh_private_key_content'] = f.read()
         record['credentials'] = credentials
 
-    if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
-            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
+    
 
     def _update_record_with_resources(record: Optional[Dict[str, Any]]) -> None:
         """Add the resources to the record."""
