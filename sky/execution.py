@@ -735,7 +735,7 @@ def launch(
         ready_cnt = 0
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Setting up SSH on cluster {original_cluster_name!r} '
+                    f'Setting up Runtime on cluster {original_cluster_name!r} '
                     f'(0/{task_ori.num_nodes} ready)')) as spinner:
             node2user = {}
             node2port = {}
@@ -752,7 +752,7 @@ def launch(
                     ready_cnt = cur_ready_cnt
                     spinner.update(
                         ux_utils.spinner_message(
-                            'Setting up SSH on cluster '
+                            'Setting up Runtime on cluster '
                             f'{original_cluster_name!r} '
                             f'({ready_cnt}/{task_ori.num_nodes} ready)'))
                 if cur_ready_cnt == task_ori.num_nodes:
