@@ -731,22 +731,21 @@ class Resources:
                                        allow_plus=True,
                                        allow_x=True)
         self._memory = memory
-        if isinstance(memory, str):
-            if memory.endswith(('+', 'x')):
-                # 'x' is used internally for make sure our resources used by
-                # jobs controller (memory: 3x) to have enough memory based on
-                # the vCPUs.
-                num_memory_gb = memory[:-1]
-            else:
-                num_memory_gb = memory
+        if memory.endswith(('+', 'x')):
+            # 'x' is used internally for make sure our resources used by
+            # jobs controller (memory: 3x) to have enough memory based on
+            # the vCPUs.
+            num_memory_gb = memory[:-1]
+        else:
+            num_memory_gb = memory
 
-            try:
-                memory_gb = float(num_memory_gb)
-            except ValueError:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'The "memory" field should be either a number or '
-                        f'a string "<number>+". Found: {memory!r}') from None
+        try:
+            memory_gb = float(num_memory_gb)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'The "memory" field should be either a number or '
+                    f'a string "<number>+". Found: {memory!r}') from None
 
         if memory_gb <= 0:
             with ux_utils.print_exception_no_traceback():
