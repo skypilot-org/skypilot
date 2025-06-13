@@ -220,6 +220,15 @@ def command_hint_messages(hint_type: CommandHintType,
         - if False, the command hint messages are for a dov cluster.
         - if None, normal job.
     """
+    if dov_config is True:
+        return ('\n📋 Useful Commands'
+                f'\nJob ID: {cluster_name}-{job_id}'
+                f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
+                f'{BOLD}sky jobs cancel {cluster_name}-{job_id}{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To stream job logs:\t\t'
+                f'{BOLD}sky jobs logs {cluster_name}-{job_id}{RESET_BOLD}'
+                f'\n{INDENT_LAST_SYMBOL}To view job queue:\t\t'
+                f'{BOLD}sky jobs queue{RESET_BOLD}')
     if hint_type == CommandHintType.CLUSTER_JOB:
         job_hint_str = (f'\nJob ID: {job_id}'
                         f'\n{INDENT_SYMBOL}To cancel the job:\t\t'

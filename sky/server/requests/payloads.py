@@ -397,7 +397,7 @@ class JobsQueueBody(RequestBody):
 class JobsCancelBody(RequestBody):
     """The request body for the jobs cancel endpoint."""
     name: Optional[str] = None
-    job_ids: Optional[List[int]] = None
+    job_ids: Optional[List[str]] = None
     all: bool = False
     all_users: bool = False
 

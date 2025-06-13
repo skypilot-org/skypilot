@@ -4504,7 +4504,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               required=False,
               type=str,
               help='Managed job name to cancel.')
-@click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.argument('job_ids', default=None, type=str, required=False, nargs=-1)
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -4525,7 +4525,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               help='Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
+def jobs_cancel(name: Optional[str], job_ids: Tuple[str], all: bool, yes: bool,
                 all_users: bool):
     """Cancel managed jobs.
 

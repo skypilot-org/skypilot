@@ -3094,6 +3094,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir,
+                    docker_image=(
+                        to_provision_config.docker_image_on_no_image_cluster),
                     docker_cluster_name=docker_cluster_name)
                 # We use the IPs from the cluster_info to update_cluster_ips,
                 # when the provisioning is done, to make sure the cluster IPs
@@ -3670,7 +3672,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(ux_utils.starting_message('Service registered.'))
         elif docker_cluster_name is None:
             logger.info(
-                ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
+                ux_utils.starting_message(
+                    f'Job submitted, ID: {handle.cluster_name}-{job_id}'))
         if docker_cluster_name is None:
             rich_utils.stop_safe_status()
         if not detach_run:

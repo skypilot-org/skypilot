@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import collections
 import os
 import signal
 import subprocess
@@ -27,6 +28,7 @@ from sky.jobs import state as job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
+from sky.skylet import job_lib as skylet_job_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -423,7 +425,7 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    del skip_finished, job_ids  # Unused.
+    del job_ids  # Unused.
     crs = core.status(cluster_names=None,
                       refresh=refresh,
                       all_users=all_users,
@@ -431,9 +433,17 @@ def queue(refresh: bool,
     cns = [cr['name'] for cr in crs]
     all_jobs = []
     cnt = 0
+    status_mapping = {
+        skylet_job_lib.JobStatus.RUNNING: job_state.ManagedJobStatus.RUNNING,
+        skylet_job_lib.JobStatus.SUCCEEDED:
+            job_state.ManagedJobStatus.SUCCEEDED,
+        skylet_job_lib.JobStatus.FAILED: job_state.ManagedJobStatus.FAILED,
+        skylet_job_lib.JobStatus.CANCELLED:
+            job_state.ManagedJobStatus.CANCELLED,
+    }
     for cn in cns:
         cq = core.queue(cluster_name=cn,
-                        skip_finished=True,
+                        skip_finished=skip_finished,
                         all_users=all_users)
         for j in cq:
             # Skip docker dev box jobs.
@@ -450,7 +460,8 @@ def queue(refresh: bool,
                 'job_duration': time.time() - j['submitted_at']
                                 if j['submitted_at'] else None,
                 'recovery_count': 0,
-                'status': job_state.ManagedJobStatus.RUNNING,
+                'status': status_mapping.get(
+                    j['status'], job_state.ManagedJobStatus.SUCCEEDED),
                 'cluster_resources': j['resources'],
                 'region': cn,
                 'user_name': j['username'],
@@ -518,7 +529,7 @@ def queue(refresh: bool,
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def cancel(name: Optional[str] = None,
-           job_ids: Optional[List[int]] = None,
+           job_ids: Optional[List[str]] = None,
            all: bool = False,
            all_users: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -530,56 +541,19 @@ def cancel(name: Optional[str] = None,
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Cancelling managed jobs')):
-        job_ids = [] if job_ids is None else job_ids
-        handle = backend_utils.is_controller_accessible(
-            controller=controller_utils.Controllers.JOBS_CONTROLLER,
-            stopped_message='All managed jobs should have finished.')
+    del all, all_users, name  # Unused.
+    cls2id = collections.defaultdict(list)
+    if job_ids is None:
+        return
+    for job_id in job_ids:
+        name_parts = job_id.split('-')
+        real_job_id = int(name_parts[-1])
+        cluster_name = '-'.join(name_parts[:-1])
+        cls2id[cluster_name].append(real_job_id)
 
-        job_id_str = ','.join(map(str, job_ids))
-        if sum([bool(job_ids), name is not None, all or all_users]) != 1:
-            arguments = []
-            arguments += [f'job_ids={job_id_str}'] if job_ids else []
-            arguments += [f'name={name}'] if name is not None else []
-            arguments += ['all'] if all else []
-            arguments += ['all_users'] if all_users else []
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Can only specify one of JOB_IDS, name, or all/'
-                    f'all_users. Provided {" ".join(arguments)!r}.')
-
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-        if all_users:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                None, all_users=True)
-        elif all:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
-        elif job_ids:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                job_ids)
-        else:
-            assert name is not None, (job_ids, name, all)
-            code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
-        # The stderr is redirected to stdout
-        returncode, stdout, stderr = backend.run_on_head(handle,
-                                                         code,
-                                                         require_outputs=True,
-                                                         stream_logs=False)
-        try:
-            subprocess_utils.handle_returncode(returncode, code,
-                                               'Failed to cancel managed job',
-                                               stdout + stderr)
-        except exceptions.CommandError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(e.error_msg) from e
-
-        logger.info(stdout)
-        if 'Multiple jobs found with name' in stdout:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Please specify the job ID instead of the job name.')
+    for cluster_name, job_ids in cls2id.items():
+        core.cancel(cluster_name, job_ids=job_ids)
+    return
 
 
 @usage_lib.entrypoint
