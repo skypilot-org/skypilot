@@ -33,7 +33,10 @@ import {
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
+import { apiClient } from '@/data/connectors/client';
+import { showToast } from '@/data/connectors/toast';
+import { CLOUDS_LIST } from '@/data/connectors/constants';
+import { SquareCode, Terminal, RotateCwIcon, Server } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -49,6 +52,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
@@ -96,6 +107,14 @@ export function Clusters() {
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
   const [workspaces, setWorkspaces] = useState([]);
   const isMobile = useMobile();
+
+  // Turn to infra confirmation states
+  const [turnToInfraState, setTurnToInfraState] = useState({
+    confirmOpen: false,
+    clusterToTurn: null,
+    turning: false,
+    error: null,
+  });
 
   // Handle URL query parameters for workspace filtering
   useEffect(() => {
@@ -160,6 +179,55 @@ export function Clusters() {
     }
   };
 
+  const handleTurnToInfra = (cluster) => {
+    setTurnToInfraState({
+      confirmOpen: true,
+      clusterToTurn: cluster,
+      turning: false,
+      error: null,
+    });
+  };
+
+  const handleConfirmTurnToInfra = async () => {
+    if (!turnToInfraState.clusterToTurn) return;
+
+    setTurnToInfraState((prev) => ({ ...prev, turning: true, error: null }));
+    try {
+      await apiClient.fetch('/ssh_up', {
+        infra: turnToInfraState.clusterToTurn,
+        cleanup: false,
+      });
+
+      setTurnToInfraState({
+        confirmOpen: false,
+        clusterToTurn: null,
+        turning: false,
+        error: null,
+      });
+
+      showToast(`Successfully initiated turning cluster "${turnToInfraState.clusterToTurn}" to infrastructure`, 'success');
+      
+      // Refresh the clusters data to reflect the change
+      dashboardCache.invalidate(getClusters);
+    } catch (error) {
+      console.error('Error turning cluster to infrastructure:', error);
+      setTurnToInfraState((prev) => ({
+        ...prev,
+        turning: false,
+        error: error,
+      }));
+    }
+  };
+
+  const handleCancelTurnToInfra = () => {
+    setTurnToInfraState({
+      confirmOpen: false,
+      clusterToTurn: null,
+      turning: false,
+      error: null,
+    });
+  };
+
   return (
     <>
       <div className="flex items-center justify-between mb-4 h-5">
@@ -220,6 +288,9 @@ export function Clusters() {
           setSelectedCluster(cluster);
           setIsVSCodeModalOpen(true);
         }}
+        onOpenTurnToInfraModal={(cluster) => {
+          handleTurnToInfra(cluster);
+        }}
       />
 
       {/* SSH Instructions Modal */}
@@ -234,6 +305,50 @@ export function Clusters() {
         onClose={() => setIsVSCodeModalOpen(false)}
         cluster={selectedCluster}
       />
+
+      {/* Turn to Infra Confirmation Dialog */}
+      <Dialog open={turnToInfraState.confirmOpen} onOpenChange={handleCancelTurnToInfra}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Turn Cluster to Infrastructure</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to turn cluster &quot;
+              {turnToInfraState.clusterToTurn}&quot; into infrastructure?
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-yellow-800">
+              <strong>Note:</strong> This cluster will be removed from the clusters table and will appear as a SSH Node Pool in the Infra page.
+            </p>
+          </div>
+
+          {turnToInfraState.error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+              <p className="text-sm text-red-800">
+                Failed to turn cluster to infrastructure: {turnToInfraState.error.message}
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={handleCancelTurnToInfra}
+              disabled={turnToInfraState.turning}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmTurnToInfra}
+              disabled={turnToInfraState.turning}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {turnToInfraState.turning ? 'Processing...' : 'Convert to Node Pool'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -245,6 +360,7 @@ export function ClusterTable({
   workspaceFilter,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  onOpenTurnToInfraModal,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -479,6 +595,8 @@ export function ClusterTable({
                         status={item.status}
                         onOpenSSHModal={onOpenSSHModal}
                         onOpenVSCodeModal={onOpenVSCodeModal}
+                        onOpenTurnToInfraModal={onOpenTurnToInfraModal}
+                        clusterData={item}
                       />
                     </TableCell>
                   </TableRow>
@@ -605,11 +723,80 @@ const handleConnect = (cluster, onOpenSSHModal) => {
   }
 };
 
+// Helper function to check if cluster can be turned to infrastructure
+const canTurnToInfra = (cluster) => {
+  console.log('Checking canTurnToInfra for cluster:', cluster.cluster, {
+    cloud: cluster.cloud,
+    infra: cluster.infra,
+    task_yaml: cluster.task_yaml ? 'present' : 'absent'
+  });
+  
+  // Don't allow turning to infra if cloud is not in standard cloud list
+  // This includes Kubernetes, SSH, and any custom infrastructure
+  if (!CLOUDS_LIST.includes(cluster.cloud)) {
+    console.log('Cluster cloud not in standard clouds list:', cluster.cloud);
+    return false;
+  }
+  
+  // Check if the cluster uses Docker images by parsing task_yaml
+  if (cluster.task_yaml) {
+    try {
+      const taskData = yaml.load(cluster.task_yaml);
+      console.log('Parsed task_yaml:', taskData);
+      
+      // Check multiple possible locations for image_id
+      let imageId = null;
+      if (taskData) {
+        // Check direct image_id field
+        if (taskData.image_id) {
+          imageId = taskData.image_id;
+        }
+        // Check nested image_id in resources
+        else if (taskData.resources && taskData.resources.image_id) {
+          imageId = taskData.resources.image_id;
+        }
+        // Check for docker field
+        else if (taskData.docker && taskData.docker.image) {
+          imageId = taskData.docker.image;
+        }
+      }
+      
+      if (imageId) {
+        console.log('Found image_id:', imageId);
+        if (typeof imageId === 'string' && imageId.startsWith('docker:')) {
+          console.log('Image starts with docker: - blocking conversion');
+          return false;
+        }
+        // Also check if it's just a Docker image without the docker: prefix
+        if (typeof imageId === 'string' && (
+          imageId.includes('/') || // Registry format like ubuntu:20.04 or myregistry/image
+          imageId.includes(':') && !imageId.startsWith('skypilot:') // Docker tag format but not SkyPilot image
+        )) {
+          console.log('Image appears to be Docker format - blocking conversion');
+          return false;
+        }
+      }
+    } catch (error) {
+      // If we can't parse the YAML, be conservative and don't allow conversion
+      console.warn('Failed to parse task_yaml for cluster', cluster.cluster, error);
+      return false;
+    }
+  }
+  
+  console.log('Cluster eligible for turning to infra');
+  return true;
+};
+
 // TODO(hailong): The enabled actions are also related to the `cloud` of the cluster
-export const enabledActions = (status) => {
+export const enabledActions = (status, cluster = null) => {
   switch (status) {
     case 'RUNNING':
-      return ['connect', 'VSCode'];
+      const baseActions = ['connect', 'VSCode'];
+      // Only add turnToInfra if the cluster is eligible
+      if (cluster && canTurnToInfra(cluster)) {
+        baseActions.push('turnToInfra');
+      }
+      return baseActions;
     default:
       return [];
   }
@@ -618,7 +805,10 @@ export const enabledActions = (status) => {
 const actionIcons = {
   connect: <Terminal className="w-4 h-4 text-gray-500 inline-block" />,
   VSCode: <SquareCode className="w-4 h-4 text-gray-500 inline-block" />,
+  turnToInfra: <Server className="w-4 h-4 text-gray-500 inline-block" />,
 };
+
+
 
 export function Status2Actions({
   withLabel = false,
@@ -626,8 +816,10 @@ export function Status2Actions({
   status,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  onOpenTurnToInfraModal,
+  clusterData,
 }) {
-  const actions = enabledActions(status);
+  const actions = enabledActions(status, clusterData);
   const isMobile = useMobile();
 
   const handleActionClick = (actionName) => {
@@ -637,6 +829,11 @@ export function Status2Actions({
         break;
       case 'VSCode':
         handleVSCodeConnection(cluster, onOpenVSCodeModal);
+        break;
+      case 'turnToInfra':
+        if (onOpenTurnToInfraModal) {
+          onOpenTurnToInfraModal(cluster);
+        }
         break;
       default:
         return;
@@ -656,6 +853,10 @@ export function Status2Actions({
             case 'VSCode':
               label = 'VSCode';
               tooltipText = 'Open in VS Code';
+              break;
+            case 'turnToInfra':
+              label = 'Convert to Node Pool';
+              tooltipText = 'Convert cluster to a SSH Node Pool';
               break;
             default:
               break;

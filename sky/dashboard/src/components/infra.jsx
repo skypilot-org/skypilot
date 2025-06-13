@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
-import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
+import { RotateCwIcon, SearchIcon, XIcon, ArrowLeftIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters, getInfraClusters } from '@/data/connectors/clusters';
@@ -17,6 +17,17 @@ import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
+import { apiClient } from '@/data/connectors/client';
+import { showToast } from '@/data/connectors/toast';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -29,6 +40,7 @@ export function SSHNodePoolClustersSection({
   isDataLoaded,
   clusters,
   handleClusterClick,
+  onTurnToCluster,
 }) {
   // Add defensive check for clusters
   const safeClusters = clusters || [];
@@ -92,6 +104,9 @@ export function SSHNodePoolClustersSection({
                   </th>
                   <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                     Launched
+                  </th>
+                  <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                    Actions
                   </th>
                 </tr>
               </thead>
@@ -162,6 +177,17 @@ export function SSHNodePoolClustersSection({
                             ? cluster.time.toLocaleDateString()
                             : '-'}
                         </span>
+                      </td>
+                      <td className="p-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onTurnToCluster && onTurnToCluster(cluster.cluster)}
+                          className="text-xs px-2 py-1 h-7"
+                        >
+                          <ArrowLeftIcon className="h-3 w-3 mr-1" />
+                          Convert to Cluster
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -586,6 +612,14 @@ export function GPUs() {
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
+  // State for turn to cluster confirmation
+  const [turnToClusterState, setTurnToClusterState] = useState({
+    confirmOpen: false,
+    clusterToTurn: null,
+    turning: false,
+    error: null,
+  });
+
   const fetchData = React.useCallback(
     async (options = { showLoadingIndicators: true }) => {
       if (options.showLoadingIndicators) {
@@ -747,6 +781,55 @@ export function GPUs() {
     if (refreshDataRef.current) {
       refreshDataRef.current({ showLoadingIndicators: true });
     }
+  };
+
+  const handleTurnToCluster = (cluster) => {
+    setTurnToClusterState({
+      confirmOpen: true,
+      clusterToTurn: cluster,
+      turning: false,
+      error: null,
+    });
+  };
+
+  const handleConfirmTurnToCluster = async () => {
+    if (!turnToClusterState.clusterToTurn) return;
+
+    setTurnToClusterState((prev) => ({ ...prev, turning: true, error: null }));
+    try {
+      await apiClient.fetch('/ssh_up', {
+        infra: turnToClusterState.clusterToTurn,
+        cleanup: true,
+      });
+
+      setTurnToClusterState({
+        confirmOpen: false,
+        clusterToTurn: null,
+        turning: false,
+        error: null,
+      });
+
+      showToast(`Successfully initiated turning SSH Node Pool "${turnToClusterState.clusterToTurn}" back to cluster`, 'success');
+      
+      // Refresh the data to reflect the change
+      handleRefresh();
+    } catch (error) {
+      console.error('Error turning SSH Node Pool to cluster:', error);
+      setTurnToClusterState((prev) => ({
+        ...prev,
+        turning: false,
+        error: error,
+      }));
+    }
+  };
+
+  const handleCancelTurnToCluster = () => {
+    setTurnToClusterState({
+      confirmOpen: false,
+      clusterToTurn: null,
+      turning: false,
+      error: null,
+    });
   };
 
   // Calculate summary data
@@ -993,6 +1076,7 @@ export function GPUs() {
         isDataLoaded={sshNodePoolDataLoaded}
         clusters={sshNodePoolClusters}
         handleClusterClick={handleContextClick}
+        onTurnToCluster={handleTurnToCluster}
       />
     );
   };
@@ -1101,6 +1185,50 @@ export function GPUs() {
       ) : (
         renderKubernetesTab()
       )}
+
+      {/* Turn to Cluster Confirmation Dialog */}
+      <Dialog open={turnToClusterState.confirmOpen} onOpenChange={handleCancelTurnToCluster}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Turn SSH Node Pool to Cluster</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to turn SSH Node Pool &quot;
+              {turnToClusterState.clusterToTurn}&quot; back to a regular cluster?
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-yellow-800">
+              <strong>Note:</strong> This SSH Node Pool will be removed from the Infrastructure page and will appear as a cluster in the Clusters page.
+            </p>
+          </div>
+
+          {turnToClusterState.error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+              <p className="text-sm text-red-800">
+                Failed to turn SSH Node Pool to cluster: {turnToClusterState.error.message}
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={handleCancelTurnToCluster}
+              disabled={turnToClusterState.turning}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmTurnToCluster}
+              disabled={turnToClusterState.turning}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {turnToClusterState.turning ? 'Processing...' : 'Convert to Cluster'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
