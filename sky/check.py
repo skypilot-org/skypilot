@@ -16,8 +16,8 @@ from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
