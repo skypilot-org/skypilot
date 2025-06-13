@@ -1239,7 +1239,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None
+        'user': user.to_dict() if user is not None else None,
     }
 
 
