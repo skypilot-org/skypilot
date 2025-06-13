@@ -22,7 +22,7 @@ Each logging storage might have its own configuration options under ``logs.<stor
 
 .. _external-logging-storage-gcp:
 
-Google Cloud Logging
+Google cloud logging
 ~~~~~~~~~~~~~~~~~~~~
 
 Configuration options:
