@@ -21,6 +21,7 @@ import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import { Layout } from '@/components/elements/layout';
 import {
   CustomTooltip as Tooltip,
@@ -73,6 +74,9 @@ export const statusGroups = {
 // Define constant for "All Workspaces" like in clusters.jsx
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
 
+// Define constant for "All Users"
+const ALL_USERS_VALUE = '__ALL_USERS__';
+
 // Helper function to filter jobs by workspace
 export function filterJobsByWorkspace(jobs, workspaceFilter) {
   // If no workspace filter or set to "All Workspaces", return all jobs
@@ -86,6 +90,41 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
     return jobWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
   });
 }
+
+// Helper function to filter jobs by user
+export function filterJobsByUser(jobs, userFilter) {
+  // If no user filter or set to "All Users", return all jobs
+  if (!userFilter || userFilter === ALL_USERS_VALUE) {
+    return jobs;
+  }
+
+  // Filter jobs by the selected user
+  return jobs.filter((job) => {
+    const jobUserId = job.user_hash || job.user;
+    return jobUserId === userFilter;
+  });
+}
+
+// Helper function to format username for display (reuse from clusters.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
 
 // Helper function to format submitted time with abbreviated units
 const formatSubmittedTime = (timestamp) => {
@@ -247,19 +286,70 @@ export function ManagedJobs() {
   });
   const isMobile = useMobile();
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
+  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
   const [workspaces, setWorkspaces] = useState([]);
+  const [users, setUsers] = useState([]);
 
-  // Handle URL query parameters for workspace filtering
+  // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
-    if (router.isReady && router.query.workspace) {
-      const workspaceParam = Array.isArray(router.query.workspace)
-        ? router.query.workspace[0]
-        : router.query.workspace;
-      setWorkspaceFilter(workspaceParam);
+    if (router.isReady) {
+      if (router.query.workspace) {
+        const workspaceParam = Array.isArray(router.query.workspace)
+          ? router.query.workspace[0]
+          : router.query.workspace;
+        setWorkspaceFilter(workspaceParam);
+      }
+      if (router.query.user) {
+        const userParam = Array.isArray(router.query.user)
+          ? router.query.user[0]
+          : router.query.user;
+        setUserFilter(userParam);
+      }
     }
-  }, [router.isReady, router.query.workspace]);
+  }, [router.isReady, router.query.workspace, router.query.user]);
 
-  // Fetch workspaces for filter dropdown
+  // Helper function to update URL query parameters
+  const updateURLParams = (newWorkspace, newUser) => {
+    const query = { ...router.query };
+
+    // Update workspace parameter
+    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
+      query.workspace = newWorkspace;
+    } else {
+      delete query.workspace;
+    }
+
+    // Update user parameter
+    if (newUser && newUser !== ALL_USERS_VALUE) {
+      query.user = newUser;
+    } else {
+      delete query.user;
+    }
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Handle workspace filter change
+  const handleWorkspaceFilterChange = (newWorkspace) => {
+    setWorkspaceFilter(newWorkspace);
+    updateURLParams(newWorkspace, userFilter);
+  };
+
+  // Handle user filter change
+  const handleUserFilterChange = (newUser) => {
+    setUserFilter(newUser);
+    updateURLParams(workspaceFilter, newUser);
+  };
+
+  // Fetch workspaces and users for filter dropdown
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
@@ -286,9 +376,52 @@ export function ManagedJobs() {
         uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
 
         setWorkspaces(Array.from(finalWorkspaces).sort());
+
+        // Fetch users for the filter dropdown
+        const fetchedUsers = await dashboardCache.get(getUsers);
+        const uniqueJobUsers = [
+          ...new Set(
+            allJobs
+              .map((job) => ({
+                userId: job.user_hash || job.user,
+                username: job.user,
+              }))
+              .filter((user) => user.userId)
+          ).values(),
+        ];
+
+        // Combine fetched users with unique job users
+        const finalUsers = new Map();
+
+        // Add fetched users first
+        fetchedUsers.forEach((user) => {
+          finalUsers.set(user.userId, {
+            userId: user.userId,
+            username: user.username,
+            display: formatUserDisplay(user.username, user.userId),
+          });
+        });
+
+        // Add any job users not in the fetched list
+        uniqueJobUsers.forEach((user) => {
+          if (!finalUsers.has(user.userId)) {
+            finalUsers.set(user.userId, {
+              userId: user.userId,
+              username: user.username,
+              display: formatUserDisplay(user.username, user.userId),
+            });
+          }
+        });
+
+        setUsers(
+          Array.from(finalUsers.values()).sort((a, b) =>
+            a.display.localeCompare(b.display)
+          )
+        );
       } catch (error) {
-        console.error('Error fetching data for workspace filter:', error);
+        console.error('Error fetching data for filters:', error);
         setWorkspaces(['default']); // Fallback or error state
+        setUsers([]); // Fallback or error state
       }
     };
     fetchFilterData();
@@ -298,6 +431,7 @@ export function ManagedJobs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -314,7 +448,10 @@ export function ManagedJobs() {
           >
             Managed Jobs
           </Link>
-          <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
+          <Select
+            value={workspaceFilter}
+            onValueChange={handleWorkspaceFilterChange}
+          >
             <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
@@ -329,6 +466,24 @@ export function ManagedJobs() {
               {workspaces.map((ws) => (
                 <SelectItem key={ws} value={ws}>
                   {ws}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={userFilter} onValueChange={handleUserFilterChange}>
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by user...">
+                {userFilter === ALL_USERS_VALUE
+                  ? 'All Users'
+                  : users.find((u) => u.userId === userFilter)?.display ||
+                    userFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.userId} value={user.userId}>
+                  {user.display}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -357,6 +512,7 @@ export function ManagedJobs() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         workspaceFilter={workspaceFilter}
+        userFilter={userFilter}
       />
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -376,6 +532,7 @@ export function ManagedJobsTable({
   setLoading,
   refreshDataRef,
   workspaceFilter,
+  userFilter,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -555,6 +712,9 @@ export function ManagedJobsTable({
     // First apply workspace filter
     let filtered = filterJobsByWorkspace(data, workspaceFilter);
 
+    // Then apply user filter
+    filtered = filterJobsByUser(filtered, userFilter);
+
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
       return filtered.filter((item) => selectedStatuses.includes(item.status));
@@ -573,7 +733,14 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, activeTab, selectedStatuses, showAllMode, workspaceFilter]);
+  }, [
+    data,
+    activeTab,
+    selectedStatuses,
+    showAllMode,
+    workspaceFilter,
+    userFilter,
+  ]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -1150,6 +1317,7 @@ export function ClusterJobs({
   clusterJobData,
   loading,
   refreshClusterJobsOnly,
+  userFilter = null,
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1178,8 +1346,15 @@ export function ClusterJobs({
   }, [expandedRowId]);
 
   const jobData = React.useMemo(() => {
-    return clusterJobData || [];
-  }, [clusterJobData]);
+    let filtered = clusterJobData || [];
+
+    // Apply user filter if provided
+    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+      filtered = filterJobsByUser(filtered, userFilter);
+    }
+
+    return filtered;
+  }, [clusterJobData, userFilter]);
 
   useEffect(() => {
     // Check if the data has changed significantly (new data received)
